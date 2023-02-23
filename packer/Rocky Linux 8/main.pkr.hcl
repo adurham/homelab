@@ -73,6 +73,7 @@ source "vsphere-iso" "vsphere" {
     name        = "Rocky Linux 8.7 Base"
     description = "Rocky Linux 8 base OS image with DISA STIG applied."
     folder      = "Templates"
+    ovf         = true
   }
 }
 
