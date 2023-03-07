@@ -2,10 +2,6 @@ variable "headless" {
   type    = string
   default = "true"
 }
-variable "shutdown_command" {
-  type    = string
-  default = "sudo /sbin/shutdown -H now"
-}
 variable "version" {
   type    = string
   default = "8.7"
@@ -80,8 +76,9 @@ source "vsphere-iso" "vsphere" {
 build {
   sources = ["source.vsphere-iso.vsphere"]
   provisioner "shell" {
+    remote_file = "script.sh"
+    execute_command = "sudo mv {{ .Path }} /run/; chmod +x /run/script.sh; sudo env {{ .Vars }} /run/script.sh"
     environment_vars = [
-      #"SUDO_PASS=${var.ssh_password}"
     ]
     scripts = ["scripts/base.sh"]
   }
