@@ -24,7 +24,7 @@ skipx
 # Disk partitioning information
 ignoredisk --only-use=sda
 clearpart --none --initlabel
-bootloader  --location=boot --boot-drive=sda --append="rd.plymouth=0 plymouth.enable=0 crashkernel=auto pti=on vsyscall=none page_poison=1 slub_debug=P audit=1 audit_backlog_limit=8192" --iscrypted --password=grub.pbkdf2.sha512.10000.6A10B89C371E2CC1EAE24B397A0E8FAB736826DF4EEEA32620E1387720C88E47B74C8FDD7D8AB241291724D2B57392887B050E1FEEAFEA0F71220815FE32996B.BB9957F4E42CE405C23AFFD96301A3680E801B8108F10EB38F73E12CF81099BC595CD3C4621F34F57D1312582C6A19B000FF126969CB0CC44EB461612C2C9276
+bootloader  --location=boot --boot-drive=sda --append="rd.plymouth=0 plymouth.enable=0 crashkernel=auto pti=on vsyscall=none page_poison=1 slub_debug=P audit=1 audit_backlog_limit=8192" --iscrypted --password=${hashed_grub_password}
 part /boot/efi --fstype=efi --size=1024 --asprimary --ondisk=sda
 part /boot --fstype=ext4 --size=1024 --asprimary --ondisk=sda
 part swap --fstype="swap" --size=1024 --ondisk=sda
@@ -82,10 +82,10 @@ usbguard
 # Lock the root account
 rootpw --lock
 # Setup Users
-user --groups=wheel --name=admin --password=$6$random_salt$6lB.jxLYbyyuJMVLUDe9Y8Cn92HbYaVHQbCGqURRL5qpOq/kee.Tn6kVMxHGVi.wKmkCP0DtqaKX3H8q9A0Oj1 --iscrypted --gecos="Admin"
-sshkey --username=admin "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDBIxmv9wttgzLEIKvNbzFUrl5wz+zLkyvNMWSl0S9arDfSkIOmVizIVC8sW1Lk97Vtj5NgAark3Hz3xRhlobuQHmeLxj7xLgal4J3+zieNSy566paX82TKuCRoQGCtUB+yexiLXfvaQ4pwAdK3YSwQ6KXrlY7qcOTYBd9ExOi2lCao/1p9+boVKA/T6/1SpkbMyU49QoN1/H66mR9jy+0i2svekjBt4lFNStnPepL6hbAOoBzCJUJ7Bc4dwVNZjqq2P8aY3QHYL+vSeFezDL6ENcsTTYfP+gnIFtswY0zQk2tJBzONOhfBBA/eTqAkQ0epESoNa0OFvu8mnQ3XQwH7"
-user --groups=wheel --name=packer --password=$6$random_salt$eUKHx/N1.Z7Vp5BahzXl8eQT5h1kvKxTPA0BjNQwpbzn5PCxWdgGKI.CrhFn00Ur7AZXvlAzwTr42EYEyzgWw0 --iscrypted --gecos="Packer"
-sshkey --username=packer "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDBIxmv9wttgzLEIKvNbzFUrl5wz+zLkyvNMWSl0S9arDfSkIOmVizIVC8sW1Lk97Vtj5NgAark3Hz3xRhlobuQHmeLxj7xLgal4J3+zieNSy566paX82TKuCRoQGCtUB+yexiLXfvaQ4pwAdK3YSwQ6KXrlY7qcOTYBd9ExOi2lCao/1p9+boVKA/T6/1SpkbMyU49QoN1/H66mR9jy+0i2svekjBt4lFNStnPepL6hbAOoBzCJUJ7Bc4dwVNZjqq2P8aY3QHYL+vSeFezDL6ENcsTTYfP+gnIFtswY0zQk2tJBzONOhfBBA/eTqAkQ0epESoNa0OFvu8mnQ3XQwH7"
+user --groups=wheel --name=admin --password=${hashed_admin_password} --iscrypted --gecos="Admin"
+sshkey --username=admin "${ssh_publickey}"
+user --groups=wheel --name=packer --password=${hashed_packer_password} --iscrypted --gecos="Packer"
+sshkey --username=packer "${ssh_publickey}"
 # Set Password Policy
 %anaconda
 pwpolicy root --minlen=6 --minquality=1 --notstrict --nochanges --notempty
@@ -342,46 +342,46 @@ fips-mode-setup --enable
 # Configure GnuTLS library to use DoD-approved TLS Encryption
 CONF_FILE=/etc/crypto-policies/back-ends/gnutls.config
 correct_value='+VERS-ALL:-VERS-DTLS0.9:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1:-VERS-DTLS1.0'
-grep -q ${correct_value} ${CONF_FILE}
+grep -q $${correct_value} $${CONF_FILE}
 if [[ $? -ne 0 ]]; then
-    existing_value=$(grep -Po '(\+VERS-ALL(?::-VERS-[A-Z]+\d\.\d)+)' ${CONF_FILE})
-    if [[ ! -z ${existing_value} ]]; then
-        sed -i "s/${existing_value}/${correct_value}/g" ${CONF_FILE}
+    existing_value=$(grep -Po '(\+VERS-ALL(?::-VERS-[A-Z]+\d\.\d)+)' $${CONF_FILE})
+    if [[ ! -z $${existing_value} ]]; then
+        sed -i "s/$${existing_value}/$${correct_value}/g" $${CONF_FILE}
     else
-        echo ${correct_value} >> ${CONF_FILE}
+        echo $${correct_value} >> $${CONF_FILE}
     fi
 fi
 # Configure SSH Client to Use FIPS 140-2 Validated Ciphers
 sshd_approved_ciphers='aes256-ctr,aes192-ctr,aes128-ctr'
 LC_ALL=C sed -i "/^.*Ciphers\s\+/d" "/etc/crypto-policies/back-ends/openssh.config"
-echo "Ciphers ${sshd_approved_ciphers}" >> "/etc/crypto-policies/back-ends/openssh.config"
+echo "Ciphers $${sshd_approved_ciphers}" >> "/etc/crypto-policies/back-ends/openssh.config"
 CONF_FILE=/etc/crypto-policies/back-ends/opensshserver.config
-correct_value="-oCiphers=${sshd_approved_ciphers}"
+correct_value="-oCiphers=$${sshd_approved_ciphers}"
 # Ensure CRYPTO_POLICY is not commented out
-sed -i 's/#CRYPTO_POLICY=/CRYPTO_POLICY=/' ${CONF_FILE}
-grep -q "'${correct_value}'" ${CONF_FILE}
+sed -i 's/#CRYPTO_POLICY=/CRYPTO_POLICY=/' $${CONF_FILE}
+grep -q "'$${correct_value}'" $${CONF_FILE}
 if [[ $? -ne 0 ]]; then
-    existing_value=$(grep -Po '(-oCiphers=\S+)' ${CONF_FILE})
-    if [[ ! -z ${existing_value} ]]; then
-        sed -i "s/${existing_value}/${correct_value}/g" ${CONF_FILE}
+    existing_value=$(grep -Po '(-oCiphers=\S+)' $${CONF_FILE})
+    if [[ ! -z $${existing_value} ]]; then
+        sed -i "s/$${existing_value}/$${correct_value}/g" $${CONF_FILE}
     else
-        echo "CRYPTO_POLICY='${correct_value}'" >> ${CONF_FILE}
+        echo "CRYPTO_POLICY='$${correct_value}'" >> $${CONF_FILE}
     fi
 fi
 # Configure SSH Client to Use FIPS 140-2 Validated MACs
 sshd_approved_macs='hmac-sha2-512,hmac-sha2-256'
 LC_ALL=C sed -i "/^.*MACs\s\+/d" "/etc/crypto-policies/back-ends/openssh.config"
-echo "MACs ${sshd_approved_macs}" >> "/etc/crypto-policies/back-ends/openssh.config"
+echo "MACs $${sshd_approved_macs}" >> "/etc/crypto-policies/back-ends/openssh.config"
 CONF_FILE=/etc/crypto-policies/back-ends/opensshserver.config
-correct_value="-oMACs=${sshd_approved_macs}"
-sed -i 's/#CRYPTO_POLICY=/CRYPTO_POLICY=/' ${CONF_FILE}
-grep -q "'${correct_value}'" ${CONF_FILE}
+correct_value="-oMACs=$${sshd_approved_macs}"
+sed -i 's/#CRYPTO_POLICY=/CRYPTO_POLICY=/' $${CONF_FILE}
+grep -q "'$${correct_value}'" $${CONF_FILE}
 if [[ $? -ne 0 ]]; then
-    existing_value=$(grep -Po '(-oMACs=\S+)' ${CONF_FILE})
-    if [[ ! -z ${existing_value} ]]; then
-        sed -i "s/${existing_value}/${correct_value}/g" ${CONF_FILE}
+    existing_value=$(grep -Po '(-oMACs=\S+)' $${CONF_FILE})
+    if [[ ! -z $${existing_value} ]]; then
+        sed -i "s/$${existing_value}/$${correct_value}/g" $${CONF_FILE}
     else
-        echo "CRYPTO_POLICY='${correct_value}'" >> ${CONF_FILE}
+        echo "CRYPTO_POLICY='$${correct_value}'" >> $${CONF_FILE}
     fi
 fi
 ## Disk Partioning
@@ -395,7 +395,7 @@ for f in /etc/sudoers /etc/sudoers.d/* ; do
   matching_list=$(grep -P '^(?!#).*[\s]+NOPASSWD[\s]*\:.*$' $f | uniq )
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
-      sed -i "s/^${entry}$/# &/g" $f
+      sed -i "s/^$${entry}$/# &/g" $f
     done <<< "$matching_list"
     /usr/sbin/visudo -cf $f &> /dev/null || echo "Fail to validate $f with visudo"
   fi
@@ -407,11 +407,11 @@ if grep -x '^[\s]*Defaults.*\btimestamp_timeout=.*' /etc/sudoers.d/*; then
 fi
 cp /etc/sudoers /etc/sudoers.bak
 if ! grep -P '^[\s]*Defaults.*\btimestamp_timeout=[-]?\w+\b\b.*$' /etc/sudoers; then
-    echo "Defaults timestamp_timeout=${var_sudo_timestamp_timeout}" >> /etc/sudoers
+    echo "Defaults timestamp_timeout=$${var_sudo_timestamp_timeout}" >> /etc/sudoers
 else
-    if ! grep -P "^[\s]*Defaults.*\btimestamp_timeout=${var_sudo_timestamp_timeout}\b.*$" /etc/sudoers; then
+    if ! grep -P "^[\s]*Defaults.*\btimestamp_timeout=$${var_sudo_timestamp_timeout}\b.*$" /etc/sudoers; then
         
-        sed -Ei "s/(^[\s]*Defaults.*\btimestamp_timeout=)[-]?\w+(\b.*$)/\1${var_sudo_timestamp_timeout}\2/" /etc/sudoers
+        sed -Ei "s/(^[\s]*Defaults.*\btimestamp_timeout=)[-]?\w+(\b.*$)/\1$${var_sudo_timestamp_timeout}\2/" /etc/sudoers
     fi
 fi
 if /usr/sbin/visudo -qcf /etc/sudoers; then
@@ -559,7 +559,7 @@ In cases where the default authselect profile does not cover a specific demand, 
     authselect apply-changes -b
 else
     AUTH_FILES=("/etc/pam.d/system-auth" "/etc/pam.d/password-auth")
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if ! grep -qE '^\s*auth\s+required\s+pam_faillock\.so\s+(preauth silent|authfail).*$' "$pam_file"; then
             sed -i --follow-symlinks '/^auth.*sufficient.*pam_unix.so.*/i auth        required      pam_faillock.so preauth silent' "$pam_file"
             sed -i --follow-symlinks '/^auth.*required.*pam_deny.so.*/i auth        required      pam_faillock.so authfail' "$pam_file"
@@ -578,7 +578,7 @@ if [ -f $FAILLOCK_CONF ]; then
     else
         sed -i --follow-symlinks 's|^\s*\(deny\s*=\s*\)\(\S\+\)|\1'"$var_accounts_passwords_pam_faillock_deny"'|g' $FAILLOCK_CONF
     fi
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if [ -e "$pam_file" ]; then
             PAM_FILE_PATH="$pam_file"
             if [ -f /usr/bin/authselect ]; then
@@ -617,7 +617,7 @@ if [ -f $FAILLOCK_CONF ]; then
         fi
     done
 else
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if ! grep -qE '^\s*auth.*pam_faillock.so (preauth|authfail).*deny' "$pam_file"; then
             sed -i --follow-symlinks '/^auth.*required.*pam_faillock.so.*preauth.*silent.*/ s/$/ deny='"$var_accounts_passwords_pam_faillock_deny"'/' "$pam_file"
             sed -i --follow-symlinks '/^auth.*required.*pam_faillock.so.*authfail.*/ s/$/ deny='"$var_accounts_passwords_pam_faillock_deny"'/' "$pam_file"
@@ -641,7 +641,7 @@ In cases where the default authselect profile does not cover a specific demand, 
     authselect apply-changes -b
 else
     AUTH_FILES=("/etc/pam.d/system-auth" "/etc/pam.d/password-auth")
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if ! grep -qE '^\s*auth\s+required\s+pam_faillock\.so\s+(preauth silent|authfail).*$' "$pam_file"; then
             sed -i --follow-symlinks '/^auth.*sufficient.*pam_unix.so.*/i auth        required      pam_faillock.so preauth silent' "$pam_file"
             sed -i --follow-symlinks '/^auth.*required.*pam_deny.so.*/i auth        required      pam_faillock.so authfail' "$pam_file"
@@ -658,7 +658,7 @@ if [ -f $FAILLOCK_CONF ]; then
     if ! grep -q $regex $FAILLOCK_CONF; then
         echo $line >>$FAILLOCK_CONF
     fi
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if [ -e "$pam_file" ]; then
             PAM_FILE_PATH="$pam_file"
             if [ -f /usr/bin/authselect ]; then
@@ -697,7 +697,7 @@ if [ -f $FAILLOCK_CONF ]; then
         fi
     done
 else
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if ! grep -qE '^\s*auth.*pam_faillock.so (preauth|authfail).*even_deny_root' "$pam_file"; then
             sed -i --follow-symlinks '/^auth.*required.*pam_faillock.so.*preauth.*silent.*/ s/$/ even_deny_root/' "$pam_file"
             sed -i --follow-symlinks '/^auth.*required.*pam_faillock.so.*authfail.*/ s/$/ even_deny_root/' "$pam_file"
@@ -719,7 +719,7 @@ In cases where the default authselect profile does not cover a specific demand, 
     authselect apply-changes -b
 else
     AUTH_FILES=("/etc/pam.d/system-auth" "/etc/pam.d/password-auth")
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if ! grep -qE '^\s*auth\s+required\s+pam_faillock\.so\s+(preauth silent|authfail).*$' "$pam_file"; then
             sed -i --follow-symlinks '/^auth.*sufficient.*pam_unix.so.*/i auth        required      pam_faillock.so preauth silent' "$pam_file"
             sed -i --follow-symlinks '/^auth.*required.*pam_deny.so.*/i auth        required      pam_faillock.so authfail' "$pam_file"
@@ -738,7 +738,7 @@ if [ -f $FAILLOCK_CONF ]; then
     else
         sed -i --follow-symlinks 's|^\s*\(fail_interval\s*=\s*\)\(\S\+\)|\1'"$var_accounts_passwords_pam_faillock_fail_interval"'|g' $FAILLOCK_CONF
     fi
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if [ -e "$pam_file" ]; then
             PAM_FILE_PATH="$pam_file"
             if [ -f /usr/bin/authselect ]; then
@@ -777,7 +777,7 @@ if [ -f $FAILLOCK_CONF ]; then
         fi
     done
 else
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if ! grep -qE '^\s*auth.*pam_faillock.so (preauth|authfail).*fail_interval' "$pam_file"; then
             sed -i --follow-symlinks '/^auth.*required.*pam_faillock.so.*preauth.*silent.*/ s/$/ fail_interval='"$var_accounts_passwords_pam_faillock_fail_interval"'/' "$pam_file"
             sed -i --follow-symlinks '/^auth.*required.*pam_faillock.so.*authfail.*/ s/$/ fail_interval='"$var_accounts_passwords_pam_faillock_fail_interval"'/' "$pam_file"
@@ -803,7 +803,7 @@ In cases where the default authselect profile does not cover a specific demand, 
     authselect apply-changes -b
 else
     AUTH_FILES=("/etc/pam.d/system-auth" "/etc/pam.d/password-auth")
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if ! grep -qE '^\s*auth\s+required\s+pam_faillock\.so\s+(preauth silent|authfail).*$' "$pam_file"; then
             sed -i --follow-symlinks '/^auth.*sufficient.*pam_unix.so.*/i auth        required      pam_faillock.so preauth silent' "$pam_file"
             sed -i --follow-symlinks '/^auth.*required.*pam_deny.so.*/i auth        required      pam_faillock.so authfail' "$pam_file"
@@ -822,7 +822,7 @@ if [ -f $FAILLOCK_CONF ]; then
     else
         sed -i --follow-symlinks 's|^\s*\(unlock_time\s*=\s*\)\(\S\+\)|\1'"$var_accounts_passwords_pam_faillock_unlock_time"'|g' $FAILLOCK_CONF
     fi
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if [ -e "$pam_file" ]; then
             PAM_FILE_PATH="$pam_file"
             if [ -f /usr/bin/authselect ]; then
@@ -862,7 +862,7 @@ if [ -f $FAILLOCK_CONF ]; then
         fi
     done
 else
-    for pam_file in "${AUTH_FILES[@]}"; do
+    for pam_file in "$${AUTH_FILES[@]}"; do
         if ! grep -qE '^\s*auth.*pam_faillock.so (preauth|authfail).*unlock_time' "$pam_file"; then
             sed -i --follow-symlinks '/^auth.*required.*pam_faillock.so.*preauth.*silent.*/ s/$/ unlock_time='"$var_accounts_passwords_pam_faillock_unlock_time"'/' "$pam_file"
             sed -i --follow-symlinks '/^auth.*required.*pam_faillock.so.*authfail.*/ s/$/ unlock_time='"$var_accounts_passwords_pam_faillock_unlock_time"'/' "$pam_file"
@@ -882,7 +882,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^dcredit")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_dcredit"
 if LC_ALL=C grep -q -m 1 -i -e "^dcredit\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^dcredit\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^dcredit\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -898,7 +898,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^dictcheck")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_dictcheck"
 if LC_ALL=C grep -q -m 1 -i -e "^dictcheck\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^dictcheck\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^dictcheck\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -914,7 +914,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^difok")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_difok"
 if LC_ALL=C grep -q -m 1 -i -e "^difok\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^difok\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^difok\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -930,7 +930,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^lcredit")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_lcredit"
 if LC_ALL=C grep -q -m 1 -i -e "^lcredit\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^lcredit\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^lcredit\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -946,7 +946,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^maxclassrepeat")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_maxclassrepeat"
 if LC_ALL=C grep -q -m 1 -i -e "^maxclassrepeat\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^maxclassrepeat\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^maxclassrepeat\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -962,7 +962,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^maxrepeat")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_maxrepeat"
 if LC_ALL=C grep -q -m 1 -i -e "^maxrepeat\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^maxrepeat\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^maxrepeat\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -978,7 +978,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^minclass")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_minclass"
 if LC_ALL=C grep -q -m 1 -i -e "^minclass\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^minclass\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^minclass\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -994,7 +994,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^minlen")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_minlen"
 if LC_ALL=C grep -q -m 1 -i -e "^minlen\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^minlen\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^minlen\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -1010,7 +1010,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^ocredit")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_ocredit"
 if LC_ALL=C grep -q -m 1 -i -e "^ocredit\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^ocredit\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^ocredit\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -1026,7 +1026,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^retry")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_retry"
 if LC_ALL=C grep -q -m 1 -i -e "^retry\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^retry\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^retry\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -1042,7 +1042,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^ucredit")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_password_pam_ucredit"
 if LC_ALL=C grep -q -m 1 -i -e "^ucredit\\>" "/etc/security/pwquality.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^ucredit\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
+    "$${sed_command[@]}" "s/^ucredit\\>.*/$escaped_formatted_output/gi" "/etc/security/pwquality.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/security/pwquality.conf" >> "/etc/security/pwquality.conf"
@@ -1213,7 +1213,7 @@ EOF
 fi
 # Configure tmux to lock session after inactivity
 tmux_conf="/etc/tmux.conf"
-touch "${tmux_conf}"
+touch "$${tmux_conf}"
 if grep -qP '^\s*set\s+-g\s+lock-after-time' "$tmux_conf" ; then
     sed -i 's/^\s*set\s\+-g\s\+lock-after-time.*$/set -g lock-after-time 900/' "$tmux_conf"
 else
@@ -1222,7 +1222,7 @@ fi
 chmod 0644 "$tmux_conf"
 # Configure the tmux Lock Command
 tmux_conf="/etc/tmux.conf"
-touch "${tmux_conf}"
+touch "$${tmux_conf}"
 if grep -qP '^\s*set\s+-g\s+lock-command' "$tmux_conf" ; then
     sed -i 's/^\s*set\s\+-g\s\+lock-command.*$/set -g lock-command vlock/' "$tmux_conf"
 else
@@ -1291,7 +1291,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^UMASK")
 printf -v formatted_output "%s %s" "$stripped_key" "$var_accounts_user_umask"
 if LC_ALL=C grep -q -m 1 -i -e "^UMASK\\>" "/etc/login.defs"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^UMASK\\>.*/$escaped_formatted_output/gi" "/etc/login.defs"
+    "$${sed_command[@]}" "s/^UMASK\\>.*/$escaped_formatted_output/gi" "/etc/login.defs"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/login.defs" >> "/etc/login.defs"
@@ -1314,7 +1314,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^FAIL_DELAY")
 printf -v formatted_output "%s %s" "$stripped_key" "$var_accounts_fail_delay"
 if LC_ALL=C grep -q -m 1 -i -e "^FAIL_DELAY\\>" "/etc/login.defs"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^FAIL_DELAY\\>.*/$escaped_formatted_output/gi" "/etc/login.defs"
+    "$${sed_command[@]}" "s/^FAIL_DELAY\\>.*/$escaped_formatted_output/gi" "/etc/login.defs"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/login.defs" >> "/etc/login.defs"
@@ -1344,7 +1344,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^disk_error_action")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_auditd_disk_error_action"
 if LC_ALL=C grep -q -m 1 -i -e "^disk_error_action\\>" "/etc/audit/auditd.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^disk_error_action\\>.*/$escaped_formatted_output/gi" "/etc/audit/auditd.conf"
+    "$${sed_command[@]}" "s/^disk_error_action\\>.*/$escaped_formatted_output/gi" "/etc/audit/auditd.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/audit/auditd.conf" >> "/etc/audit/auditd.conf"
@@ -1361,7 +1361,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^disk_full_action")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_auditd_disk_full_action"
 if LC_ALL=C grep -q -m 1 -i -e "^disk_full_action\\>" "/etc/audit/auditd.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^disk_full_action\\>.*/$escaped_formatted_output/gi" "/etc/audit/auditd.conf"
+    "$${sed_command[@]}" "s/^disk_full_action\\>.*/$escaped_formatted_output/gi" "/etc/audit/auditd.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/audit/auditd.conf" >> "/etc/audit/auditd.conf"
@@ -1378,7 +1378,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^space_left_action")
 printf -v formatted_output "%s = %s" "$stripped_key" "$var_auditd_space_left_action"
 if LC_ALL=C grep -q -m 1 -i -e "^space_left_action\\>" "$AUDITCONFIG"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^space_left_action\\>.*/$escaped_formatted_output/gi" "$AUDITCONFIG"
+    "$${sed_command[@]}" "s/^space_left_action\\>.*/$escaped_formatted_output/gi" "$AUDITCONFIG"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "$AUDITCONFIG" >> "$AUDITCONFIG"
@@ -1447,13 +1447,13 @@ if [[ ! -f /etc/rsyslog.conf ]]; then
 	touch /etc/rsyslog.conf
 fi
 APPEND_LINE=$(sed -rn '/^\S+\s+\/var\/log\/secure$/p' /etc/rsyslog.conf)
-for K in "${!REMOTE_METHODS[@]}"
+for K in "$${!REMOTE_METHODS[@]}"
 do
-	if ! grep -rq "${REMOTE_METHODS[$K]}" /etc/rsyslog.*; then
-		if [[ ! -z ${APPEND_LINE} ]]; then
-			sed -r -i "0,/^(\S+\s+\/var\/log\/secure$)/s//\1\n${K} \/var\/log\/secure/" /etc/rsyslog.conf
+	if ! grep -rq "$${REMOTE_METHODS[$K]}" /etc/rsyslog.*; then
+		if [[ ! -z $${APPEND_LINE} ]]; then
+			sed -r -i "0,/^(\S+\s+\/var\/log\/secure$)/s//\1\n$${K} \/var\/log\/secure/" /etc/rsyslog.conf
 		else
-			echo "${K} \/var\/log\/secure/" >> /etc/rsyslog.conf
+			echo "$${K} \/var\/log\/secure/" >> /etc/rsyslog.conf
 		fi
 	fi
 done
@@ -1468,7 +1468,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^\*\.\*")
 printf -v formatted_output "%s %s" "$stripped_key" "@@$rsyslog_remote_loghost_address"
 if LC_ALL=C grep -q -m 1 -i -e "^\*\.\*\\>" "/etc/rsyslog.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^\*\.\*\\>.*/$escaped_formatted_output/gi" "/etc/rsyslog.conf"
+    "$${sed_command[@]}" "s/^\*\.\*\\>.*/$escaped_formatted_output/gi" "/etc/rsyslog.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/rsyslog.conf" >> "/etc/rsyslog.conf"
@@ -1484,7 +1484,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1498,7 +1498,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv6.conf.all.accept_ra")
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv6_conf_all_accept_ra_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv6.conf.all.accept_ra\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv6.conf.all.accept_ra\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv6.conf.all.accept_ra\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1510,7 +1510,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1524,7 +1524,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv6.conf.all.accept_redirects")
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv6_conf_all_accept_redirects_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv6.conf.all.accept_redirects\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv6.conf.all.accept_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv6.conf.all.accept_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1536,7 +1536,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1550,7 +1550,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv6.conf.all.accept_source_rout
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv6_conf_all_accept_source_route_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv6.conf.all.accept_source_route\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv6.conf.all.accept_source_route\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv6.conf.all.accept_source_route\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1562,7 +1562,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1576,7 +1576,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv6.conf.all.forwarding")
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv6_conf_all_forwarding_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv6.conf.all.forwarding\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv6.conf.all.forwarding\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv6.conf.all.forwarding\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1588,7 +1588,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1602,7 +1602,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv6.conf.default.accept_ra")
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv6_conf_default_accept_ra_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv6.conf.default.accept_ra\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv6.conf.default.accept_ra\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv6.conf.default.accept_ra\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1614,7 +1614,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1628,7 +1628,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv6.conf.default.accept_redirec
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv6_conf_default_accept_redirects_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv6.conf.default.accept_redirects\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv6.conf.default.accept_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv6.conf.default.accept_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1640,7 +1640,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1654,7 +1654,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv6.conf.default.accept_source_
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv6_conf_default_accept_source_route_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv6.conf.default.accept_source_route\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv6.conf.default.accept_source_route\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv6.conf.default.accept_source_route\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1667,7 +1667,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1681,7 +1681,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv4.conf.all.accept_redirects")
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv4_conf_all_accept_redirects_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv4.conf.all.accept_redirects\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv4.conf.all.accept_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv4.conf.all.accept_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1693,7 +1693,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1707,7 +1707,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv4.conf.all.accept_source_rout
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv4_conf_all_accept_source_route_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv4.conf.all.accept_source_route\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv4.conf.all.accept_source_route\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv4.conf.all.accept_source_route\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1719,7 +1719,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1733,7 +1733,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv4.conf.all.forwarding")
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv4_conf_all_forwarding_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv4.conf.all.forwarding\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv4.conf.all.forwarding\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv4.conf.all.forwarding\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1745,7 +1745,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1759,7 +1759,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv4.conf.all.rp_filter")
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv4_conf_all_rp_filter_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv4.conf.all.rp_filter\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv4.conf.all.rp_filter\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv4.conf.all.rp_filter\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1771,7 +1771,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1785,7 +1785,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv4.conf.default.accept_redirec
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv4_conf_default_accept_redirects_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv4.conf.default.accept_redirects\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv4.conf.default.accept_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv4.conf.default.accept_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1797,7 +1797,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1811,7 +1811,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv4.conf.default.accept_source_
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv4_conf_default_accept_source_route_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv4.conf.default.accept_source_route\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv4.conf.default.accept_source_route\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv4.conf.default.accept_source_route\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1823,7 +1823,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1837,7 +1837,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv4.icmp_echo_ignore_broadcasts
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_net_ipv4_icmp_echo_ignore_broadcasts_value"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv4.icmp_echo_ignore_broadcasts\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv4.icmp_echo_ignore_broadcasts\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv4.icmp_echo_ignore_broadcasts\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1849,7 +1849,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1862,7 +1862,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv4.conf.all.send_redirects")
 printf -v formatted_output "%s = %s" "$stripped_key" "0"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv4.conf.all.send_redirects\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv4.conf.all.send_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv4.conf.all.send_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1874,7 +1874,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1887,7 +1887,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.ipv4.conf.default.send_redirects
 printf -v formatted_output "%s = %s" "$stripped_key" "0"
 if LC_ALL=C grep -q -m 1 -i -e "^net.ipv4.conf.default.send_redirects\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.ipv4.conf.default.send_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.ipv4.conf.default.send_redirects\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1966,7 +1966,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -1979,7 +1979,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^fs.protected_hardlinks")
 printf -v formatted_output "%s = %s" "$stripped_key" "1"
 if LC_ALL=C grep -q -m 1 -i -e "^fs.protected_hardlinks\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^fs.protected_hardlinks\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^fs.protected_hardlinks\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -1991,7 +1991,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2004,7 +2004,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^fs.protected_symlinks")
 printf -v formatted_output "%s = %s" "$stripped_key" "1"
 if LC_ALL=C grep -q -m 1 -i -e "^fs.protected_symlinks\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^fs.protected_symlinks\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^fs.protected_symlinks\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2045,10 +2045,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nosuid)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /boot  defaults,${previous_mount_opts}nosuid 0 0" >>/etc/fstab
+    echo " /boot  defaults,$${previous_mount_opts}nosuid 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nosuid")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
 fi
 if mkdir -p "/boot"; then
     if mountpoint -q "/boot"; then
@@ -2063,10 +2063,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nodev)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo "tmpfs /dev/shm tmpfs defaults,${previous_mount_opts}nodev 0 0" >>/etc/fstab
+    echo "tmpfs /dev/shm tmpfs defaults,$${previous_mount_opts}nodev 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nodev")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nodev|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nodev|" /etc/fstab
 fi
 if mkdir -p "/dev/shm"; then
     if mountpoint -q "/dev/shm"; then
@@ -2081,10 +2081,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|noexec)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo "tmpfs /dev/shm tmpfs defaults,${previous_mount_opts}noexec 0 0" >>/etc/fstab
+    echo "tmpfs /dev/shm tmpfs defaults,$${previous_mount_opts}noexec 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "noexec")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,noexec|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,noexec|" /etc/fstab
 fi
 if mkdir -p "/dev/shm"; then
     if mountpoint -q "/dev/shm"; then
@@ -2099,10 +2099,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nosuid)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo "tmpfs /dev/shm tmpfs defaults,${previous_mount_opts}nosuid 0 0" >>/etc/fstab
+    echo "tmpfs /dev/shm tmpfs defaults,$${previous_mount_opts}nosuid 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nosuid")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
 fi
 if mkdir -p "/dev/shm"; then
     if mountpoint -q "/dev/shm"; then
@@ -2124,10 +2124,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|noexec)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /home  defaults,${previous_mount_opts}noexec 0 0" >>/etc/fstab
+    echo " /home  defaults,$${previous_mount_opts}noexec 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "noexec")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,noexec|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,noexec|" /etc/fstab
 fi
 
 if mkdir -p "/home"; then
@@ -2150,10 +2150,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nosuid)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /home  defaults,${previous_mount_opts}nosuid 0 0" >>/etc/fstab
+    echo " /home  defaults,$${previous_mount_opts}nosuid 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nosuid")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
 fi
 if mkdir -p "/home"; then
     if mountpoint -q "/home"; then
@@ -2175,10 +2175,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nodev)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /tmp  defaults,${previous_mount_opts}nodev 0 0" >>/etc/fstab
+    echo " /tmp  defaults,$${previous_mount_opts}nodev 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nodev")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nodev|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nodev|" /etc/fstab
 fi
 if mkdir -p "/tmp"; then
     if mountpoint -q "/tmp"; then
@@ -2200,10 +2200,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|noexec)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /tmp  defaults,${previous_mount_opts}noexec 0 0" >>/etc/fstab
+    echo " /tmp  defaults,$${previous_mount_opts}noexec 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "noexec")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,noexec|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,noexec|" /etc/fstab
 fi
 if mkdir -p "/tmp"; then
     if mountpoint -q "/tmp"; then
@@ -2225,10 +2225,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nosuid)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /tmp  defaults,${previous_mount_opts}nosuid 0 0" >>/etc/fstab
+    echo " /tmp  defaults,$${previous_mount_opts}nosuid 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nosuid")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
 fi
 if mkdir -p "/tmp"; then
     if mountpoint -q "/tmp"; then
@@ -2250,10 +2250,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nodev)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /var/log/audit  defaults,${previous_mount_opts}nodev 0 0" >>/etc/fstab
+    echo " /var/log/audit  defaults,$${previous_mount_opts}nodev 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nodev")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nodev|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nodev|" /etc/fstab
 fi
 if mkdir -p "/var/log/audit"; then
     if mountpoint -q "/var/log/audit"; then
@@ -2275,10 +2275,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|noexec)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /var/log/audit  defaults,${previous_mount_opts}noexec 0 0" >>/etc/fstab
+    echo " /var/log/audit  defaults,$${previous_mount_opts}noexec 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "noexec")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,noexec|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,noexec|" /etc/fstab
 fi
 if mkdir -p "/var/log/audit"; then
     if mountpoint -q "/var/log/audit"; then
@@ -2300,10 +2300,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nosuid)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /var/log/audit  defaults,${previous_mount_opts}nosuid 0 0" >>/etc/fstab
+    echo " /var/log/audit  defaults,$${previous_mount_opts}nosuid 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nosuid")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
 fi
 if mkdir -p "/var/log/audit"; then
     if mountpoint -q "/var/log/audit"; then
@@ -2325,10 +2325,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nodev)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /var/log  defaults,${previous_mount_opts}nodev 0 0" >>/etc/fstab
+    echo " /var/log  defaults,$${previous_mount_opts}nodev 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nodev")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nodev|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nodev|" /etc/fstab
 fi
 if mkdir -p "/var/log"; then
     if mountpoint -q "/var/log"; then
@@ -2350,10 +2350,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|noexec)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /var/log  defaults,${previous_mount_opts}noexec 0 0" >>/etc/fstab
+    echo " /var/log  defaults,$${previous_mount_opts}noexec 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "noexec")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,noexec|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,noexec|" /etc/fstab
 fi
 if mkdir -p "/var/log"; then
     if mountpoint -q "/var/log"; then
@@ -2375,10 +2375,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nosuid)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /var/log  defaults,${previous_mount_opts}nosuid 0 0" >>/etc/fstab
+    echo " /var/log  defaults,$${previous_mount_opts}nosuid 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nosuid")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
 fi
 if mkdir -p "/var/log"; then
     if mountpoint -q "/var/log"; then
@@ -2400,10 +2400,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nodev)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /var/tmp  defaults,${previous_mount_opts}nodev 0 0" >>/etc/fstab
+    echo " /var/tmp  defaults,$${previous_mount_opts}nodev 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nodev")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nodev|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nodev|" /etc/fstab
 fi
 if mkdir -p "/var/tmp"; then
     if mountpoint -q "/var/tmp"; then
@@ -2425,10 +2425,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|noexec)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /var/tmp  defaults,${previous_mount_opts}noexec 0 0" >>/etc/fstab
+    echo " /var/tmp  defaults,$${previous_mount_opts}noexec 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "noexec")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,noexec|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,noexec|" /etc/fstab
 fi
 if mkdir -p "/var/tmp"; then
     if mountpoint -q "/var/tmp"; then
@@ -2450,10 +2450,10 @@ if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
         sed -E "s/(rw|defaults|seclabel|nosuid)(,|$)//g;s/,$//")
     [ "$previous_mount_opts" ] && previous_mount_opts+=","
-    echo " /var/tmp  defaults,${previous_mount_opts}nosuid 0 0" >>/etc/fstab
+    echo " /var/tmp  defaults,$${previous_mount_opts}nosuid 0 0" >>/etc/fstab
 elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nosuid")" -eq 0 ]; then
     previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
-    sed -i "s|\(${mount_point_match_regexp}.*${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
 fi
 if mkdir -p "/var/tmp"; then
     if mountpoint -q "/var/tmp"; then
@@ -2507,7 +2507,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2521,7 +2521,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^kernel.kptr_restrict")
 printf -v formatted_output "%s = %s" "$stripped_key" "$sysctl_kernel_kptr_restrict_value"
 if LC_ALL=C grep -q -m 1 -i -e "^kernel.kptr_restrict\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^kernel.kptr_restrict\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^kernel.kptr_restrict\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2533,7 +2533,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2546,7 +2546,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^kernel.randomize_va_space")
 printf -v formatted_output "%s = %s" "$stripped_key" "2"
 if LC_ALL=C grep -q -m 1 -i -e "^kernel.randomize_va_space\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^kernel.randomize_va_space\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^kernel.randomize_va_space\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2558,7 +2558,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2571,7 +2571,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^kernel.core_pattern")
 printf -v formatted_output "%s = %s" "$stripped_key" "|/bin/false"
 if LC_ALL=C grep -q -m 1 -i -e "^kernel.core_pattern\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^kernel.core_pattern\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^kernel.core_pattern\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2584,7 +2584,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
       # comment out "kernel.dmesg_restrict" matches to preserve user data
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2597,7 +2597,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^kernel.dmesg_restrict")
 printf -v formatted_output "%s = %s" "$stripped_key" "1"
 if LC_ALL=C grep -q -m 1 -i -e "^kernel.dmesg_restrict\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^kernel.dmesg_restrict\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^kernel.dmesg_restrict\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2609,7 +2609,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2622,7 +2622,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^kernel.kexec_load_disabled")
 printf -v formatted_output "%s = %s" "$stripped_key" "1"
 if LC_ALL=C grep -q -m 1 -i -e "^kernel.kexec_load_disabled\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^kernel.kexec_load_disabled\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^kernel.kexec_load_disabled\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2634,7 +2634,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2647,7 +2647,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^kernel.perf_event_paranoid")
 printf -v formatted_output "%s = %s" "$stripped_key" "2"
 if LC_ALL=C grep -q -m 1 -i -e "^kernel.perf_event_paranoid\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^kernel.perf_event_paranoid\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^kernel.perf_event_paranoid\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2659,7 +2659,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2672,7 +2672,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^kernel.unprivileged_bpf_disabled")
 printf -v formatted_output "%s = %s" "$stripped_key" "1"
 if LC_ALL=C grep -q -m 1 -i -e "^kernel.unprivileged_bpf_disabled\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^kernel.unprivileged_bpf_disabled\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^kernel.unprivileged_bpf_disabled\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2684,7 +2684,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2697,7 +2697,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^kernel.yama.ptrace_scope")
 printf -v formatted_output "%s = %s" "$stripped_key" "1"
 if LC_ALL=C grep -q -m 1 -i -e "^kernel.yama.ptrace_scope\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^kernel.yama.ptrace_scope\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^kernel.yama.ptrace_scope\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2709,7 +2709,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2722,7 +2722,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^net.core.bpf_jit_harden")
 printf -v formatted_output "%s = %s" "$stripped_key" "2"
 if LC_ALL=C grep -q -m 1 -i -e "^net.core.bpf_jit_harden\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^net.core.bpf_jit_harden\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^net.core.bpf_jit_harden\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2734,7 +2734,7 @@ for f in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf; do
   if ! test -z "$matching_list"; then
     while IFS= read -r entry; do
       escaped_entry=$(sed -e 's|/|\\/|g' <<< "$entry")
-      sed -i "s/^${escaped_entry}$/# &/g" $f
+      sed -i "s/^$${escaped_entry}$/# &/g" $f
     done <<< "$matching_list"
   fi
 done
@@ -2747,7 +2747,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^user.max_user_namespaces")
 printf -v formatted_output "%s = %s" "$stripped_key" "0"
 if LC_ALL=C grep -q -m 1 -i -e "^user.max_user_namespaces\\>" "/etc/sysctl.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^user.max_user_namespaces\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
+    "$${sed_command[@]}" "s/^user.max_user_namespaces\\>.*/$escaped_formatted_output/gi" "/etc/sysctl.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/sysctl.conf" >> "/etc/sysctl.conf"
@@ -2784,7 +2784,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^port")
 printf -v formatted_output "%s %s" "$stripped_key" "0"
 if LC_ALL=C grep -q -m 1 -i -e "^port\\>" "/etc/chrony.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^port\\>.*/$escaped_formatted_output/gi" "/etc/chrony.conf"
+    "$${sed_command[@]}" "s/^port\\>.*/$escaped_formatted_output/gi" "/etc/chrony.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/chrony.conf" >> "/etc/chrony.conf"
@@ -2799,7 +2799,7 @@ stripped_key=$(sed 's/[\^=\$,;+]*//g' <<< "^cmdport")
 printf -v formatted_output "%s %s" "$stripped_key" "0"
 if LC_ALL=C grep -q -m 1 -i -e "^cmdport\\>" "/etc/chrony.conf"; then
     escaped_formatted_output=$(sed -e 's|/|\\/|g' <<< "$formatted_output")
-    "${sed_command[@]}" "s/^cmdport\\>.*/$escaped_formatted_output/gi" "/etc/chrony.conf"
+    "$${sed_command[@]}" "s/^cmdport\\>.*/$escaped_formatted_output/gi" "/etc/chrony.conf"
 else
     cce=""
     printf '\n# Per %s: Set %s in %s\n' "$cce" "$formatted_output" "/etc/chrony.conf" >> "/etc/chrony.conf"

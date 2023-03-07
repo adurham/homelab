@@ -1,31 +1,14 @@
-variable "headless" {
-  type    = string
-  default = "true"
+locals {
+  data_source_content = {
+    "ks.cfg" = templatefile("http/ks.pkrtpl.hcl", {
+      hashed_grub_password   = var.hashed_grub_password
+      hashed_admin_password  = var.hashed_admin_password
+      hashed_packer_password = var.hashed_packer_password
+      ssh_publickey          = var.ssh_publickey
+    })
+  }
 }
-variable "version" {
-  type    = string
-  default = "8.7"
-}
-variable "vcenter_username" {
-  type        = string
-  description = "The username for the vcenter server"
-  sensitive   = true
-}
-variable "vcenter_password" {
-  type        = string
-  description = "The password for the vcenter server"
-  sensitive   = true
-}
-variable "ssh_username" {
-  type        = string
-  description = "The username for the SSH user"
-  sensitive   = true
-}
-variable "ssh_password" {
-  type        = string
-  description = "The password for the SSH user"
-  sensitive   = true
-}
+
 
 source "vsphere-iso" "vsphere" {
   vcenter_server       = "10.0.4.2"
@@ -53,7 +36,8 @@ source "vsphere-iso" "vsphere" {
     "initrdefi /images/pxeboot/initrd.img<enter>",
     "boot<enter><wait>"
   ]
-  cd_files     = ["http/ks.cfg"]
+  // cd_files     = ["http/ks.cfg"]
+  cd_content   = local.data_source_content
   cd_label     = "kickstart"
   cdrom_type   = "sata"
   remove_cdrom = true
@@ -62,8 +46,9 @@ source "vsphere-iso" "vsphere" {
     network_card = "vmxnet3"
   }
   ssh_username = "${var.ssh_username}"
-  ssh_password = "${var.ssh_password}"
-  ssh_timeout  = "20m"
+  // ssh_password = "${var.ssh_password}"
+  // ssh_private_key_file = "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+  ssh_timeout = "20m"
   content_library_destination {
     library     = "Homelab"
     name        = "Rocky Linux 8.7 Base"
@@ -76,7 +61,7 @@ source "vsphere-iso" "vsphere" {
 build {
   sources = ["source.vsphere-iso.vsphere"]
   provisioner "shell" {
-    remote_file = "script.sh"
+    remote_file     = "script.sh"
     execute_command = "sudo mv {{ .Path }} /run/; chmod +x /run/script.sh; sudo env {{ .Vars }} /run/script.sh"
     environment_vars = [
     ]
