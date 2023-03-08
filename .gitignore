@@ -1,2 +1,1 @@
-**/.*-secrets.json
-*.auto.pkrvars.hcl
+*secrets.auto.pkrvars.hcl
