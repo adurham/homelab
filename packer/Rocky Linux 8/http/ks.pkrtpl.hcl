@@ -456,6 +456,85 @@ cat <<EOF >/etc/issue
 $formatted
 EOF
 ## Protect Accounts by Configuring PAM
+# Account lockouts must be logged
+if [ -f /usr/bin/authselect ]; then
+    if ! authselect check; then
+echo "
+authselect integrity check failed. Remediation aborted!
+This remediation could not be applied because an authselect profile was not selected or the selected profile is not intact.
+It is not recommended to manually edit the PAM files when authselect tool is available.
+In cases where the default authselect profile does not cover a specific demand, a custom authselect profile is recommended."
+exit 1
+fi
+authselect enable-feature with-faillock
+authselect apply-changes -b
+else
+AUTH_FILES=("/etc/pam.d/system-auth" "/etc/pam.d/password-auth")
+for pam_file in "$${AUTH_FILES[@]}"
+do
+    if ! grep -qE '^\s*auth\s+required\s+pam_faillock\.so\s+(preauth silent|authfail).*$' "$pam_file" ; then
+        sed -i --follow-symlinks '/^auth.*sufficient.*pam_unix\.so.*/i auth        required      pam_faillock.so preauth silent' "$pam_file"
+        sed -i --follow-symlinks '/^auth.*required.*pam_deny\.so.*/i auth        required      pam_faillock.so authfail' "$pam_file"
+        sed -i --follow-symlinks '/^account.*required.*pam_unix\.so.*/i account     required      pam_faillock.so' "$pam_file"
+    fi
+    sed -Ei 's/(auth.*)(\[default=die\])(.*pam_faillock\.so)/\1required     \3/g' "$pam_file"
+done
+fi
+AUTH_FILES=("/etc/pam.d/system-auth" "/etc/pam.d/password-auth")
+FAILLOCK_CONF="/etc/security/faillock.conf"
+if [ -f $FAILLOCK_CONF ]; then
+    regex="^\s*audit"
+    line="audit"
+    if ! grep -q $regex $FAILLOCK_CONF; then
+        echo $line >> $FAILLOCK_CONF
+    fi
+    for pam_file in "$${AUTH_FILES[@]}"
+    do
+        if [ -e "$pam_file" ] ; then
+            PAM_FILE_PATH="$pam_file"
+            if [ -f /usr/bin/authselect ]; then
+                if ! authselect check; then
+                echo "
+                authselect integrity check failed. Remediation aborted!
+                This remediation could not be applied because an authselect profile was not selected or the selected profile is not intact.
+                It is not recommended to manually edit the PAM files when authselect tool is available.
+                In cases where the default authselect profile does not cover a specific demand, a custom authselect profile is recommended."
+                exit 1
+                fi
+                CURRENT_PROFILE=$(authselect current -r | awk '{ print $1 }')
+                if [[ ! $CURRENT_PROFILE == custom/* ]]; then
+                    ENABLED_FEATURES=$(authselect current | tail -n+3 | awk '{ print $2 }')
+                    authselect create-profile hardening -b $CURRENT_PROFILE
+                    CURRENT_PROFILE="custom/hardening"
+                    authselect apply-changes -b --backup=before-hardening-custom-profile
+                    authselect select $CURRENT_PROFILE
+                    for feature in $ENABLED_FEATURES; do
+                        authselect enable-feature $feature;
+                    done
+                    authselect apply-changes -b --backup=after-hardening-custom-profile
+                fi
+                PAM_FILE_NAME=$(basename "$pam_file")
+                PAM_FILE_PATH="/etc/authselect/$CURRENT_PROFILE/$PAM_FILE_NAME"
+                authselect apply-changes -b
+            fi
+        if grep -qP '^\s*auth\s.*\bpam_faillock.so\s.*\baudit\b' "$PAM_FILE_PATH"; then
+            sed -i -E --follow-symlinks 's/(.*auth.*pam_faillock.so.*)\baudit\b=?[[:alnum:]]*(.*)/\1\2/g' "$PAM_FILE_PATH"
+        fi
+            if [ -f /usr/bin/authselect ]; then
+                authselect apply-changes -b
+            fi
+        else
+            echo "$pam_file was not found" >&2
+        fi
+    done
+else
+    for pam_file in "$${AUTH_FILES[@]}"
+    do
+        if ! grep -qE '^\s*auth.*pam_faillock\.so (preauth|authfail).*audit' "$pam_file"; then
+            sed -i --follow-symlinks '/^auth.*required.*pam_faillock\.so.*preauth.*silent.*/ s/$/ audit/' "$pam_file"
+        fi
+    done
+fi
 # Limit Password Reuse: password-auth
 var_password_pam_remember='5'
 var_password_pam_remember_control_flag='required'
@@ -1201,12 +1280,12 @@ if [ -f /usr/bin/authselect ]; then
 fi
 ## Protect Physical Console Access
 # Support session locking with tmux
-if ! grep -x '  case "$name" in sshd|login) exec tmux ;; esac' /etc/bashrc; then
+if ! grep -x '  case "$name" in sshd|login) tmux ;; esac' /etc/bashrc /etc/profile.d/*.sh; then
     cat >> /etc/profile.d/tmux.sh <<'EOF'
 if [ "$PS1" ]; then
   parent=$(ps -o ppid= -p $$)
   name=$(ps -o comm= -p $parent)
-  case "$name" in sshd|login) exec tmux ;; esac
+  case "$name" in sshd|login) tmux ;; esac
 fi
 EOF
     chmod 0644 /etc/profile.d/tmux.sh
@@ -1229,10 +1308,21 @@ else
     echo "set -g lock-command vlock" >> "$tmux_conf"
 fi
 chmod 0644 "$tmux_conf"
+# Configure the tmux lock session key binding
+tmux_conf="/etc/tmux.conf"
+if grep -qP '^\s*bind\s+\w\s+lock-session' "$tmux_conf" ; then
+    sed -i 's/\s*bind\s\+\w\s\+lock-session.*$/bind X lock-session/' "$tmux_conf"
+else
+    echo "bind X lock-session" >> "$tmux_conf"
+fi
+chmod 0644 "$tmux_conf"
 # Prevent user from disabling the screen lock
 if grep -q 'tmux\s*$' /etc/shells ; then
 	sed -i '/tmux\s*$/d' /etc/shells
 fi
+# Disable debug-shell SystemD Service
+systemctl disable --now debug-shell.service
+systemctl mask --now debug-shell.service
 # Disable Ctrl-Alt-Del Burst Action
 echo "CtrlAltDelBurstAction=none" >> /etc/systemd/system.conf
 # Disable Ctrl-Alt-Del Reboot Activation
@@ -2057,6 +2147,31 @@ if mkdir -p "/boot"; then
         mount --target "/boot"
     fi
 fi
+# Add nosuid Option to /boot/efi
+mount_point_match_regexp="$(printf "[[:space:]]%s[[:space:]]" "/boot/efi")"
+grep "$mount_point_match_regexp" -q /etc/fstab ||
+    {
+        echo "The mount point '/boot/efi' is not even in /etc/fstab, so we can't set up mount options" >&2
+        echo "Not remediating, because there is no record of /boot/efi in /etc/fstab" >&2
+        return 1
+    }
+mount_point_match_regexp="$(printf "[[:space:]]%s[[:space:]]" /boot/efi)"
+if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
+    previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/mtab | head -1 | awk '{print $4}' |
+        sed -E "s/(rw|defaults|seclabel|nosuid)(,|$)//g;s/,$//")
+    [ "$previous_mount_opts" ] && previous_mount_opts+=","
+    echo " /boot/efi  defaults,$${previous_mount_opts}nosuid 0 0" >>/etc/fstab
+elif [ "$(grep "$mount_point_match_regexp" /etc/fstab | grep -c "nosuid")" -eq 0 ]; then
+    previous_mount_opts=$(grep "$mount_point_match_regexp" /etc/fstab | awk '{print $4}')
+    sed -i "s|\($${mount_point_match_regexp}.*$${previous_mount_opts}\)|\1,nosuid|" /etc/fstab
+fi
+if mkdir -p "/boot/efi"; then
+    if mountpoint -q "/boot/efi"; then
+        mount -o remount --target "/boot/efi"
+    else
+        mount --target "/boot/efi"
+    fi
+fi
 # Add nodev Option to /dev/shm
 mount_point_match_regexp="$(printf "[[:space:]]%s[[:space:]]" /dev/shm)"
 if [ "$(grep -c "$mount_point_match_regexp" /etc/fstab)" -eq 0 ]; then
@@ -2815,15 +2930,20 @@ grep "^\(server\|pool\|peer\)" "$config_file" | grep -v maxpoll | while read -r 
         sed -i "s/$line/& maxpoll $var_time_service_set_maxpoll/" "$config_file"
 done
 ## SSH Server
-# Set SSH Client Alive Count Max to zero
-LC_ALL=C sed -i "/^\s*ClientAliveCountMax\s\+/Id" "/etc/ssh/sshd_config"
+# Set SSH Client Alive Count Max
+var_sshd_set_keepalive='1'
+if [ -e "/etc/ssh/sshd_config" ] ; then
+    LC_ALL=C sed -i "/^\s*ClientAliveCountMax\s\+/Id" "/etc/ssh/sshd_config"
+else
+    touch "/etc/ssh/sshd_config"
+fi
 cp "/etc/ssh/sshd_config" "/etc/ssh/sshd_config.bak"
 line_number="$(LC_ALL=C grep -n "^Match" "/etc/ssh/sshd_config.bak" | LC_ALL=C sed 's/:.*//g')"
 if [ -z "$line_number" ]; then
-    echo "ClientAliveCountMax 0" >> "/etc/ssh/sshd_config"
+    printf '%s\n' "ClientAliveCountMax $var_sshd_set_keepalive" >> "/etc/ssh/sshd_config"
 else
     head -n "$(( line_number - 1 ))" "/etc/ssh/sshd_config.bak" > "/etc/ssh/sshd_config"
-    echo "ClientAliveCountMax 0" >> "/etc/ssh/sshd_config"
+    printf '%s\n' "ClientAliveCountMax $var_sshd_set_keepalive" >> "/etc/ssh/sshd_config"
     tail -n "+$(( line_number ))" "/etc/ssh/sshd_config.bak" >> "/etc/ssh/sshd_config"
 fi
 rm "/etc/ssh/sshd_config.bak"

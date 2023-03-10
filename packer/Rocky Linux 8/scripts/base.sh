@@ -28,6 +28,16 @@ done
 tmux_conf="/etc/tmux.conf"
 touch "${tmux_conf}"
 echo "set -g mouse on" >> "$tmux_conf"
+# Remediate CVE-2021-30465
+dnf install -y containers-common
+# Configure fapolicy
+cat << EOF >> /etc/fapolicyd/rules.d/01-Tanium.rules
+allow perm=any dir=/opt/Tanium/TaniumClient : dir=/opt/Tanium/TaniumClient
+EOF
+systemctl restart fapolicyd.service
+# Build and Test AIDE Database
+/usr/sbin/aide --init
+/bin/cp -p /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
 # Set password policy back for packer user
 chage -M 60 packer
 chage -m 1 packer
