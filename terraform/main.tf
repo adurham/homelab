@@ -38,7 +38,7 @@ resource "vsphere_tag" "vsphere_environment_tag" {
 }
 
 resource "vsphere_resource_pool" "vsphere_homelab_resource_pool" {
-  name                    = "${var.environment} Resource Pool"
+  name                    = "${var.environment}"
   parent_resource_pool_id = data.vsphere_compute_cluster.vsphere_compute_cluster.resource_pool_id
   cpu_share_level         = "normal"
   # cpu_shares               = 4000
