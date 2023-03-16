@@ -1,1 +1,9 @@
-*secrets.auto.pkrvars.hcl
+# Packer
+packer/**/*secrets.auto.pkrvars.hcl
+packer/**/manifests/*.json
+
+# Terraform
+*terraform.tfvars
+*terraform/.terraform/*
+*terraform/terraform.tfstate.d/*
+terraform/.terraform.lock.hcl

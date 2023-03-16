@@ -91,8 +91,8 @@ source "vsphere-iso" "vsphere" {
   convert_to_template = var.common_template_conversion
   content_library_destination {
     library     = var.common_content_library_name
-    name        = "${var.vm_guest_os_family}-${var.vm_guest_os_vendor}-${var.vm_guest_os_member}-${var.vm_guest_os_version}"
-    description = "${var.vm_guest_os_family}-${var.vm_guest_os_vendor}-${var.vm_guest_os_member}-${var.vm_guest_os_version}: ${local.buildtime}"
+    name        = "${title(var.vm_guest_os_vendor)}-${title(var.vm_guest_os_member)} ${var.vm_guest_os_version}"
+    description = "${title(var.vm_guest_os_vendor)}-${title(var.vm_guest_os_member)} ${var.vm_guest_os_version}: With DISA STIG applied."
     destroy     = var.common_content_library_destroy
     ovf         = var.common_content_library_ovf
     skip_import = var.common_content_library_skip_import

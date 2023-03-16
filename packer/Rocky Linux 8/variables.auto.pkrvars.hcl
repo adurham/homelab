@@ -21,8 +21,8 @@ common_shutdown_timeout = "5m"
 common_template_conversion = false
 common_content_library_name = "Homelab"
 common_content_library_ovf = true
-common_content_library_destroy = false
-common_content_library_skip_import = true
+common_content_library_destroy = true
+common_content_library_skip_import = false
 
 // Guest Operating System Metadata
 vm_guest_os_language = "en_US"
