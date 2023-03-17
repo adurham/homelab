@@ -49,6 +49,7 @@ openscap
 openscap-scanner
 openssh-server
 openssl-pkcs11
+perl
 policycoreutils
 postfix
 rng-tools
