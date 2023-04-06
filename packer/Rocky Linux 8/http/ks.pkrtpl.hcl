@@ -85,7 +85,7 @@ rootpw --lock
 # Setup Users
 user --groups=wheel --name=admin --password=${hashed_admin_password} --iscrypted --gecos="Admin"
 sshkey --username=admin "${ssh_publickey}"
-user --groups=wheel --name=packer --password=${hashed_packer_password} --iscrypted --gecos="Packer"
+user --groups=wheel --name=packer --password=${hashed_build_password} --iscrypted --gecos="Packer"
 sshkey --username=packer "${ssh_publickey}"
 # Set Password Policy
 %anaconda

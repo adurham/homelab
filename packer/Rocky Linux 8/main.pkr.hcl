@@ -16,7 +16,7 @@ locals {
     "/ks.cfg" = templatefile("http/ks.pkrtpl.hcl", {
       hashed_grub_password   = var.hashed_grub_password
       hashed_admin_password  = var.hashed_admin_password
-      hashed_packer_password = var.hashed_packer_password
+      hashed_build_password = var.hashed_build_password
       ssh_publickey          = var.ssh_publickey
     })
   }

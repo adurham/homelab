@@ -231,9 +231,38 @@ variable "common_shutdown_timeout" {
 }
 
 // Communicator Settings and Credentials
+variable "admin_username" {
+  type        = string
+  description = "The username for the primary admin account"
+  sensitive   = true
+  default     = null
+}
+variable "admin_group" {
+  type        = string
+  description = "The group for the primary admin account"
+  sensitive   = true
+  default     = null
+}
+variable "admin_password" {
+  type        = string
+  description = "The password for the primary admin account"
+  sensitive   = true
+  default     = null
+}
+variable "hashed_admin_password" {
+  type        = string
+  description = "SHA512 of the password for the primary admin account"
+  sensitive   = true
+}
 variable "build_username" {
   type        = string
   description = "The username to login to the guest operating system"
+  sensitive   = true
+  default     = null
+}
+variable "build_group" {
+  type        = string
+  description = "The group to login to the guest operating system"
   sensitive   = true
   default     = null
 }
@@ -243,11 +272,10 @@ variable "build_password" {
   sensitive   = true
   default     = null
 }
-variable "build_password_encrypted" {
+variable "hashed_build_password" {
   type        = string
-  description = "The encrypted password to login the guest operating system"
+  description = "SHA512 of the password to login to the guest operating system"
   sensitive   = true
-  default     = null
 }
 variable "communicator_port" {
   type        = string
@@ -274,16 +302,6 @@ variable "inline" {
 variable "ssh_publickey" {
   type        = string
   description = "The publickey for the SSH user"
-  sensitive   = true
-}
-variable "hashed_admin_password" {
-  type        = string
-  description = "SHA512 of the password for the Admin user"
-  sensitive   = true
-}
-variable "hashed_packer_password" {
-  type        = string
-  description = "SHA512 of the password for the Packer user"
   sensitive   = true
 }
 variable "hashed_grub_password" {

@@ -38,6 +38,12 @@ systemctl restart fapolicyd.service
 # Build and Test AIDE Database
 /usr/sbin/aide --init
 /bin/cp -p /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
+# Add admin group to sudoers
+echo '%admin ALL=(ALL) ALL' >> /etc/sudoers.d/01-admin
+# Prevent access to su with sudo
+echo '%admin ALL=(ALL) !/bin/su' >> /etc/sudoers.d/02-no-su
+# Remove wheel from sudo
+sed -i '/^%wheel/d' /etc/sudoers
 # Set password policy back for packer user
 chage -M 60 packer
 chage -m 1 packer
