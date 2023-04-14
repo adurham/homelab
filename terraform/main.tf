@@ -38,7 +38,7 @@ resource "vsphere_tag" "vsphere_environment_tag" {
 }
 
 resource "vsphere_resource_pool" "vsphere_homelab_resource_pool" {
-  name                    = "${var.environment}"
+  name                    = var.environment
   parent_resource_pool_id = data.vsphere_compute_cluster.vsphere_compute_cluster.resource_pool_id
   cpu_share_level         = "normal"
   # cpu_shares               = 4000
@@ -86,5 +86,40 @@ resource "vsphere_distributed_port_group" "vsphere_network_port_group" {
   depends_on = [
     vsphere_tag.vsphere_terraform_tag,
     vsphere_tag.vsphere_environment_tag
+  ]
+}
+
+resource vsphere_role "packer" {
+  name = "packer-svc"
+  role_privileges = [
+    "ContentLibrary.AddLibraryItem",
+    "ContentLibrary.UpdateLibraryItem",
+    "Datastore.AllocateSpace",
+    "Datastore.Browse",
+    "Datastore.FileManagement",
+    "Network.Assign",
+    "Resource.AssignVMToPool",
+    "VApp.Export",
+    "VirtualMachine.Config.AddNewDisk",
+    "VirtualMachine.Config.AddRemoveDevice",
+    "VirtualMachine.Config.AdvancedConfig",
+    "VirtualMachine.Config.Annotation",
+    "VirtualMachine.Config.CPUCount",
+    "VirtualMachine.Config.Memory",
+    "VirtualMachine.Config.Resource",
+    "VirtualMachine.Config.Settings",
+    "VirtualMachine.Interact.DeviceConnection",
+    "VirtualMachine.Interact.PowerOff",
+    "VirtualMachine.Interact.PowerOn",
+    "VirtualMachine.Interact.PutUsbScanCodes",
+    "VirtualMachine.Interact.SetCDMedia",
+    "VirtualMachine.Interact.SetFloppyMedia",
+    "VirtualMachine.Inventory.Create",
+    "VirtualMachine.Inventory.CreateFromExisting",
+    "VirtualMachine.Inventory.Delete",
+    "VirtualMachine.Provisioning.CreateTemplateFromVM",
+    "VirtualMachine.Provisioning.MarkAsTemplate",
+    "VirtualMachine.Provisioning.MarkAsVM",
+    "VirtualMachine.State.CreateSnapshot"
   ]
 }
