@@ -8,3 +8,4 @@ packer/**/manifests/*.json
 */terraform.tfstate*
 */terraform.tfstate.d/*
 */.terraform.lock.hcl
+*/.terraform.tfstate.lock.info
