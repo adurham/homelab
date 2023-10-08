@@ -5,7 +5,7 @@ module "demo_wn1015_clients" {
   vmrp         = "amd-vmcl02/Resources"
   vmfolder     = "Tanium/Demo"
   datastore    = "vSphere Rust"
-  vmtemp       = "Windows Server 2012 R2"
+  vmtemp       = "Windows 10 Enterprise LTSC 2015"
   instances    = 5
   vmname       = "dmo-wndsk"
   vmnameformat = "%01d-2k15"
@@ -30,7 +30,7 @@ module "demo_wn1016_clients" {
   vmrp         = "amd-vmcl02/Resources"
   vmfolder     = "Tanium/Demo"
   datastore    = "vSphere Rust"
-  vmtemp       = "Windows Server 2016"
+  vmtemp       = "Windows 10 Enterprise LTSC 2016"
   instances    = 5
   vmname       = "dmo-wndsk"
   vmnameformat = "%01d-2k16"
@@ -55,7 +55,7 @@ module "demo_wn1019_clients" {
   vmrp         = "amd-vmcl02/Resources"
   vmfolder     = "Tanium/Demo"
   datastore    = "vSphere Rust"
-  vmtemp       = "Windows Server 2019"
+  vmtemp       = "Windows 10 Enterprise LTSC 2019"
   instances    = 5
   vmname       = "dmo-wndsk"
   vmnameformat = "%01d-2k19"
@@ -80,7 +80,7 @@ module "demo_wn1021_clients" {
   vmrp         = "amd-vmcl02/Resources"
   vmfolder     = "Tanium/Demo"
   datastore    = "vSphere Rust"
-  vmtemp       = "Windows Server 2022"
+  vmtemp       = "Windows 10 Enterprise LTSC 2021"
   instances    = 5
   vmname       = "dmo-wndsk"
   vmnameformat = "%01d-2k21"
