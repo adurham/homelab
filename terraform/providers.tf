@@ -2,15 +2,15 @@ terraform {
   required_providers {
     vsphere = {
       source  = "hashicorp/vsphere"
-      version = "~> 2.4.2"
+      version = "~> 2.6.1"
     }
-    http = {
-      source = "hashicorp/http"
+    nsxt = {
+      source = "vmware/nsxt"
       version = "~> 3.4.0"
     }
     null = {
       source = "hashicorp/null"
-      version = "~> 3.2.1"
+      version = "~> 3.2.2"
     }
   }
 }
@@ -22,8 +22,11 @@ provider "vsphere" {
   allow_unverified_ssl = var.vsphere_insecure_connection
 }
 
-provider "http" {
-  alias = "opnsense"
+provider "nsxt" {
+  host                 = var.nsx_endpoint
+  username             = var.nsx_username
+  password             = var.nsx_password
+  allow_unverified_ssl = var.nsx_insecure_connection
 }
 
 provider "null" {
