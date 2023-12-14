@@ -5,11 +5,11 @@ terraform {
       version = "~> 2.6.1"
     }
     nsxt = {
-      source = "vmware/nsxt"
+      source  = "vmware/nsxt"
       version = "~> 3.4.0"
     }
     null = {
-      source = "hashicorp/null"
+      source  = "hashicorp/null"
       version = "~> 3.2.2"
     }
   }
@@ -27,8 +27,9 @@ provider "nsxt" {
   username             = var.nsx_username
   password             = var.nsx_password
   allow_unverified_ssl = var.nsx_insecure_connection
+  max_retries          = 2
 }
 
 provider "null" {
-  
+
 }
