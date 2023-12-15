@@ -16,10 +16,10 @@ terraform {
 }
 
 provider "vsphere" {
-  vsphere_server       = var.vsphere_endpoint
-  user                 = var.vsphere_username
-  password             = var.vsphere_password
-  allow_unverified_ssl = var.vsphere_insecure_connection
+  vsphere_server       = var.vcenter_endpoint
+  user                 = var.vcenter_username
+  password             = var.vcenter_password
+  allow_unverified_ssl = var.vcenter_insecure_connection
 }
 
 provider "nsxt" {

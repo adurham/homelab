@@ -9,3 +9,4 @@ packer/**/manifests/*.json
 */terraform.tfstate.d/*
 */.terraform.lock.hcl
 */.terraform.tfstate.lock.info
+.DS_Store

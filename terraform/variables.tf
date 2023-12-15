@@ -1,6 +1,6 @@
 variable "esxi_password" {
   type        = string
-  description = "The password for the vSphere server"
+  description = "The password for the ESXi server"
   sensitive   = true
 }
 variable "esxi_7_license" {
@@ -13,28 +13,28 @@ variable "esxi_8_license" {
   description = "The license for ESXi 8"
   sensitive   = true
 }
-variable "vsphere_endpoint" {
+variable "vcenter_endpoint" {
   type        = string
-  description = "The FQDN of the vSphere server"
+  description = "The FQDN of the vCenter server"
 }
 variable "vcenter_license" {
   type        = string
-  description = "The license for the vSphere server"
+  description = "The license for the vCenter server"
   sensitive   = true
 }
-variable "vsphere_username" {
+variable "vcenter_username" {
   type        = string
-  description = "The username for the vSphere server"
+  description = "The username for the vCenter server"
   sensitive   = true
 }
-variable "vsphere_password" {
+variable "vcenter_password" {
   type        = string
-  description = "The password for the vSphere server"
+  description = "The password for the vCenter server"
   sensitive   = true
 }
-variable "vsphere_insecure_connection" {
+variable "vcenter_insecure_connection" {
   type        = bool
-  description = "Don't validate vSphere Server TLS certificate"
+  description = "Don't validate vCenter Server TLS certificate"
   default     = false
 }
 variable "nsx_endpoint" {
@@ -55,6 +55,21 @@ variable "nsx_insecure_connection" {
   type        = bool
   description = "Don't validate NSX Server TLS certificate"
   default     = false
+}
+variable "nsx_transport_node_cli_username" {
+  type        = string
+  description = "The CLI username for the NSX Transport server"
+  sensitive   = true
+}
+variable "nsx_transport_node_cli_password" {
+  type        = string
+  description = "The CLI password for the NSX Transport server"
+  sensitive   = true
+}
+variable "nsx_transport_node_root_password" {
+  type        = string
+  description = "The root password for the NSX Transport server"
+  sensitive   = true
 }
 variable "win_local_adminpass" {
   type        = string
