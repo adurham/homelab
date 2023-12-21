@@ -37,6 +37,7 @@ module "homelab-vault_server" {
     "${nsxt_policy_fixed_segment.vault.display_name}" = ["172.16.0.195", "172.16.0.196", "172.16.0.197"]
   }
   vmgateway = "172.16.0.193"
+  dns_server_list  = [nsxt_policy_fixed_segment.vault.subnet[0].dhcp_v4_config[0].dns_servers[0]]
   dc        = "${vsphere_datacenter.Homelab.name}"
   datastore = "vsanDatastore"
 }

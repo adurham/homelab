@@ -37,6 +37,7 @@ module "homelab-consul_server" {
     "${nsxt_policy_fixed_segment.consul.display_name}" = ["172.16.0.131", "172.16.0.132", "172.16.0.133"]
   }
   vmgateway = "172.16.0.129"
+  dns_server_list  = [nsxt_policy_fixed_segment.consul.subnet[0].dhcp_v4_config[0].dns_servers[0]]
   dc        = "${vsphere_datacenter.Homelab.name}"
   datastore = "vsanDatastore"
 }
