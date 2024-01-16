@@ -82,7 +82,7 @@ resource "vsphere_compute_cluster" "cl01" {
   datacenter_id                = vsphere_datacenter.Homelab.moid
   drs_enabled                  = true
   drs_automation_level         = "fullyAutomated"
-  ha_enabled                   = false
+  ha_enabled                   = true
   dpm_enabled                  = true
   dpm_automation_level         = "automated"
   drs_scale_descendants_shares = "scaleCpuAndMemoryShares"
@@ -170,7 +170,7 @@ resource "vsphere_compute_cluster" "cl02" {
   datacenter_id                = vsphere_datacenter.Homelab.moid
   drs_enabled                  = true
   drs_automation_level         = "fullyAutomated"
-  ha_enabled                   = false
+  ha_enabled                   = true
   dpm_enabled                  = false
   dpm_automation_level         = "automated"
   drs_scale_descendants_shares = "disabled"
@@ -242,20 +242,6 @@ resource "vsphere_distributed_virtual_switch" "vds02" {
 }
 
 resource "vsphere_distributed_port_group" "vds01_vdpg01" {
-  name                            = "1GbE0-Physical Management"
-  depends_on                      = [vsphere_distributed_virtual_switch.vds01]
-  distributed_virtual_switch_uuid = vsphere_distributed_virtual_switch.vds01.id
-  vlan_id                         = 3
-}
-
-resource "vsphere_distributed_port_group" "vds01_vdpg02" {
-  name                            = "1GbE0-Virtual Management"
-  depends_on                      = [vsphere_distributed_virtual_switch.vds01]
-  distributed_virtual_switch_uuid = vsphere_distributed_virtual_switch.vds01.id
-  vlan_id                         = 6
-}
-
-resource "vsphere_distributed_port_group" "vds01_vdpg03" {
   name                            = "1GbE0-NSX Trunk"
   depends_on                      = [vsphere_distributed_virtual_switch.vds01]
   distributed_virtual_switch_uuid = vsphere_distributed_virtual_switch.vds01.id
@@ -266,18 +252,33 @@ resource "vsphere_distributed_port_group" "vds01_vdpg03" {
 }
 
 resource "vsphere_distributed_port_group" "vds02_vdpg01" {
+  name                            = "10GbE0-Physical Management"
+  depends_on                      = [vsphere_distributed_virtual_switch.vds02]
+  distributed_virtual_switch_uuid = vsphere_distributed_virtual_switch.vds02.id
+  vlan_id                         = 3
+}
+
+resource "vsphere_distributed_port_group" "vds02_vdpg02" {
   name                            = "10GbE0-iSCSI"
   depends_on                      = [vsphere_distributed_virtual_switch.vds02]
   distributed_virtual_switch_uuid = vsphere_distributed_virtual_switch.vds02.id
   vlan_id                         = 4
 }
 
-resource "vsphere_distributed_port_group" "vds02_vdpg02" {
+resource "vsphere_distributed_port_group" "vds02_vdpg03" {
   name                            = "10GbE0-vMotion"
   depends_on                      = [vsphere_distributed_virtual_switch.vds02]
   distributed_virtual_switch_uuid = vsphere_distributed_virtual_switch.vds02.id
   vlan_id                         = 5
 }
+
+resource "vsphere_distributed_port_group" "vds02_vdpg04" {
+  name                            = "10GbE0-Virtual Management"
+  depends_on                      = [vsphere_distributed_virtual_switch.vds02]
+  distributed_virtual_switch_uuid = vsphere_distributed_virtual_switch.vds02.id
+  vlan_id                         = 6
+}
+
 
 resource "vsphere_nas_datastore" "datastore01" {
   name = "vSphere NFS"
