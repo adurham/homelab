@@ -76,3 +76,7 @@ variable "win_local_adminpass" {
   description = "The password for the Windows local admin account"
   sensitive   = true
 }
+variable "domain" {
+  type        = string
+  description = "FQDN to use in multiple places"
+}

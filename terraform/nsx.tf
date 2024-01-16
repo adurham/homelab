@@ -71,31 +71,229 @@ resource "nsxt_policy_uplink_host_switch_profile" "edge_host_switch_profile" {
   }
 }
 
-resource "nsxt_policy_ip_pool" "host_transport_node_ip_pool" {
+// Need to figure out if I NEED an Edge IP pool, or if I can just use DHCP
+resource "nsxt_policy_ip_pool" "edge_host_transport_node_ip_pool" {
   description  = "ip_pool provisioned by Terraform"
-  display_name = "NSX-ESX-TEP-IP-Pool"
+  display_name = "Edge-TEP-IP-Pool"
   tag {
     scope = "color"
     tag   = "blue"
   }
 }
 
-resource "nsxt_policy_ip_pool_static_subnet" "host_transport_node_static_pool" {
-  display_name = "NSX-ESX-TEP-IP-Pool"
-  pool_path    = nsxt_policy_ip_pool.host_transport_node_ip_pool.path
-  cidr         = "10.0.3.0/26"
-  gateway      = "10.0.3.1"
+resource "nsxt_policy_ip_pool_static_subnet" "edge_host_transport_node_static_pool" {
+  display_name = "Edge-TEP-IP-Pool"
+  pool_path    = nsxt_policy_ip_pool.edge_host_transport_node_ip_pool.path
+  cidr         = "10.0.3.64/26"
+  gateway      = "10.0.3.65"
+  dns_suffix   = var.domain
   dns_nameservers = [
-    "10.0.3.1"
+    "10.0.3.65"
   ]
   allocation_range {
-    start = "10.0.3.2"
-    end   = "10.0.3.62"
+    start = "10.0.3.66"
+    end   = "10.0.3.126"
+  }
+}
+
+resource "nsxt_compute_manager" "Homelab" {
+  description  = "Compute Manager"
+  display_name = "Homelab"
+  # tag {
+  #   scope = "scope1"
+  #   tag   = "tag1"
+  # }
+  server                 = "amd-vmvc01.lab.amd-e.com"
+  create_service_account = true
+  set_as_oidc_provider   = true
+  credential {
+    username_password_login {
+      username   = var.vcenter_username
+      password   = var.vcenter_password
+      thumbprint = "17:19:5A:E8:6E:DB:12:36:93:4E:63:1B:65:DD:A2:67:2A:AC:39:63:FC:9C:0C:FD:FB:BF:BB:C4:62:D6:E2:6B"
+    }
+  }
+  origin_type = "vCenter"
+}
+
+resource "nsxt_policy_host_transport_node" "amd-hwvm01" {
+  display_name      = "amd-hwvm01.${var.domain}"
+  description       = "Terraform-deployed host transport node"
+  site_path         = "/infra/sites/default"
+  enforcement_point = "default"
+  node_deployment_info {
+    ip_addresses = [
+      data.vsphere_host_thumbprint.amd-hwvm01_thumbprint.address
+    ]
+    os_type    = "ESXI"
+    os_version = "7.0.3"
+  }
+  standard_host_switch {
+    host_switch_mode = "STANDARD"
+    host_switch_type = "VDS"
+    host_switch_id   = "50 29 06 ed 9c 31 f7 32-7d 11 11 19 4b 35 93 ce"
+    host_switch_profile = [
+      nsxt_policy_uplink_host_switch_profile.esx_host_switch_profile.path,
+      "/infra/host-switch-profiles/0de8282e-7385-4e8e-a905-0c11960db728"
+    ]
+    ip_assignment {
+      assigned_by_dhcp = true
+    }
+    transport_zone_endpoint {
+      transport_zone = nsxt_policy_transport_zone.vlan_tz.path
+    }
+    transport_zone_endpoint {
+      transport_zone = nsxt_policy_transport_zone.overlay_tz.path
+    }
+    uplink {
+      uplink_name     = "Uplink-1"
+      vds_uplink_name = "Uplink 1"
+    }
+    uplink {
+      uplink_name     = "Uplink-2"
+      vds_uplink_name = "Uplink 2"
+    }
+  }
+  tag {
+    scope = "app"
+    tag   = "web"
+  }
+}
+
+resource "nsxt_policy_host_transport_node" "amd-hwvm02" {
+  display_name      = "amd-hwvm02.${var.domain}"
+  description       = "Terraform-deployed host transport node"
+  site_path         = "/infra/sites/default"
+  enforcement_point = "default"
+  node_deployment_info {
+    ip_addresses = [
+      data.vsphere_host_thumbprint.amd-hwvm02_thumbprint.address
+    ]
+    os_type    = "ESXI"
+    os_version = "7.0.3"
+  }
+  standard_host_switch {
+    host_switch_mode = "STANDARD"
+    host_switch_type = "VDS"
+    host_switch_id   = "50 29 06 ed 9c 31 f7 32-7d 11 11 19 4b 35 93 ce"
+    host_switch_profile = [
+      nsxt_policy_uplink_host_switch_profile.esx_host_switch_profile.path,
+      "/infra/host-switch-profiles/0de8282e-7385-4e8e-a905-0c11960db728"
+    ]
+    ip_assignment {
+      assigned_by_dhcp = true
+    }
+    transport_zone_endpoint {
+      transport_zone = nsxt_policy_transport_zone.vlan_tz.path
+    }
+    transport_zone_endpoint {
+      transport_zone = nsxt_policy_transport_zone.overlay_tz.path
+    }
+    uplink {
+      uplink_name     = "Uplink-1"
+      vds_uplink_name = "Uplink 1"
+    }
+    uplink {
+      uplink_name     = "Uplink-2"
+      vds_uplink_name = "Uplink 2"
+    }
+  }
+  tag {
+    scope = "app"
+    tag   = "web"
+  }
+}
+
+resource "nsxt_policy_host_transport_node" "amd-hwvm03" {
+  display_name      = "amd-hwvm03.${var.domain}"
+  description       = "Terraform-deployed host transport node"
+  site_path         = "/infra/sites/default"
+  enforcement_point = "default"
+  node_deployment_info {
+    ip_addresses = [
+      data.vsphere_host_thumbprint.amd-hwvm03_thumbprint.address
+    ]
+    os_type    = "ESXI"
+    os_version = "7.0.3"
+  }
+  standard_host_switch {
+    host_switch_mode = "STANDARD"
+    host_switch_type = "VDS"
+    host_switch_id   = "50 29 06 ed 9c 31 f7 32-7d 11 11 19 4b 35 93 ce"
+    host_switch_profile = [
+      nsxt_policy_uplink_host_switch_profile.esx_host_switch_profile.path,
+      "/infra/host-switch-profiles/0de8282e-7385-4e8e-a905-0c11960db728"
+    ]
+    ip_assignment {
+      assigned_by_dhcp = true
+    }
+    transport_zone_endpoint {
+      transport_zone = nsxt_policy_transport_zone.vlan_tz.path
+    }
+    transport_zone_endpoint {
+      transport_zone = nsxt_policy_transport_zone.overlay_tz.path
+    }
+    uplink {
+      uplink_name     = "Uplink-1"
+      vds_uplink_name = "Uplink 1"
+    }
+    uplink {
+      uplink_name     = "Uplink-2"
+      vds_uplink_name = "Uplink 2"
+    }
+  }
+  tag {
+    scope = "app"
+    tag   = "web"
+  }
+}
+
+resource "nsxt_policy_host_transport_node" "amd-hwvm04" {
+  display_name      = "amd-hwvm04.${var.domain}"
+  description       = "Terraform-deployed host transport node"
+  site_path         = "/infra/sites/default"
+  enforcement_point = "default"
+  node_deployment_info {
+    ip_addresses = [
+      data.vsphere_host_thumbprint.amd-hwvm04_thumbprint.address
+    ]
+    os_type    = "ESXI"
+    os_version = "7.0.3"
+  }
+  standard_host_switch {
+    host_switch_mode = "STANDARD"
+    host_switch_type = "VDS"
+    host_switch_id   = "50 29 06 ed 9c 31 f7 32-7d 11 11 19 4b 35 93 ce"
+    host_switch_profile = [
+      nsxt_policy_uplink_host_switch_profile.esx_host_switch_profile.path,
+      "/infra/host-switch-profiles/0de8282e-7385-4e8e-a905-0c11960db728"
+    ]
+    ip_assignment {
+      assigned_by_dhcp = true
+    }
+    transport_zone_endpoint {
+      transport_zone = nsxt_policy_transport_zone.vlan_tz.path
+    }
+    transport_zone_endpoint {
+      transport_zone = nsxt_policy_transport_zone.overlay_tz.path
+    }
+    uplink {
+      uplink_name     = "Uplink-1"
+      vds_uplink_name = "Uplink 1"
+    }
+    uplink {
+      uplink_name     = "Uplink-2"
+      vds_uplink_name = "Uplink 2"
+    }
+  }
+  tag {
+    scope = "app"
+    tag   = "web"
   }
 }
 
 resource "nsxt_policy_host_transport_node" "amd-hwvm05" {
-  display_name      = "amd-hwvm05"
+  display_name      = "amd-hwvm05.${var.domain}"
   description       = "Terraform-deployed host transport node"
   site_path         = "/infra/sites/default"
   enforcement_point = "default"
@@ -110,12 +308,11 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm05" {
     host_switch_mode = "STANDARD"
     host_switch_type = "VDS"
     host_switch_profile = [
-      nsxt_policy_uplink_host_switch_profile.host_transport_node_switch_profile.path,
+      nsxt_policy_uplink_host_switch_profile.esx_host_switch_profile.path,
       "/infra/host-switch-profiles/0de8282e-7385-4e8e-a905-0c11960db728"
     ]
     ip_assignment {
-      assigned_by_dhcp = false
-      static_ip_pool   = nsxt_policy_ip_pool.host_transport_node_ip_pool.path
+      assigned_by_dhcp = true
     }
     transport_zone_endpoint {
       transport_zone = nsxt_policy_transport_zone.vlan_tz.path
@@ -124,11 +321,11 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm05" {
       transport_zone = nsxt_policy_transport_zone.overlay_tz.path
     }
     uplink {
-      uplink_name     = "uplink-1"
+      uplink_name     = "Uplink-1"
       vds_uplink_name = "Uplink 1"
     }
     uplink {
-      uplink_name     = "uplink-2"
+      uplink_name     = "Uplink-2"
       vds_uplink_name = "Uplink 2"
     }
   }
@@ -139,7 +336,7 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm05" {
 }
 
 resource "nsxt_policy_host_transport_node" "amd-hwvm06" {
-  display_name      = "amd-hwvm06"
+  display_name      = "amd-hwvm06.${var.domain}"
   description       = "Terraform-deployed host transport node"
   site_path         = "/infra/sites/default"
   enforcement_point = "default"
@@ -154,12 +351,11 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm06" {
     host_switch_mode = "STANDARD"
     host_switch_type = "VDS"
     host_switch_profile = [
-      nsxt_policy_uplink_host_switch_profile.host_transport_node_switch_profile.path,
+      nsxt_policy_uplink_host_switch_profile.esx_host_switch_profile.path,
       "/infra/host-switch-profiles/0de8282e-7385-4e8e-a905-0c11960db728"
     ]
     ip_assignment {
-      assigned_by_dhcp = false
-      static_ip_pool   = nsxt_policy_ip_pool.host_transport_node_ip_pool.path
+      assigned_by_dhcp = true
     }
     transport_zone_endpoint {
       transport_zone = nsxt_policy_transport_zone.vlan_tz.path
@@ -168,11 +364,11 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm06" {
       transport_zone = nsxt_policy_transport_zone.overlay_tz.path
     }
     uplink {
-      uplink_name     = "uplink-1"
+      uplink_name     = "Uplink-1"
       vds_uplink_name = "Uplink 1"
     }
     uplink {
-      uplink_name     = "uplink-2"
+      uplink_name     = "Uplink-2"
       vds_uplink_name = "Uplink 2"
     }
   }
@@ -183,7 +379,7 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm06" {
 }
 
 resource "nsxt_policy_host_transport_node" "amd-hwvm07" {
-  display_name      = "amd-hwvm07"
+  display_name      = "amd-hwvm07.${var.domain}"
   description       = "Terraform-deployed host transport node"
   site_path         = "/infra/sites/default"
   enforcement_point = "default"
@@ -199,12 +395,11 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm07" {
     host_switch_type = "VDS"
     host_switch_id   = "50 29 06 ed 9c 31 f7 32-7d 11 11 19 4b 35 93 ce"
     host_switch_profile = [
-      nsxt_policy_uplink_host_switch_profile.host_transport_node_switch_profile.path,
+      nsxt_policy_uplink_host_switch_profile.esx_host_switch_profile.path,
       "/infra/host-switch-profiles/0de8282e-7385-4e8e-a905-0c11960db728"
     ]
     ip_assignment {
-      assigned_by_dhcp = false
-      static_ip_pool   = nsxt_policy_ip_pool.host_transport_node_ip_pool.path
+      assigned_by_dhcp = true
     }
     transport_zone_endpoint {
       transport_zone = nsxt_policy_transport_zone.vlan_tz.path
@@ -213,11 +408,11 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm07" {
       transport_zone = nsxt_policy_transport_zone.overlay_tz.path
     }
     uplink {
-      uplink_name     = "uplink-1"
+      uplink_name     = "Uplink-1"
       vds_uplink_name = "Uplink 1"
     }
     uplink {
-      uplink_name     = "uplink-2"
+      uplink_name     = "Uplink-2"
       vds_uplink_name = "Uplink 2"
     }
   }
@@ -228,7 +423,7 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm07" {
 }
 
 resource "nsxt_policy_host_transport_node" "amd-hwvm08" {
-  display_name      = "amd-hwvm08"
+  display_name      = "amd-hwvm08.${var.domain}"
   description       = "Terraform-deployed host transport node"
   site_path         = "/infra/sites/default"
   enforcement_point = "default"
@@ -244,12 +439,11 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm08" {
     host_switch_type = "VDS"
     host_switch_id   = "50 29 06 ed 9c 31 f7 32-7d 11 11 19 4b 35 93 ce"
     host_switch_profile = [
-      nsxt_policy_uplink_host_switch_profile.host_transport_node_switch_profile.path,
+      nsxt_policy_uplink_host_switch_profile.esx_host_switch_profile.path,
       "/infra/host-switch-profiles/0de8282e-7385-4e8e-a905-0c11960db728"
     ]
     ip_assignment {
-      assigned_by_dhcp = false
-      static_ip_pool   = nsxt_policy_ip_pool.host_transport_node_ip_pool.path
+      assigned_by_dhcp = true
     }
     transport_zone_endpoint {
       transport_zone = nsxt_policy_transport_zone.vlan_tz.path
@@ -258,11 +452,11 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm08" {
       transport_zone = nsxt_policy_transport_zone.overlay_tz.path
     }
     uplink {
-      uplink_name     = "uplink-1"
+      uplink_name     = "Uplink-1"
       vds_uplink_name = "Uplink 1"
     }
     uplink {
-      uplink_name     = "uplink-2"
+      uplink_name     = "Uplink-2"
       vds_uplink_name = "Uplink 2"
     }
   }
@@ -272,47 +466,12 @@ resource "nsxt_policy_host_transport_node" "amd-hwvm08" {
   }
 }
 
-// NOT READY YET
-# resource "nsxt_policy_host_transport_node_collection" "amd-vmcl02" {
-#   display_name                = "amd-vmcl02"
-#   compute_collection_id       = vsphere_compute_cluster.cl02.id
-#   transport_node_profile_path = "/infra/host-switch-profiles/0de8282e-7385-4e8e-a905-0c11960db728"
-#   tag {
-#     scope = "color"
-#     tag   = "blue"
-#   }
-# }
-
-resource "nsxt_policy_ip_pool" "ip_pool" {
-  description  = "ip_pool provisioned by Terraform"
-  display_name = "NSX-Edge-TEP-IP-Pool"
-  tag {
-    scope = "color"
-    tag   = "blue"
-  }
-}
-
-# resource "nsxt_policy_ip_pool_static_subnet" "static_subnet1" {
-#   display_name = "static-subnet1"
-#   pool_path    = nsxt_policy_ip_pool.ip_pool.path
-#   cidr         = "10.0.3.64/26"
-#   gateway      = "10.0.3.65"
-#   dns_nameservers = [
-#     "10.0.3.65"
-#   ]
-#   allocation_range {
-#     start = "10.0.3.66"
-#     end   = "10.0.3.126"
-#   }
-# }
-
 resource "nsxt_transport_node" "edge_node1" {
   display_name = "amd-nxed02-01"
   description  = "Terraform-deployed edge node"
   standard_host_switch {
-    // TO-DO Need to dynamically assign this
     host_switch_profile = [
-      "54429388-31e5-4ec5-a78a-3b5a62bf8f04"
+      nsxt_policy_uplink_host_switch_profile.edge_host_switch_profile.id
     ]
     // TO-DO Need to dynamically assign this
     ip_assignment {
@@ -327,13 +486,11 @@ resource "nsxt_transport_node" "edge_node1" {
       device_name = "fp-eth1"
       uplink_name = "Uplink-2"
     }
-    // TO-DO Need to dynamically assign this
     transport_zone_endpoint {
-      transport_zone = "5b677017-6db4-4ba9-a1ec-ce5b7966c43e"
+      transport_zone = nsxt_policy_transport_zone.overlay_tz.id
     }
-    // TO-DO Need to dynamically assign this
     transport_zone_endpoint {
-      transport_zone = "f220ffcc-05cb-4130-96a3-4602b30047d4"
+      transport_zone = nsxt_policy_transport_zone.vlan_tz.id
     }
   }
   edge_node {
@@ -345,20 +502,17 @@ resource "nsxt_transport_node" "edge_node1" {
         root_password = var.nsx_transport_node_root_password
       }
       vm_deployment_config {
-        compute_id = "resgroup-9"
-        // TO-DO Need to dynamically assign this
+        compute_id = vsphere_compute_cluster.cl02.resource_pool_id
         data_network_ids = [
           vsphere_distributed_port_group.vds01_vdpg01.id,
           vsphere_distributed_port_group.vds01_vdpg01.id
         ]
         default_gateway_address = []
         ipv4_assignment_enabled = true
-        // TO-DO Need to dynamically assign this
-        management_network_id = "dvportgroup-37"
+        management_network_id   = vsphere_distributed_port_group.vds02_vdpg04.id
         // TO-DO Need to dynamically assign this
         storage_id = "datastore-25"
-        // TO-DO Need to dynamically assign this
-        vc_id = "85b3eb4a-db1a-4121-ad0e-1c672e3925f0"
+        vc_id      = nsxt_compute_manager.Homelab.id
         reservation_info {
           cpu_reservation_in_mhz        = 0
           cpu_reservation_in_shares     = "HIGH_PRIORITY"
@@ -367,7 +521,7 @@ resource "nsxt_transport_node" "edge_node1" {
       }
     }
     node_settings {
-      hostname = "amd-nxed02-01.lab.amd-e.com"
+      hostname = "amd-nxed02-01.${var.domain}"
       dns_servers = [
         "10.0.2.1"
       ]
@@ -377,7 +531,7 @@ resource "nsxt_transport_node" "edge_node1" {
         "10.0.2.1"
       ]
       search_domains = [
-        "lab.amd-e.com"
+        var.domain
       ]
     }
   }
@@ -387,9 +541,8 @@ resource "nsxt_transport_node" "edge_node2" {
   display_name = "amd-nxed02-02"
   description  = "Terraform-deployed edge node"
   standard_host_switch {
-    // TO-DO Need to dynamically assign this
     host_switch_profile = [
-      "54429388-31e5-4ec5-a78a-3b5a62bf8f04"
+      nsxt_policy_uplink_host_switch_profile.edge_host_switch_profile.id
     ]
     // TO-DO Need to dynamically assign this
     ip_assignment {
@@ -404,13 +557,11 @@ resource "nsxt_transport_node" "edge_node2" {
       device_name = "fp-eth1"
       uplink_name = "Uplink-2"
     }
-    // TO-DO Need to dynamically assign this
     transport_zone_endpoint {
-      transport_zone = "5b677017-6db4-4ba9-a1ec-ce5b7966c43e"
+      transport_zone = nsxt_policy_transport_zone.overlay_tz.id
     }
-    // TO-DO Need to dynamically assign this
     transport_zone_endpoint {
-      transport_zone = "f220ffcc-05cb-4130-96a3-4602b30047d4"
+      transport_zone = nsxt_policy_transport_zone.vlan_tz.id
     }
   }
   edge_node {
@@ -422,20 +573,17 @@ resource "nsxt_transport_node" "edge_node2" {
         root_password = var.nsx_transport_node_root_password
       }
       vm_deployment_config {
-        compute_id = "resgroup-9"
-        // TO-DO Need to dynamically assign this
+        compute_id = vsphere_compute_cluster.cl02.resource_pool_id
         data_network_ids = [
           vsphere_distributed_port_group.vds01_vdpg01.id,
           vsphere_distributed_port_group.vds01_vdpg01.id
         ]
         default_gateway_address = []
         ipv4_assignment_enabled = true
-        // TO-DO Need to dynamically assign this
-        management_network_id = "dvportgroup-37"
+        management_network_id   = vsphere_distributed_port_group.vds02_vdpg04.id
         // TO-DO Need to dynamically assign this
         storage_id = "datastore-25"
-        // TO-DO Need to dynamically assign this
-        vc_id = "85b3eb4a-db1a-4121-ad0e-1c672e3925f0"
+        vc_id      = nsxt_compute_manager.Homelab.id
         reservation_info {
           cpu_reservation_in_mhz        = 0
           cpu_reservation_in_shares     = "HIGH_PRIORITY"
@@ -444,7 +592,7 @@ resource "nsxt_transport_node" "edge_node2" {
       }
     }
     node_settings {
-      hostname = "amd-nxed02-02.lab.amd-e.com"
+      hostname = "amd-nxed02-02.${var.domain}"
       dns_servers = [
         "10.0.2.1"
       ]
@@ -454,7 +602,7 @@ resource "nsxt_transport_node" "edge_node2" {
         "10.0.2.1"
       ]
       search_domains = [
-        "lab.amd-e.com"
+        var.domain
       ]
     }
   }
@@ -502,46 +650,26 @@ resource "nsxt_policy_tier0_gateway_interface" "if1" {
   display_name = "tier0_gw_uplink01"
   description  = "connection for tier0_gw"
   type         = "EXTERNAL"
-  //TO-DO Need to dynamically assign this
-  edge_node_path = "/infra/sites/default/enforcement-points/default/edge-clusters/e9f8265c-035f-4fd9-9bcc-6daf46a28207/edge-nodes/6"
-  //TO-DO Need to dynamically assign this
-  gateway_path = "/infra/tier-0s/Homelab-T0"
+  //TO-DO Need to BETTER dynamically assign this
+  edge_node_path = "/infra/sites/default/enforcement-points/default/edge-clusters/${nsxt_edge_cluster.edge_cluster.id}/edge-nodes/${nsxt_edge_cluster.edge_cluster.member[1].member_index}"
+  gateway_path = nsxt_policy_tier0_gateway.tier0_gw.path
   //TO-DO Need to dynamically assign this
   segment_path = "/infra/segments/Edge_Uplink"
   subnets      = ["10.0.3.130/26"]
   mtu          = 2100
-  # ospf {
-  #   area_path        = "/infra/tier-0s/Homelab-T0/locale-services/default/ospf/areas/49370d63-16a5-4998-a168-8699df0025c2"
-  #   bfd_profile_path = "/infra/bfd-profiles/Homelab"
-  #   dead_interval    = 40
-  #   enable_bfd       = true
-  #   enabled          = true
-  #   hello_interval   = 10
-  #   network_type     = "BROADCAST"
-  # }
 }
 
 resource "nsxt_policy_tier0_gateway_interface" "if2" {
   display_name = "tier0_gw_uplink02"
   description  = "connection for tier0_gw"
   type         = "EXTERNAL"
-  //TO-DO Need to dynamically assign this
-  edge_node_path = "/infra/sites/default/enforcement-points/default/edge-clusters/e9f8265c-035f-4fd9-9bcc-6daf46a28207/edge-nodes/5"
-  //TO-DO Need to dynamically assign this
-  gateway_path = "/infra/tier-0s/Homelab-T0"
+  //TO-DO Need to BETTER dynamically assign this
+  edge_node_path = "/infra/sites/default/enforcement-points/default/edge-clusters/${nsxt_edge_cluster.edge_cluster.id}/edge-nodes/${nsxt_edge_cluster.edge_cluster.member[0].member_index}"
+  gateway_path = nsxt_policy_tier0_gateway.tier0_gw.path
   //TO-DO Need to dynamically assign this
   segment_path = "/infra/segments/Edge_Uplink"
   subnets      = ["10.0.3.131/26"]
   mtu          = 2100
-  # ospf {
-  #   area_path        = "/infra/tier-0s/Homelab-T0/locale-services/default/ospf/areas/49370d63-16a5-4998-a168-8699df0025c2"
-  #   bfd_profile_path = "/infra/bfd-profiles/Homelab"
-  #   dead_interval    = 40
-  #   enable_bfd       = true
-  #   enabled          = true
-  #   hello_interval   = 10
-  #   network_type     = "BROADCAST"
-  # }
 }
 
 resource "nsxt_policy_tier1_gateway" "tier1_gw" {
@@ -558,7 +686,7 @@ resource "nsxt_policy_tier1_gateway" "tier1_gw" {
   enable_standby_relocation = "false"
   tier0_path                = nsxt_policy_tier0_gateway.tier0_gw.path
   //TO-DO Need to dynamically assign this
-  dhcp_config_path          = "/infra/dhcp-server-configs/Homelab"
+  dhcp_config_path = "/infra/dhcp-server-configs/Homelab"
   route_advertisement_types = [
     "TIER1_IPSEC_LOCAL_ENDPOINT",
     "TIER1_CONNECTED"

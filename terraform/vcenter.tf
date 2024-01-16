@@ -279,7 +279,6 @@ resource "vsphere_distributed_port_group" "vds02_vdpg04" {
   vlan_id                         = 6
 }
 
-
 resource "vsphere_nas_datastore" "datastore01" {
   name = "vSphere NFS"
   host_system_ids = flatten([
