@@ -1,7 +1,10 @@
 resource "nsxt_policy_fixed_segment" "active_directory" {
-  display_name      = "Homelab - Active Directory"
+  display_name      = "Active Directory"
   description       = "Terraform provisioned Segment"
   connectivity_path = nsxt_policy_tier1_gateway.tier1_gw.path
+  overlay_id = 0
+  replication_mode = "MTEP"
+  transport_zone_path = nsxt_policy_transport_zone.overlay_tz.path
   subnet {
     cidr        = "172.16.0.1/25"
     dhcp_v4_config {
@@ -84,4 +87,3 @@ module "homelab-active_directory_certificate_authority" {
   datastore = "vsanDatastore"
   is_windows_image = true
 }
-
