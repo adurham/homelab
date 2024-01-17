@@ -629,14 +629,13 @@ data "nsxt_policy_edge_cluster" "edge_cluster" {
   display_name = "amd-nxedcl01"
 }
 
-//TO-DO no way to set stateful mode here?
 resource "nsxt_policy_tier0_gateway" "tier0_gw" {
   description              = "Tier-0 provisioned by Terraform"
   display_name             = "tier0_gw"
   failover_mode            = "NON_PREEMPTIVE"
   default_rule_logging     = false
   enable_firewall          = true
-  ha_mode                  = "ACTIVE_ACTIVE"
+  ha_mode                  = "ACTIVE_STANDBY"
   internal_transit_subnets = ["169.254.0.0/24"]
   transit_subnets          = ["100.64.0.0/16"]
   bgp_config {
@@ -672,6 +671,46 @@ resource "nsxt_policy_tier0_gateway_interface" "if2" {
   mtu          = 2100
 }
 
+resource "nsxt_policy_bgp_neighbor" "tier0_gw_bgp" {
+  display_name          = "tier0_gw_bgp"
+  description           = "Terraform provisioned BgpNeighborConfig"
+  bgp_path              = nsxt_policy_tier0_gateway.tier0_gw.bgp_config.0.path
+  allow_as_in           = true
+  graceful_restart_mode = "HELPER_ONLY"
+  hold_down_time        = 300
+  keep_alive_time       = 100
+  neighbor_address      = "10.0.3.129"
+  remote_as_num         = "65000"
+  source_addresses      = [
+    nsxt_policy_tier0_gateway_interface.if1.ip_addresses[0],
+    nsxt_policy_tier0_gateway_interface.if2.ip_addresses[0]
+  ]
+  bfd_config {
+    enabled  = true
+    interval = 1000
+    multiple = 4
+  }
+}
+
+resource "nsxt_policy_gateway_redistribution_config" "tier0_gw" {
+  gateway_path = nsxt_policy_tier0_gateway.tier0_gw.path
+  bgp_enabled  = true
+  rule {
+    name  = "rule-1"
+    types = [
+      "TIER1_NAT",
+      "TIER1_STATIC",
+      "TIER1_LB_VIP",
+      "TIER1_LB_SNAT",
+      "TIER1_DNS_FORWARDER_IP",
+      "TIER1_CONNECTED",
+      "TIER1_SERVICE_INTERFACE",
+      "TIER1_SEGMENT",
+      "TIER1_IPSEC_LOCAL_ENDPOINT"
+    ]
+  }
+}
+
 resource "nsxt_policy_tier1_gateway" "tier1_gw" {
   description  = "Tier-1 provisioned by Terraform"
   display_name = "tier1-gw1"
@@ -679,7 +718,7 @@ resource "nsxt_policy_tier1_gateway" "tier1_gw" {
     nsxt_edge_cluster.edge_cluster
   ]
   edge_cluster_path         = data.nsxt_policy_edge_cluster.edge_cluster.path
-  ha_mode                   = "ACTIVE_ACTIVE"
+  ha_mode                   = "ACTIVE_STANDBY"
   failover_mode             = "NON_PREEMPTIVE"
   default_rule_logging      = "false"
   enable_firewall           = "true"
