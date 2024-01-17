@@ -3,12 +3,12 @@ resource "nsxt_policy_fixed_segment" "tanium" {
   description       = "Terraform provisioned Segment"
   connectivity_path = nsxt_policy_tier1_gateway.tier1_gw.path
   subnet {
-    cidr        = "172.16.1.1/25"
+    cidr = "172.16.1.1/25"
     dhcp_v4_config {
-        dns_servers = [
-            "10.0.3.129"
-        ]
-        lease_time = 86400
+      dns_servers = [
+        "10.0.3.129"
+      ]
+      lease_time = 86400
     }
   }
 }
@@ -24,20 +24,20 @@ module "homelab-tanium_server" {
     nsxt_policy_fixed_segment.tanium,
     vsphere_folder.tanium
   ]
-  source    = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-  vmtemp    = "TanOS 1.8.1.0165 - Dev"
-  vmfolder = vsphere_folder.tanium.path
-  instances = 2
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "TanOS 1.8.1.0165 - Dev"
+  vmfolder   = vsphere_folder.tanium.path
+  instances  = 2
   cpu_number = 4
-  ram_size = 16384
-  vmname    = "amd-lxts"
-  vmrp      = "${vsphere_compute_cluster.cl02.name}/Resources"
-  domain = "lab.amd-e.com"
+  ram_size   = 16384
+  vmname     = "amd-lxts"
+  vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
+  domain     = "lab.amd-e.com"
   network = {
     "${nsxt_policy_fixed_segment.tanium.display_name}" = ["172.16.1.3", "172.16.1.4"]
   }
   vmgateway = "172.16.1.1"
-  dc        = "${vsphere_datacenter.Homelab.name}"
+  dc        = vsphere_datacenter.Homelab.name
   datastore = "vsanDatastore"
 }
 
@@ -46,20 +46,20 @@ module "homelab-tanium_module_server" {
     nsxt_policy_fixed_segment.tanium,
     vsphere_folder.tanium
   ]
-  source    = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-  vmtemp    = "TanOS 1.8.1.0165 - Dev"
-  vmfolder = vsphere_folder.tanium.path
-  instances = 2
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "TanOS 1.8.1.0165 - Dev"
+  vmfolder   = vsphere_folder.tanium.path
+  instances  = 2
   cpu_number = 4
-  ram_size = 16384
-  vmname    = "amd-lxtms"
-  vmrp      = "${vsphere_compute_cluster.cl02.name}/Resources"
-  domain = "lab.amd-e.com"
+  ram_size   = 16384
+  vmname     = "amd-lxtms"
+  vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
+  domain     = "lab.amd-e.com"
   network = {
     "${nsxt_policy_fixed_segment.tanium.display_name}" = ["172.16.1.5", "172.16.1.6"]
   }
   vmgateway = "172.16.1.1"
-  dc        = "${vsphere_datacenter.Homelab.name}"
+  dc        = vsphere_datacenter.Homelab.name
   datastore = "vsanDatastore"
 }
 
@@ -68,20 +68,20 @@ module "homelab-tanium_zone_server" {
     nsxt_policy_fixed_segment.tanium,
     vsphere_folder.tanium
   ]
-  source    = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-  vmtemp    = "TanOS 1.8.1.0165 - Dev"
-  vmfolder = vsphere_folder.tanium.path
-  instances = 2
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "TanOS 1.8.1.0165 - Dev"
+  vmfolder   = vsphere_folder.tanium.path
+  instances  = 2
   cpu_number = 4
-  ram_size = 16384
-  vmname    = "amd-lxzs"
-  vmrp      = "${vsphere_compute_cluster.cl02.name}/Resources"
-  domain = "lab.amd-e.com"
+  ram_size   = 16384
+  vmname     = "amd-lxzs"
+  vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
+  domain     = "lab.amd-e.com"
   network = {
     "${nsxt_policy_fixed_segment.tanium.display_name}" = ["172.16.1.7", "172.16.1.8"]
   }
   vmgateway = "172.16.1.1"
-  dc        = "${vsphere_datacenter.Homelab.name}"
+  dc        = vsphere_datacenter.Homelab.name
   datastore = "vsanDatastore"
 }
 

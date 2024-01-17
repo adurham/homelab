@@ -651,7 +651,7 @@ resource "nsxt_policy_tier0_gateway_interface" "if1" {
   type         = "EXTERNAL"
   //TO-DO Need to BETTER dynamically assign this
   edge_node_path = "/infra/sites/default/enforcement-points/default/edge-clusters/${nsxt_edge_cluster.edge_cluster.id}/edge-nodes/${nsxt_edge_cluster.edge_cluster.member[1].member_index}"
-  gateway_path = nsxt_policy_tier0_gateway.tier0_gw.path
+  gateway_path   = nsxt_policy_tier0_gateway.tier0_gw.path
   //TO-DO Need to dynamically assign this
   segment_path = "/infra/segments/Edge_Uplink"
   subnets      = ["10.0.3.130/26"]
@@ -664,7 +664,7 @@ resource "nsxt_policy_tier0_gateway_interface" "if2" {
   type         = "EXTERNAL"
   //TO-DO Need to BETTER dynamically assign this
   edge_node_path = "/infra/sites/default/enforcement-points/default/edge-clusters/${nsxt_edge_cluster.edge_cluster.id}/edge-nodes/${nsxt_edge_cluster.edge_cluster.member[0].member_index}"
-  gateway_path = nsxt_policy_tier0_gateway.tier0_gw.path
+  gateway_path   = nsxt_policy_tier0_gateway.tier0_gw.path
   //TO-DO Need to dynamically assign this
   segment_path = "/infra/segments/Edge_Uplink"
   subnets      = ["10.0.3.131/26"]
@@ -681,7 +681,7 @@ resource "nsxt_policy_bgp_neighbor" "tier0_gw_bgp" {
   keep_alive_time       = 100
   neighbor_address      = "10.0.3.129"
   remote_as_num         = "65000"
-  source_addresses      = [
+  source_addresses = [
     nsxt_policy_tier0_gateway_interface.if1.ip_addresses[0],
     nsxt_policy_tier0_gateway_interface.if2.ip_addresses[0]
   ]
@@ -696,7 +696,7 @@ resource "nsxt_policy_gateway_redistribution_config" "tier0_gw" {
   gateway_path = nsxt_policy_tier0_gateway.tier0_gw.path
   bgp_enabled  = true
   rule {
-    name  = "rule-1"
+    name = "rule-1"
     types = [
       "TIER1_NAT",
       "TIER1_STATIC",
