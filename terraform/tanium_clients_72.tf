@@ -1,5 +1,5 @@
 resource "nsxt_policy_fixed_segment" "tanium_clients_72" {
-  display_name      = "Homelab - Tanium Clients - 7.2"
+  display_name      = "Tanium Clients - 7.2"
   description       = "Terraform provisioned Segment"
   connectivity_path = nsxt_policy_tier1_gateway.tier1_gw.path
   subnet {
