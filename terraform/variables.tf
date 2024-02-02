@@ -80,3 +80,13 @@ variable "domain" {
   type        = string
   description = "FQDN to use in multiple places"
 }
+variable "domainuser" {
+  type        = string
+  description = "The user for the Windows domain join"
+  sensitive   = true
+}
+variable "domainpass" {
+  type        = string
+  description = "The password for the Windows domain join"
+  sensitive   = true
+}
