@@ -103,7 +103,7 @@ resource "nsxt_compute_manager" "Homelab" {
   #   scope = "scope1"
   #   tag   = "tag1"
   # }
-  server                 = "amd-vmvc01.lab.amd-e.com"
+  server                 = "10.0.2.2"
   create_service_account = true
   set_as_oidc_provider   = true
   credential {

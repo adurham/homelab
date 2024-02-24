@@ -20,6 +20,72 @@ resource "vsphere_folder" "tanium_clients_76" {
   datacenter_id = vsphere_datacenter.Homelab.moid
 }
 
+module "homelab-tanium_clients_76-debian_12" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_76,
+    vsphere_folder.tanium_clients_76
+  ]
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "Debian Linux 12"
+  vmfolder   = vsphere_folder.tanium_clients_76.path
+  instances  = 0
+  cpu_number = 2
+  ram_size   = 4096
+  vmname     = "tn76-dbn12-"
+  vmrp       = "${vsphere_compute_cluster.cl01.name}/Resources"
+  domain     = var.domain
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_76.display_name}" = ["", ""]
+  }
+  vmgateway = "172.16.5.1"
+  dc        = vsphere_datacenter.Homelab.name
+  datastore = "vSphere Flash 1"
+}
+
+module "homelab-tanium_clients_76-debian_11" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_76,
+    vsphere_folder.tanium_clients_76
+  ]
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "Debian Linux 11"
+  vmfolder   = vsphere_folder.tanium_clients_76.path
+  instances  = 0
+  cpu_number = 2
+  ram_size   = 4096
+  vmname     = "tn76-dbn11-"
+  vmrp       = "${vsphere_compute_cluster.cl01.name}/Resources"
+  domain     = var.domain
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_76.display_name}" = ["", ""]
+  }
+  vmgateway = "172.16.5.1"
+  dc        = vsphere_datacenter.Homelab.name
+  datastore = "vSphere Flash 1"
+}
+
+module "homelab-tanium_clients_76-debian_10" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_76,
+    vsphere_folder.tanium_clients_76
+  ]
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "Debian Linux 10"
+  vmfolder   = vsphere_folder.tanium_clients_76.path
+  instances  = 0
+  cpu_number = 2
+  ram_size   = 4096
+  vmname     = "tn76-dbn10-"
+  vmrp       = "${vsphere_compute_cluster.cl01.name}/Resources"
+  domain     = var.domain
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_76.display_name}" = ["", ""]
+  }
+  vmgateway = "172.16.5.1"
+  dc        = vsphere_datacenter.Homelab.name
+  datastore = "vSphere Flash 1"
+}
+
 module "homelab-tanium_clients_76-ubuntu_22" {
   depends_on = [
     nsxt_policy_fixed_segment.tanium_clients_76,
@@ -84,6 +150,94 @@ module "homelab-tanium_clients_76-ubuntu_18" {
   vmgateway = "172.16.5.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+}
+
+module "homelab-tanium_clients_76-rhel_9" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_76,
+    vsphere_folder.tanium_clients_76
+  ]
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "RedHat Enterprise Linux 9"
+  vmfolder   = vsphere_folder.tanium_clients_76.path
+  instances  = 2
+  cpu_number = 2
+  ram_size   = 4096
+  vmname     = "tn76-rhel9-"
+  vmrp       = "${vsphere_compute_cluster.cl01.name}/Resources"
+  domain     = var.domain
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_76.display_name}" = ["", ""]
+  }
+  vmgateway = "172.16.5.1"
+  dc        = vsphere_datacenter.Homelab.name
+  datastore = "vSphere Flash 1"
+}
+
+module "homelab-tanium_clients_76-rhel_8" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_76,
+    vsphere_folder.tanium_clients_76
+  ]
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "RedHat Enterprise Linux 8"
+  vmfolder   = vsphere_folder.tanium_clients_76.path
+  instances  = 2
+  cpu_number = 2
+  ram_size   = 4096
+  vmname     = "tn76-rhel8-"
+  vmrp       = "${vsphere_compute_cluster.cl01.name}/Resources"
+  domain     = var.domain
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_76.display_name}" = ["", ""]
+  }
+  vmgateway = "172.16.5.1"
+  dc        = vsphere_datacenter.Homelab.name
+  datastore = "vSphere Flash 1"
+}
+
+module "homelab-tanium_clients_76-rhel_7" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_76,
+    vsphere_folder.tanium_clients_76
+  ]
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "RedHat Enterprise Linux 7"
+  vmfolder   = vsphere_folder.tanium_clients_76.path
+  instances  = 0
+  cpu_number = 2
+  ram_size   = 4096
+  vmname     = "tn76-rhel7-"
+  vmrp       = "${vsphere_compute_cluster.cl01.name}/Resources"
+  domain     = var.domain
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_76.display_name}" = ["", ""]
+  }
+  vmgateway = "172.16.5.1"
+  dc        = vsphere_datacenter.Homelab.name
+  datastore = "vSphere Flash 1"
+}
+
+module "homelab-tanium_clients_76-rhel_6" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_76,
+    vsphere_folder.tanium_clients_76
+  ]
+  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp     = "RedHat Enterprise Linux 6"
+  vmfolder   = vsphere_folder.tanium_clients_76.path
+  instances  = 0
+  cpu_number = 2
+  ram_size   = 4096
+  vmname     = "tn76-rhel6-"
+  vmrp       = "${vsphere_compute_cluster.cl01.name}/Resources"
+  domain     = var.domain
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_76.display_name}" = ["", ""]
+  }
+  vmgateway = "172.16.5.1"
+  dc        = vsphere_datacenter.Homelab.name
+  datastore = "vSphere Flash 1"
 }
 
 module "homelab-tanium_clients_76-oracle_9" {
