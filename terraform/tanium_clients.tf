@@ -5,7 +5,7 @@ resource "vsphere_folder" "tanium_clients" {
 }
 
 resource "vsphere_folder" "tanium_qa_clients" {
-  path          = "${vsphere_folder.tanium.path}/QA Clients"
+  path          = "${vsphere_folder.tanium_clients.path}/QA Clients"
   type          = "vm"
   datacenter_id = vsphere_datacenter.Homelab.moid
 }

@@ -39,7 +39,7 @@ module "homelab-tanium_clients_74-debian_12" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-debian_11" {
@@ -61,7 +61,7 @@ module "homelab-tanium_clients_74-debian_11" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-debian_10" {
@@ -83,7 +83,7 @@ module "homelab-tanium_clients_74-debian_10" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-ubuntu_22" {
@@ -105,7 +105,7 @@ module "homelab-tanium_clients_74-ubuntu_22" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-ubuntu_20" {
@@ -127,7 +127,7 @@ module "homelab-tanium_clients_74-ubuntu_20" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-ubuntu_18" {
@@ -149,7 +149,7 @@ module "homelab-tanium_clients_74-ubuntu_18" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-rhel_9" {
@@ -160,7 +160,7 @@ module "homelab-tanium_clients_74-rhel_9" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "RedHat Enterprise Linux 9"
   vmfolder   = vsphere_folder.tanium_clients_74.path
-  instances  = 0
+  instances  = 2
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tn74-rhel9-"
@@ -171,7 +171,7 @@ module "homelab-tanium_clients_74-rhel_9" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-rhel_8" {
@@ -182,7 +182,7 @@ module "homelab-tanium_clients_74-rhel_8" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "RedHat Enterprise Linux 8"
   vmfolder   = vsphere_folder.tanium_clients_74.path
-  instances  = 0
+  instances  = 2
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tn74-rhel8-"
@@ -193,7 +193,7 @@ module "homelab-tanium_clients_74-rhel_8" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-rhel_7" {
@@ -204,7 +204,7 @@ module "homelab-tanium_clients_74-rhel_7" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "RedHat Enterprise Linux 7"
   vmfolder   = vsphere_folder.tanium_clients_74.path
-  instances  = 0
+  instances  = 2
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tn74-rhel7-"
@@ -215,7 +215,7 @@ module "homelab-tanium_clients_74-rhel_7" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-rhel_6" {
@@ -226,7 +226,7 @@ module "homelab-tanium_clients_74-rhel_6" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "RedHat Enterprise Linux 6"
   vmfolder   = vsphere_folder.tanium_clients_74.path
-  instances  = 0
+  instances  = 2
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tn74-rhel6-"
@@ -237,7 +237,7 @@ module "homelab-tanium_clients_74-rhel_6" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-oracle_9" {
@@ -259,7 +259,7 @@ module "homelab-tanium_clients_74-oracle_9" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-oracle_8" {
@@ -281,7 +281,7 @@ module "homelab-tanium_clients_74-oracle_8" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-oracle_7" {
@@ -303,7 +303,7 @@ module "homelab-tanium_clients_74-oracle_7" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-oracle_6" {
@@ -325,7 +325,7 @@ module "homelab-tanium_clients_74-oracle_6" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash 1"
+  datastore = "vSphere Flash"
 }
 
 module "homelab-tanium_clients_74-windows_server_2022" {

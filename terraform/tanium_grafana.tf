@@ -14,7 +14,7 @@ module "homelab-tanium_grafana" {
   vmfolder   = vsphere_folder.tanium_grafana.path
   instances  = 1
   cpu_number = 6
-  ram_size   = 20480
+  ram_size   = 65536
   vmname     = "amd-tngf"
   vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
   domain     = "lab.amd-e.com"

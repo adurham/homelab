@@ -29,7 +29,7 @@ module "homelab-tanium_server" {
   vmfolder   = vsphere_folder.tanium.path
   instances  = 2
   cpu_number = 4
-  ram_size   = 16384
+  ram_size   = 32768
   vmname     = "amd-lxts"
   vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
   domain     = "lab.amd-e.com"
@@ -51,7 +51,7 @@ module "homelab-tanium_module_server" {
   vmfolder   = vsphere_folder.tanium.path
   instances  = 2
   cpu_number = 4
-  ram_size   = 16384
+  ram_size   = 32768
   vmname     = "amd-lxtms"
   vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
   domain     = "lab.amd-e.com"
@@ -73,7 +73,7 @@ module "homelab-tanium_zone_server" {
   vmfolder   = vsphere_folder.tanium.path
   instances  = 2
   cpu_number = 4
-  ram_size   = 16384
+  ram_size   = 8192
   vmname     = "amd-lxzs"
   vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
   domain     = "lab.amd-e.com"

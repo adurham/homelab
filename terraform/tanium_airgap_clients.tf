@@ -78,7 +78,7 @@ module "homelab-tanium_airgap_clients-ubuntu_22" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Ubuntu Linux 22.04"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-ubnt22-"
@@ -100,7 +100,7 @@ module "homelab-tanium_airgap_clients-ubuntu_20" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Ubuntu Linux 20.04"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-ubnt20-"
@@ -122,7 +122,7 @@ module "homelab-tanium_airgap_clients-ubuntu_18" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Ubuntu Linux 18.04"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-ubnt18-"
@@ -232,7 +232,7 @@ module "homelab-tanium_airgap_clients-oracle_9" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Oracle Linux 9"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-oel9-"
@@ -254,7 +254,7 @@ module "homelab-tanium_airgap_clients-oracle_8" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Oracle Linux 8"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-oel8-"
@@ -276,7 +276,7 @@ module "homelab-tanium_airgap_clients-oracle_7" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Oracle Linux 7"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-oel7-"
@@ -298,7 +298,7 @@ module "homelab-tanium_airgap_clients-oracle_6" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Oracle Linux 6"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-oel6-"
@@ -320,7 +320,7 @@ module "homelab-tanium_airgap_clients-windows_server_2022" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Windows Server 2022 Datacenter"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-wn2022-"
@@ -343,7 +343,7 @@ module "homelab-tanium_airgap_clients-windows_server_2019" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Windows Server 2019 Datacenter"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-wn2019-"
@@ -366,7 +366,7 @@ module "homelab-tanium_airgap_clients-windows_server_2016" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Windows Server 2016 Datacenter"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-wn2016-"
@@ -389,7 +389,7 @@ module "homelab-tanium_airgap_clients-windows_server_2012r2" {
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "Windows Server 2012 R2 Datacenter"
   vmfolder   = vsphere_folder.tanium_airgap_clients.path
-  instances  = 1
+  instances  = 0
   cpu_number = 2
   ram_size   = 4096
   vmname     = "tnag-wn2012-"
