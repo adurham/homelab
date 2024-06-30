@@ -20,38 +20,17 @@ POLL_INTERVAL = 30
 
 
 def load_env_vars(filename):
-    """Loads environment variables from a file.
-
-    Args:
-        filename (str): The path to the environment file.
-
-    Returns:
-        dict: A dictionary containing the environment variables.
-
-    Raises:
-        FileNotFoundError: If the environment file is not found.
-        SystemExit: If there's an error loading environment variables.
-    """
-
     env_vars = {}
-    try:
-        with open(filename) as file:
-            for line in file:
-                line = line.strip()
-                if line and '=' in line:
-                    name, value = line.split('=', 1)
-                    env_vars[name] = value
-        return env_vars
-    except FileNotFoundError:
-        print(f"Error: Environment file '{filename}' not found.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error loading environment variables: {e}")
-        sys.exit(1)
-
+    with open(filename) as file:
+        for line in file:
+            line = line.strip()
+            if line and '=' in line:  # Ensure the line is not empty and contains '='
+                name, value = line.split('=', 1)
+                env_vars[name] = value
+    return env_vars
 
 # Load environment variables from config.env file
-env_vars = load_env_vars('config.env')
+env_vars = load_env_vars('tanium_creds.env')
 
 # URL details
 host = env_vars.get("HOST")

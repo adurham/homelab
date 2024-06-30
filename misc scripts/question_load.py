@@ -12,6 +12,22 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 def parse_date(date_str):
     return datetime.strptime(date_str, '%m/%d/%Y, %I:%M:%S %p')
 
+# Function to load environment variables from a file
+def load_env_vars(filename):
+    env_vars = {}
+    with open(filename) as file:
+        for line in file:
+            line = line.strip()
+            if line and '=' in line:
+                name, value = line.split('=', 1)
+                env_vars[name] = value
+    return env_vars
+
+# Load environment variables
+env_vars = load_env_vars()
+api_host = env_vars.get("HOST")
+api_token = env_vars.get("API_TOKEN")
+
 # Prompt the user for the file path and date
 file_path = input("Please enter the path to the JSON file: ")
 date_str = input("Please enter the date (e.g., 6/14/2024, 11:46:38 AM): ")
@@ -39,11 +55,10 @@ for item in data['object_list']['question_history']:
 logging.debug(f"Filtered query texts: {query_texts}")
 
 # Placeholder for the URL and headers for the API call
-api_host = "tanium.lab.amd-e.com"
 api_path = "/api/v2/questions"
 headers = {
     'Content-Type': 'application/json',
-    'session': 'token-'  # Add your authorization token here if needed
+    'session': api_token
 }
 logging.debug(f"API Host: {api_host}, API Path: {api_path}, Headers: {headers}")
 

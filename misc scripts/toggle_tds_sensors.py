@@ -16,7 +16,7 @@ def load_env_vars(filename):
     return env_vars
 
 # Load environment variables from config.env file
-env_vars = load_env_vars('config.env')
+env_vars = load_env_vars('tanium_creds.env')
 
 # URL details
 host = env_vars.get("HOST")
