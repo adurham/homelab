@@ -4,13 +4,13 @@ locals {
   lease_time  = 86400
 
   # Datastores
-  datastore_flash       = "vSphere Flash"
-  datastore_rust        = "vSphere Rust"
+  datastore_flash         = "vSphere Flash"
+  datastore_rust          = "vSphere Rust"
   datastore_vsandatastore = "vsanDatastore"
 
   # Clusters
-  cl01_resource_pool   = "${vsphere_compute_cluster.cl01.name}/Resources"
-  cl02_resource_pool   = "${vsphere_compute_cluster.cl02.name}/Resources"
+  cl01_resource_pool = "${vsphere_compute_cluster.cl01.name}/Resources"
+  cl02_resource_pool = "${vsphere_compute_cluster.cl02.name}/Resources"
 
   # Low Resource VM Specs
   low_resource_vm_specs = {
@@ -26,6 +26,14 @@ locals {
   peering_test_gateway      = "172.16.7.1"
   keycloak_gateway          = "172.16.0.161"
 
+  # Active Directory Settings
+  active_directory_cidr     = "172.16.0.1/25"
+  active_directory_vmgw     = "172.16.0.1"
+  active_directory_ips      = ["172.16.0.3", "172.16.0.4", "172.16.0.5"]
+  federation_services_ips   = ["172.16.0.6", "172.16.0.7", "172.16.0.8"]
+  certificate_authority_ips = ["172.16.0.9", "172.16.0.10", "172.16.0.11"]
+
+
   # Edge Node Paths
   edge_node_path_1 = format(
     "/infra/sites/default/enforcement-points/default/edge-clusters/%s/edge-nodes/%s",
@@ -37,4 +45,9 @@ locals {
     nsxt_edge_cluster.edge_cluster.id,
     nsxt_edge_cluster.edge_cluster.member[0].member_index
   )
+
+  # Common Settings for VMs
+  ws22dc_template    = "Windows Server 2022 Datacenter"
+  vsan_datastore     = local.datastore_vsandatastore
+  vsphere_datacenter = "Homelab"
 }

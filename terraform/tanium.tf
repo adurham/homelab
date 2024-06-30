@@ -22,16 +22,16 @@ module "homelab-tanium_server" {
     nsxt_policy_fixed_segment.tanium,
     vsphere_folder.tanium
   ]
-  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-  vmtemp     = "TanOS 1.8.1.0165 - Dev"
-  vmfolder   = vsphere_folder.tanium.path
-  instances  = 2
-  cpu_number = 4
-  ram_size   = 32768
+  source       = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp       = "TanOS 1.8.1.0165 - Dev"
+  vmfolder     = vsphere_folder.tanium.path
+  instances    = 2
+  cpu_number   = 4
+  ram_size     = 32768
   disk_size_gb = ["750"]
-  vmname     = "amd-lxts"
-  vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
-  domain     = "lab.amd-e.com"
+  vmname       = "amd-lxts"
+  vmrp         = "${vsphere_compute_cluster.cl02.name}/Resources"
+  domain       = "lab.amd-e.com"
   network = {
     "${nsxt_policy_fixed_segment.tanium.display_name}" = ["172.16.1.3", "172.16.1.4"]
   }

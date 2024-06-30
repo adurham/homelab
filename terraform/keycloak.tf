@@ -1,7 +1,7 @@
 resource "nsxt_policy_fixed_segment" "keycloak" {
-  display_name        = "Keycloak"
-  description         = "Terraform provisioned Segment"
-  connectivity_path   = nsxt_policy_tier1_gateway.tier1_gw.path
+  display_name      = "Keycloak"
+  description       = "Terraform provisioned Segment"
+  connectivity_path = nsxt_policy_tier1_gateway.tier1_gw.path
   subnet {
     cidr = "172.16.0.161/28"
     dhcp_v4_config {
@@ -34,7 +34,7 @@ module "homelab-keycloak_server" {
   network = {
     "${nsxt_policy_fixed_segment.keycloak.display_name}" = ["172.16.0.162"]
   }
-  ipv4submask = ["28"]
+  ipv4submask     = ["28"]
   vmgateway       = "172.16.0.161"
   dns_server_list = [nsxt_policy_fixed_segment.keycloak.subnet[0].dhcp_v4_config[0].dns_servers[0]]
   dc              = vsphere_datacenter.Homelab.name

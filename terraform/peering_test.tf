@@ -25,7 +25,7 @@ variable "instances" {
 }
 
 locals {
-  network = { 
+  network = {
     "${nsxt_policy_fixed_segment.tanium_clients_peering_test.display_name}" = [for i in range(var.instances) : ""]
   }
 }
@@ -119,9 +119,9 @@ module "homelab-tanium_clients_peering_test-ubuntu_22" {
   vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
   domain          = var.domain
   network         = local.network
-  vmgateway = "172.16.7.1"
-  dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Rust"
+  vmgateway       = "172.16.7.1"
+  dc              = vsphere_datacenter.Homelab.name
+  datastore       = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_peering_test-ubuntu_20" {

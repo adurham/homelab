@@ -171,6 +171,7 @@ resource "vsphere_compute_cluster" "cl02" {
   datacenter_id                = vsphere_datacenter.Homelab.moid
   drs_enabled                  = true
   drs_automation_level         = "fullyAutomated"
+  drs_migration_threshold      = 2
   ha_enabled                   = true
   dpm_enabled                  = false
   dpm_automation_level         = "automated"

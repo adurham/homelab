@@ -1,9 +1,9 @@
 resource "nsxt_policy_fixed_segment" "tanzu_management" {
-  display_name        = "Tanzu Management"
-  description         = "Terraform provisioned Segment"
-  connectivity_path   = nsxt_policy_tier1_gateway.tier1_gw.path
+  display_name      = "Tanzu Management"
+  description       = "Terraform provisioned Segment"
+  connectivity_path = nsxt_policy_tier1_gateway.tier1_gw.path
   subnet {
-    cidr = "172.16.0.177/28"
+    cidr        = "172.16.0.177/28"
     dhcp_ranges = ["172.16.0.179-172.16.0.190"]
     dhcp_v4_config {
       dns_servers = var.dns_servers
