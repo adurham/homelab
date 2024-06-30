@@ -5,10 +5,8 @@ resource "nsxt_policy_fixed_segment" "consul" {
   subnet {
     cidr = "172.16.0.129/28"
     dhcp_v4_config {
-      dns_servers = [
-        "10.0.3.129"
-      ]
-      lease_time = 86400
+      dns_servers = var.dns_servers
+      lease_time  = var.lease_time
     }
   }
 }
@@ -32,7 +30,7 @@ module "homelab-consul_server" {
   ram_size   = 4096
   vmname     = "amd-lxcnsl"
   vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
-  domain     = "lab.amd-e.com"
+  domain     = var.domain
   network = {
     "${nsxt_policy_fixed_segment.consul.display_name}" = ["172.16.0.131", "172.16.0.132", "172.16.0.133"]
   }
