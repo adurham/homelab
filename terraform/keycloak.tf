@@ -5,10 +5,8 @@ resource "nsxt_policy_fixed_segment" "keycloak" {
   subnet {
     cidr = "172.16.0.161/28"
     dhcp_v4_config {
-      dns_servers = [
-        "10.0.3.129"
-      ]
-      lease_time = 86400
+      dns_servers = var.dns_servers
+      lease_time  = var.lease_time
     }
   }
 }

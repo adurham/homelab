@@ -6,10 +6,8 @@ resource "nsxt_policy_fixed_segment" "tanium_clients_72" {
     cidr        = "172.16.3.1/24"
     dhcp_ranges = ["172.16.3.2-172.16.3.254"]
     dhcp_v4_config {
-      dns_servers = [
-        "10.0.3.129"
-      ]
-      lease_time = 86400
+      dns_servers = var.dns_servers
+      lease_time  = var.lease_time
     }
   }
 }
