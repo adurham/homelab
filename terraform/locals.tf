@@ -4,9 +4,9 @@ locals {
   lease_time  = 86400
 
   # Datastores
-  datastore_flash         = "vSphere Flash"
-  datastore_rust          = "vSphere Rust"
-  datastore_vsandatastore = "vsanDatastore"
+  datastore_flash = "vSphere Flash"
+  datastore_rust  = "vSphere Rust"
+  datastore_vsan  = "vsanDatastore"
 
   # Clusters
   cl01_resource_pool = "${vsphere_compute_cluster.cl01.name}/Resources"
@@ -32,6 +32,12 @@ locals {
   active_directory_ips      = ["172.16.0.3", "172.16.0.4", "172.16.0.5"]
   federation_services_ips   = ["172.16.0.6", "172.16.0.7", "172.16.0.8"]
   certificate_authority_ips = ["172.16.0.9", "172.16.0.10", "172.16.0.11"]
+  active_directory_resource_vm_specs = {
+    cpu_number      = 2
+    ram_size        = 4096
+    cpu_share_level = "normal"
+    io_share_level  = ["normal"]
+  }
 
 
   # Edge Node Paths
@@ -48,6 +54,5 @@ locals {
 
   # Common Settings for VMs
   ws22dc_template    = "Windows Server 2022 Datacenter"
-  vsan_datastore     = local.datastore_vsandatastore
   vsphere_datacenter = "Homelab"
 }

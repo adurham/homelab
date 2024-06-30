@@ -120,3 +120,14 @@ variable "lease_time" {
   description = "Default DHCP lease time"
   default     = 86400
 }
+
+variable "env" {
+  description = "The environment for deployment (e.g., dev, test, production)"
+  type        = string
+  default     = "dev"
+}
+
+variable "ad_instances" {
+  description = "Number of Active Directory instances"
+  type        = number
+}
