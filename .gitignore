@@ -1,0 +1,17 @@
+# Packer
+packer/**/*secrets.auto.pkrvars.hcl
+packer/**/manifests/*.json
+
+# Terraform
+*/*terraform.tfvars
+*/.terraform/*
+*/terraform.tfstate*
+*/terraform.tfstate.d/*
+*/.terraform.lock.hcl
+*/.terraform.tfstate.lock.info
+.DS_Store
+
+# Scratch
+scratch/*
+misc scripts/config.env
+misc scripts/SecureCredentials.xml
