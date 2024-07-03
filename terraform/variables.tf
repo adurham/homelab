@@ -127,7 +127,22 @@ variable "env" {
   default     = "dev"
 }
 
-variable "ad_instances" {
+variable "active_directory_instances" {
   description = "Number of Active Directory instances"
+  type        = number
+}
+
+variable "consul_instances" {
+  description = "Number of Consul instances"
+  type        = number
+}
+
+variable "keycloak_instances" {
+  description = "Number of Keycloak instances"
+  type        = number
+}
+
+variable "vault_instances" {
+  description = "Number of Keycloak instances"
   type        = number
 }
