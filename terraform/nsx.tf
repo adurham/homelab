@@ -1,7 +1,7 @@
 resource "nsxt_policy_transport_zone" "overlay_tz" {
   display_name   = "nsx.overlay_tz.1GbE0"
   description    = "Terraform-deployed Overlay transport zone"
-  transport_type = "OVERLAY_BACKED"
+  transport_type = "OVERLAY_STANDARD"
 }
 
 resource "nsxt_policy_transport_zone" "vlan_tz" {

@@ -1,41 +1,61 @@
+# Define a fixed segment for Vault
 resource "nsxt_policy_fixed_segment" "vault" {
   display_name      = "Vault"
   description       = "Terraform provisioned Segment"
   connectivity_path = nsxt_policy_tier1_gateway.tier1_gw.path
+
   subnet {
-    cidr = "172.16.0.145/28"
+    cidr = local.vault_cidr
     dhcp_v4_config {
-      dns_servers = var.dns_servers
-      lease_time  = var.lease_time
+      dns_servers = local.dns_servers
+      lease_time  = local.lease_time
     }
   }
 }
 
+# Create a VM folder for Vault
 resource "vsphere_folder" "vault" {
   path          = "Vault"
   type          = "vm"
   datacenter_id = vsphere_datacenter.Homelab.moid
 }
 
+# Deploy the Vault server using a module
 module "homelab-vault_server" {
   depends_on = [
     nsxt_policy_fixed_segment.vault,
     vsphere_folder.vault
   ]
-  source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-  vmtemp     = "Ubuntu Linux 22.04"
-  vmfolder   = vsphere_folder.vault.path
-  instances  = 3
-  cpu_number = 2
-  ram_size   = 4096
-  vmname     = "amd-lxvlt"
-  vmrp       = "${vsphere_compute_cluster.cl02.name}/Resources"
-  domain     = "lab.amd-e.com"
+
+  source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp          = "Ubuntu Linux 22.04"
+  vmfolder        = vsphere_folder.vault.path
+  instances       = var.vault_instances
+  cpu_number      = local.vault_resource_vm_specs.cpu_number
+  cpu_share_level = local.vault_resource_vm_specs.cpu_share_level
+  ram_size        = local.vault_resource_vm_specs.ram_size
+  io_share_level  = local.vault_resource_vm_specs.io_share_level
+  vmname          = "amd-lxvlt"
+  vmrp            = local.cl02_resource_pool
+  domain          = var.domain
+
   network = {
-    "${nsxt_policy_fixed_segment.vault.display_name}" = ["172.16.0.195", "172.16.0.196", "172.16.0.197"]
+    (nsxt_policy_fixed_segment.vault.display_name) = local.vault_ips
   }
-  vmgateway       = "172.16.0.193"
-  dns_server_list = [nsxt_policy_fixed_segment.vault.subnet[0].dhcp_v4_config[0].dns_servers[0]]
-  dc              = vsphere_datacenter.Homelab.name
-  datastore       = "vsanDatastore"
+
+  ipv4submask     = local.vault_netmask_cidr
+  vmgateway       = local.vault_gateway
+  dns_server_list = local.dns_servers
+  dc              = local.vsphere_datacenter
+  datastore       = local.datastore_vsan
+}
+
+# Output the segment path for further use or debugging
+output "vault_segment_path" {
+  value = nsxt_policy_fixed_segment.vault.path
+}
+
+# Output the folder path for further use or debugging
+output "vault_folder_path" {
+  value = vsphere_folder.vault.path
 }
