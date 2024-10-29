@@ -9,7 +9,7 @@ locals {
   datastore_vsan  = "vsanDatastore"
 
   # Clusters
-  cl01_resource_pool = "${vsphere_compute_cluster.cl01.name}/Resources"
+  # cl01_resource_pool = "${vsphere_compute_cluster.cl01.name}/Resources"
   cl02_resource_pool = "${vsphere_compute_cluster.cl02.name}/Resources"
 
   # Low Resource VM Specs
@@ -21,9 +21,9 @@ locals {
   }
 
   # Network Configurations
-  tanium_clients_74_network = nsxt_policy_fixed_segment.tanium_clients_74.display_name
-  tanium_clients_74_gateway = "172.16.4.1"
-  peering_test_gateway      = "172.16.7.1"
+  # tanium_clients_74_network = nsxt_policy_fixed_segment.tanium_clients_74.display_name
+  # tanium_clients_74_gateway = "172.16.4.1"
+  # peering_test_gateway      = "172.16.7.1"
 
   # Active Directory Settings
   active_directory_cidr         = "172.16.0.1/25"

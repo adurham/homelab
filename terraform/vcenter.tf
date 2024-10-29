@@ -6,94 +6,94 @@ resource "vsphere_datacenter" "Homelab" {
   name = "Homelab"
 }
 
-data "vsphere_host_thumbprint" "amd-hwvm01_thumbprint" {
-  address  = "10.0.1.72"
-  insecure = true
-}
+# data "vsphere_host_thumbprint" "amd-hwvm01_thumbprint" {
+#   address  = "10.0.1.72"
+#   insecure = true
+# }
 
-resource "vsphere_host" "amd-hwvm01" {
-  hostname        = "amd-hwvm01.lab.amd-e.com"
-  thumbprint      = data.vsphere_host_thumbprint.amd-hwvm01_thumbprint.id
-  username        = "root"
-  password        = var.esxi_password
-  license         = var.esxi_7_license
-  datacenter      = vsphere_datacenter.Homelab.moid
-  cluster_managed = true
-  lockdown        = "normal"
-}
+# resource "vsphere_host" "amd-hwvm01" {
+#   hostname        = "amd-hwvm01.lab.amd-e.com"
+#   thumbprint      = data.vsphere_host_thumbprint.amd-hwvm01_thumbprint.id
+#   username        = "root"
+#   password        = var.esxi_password
+#   license         = var.esxi_7_license
+#   datacenter      = vsphere_datacenter.Homelab.moid
+#   cluster_managed = true
+#   lockdown        = "normal"
+# }
 
-data "vsphere_host_thumbprint" "amd-hwvm02_thumbprint" {
-  address  = "10.0.1.73"
-  insecure = true
-}
+# data "vsphere_host_thumbprint" "amd-hwvm02_thumbprint" {
+#   address  = "10.0.1.73"
+#   insecure = true
+# }
 
-resource "vsphere_host" "amd-hwvm02" {
-  hostname        = "amd-hwvm02.lab.amd-e.com"
-  thumbprint      = data.vsphere_host_thumbprint.amd-hwvm02_thumbprint.id
-  username        = "root"
-  password        = var.esxi_password
-  license         = var.esxi_7_license
-  datacenter      = vsphere_datacenter.Homelab.moid
-  cluster_managed = true
-  lockdown        = "normal"
-}
+# resource "vsphere_host" "amd-hwvm02" {
+#   hostname        = "amd-hwvm02.lab.amd-e.com"
+#   thumbprint      = data.vsphere_host_thumbprint.amd-hwvm02_thumbprint.id
+#   username        = "root"
+#   password        = var.esxi_password
+#   license         = var.esxi_7_license
+#   datacenter      = vsphere_datacenter.Homelab.moid
+#   cluster_managed = true
+#   lockdown        = "normal"
+# }
 
-data "vsphere_host_thumbprint" "amd-hwvm03_thumbprint" {
-  address  = "10.0.1.74"
-  insecure = true
-}
+# data "vsphere_host_thumbprint" "amd-hwvm03_thumbprint" {
+#   address  = "10.0.1.74"
+#   insecure = true
+# }
 
-resource "vsphere_host" "amd-hwvm03" {
-  hostname        = "amd-hwvm03.lab.amd-e.com"
-  thumbprint      = data.vsphere_host_thumbprint.amd-hwvm03_thumbprint.id
-  username        = "root"
-  password        = var.esxi_password
-  license         = var.esxi_7_license
-  datacenter      = vsphere_datacenter.Homelab.moid
-  cluster_managed = true
-  lockdown        = "normal"
-}
+# resource "vsphere_host" "amd-hwvm03" {
+#   hostname        = "amd-hwvm03.lab.amd-e.com"
+#   thumbprint      = data.vsphere_host_thumbprint.amd-hwvm03_thumbprint.id
+#   username        = "root"
+#   password        = var.esxi_password
+#   license         = var.esxi_7_license
+#   datacenter      = vsphere_datacenter.Homelab.moid
+#   cluster_managed = true
+#   lockdown        = "normal"
+# }
 
-data "vsphere_host_thumbprint" "amd-hwvm04_thumbprint" {
-  address  = "10.0.1.75"
-  insecure = true
-}
+# data "vsphere_host_thumbprint" "amd-hwvm04_thumbprint" {
+#   address  = "10.0.1.75"
+#   insecure = true
+# }
 
-resource "vsphere_host" "amd-hwvm04" {
-  hostname        = "amd-hwvm04.lab.amd-e.com"
-  thumbprint      = data.vsphere_host_thumbprint.amd-hwvm04_thumbprint.id
-  username        = "root"
-  password        = var.esxi_password
-  license         = var.esxi_7_license
-  datacenter      = vsphere_datacenter.Homelab.moid
-  cluster_managed = true
-  lockdown        = "normal"
-}
+# resource "vsphere_host" "amd-hwvm04" {
+#   hostname        = "amd-hwvm04.lab.amd-e.com"
+#   thumbprint      = data.vsphere_host_thumbprint.amd-hwvm04_thumbprint.id
+#   username        = "root"
+#   password        = var.esxi_password
+#   license         = var.esxi_7_license
+#   datacenter      = vsphere_datacenter.Homelab.moid
+#   cluster_managed = true
+#   lockdown        = "normal"
+# }
 
-resource "vsphere_compute_cluster" "cl01" {
-  name = "amd-vmcl01"
-  depends_on = [
-    vsphere_datacenter.Homelab,
-    vsphere_host.amd-hwvm01,
-    vsphere_host.amd-hwvm02,
-    vsphere_host.amd-hwvm03,
-    vsphere_host.amd-hwvm04
-  ]
-  datacenter_id                = vsphere_datacenter.Homelab.moid
-  drs_enabled                  = true
-  drs_automation_level         = "fullyAutomated"
-  ha_enabled                   = false
-  dpm_enabled                  = false
-  dpm_automation_level         = "automated"
-  drs_scale_descendants_shares = "scaleCpuAndMemoryShares"
-  drs_migration_threshold      = 2
-  host_system_ids = [
-    vsphere_host.amd-hwvm01.id,
-    vsphere_host.amd-hwvm02.id,
-    vsphere_host.amd-hwvm03.id,
-    vsphere_host.amd-hwvm04.id
-  ]
-}
+# resource "vsphere_compute_cluster" "cl01" {
+#   name = "amd-vmcl01"
+#   depends_on = [
+#     vsphere_datacenter.Homelab,
+#     vsphere_host.amd-hwvm01,
+#     vsphere_host.amd-hwvm02,
+#     vsphere_host.amd-hwvm03,
+#     vsphere_host.amd-hwvm04
+#   ]
+#   datacenter_id                = vsphere_datacenter.Homelab.moid
+#   drs_enabled                  = true
+#   drs_automation_level         = "fullyAutomated"
+#   ha_enabled                   = false
+#   dpm_enabled                  = false
+#   dpm_automation_level         = "automated"
+#   drs_scale_descendants_shares = "scaleCpuAndMemoryShares"
+#   drs_migration_threshold      = 2
+#   host_system_ids = [
+#     vsphere_host.amd-hwvm01.id,
+#     vsphere_host.amd-hwvm02.id,
+#     vsphere_host.amd-hwvm03.id,
+#     vsphere_host.amd-hwvm04.id
+#   ]
+# }
 
 data "vsphere_host_thumbprint" "amd-hwvm05_thumbprint" {
   address  = "10.0.1.76"
@@ -172,7 +172,7 @@ resource "vsphere_compute_cluster" "cl02" {
   drs_enabled                  = true
   drs_automation_level         = "fullyAutomated"
   drs_migration_threshold      = 2
-  ha_enabled                   = true
+  ha_enabled                   = false
   dpm_enabled                  = false
   dpm_automation_level         = "automated"
   drs_scale_descendants_shares = "scaleCpuAndMemoryShares"
@@ -194,7 +194,7 @@ resource "vsphere_compute_cluster" "cl02" {
 resource "vsphere_distributed_virtual_switch" "vds01" {
   name = "1GbE0"
   depends_on = [
-    vsphere_compute_cluster.cl01,
+    # vsphere_compute_cluster.cl01,
     vsphere_compute_cluster.cl02
   ]
   datacenter_id                    = vsphere_datacenter.Homelab.moid
@@ -203,13 +203,13 @@ resource "vsphere_distributed_virtual_switch" "vds01" {
   standby_uplinks                  = []
   netflow_sampling_rate            = 4096
   network_resource_control_enabled = true
-  dynamic "host" {
-    for_each = toset(vsphere_compute_cluster.cl01.host_system_ids)
-    content {
-      host_system_id = host.value
-      devices        = ["vmnic0", "vmnic1"]
-    }
-  }
+  # dynamic "host" {
+  #   for_each = toset(vsphere_compute_cluster.cl01.host_system_ids)
+  #   content {
+  #     host_system_id = host.value
+  #     devices        = ["vmnic0", "vmnic1"]
+  #   }
+  # }
   dynamic "host" {
     for_each = toset(vsphere_compute_cluster.cl02.host_system_ids)
     content {
@@ -222,7 +222,7 @@ resource "vsphere_distributed_virtual_switch" "vds01" {
 resource "vsphere_distributed_virtual_switch" "vds02" {
   name = "10GbE0"
   depends_on = [
-    vsphere_compute_cluster.cl01,
+    # vsphere_compute_cluster.cl01,
     vsphere_compute_cluster.cl02
   ]
   datacenter_id                    = vsphere_datacenter.Homelab.moid
@@ -231,13 +231,13 @@ resource "vsphere_distributed_virtual_switch" "vds02" {
   standby_uplinks                  = []
   netflow_sampling_rate            = 4096
   network_resource_control_enabled = true
-  dynamic "host" {
-    for_each = toset(vsphere_compute_cluster.cl01.host_system_ids)
-    content {
-      host_system_id = host.value
-      devices        = ["vmnic2", "vmnic3"]
-    }
-  }
+  # dynamic "host" {
+  #   for_each = toset(vsphere_compute_cluster.cl01.host_system_ids)
+  #   content {
+  #     host_system_id = host.value
+  #     devices        = ["vmnic2", "vmnic3"]
+  #   }
+  # }
   dynamic "host" {
     for_each = toset(vsphere_compute_cluster.cl02.host_system_ids)
     content {
@@ -293,7 +293,7 @@ resource "vsphere_distributed_port_group" "vds02_vdpg04" {
 resource "vsphere_nas_datastore" "datastore01" {
   name = "vSphere NFS"
   host_system_ids = flatten([
-    vsphere_compute_cluster.cl01.host_system_ids,
+    # vsphere_compute_cluster.cl01.host_system_ids,
     vsphere_compute_cluster.cl02.host_system_ids
   ])
   type          = "NFS41"
