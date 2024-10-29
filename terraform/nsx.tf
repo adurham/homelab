@@ -1,7 +1,7 @@
 resource "nsxt_policy_transport_zone" "overlay_tz" {
   display_name   = "nsx.overlay_tz.1GbE0"
   description    = "Terraform-deployed Overlay transport zone"
-  transport_type = "OVERLAY_STANDARD"
+  transport_type = "OVERLAY_BACKED"
 }
 
 resource "nsxt_policy_transport_zone" "vlan_tz" {
@@ -146,15 +146,15 @@ resource "nsxt_compute_manager" "Homelab" {
   origin_type = "vCenter"
 }
 
-resource "nsxt_policy_host_transport_node_collection" "amd-vmcl01" {
-  display_name                = "amd-vmcl01"
-  compute_collection_id       = "${nsxt_compute_manager.Homelab.id}:${vsphere_compute_cluster.cl01.id}"
-  transport_node_profile_path = nsxt_policy_host_transport_node_profile.tnp1.path
-  tag {
-    scope = "color"
-    tag   = "red"
-  }
-}
+# resource "nsxt_policy_host_transport_node_collection" "amd-vmcl01" {
+#   display_name                = "amd-vmcl01"
+#   compute_collection_id       = "${nsxt_compute_manager.Homelab.id}:${vsphere_compute_cluster.cl01.id}"
+#   transport_node_profile_path = nsxt_policy_host_transport_node_profile.tnp1.path
+#   tag {
+#     scope = "color"
+#     tag   = "red"
+#   }
+# }
 
 resource "nsxt_policy_host_transport_node_collection" "amd-vmcl02" {
   display_name                = "amd-vmcl02"
@@ -167,7 +167,7 @@ resource "nsxt_policy_host_transport_node_collection" "amd-vmcl02" {
 }
 
 resource "nsxt_transport_node" "edge_node1" {
-  display_name = "amd-nxed02-01"
+  display_name = "amd-nxen01"
   description  = "Terraform-deployed edge node"
   standard_host_switch {
     host_switch_profile = [
@@ -176,7 +176,7 @@ resource "nsxt_transport_node" "edge_node1" {
     // TO-DO Need to dynamically assign this
     ip_assignment {
       assigned_by_dhcp = false
-      static_ip_pool   = "fd15df55-2b2a-4709-9d4e-2e06bfcc65b2"
+      static_ip_pool   = "fc124b7a-929a-47f0-a985-b2622c18d6ea"
     }
     pnic {
       device_name = "fp-eth0"
@@ -221,7 +221,7 @@ resource "nsxt_transport_node" "edge_node1" {
       }
     }
     node_settings {
-      hostname = "amd-nxed02-01.${var.domain}"
+      hostname = "amd-nxen01.${var.domain}"
       dns_servers = [
         "10.0.2.1"
       ]
@@ -238,7 +238,7 @@ resource "nsxt_transport_node" "edge_node1" {
 }
 
 resource "nsxt_transport_node" "edge_node2" {
-  display_name = "amd-nxed02-02"
+  display_name = "amd-nxen02"
   description  = "Terraform-deployed edge node"
   standard_host_switch {
     host_switch_profile = [
@@ -247,7 +247,7 @@ resource "nsxt_transport_node" "edge_node2" {
     // TO-DO Need to dynamically assign this
     ip_assignment {
       assigned_by_dhcp = false
-      static_ip_pool   = "fd15df55-2b2a-4709-9d4e-2e06bfcc65b2"
+      static_ip_pool   = "fc124b7a-929a-47f0-a985-b2622c18d6ea"
     }
     pnic {
       device_name = "fp-eth0"
@@ -292,7 +292,7 @@ resource "nsxt_transport_node" "edge_node2" {
       }
     }
     node_settings {
-      hostname = "amd-nxed02-02.${var.domain}"
+      hostname = "amd-nxen02.${var.domain}"
       dns_servers = [
         "10.0.2.1"
       ]
@@ -310,7 +310,7 @@ resource "nsxt_transport_node" "edge_node2" {
 
 resource "nsxt_edge_cluster" "edge_cluster" {
   description  = "Terraform provisioned Edge Cluster"
-  display_name = "amd-nxedcl01"
+  display_name = "amd-nxec01"
   depends_on = [
     nsxt_transport_node.edge_node1,
     nsxt_transport_node.edge_node2
@@ -326,7 +326,7 @@ resource "nsxt_edge_cluster" "edge_cluster" {
 }
 
 data "nsxt_policy_edge_cluster" "edge_cluster" {
-  display_name = "amd-nxedcl01"
+  display_name = "amd-nxec01"
 }
 
 resource "nsxt_policy_tier0_gateway" "tier0_gw" {
@@ -432,7 +432,7 @@ resource "nsxt_policy_tier1_gateway" "tier1_gw" {
   enable_standby_relocation = "false"
   tier0_path                = nsxt_policy_tier0_gateway.tier0_gw.path
   //TO-DO Need to dynamically assign this
-  dhcp_config_path = "/infra/dhcp-server-configs/Homelab"
+  # dhcp_config_path = "/infra/dhcp-server-configs/Homelab"
   route_advertisement_types = [
     "TIER1_IPSEC_LOCAL_ENDPOINT",
     "TIER1_CONNECTED"

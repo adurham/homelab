@@ -17,6 +17,12 @@ resource "vsphere_folder" "tanium" {
   datacenter_id = vsphere_datacenter.Homelab.moid
 }
 
+resource "vsphere_folder" "tanium_tanos" {
+  path          = "${vsphere_folder.tanium.path}/TanOS"
+  type          = "vm"
+  datacenter_id = vsphere_datacenter.Homelab.moid
+}
+
 module "homelab-tanium_server" {
   depends_on = [
     nsxt_policy_fixed_segment.tanium,
@@ -24,9 +30,9 @@ module "homelab-tanium_server" {
   ]
   source       = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp       = "TanOS 1.8.1.0165 - Dev"
-  vmfolder     = vsphere_folder.tanium.path
+  vmfolder     = vsphere_folder.tanium_tanos.path
   instances    = 2
-  cpu_number   = 4
+  cpu_number   = 8
   ram_size     = 32768
   disk_size_gb = ["750"]
   vmname       = "amd-lxts"
@@ -47,7 +53,7 @@ module "homelab-tanium_module_server" {
   ]
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "TanOS 1.8.1.0165 - Dev"
-  vmfolder   = vsphere_folder.tanium.path
+  vmfolder   = vsphere_folder.tanium_tanos.path
   instances  = 2
   cpu_number = 8
   ram_size   = 32768
@@ -69,7 +75,7 @@ module "homelab-tanium_zone_server" {
   ]
   source     = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp     = "TanOS 1.8.1.0165 - Dev"
-  vmfolder   = vsphere_folder.tanium.path
+  vmfolder   = vsphere_folder.tanium_tanos.path
   instances  = 2
   cpu_number = 4
   ram_size   = 8192
@@ -85,7 +91,7 @@ module "homelab-tanium_zone_server" {
 }
 
 resource "vsphere_folder" "windows_tanium" {
-  path          = "${vsphere_folder.tanium.path}/Windows TS"
+  path          = "${vsphere_folder.tanium.path}/Windows"
   type          = "vm"
   datacenter_id = vsphere_datacenter.Homelab.moid
 }
