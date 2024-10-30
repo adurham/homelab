@@ -345,11 +345,11 @@ def main():
     env_vars = load_env_vars("tanium_creds.env")
     tanium_username = env_vars.get("TANIUM_USERNAME")
     tanium_password = env_vars.get("TANIUM_PASSWORD")
-    server_api_base_url = env_vars.get("SERVER_API_BASE_URL")
+    server_api_base_url = env_vars.get("TANIUM_BASE_URL")
     available_solutions_xml_url = env_vars.get("AVAILABLE_SOLUTIONS_XML_URL")
 
     session_token = login_to_api(
-        f"{server_api_base_url}/api/v2/session/login", tanium_username, tanium_password
+        f"https://{server_api_base_url}/api/v2/session/login", tanium_username, tanium_password
     )
     headers = {
         "session": session_token,
@@ -358,10 +358,10 @@ def main():
 
     available_solutions = parse_xml(available_solutions_xml_url)
     installed_solutions = get_installed_solutions(
-        f"{server_api_base_url}/api/v2/result_data/69", headers
+        f"https://{server_api_base_url}/api/v2/result_data/69", headers
     )
     installed_workbenches = get_installed_workbenches(
-        f"{server_api_base_url}/api/v2/result_data/70", headers
+        f"https://{server_api_base_url}/api/v2/result_data/70", headers
     )
 
     # Combine installed solutions and workbenches for the update process
