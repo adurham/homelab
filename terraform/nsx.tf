@@ -146,15 +146,15 @@ resource "nsxt_compute_manager" "Homelab" {
   origin_type = "vCenter"
 }
 
-# resource "nsxt_policy_host_transport_node_collection" "amd-vmcl01" {
-#   display_name                = "amd-vmcl01"
-#   compute_collection_id       = "${nsxt_compute_manager.Homelab.id}:${vsphere_compute_cluster.cl01.id}"
-#   transport_node_profile_path = nsxt_policy_host_transport_node_profile.tnp1.path
-#   tag {
-#     scope = "color"
-#     tag   = "red"
-#   }
-# }
+resource "nsxt_policy_host_transport_node_collection" "amd-vmcl01" {
+  display_name                = "amd-vmcl01"
+  compute_collection_id       = "${nsxt_compute_manager.Homelab.id}:${vsphere_compute_cluster.cl01.id}"
+  transport_node_profile_path = nsxt_policy_host_transport_node_profile.tnp1.path
+  tag {
+    scope = "color"
+    tag   = "red"
+  }
+}
 
 resource "nsxt_policy_host_transport_node_collection" "amd-vmcl02" {
   display_name                = "amd-vmcl02"
@@ -432,7 +432,7 @@ resource "nsxt_policy_tier1_gateway" "tier1_gw" {
   enable_standby_relocation = "false"
   tier0_path                = nsxt_policy_tier0_gateway.tier0_gw.path
   //TO-DO Need to dynamically assign this
-  # dhcp_config_path = "/infra/dhcp-server-configs/Homelab"
+  dhcp_config_path = "/infra/dhcp-server-configs/Homelab"
   route_advertisement_types = [
     "TIER1_IPSEC_LOCAL_ENDPOINT",
     "TIER1_CONNECTED"
