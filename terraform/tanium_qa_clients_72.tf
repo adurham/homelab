@@ -218,13 +218,13 @@ module "homelab-tanium_clients_72-rhel_7" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "RedHat Enterprise Linux 7"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 2
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
   io_share_level  = local.low_resource_vm_specs.io_share_level
   vmname          = "tn72-rhel7-"
-  vmrp            = "${vsphere_compute_cluster.cl02.name}/Resources"
+  vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
   domain          = var.domain
   network = {
     "${nsxt_policy_fixed_segment.tanium_clients_72.display_name}" = ["", ""]
@@ -354,110 +354,110 @@ module "homelab-tanium_clients_72-oracle_6" {
   datastore = "vSphere Flash"
 }
 
-# module "homelab-tanium_clients_72-windows_server_2022" {
-#   depends_on = [
-#     nsxt_policy_fixed_segment.tanium_clients_72,
-#     vsphere_folder.tanium_clients_72
-#   ]
-#   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-#   vmtemp          = "Windows Server 2022 Datacenter"
-#   vmfolder        = vsphere_folder.tanium_clients_72.path
-#   instances       = 1
-#   cpu_number      = local.low_resource_vm_specs.cpu_number
-#   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
-#   ram_size        = local.low_resource_vm_specs.ram_size
-#   io_share_level  = local.low_resource_vm_specs.io_share_level
-#   vmname          = "tn72-wn2022-"
-#   vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
-#   network = {
-#     "${nsxt_policy_fixed_segment.tanium_clients_72.display_name}" = ["", ""]
-#   }
-#   vmgateway             = "172.16.3.1"
-#   dc                    = vsphere_datacenter.Homelab.name
-#   datastore             = "vSphere Flash"
-#   is_windows_image      = true
-#   windomain             = var.domain
-#   domain_admin_user     = var.domainuser
-#   domain_admin_password = var.domainpass
-# }
+module "homelab-tanium_clients_72-windows_server_2022" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_72,
+    vsphere_folder.tanium_clients_72
+  ]
+  source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp          = "Windows Server 2022 Datacenter"
+  vmfolder        = vsphere_folder.tanium_clients_72.path
+  instances       = 1
+  cpu_number      = local.low_resource_vm_specs.cpu_number
+  cpu_share_level = local.low_resource_vm_specs.cpu_share_level
+  ram_size        = local.low_resource_vm_specs.ram_size
+  io_share_level  = local.low_resource_vm_specs.io_share_level
+  vmname          = "tn72-wn2022-"
+  vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_72.display_name}" = ["", ""]
+  }
+  vmgateway             = "172.16.3.1"
+  dc                    = vsphere_datacenter.Homelab.name
+  datastore             = "vSphere Flash"
+  is_windows_image      = true
+  windomain             = var.domain
+  domain_admin_user     = var.domainuser
+  domain_admin_password = var.domainpass
+}
 
-# module "homelab-tanium_clients_72-windows_server_2019" {
-#   depends_on = [
-#     nsxt_policy_fixed_segment.tanium_clients_72,
-#     vsphere_folder.tanium_clients_72
-#   ]
-#   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-#   vmtemp          = "Windows Server 2019 Datacenter"
-#   vmfolder        = vsphere_folder.tanium_clients_72.path
-#   instances       = 1
-#   cpu_number      = local.low_resource_vm_specs.cpu_number
-#   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
-#   ram_size        = local.low_resource_vm_specs.ram_size
-#   io_share_level  = local.low_resource_vm_specs.io_share_level
-#   vmname          = "tn72-wn2019-"
-#   vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
-#   network = {
-#     "${nsxt_policy_fixed_segment.tanium_clients_72.display_name}" = ["", ""]
-#   }
-#   vmgateway             = "172.16.3.1"
-#   dc                    = vsphere_datacenter.Homelab.name
-#   datastore             = "vSphere Flash"
-#   is_windows_image      = true
-#   windomain             = var.domain
-#   domain_admin_user     = var.domainuser
-#   domain_admin_password = var.domainpass
-# }
+module "homelab-tanium_clients_72-windows_server_2019" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_72,
+    vsphere_folder.tanium_clients_72
+  ]
+  source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp          = "Windows Server 2019 Datacenter"
+  vmfolder        = vsphere_folder.tanium_clients_72.path
+  instances       = 1
+  cpu_number      = local.low_resource_vm_specs.cpu_number
+  cpu_share_level = local.low_resource_vm_specs.cpu_share_level
+  ram_size        = local.low_resource_vm_specs.ram_size
+  io_share_level  = local.low_resource_vm_specs.io_share_level
+  vmname          = "tn72-wn2019-"
+  vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_72.display_name}" = ["", ""]
+  }
+  vmgateway             = "172.16.3.1"
+  dc                    = vsphere_datacenter.Homelab.name
+  datastore             = "vSphere Flash"
+  is_windows_image      = true
+  windomain             = var.domain
+  domain_admin_user     = var.domainuser
+  domain_admin_password = var.domainpass
+}
 
-# module "homelab-tanium_clients_72-windows_server_2016" {
-#   depends_on = [
-#     nsxt_policy_fixed_segment.tanium_clients_72,
-#     vsphere_folder.tanium_clients_72
-#   ]
-#   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-#   vmtemp          = "Windows Server 2016 Datacenter"
-#   vmfolder        = vsphere_folder.tanium_clients_72.path
-#   instances       = 1
-#   cpu_number      = local.low_resource_vm_specs.cpu_number
-#   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
-#   ram_size        = local.low_resource_vm_specs.ram_size
-#   io_share_level  = local.low_resource_vm_specs.io_share_level
-#   vmname          = "tn72-wn2016-"
-#   vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
-#   network = {
-#     "${nsxt_policy_fixed_segment.tanium_clients_72.display_name}" = ["", ""]
-#   }
-#   vmgateway             = "172.16.3.1"
-#   dc                    = vsphere_datacenter.Homelab.name
-#   datastore             = "vSphere Flash"
-#   is_windows_image      = true
-#   windomain             = var.domain
-#   domain_admin_user     = var.domainuser
-#   domain_admin_password = var.domainpass
-# }
+module "homelab-tanium_clients_72-windows_server_2016" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_72,
+    vsphere_folder.tanium_clients_72
+  ]
+  source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp          = "Windows Server 2016 Datacenter"
+  vmfolder        = vsphere_folder.tanium_clients_72.path
+  instances       = 1
+  cpu_number      = local.low_resource_vm_specs.cpu_number
+  cpu_share_level = local.low_resource_vm_specs.cpu_share_level
+  ram_size        = local.low_resource_vm_specs.ram_size
+  io_share_level  = local.low_resource_vm_specs.io_share_level
+  vmname          = "tn72-wn2016-"
+  vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_72.display_name}" = ["", ""]
+  }
+  vmgateway             = "172.16.3.1"
+  dc                    = vsphere_datacenter.Homelab.name
+  datastore             = "vSphere Flash"
+  is_windows_image      = true
+  windomain             = var.domain
+  domain_admin_user     = var.domainuser
+  domain_admin_password = var.domainpass
+}
 
-# module "homelab-tanium_clients_72-windows_server_2012r2" {
-#   depends_on = [
-#     nsxt_policy_fixed_segment.tanium_clients_72,
-#     vsphere_folder.tanium_clients_72
-#   ]
-#   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-#   vmtemp          = "Windows Server 2012 R2 Datacenter"
-#   vmfolder        = vsphere_folder.tanium_clients_72.path
-#   instances       = 1
-#   cpu_number      = local.low_resource_vm_specs.cpu_number
-#   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
-#   ram_size        = local.low_resource_vm_specs.ram_size
-#   io_share_level  = local.low_resource_vm_specs.io_share_level
-#   vmname          = "tn72-wn2012-"
-#   vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
-#   network = {
-#     "${nsxt_policy_fixed_segment.tanium_clients_72.display_name}" = ["", ""]
-#   }
-#   vmgateway             = "172.16.3.1"
-#   dc                    = vsphere_datacenter.Homelab.name
-#   datastore             = "vSphere Flash"
-#   is_windows_image      = true
-#   windomain             = var.domain
-#   domain_admin_user     = var.domainuser
-#   domain_admin_password = var.domainpass
-# }
+module "homelab-tanium_clients_72-windows_server_2012r2" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_72,
+    vsphere_folder.tanium_clients_72
+  ]
+  source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+  vmtemp          = "Windows Server 2012 R2 Datacenter"
+  vmfolder        = vsphere_folder.tanium_clients_72.path
+  instances       = 1
+  cpu_number      = local.low_resource_vm_specs.cpu_number
+  cpu_share_level = local.low_resource_vm_specs.cpu_share_level
+  ram_size        = local.low_resource_vm_specs.ram_size
+  io_share_level  = local.low_resource_vm_specs.io_share_level
+  vmname          = "tn72-wn2012-"
+  vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_72.display_name}" = ["", ""]
+  }
+  vmgateway             = "172.16.3.1"
+  dc                    = vsphere_datacenter.Homelab.name
+  datastore             = "vSphere Flash"
+  is_windows_image      = true
+  windomain             = var.domain
+  domain_admin_user     = var.domainuser
+  domain_admin_password = var.domainpass
+}
