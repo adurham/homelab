@@ -24,3 +24,9 @@ tanium_file_dest_linux: "/tmp/"         # Linux
 
 # (Optional) Any arguments for executing the specific file
 specific_file_exec_arguments: "/some_argument"
+
+# Tanium Server address for installation
+tanium_server_address: "amd-lxzs01.lab.amd-e.com"
+
+# Default log verbosity level for Tanium Client installation
+tanium_log_verbosity: 0

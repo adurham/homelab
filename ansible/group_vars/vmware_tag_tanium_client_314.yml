@@ -18,7 +18,7 @@ ansible_vmware_password: !vault |
           63366136653665393466636636366162393861306130366561663732366130383639313139303431
           6236366662393630310a633231353539656130316262393134356532343164656237623263633366
           3836
-ansible_vmware_validate_certs: no
+ansible_vmware_validate_certs: false
 
 # Guest OS credentials for VMware Tools
 ansible_vmware_tools_user: !vault |
