@@ -1,0 +1,26 @@
+# roles/tanium_client_314/defaults/main.yml
+---
+# Default Tanium Client version to install
+tanium_client_version: "7.2.314.3660"
+
+# Base URL of your Tanium Server
+tanium_server_url: "https://tanium.lab.amd-e.com"
+
+# API endpoint to list client versions
+tanium_client_version_endpoint: "/plugin/products/client-management/v1/client-version/list"
+
+# Destination path for the Tanium Client installer on Windows
+tanium_file_dest_windows: "C:\\Temp"
+
+# Base installation directory for Tanium Client on Windows
+tanium_install_base_dir_windows: >
+  {% if ansible_architecture == 'x86_64' %}
+    "C:\\Program Files\\Tanium\\Tanium Client"
+  {% else %}
+    "C:\\Program Files (x86)\\Tanium\\Tanium Client"
+  {% endif %}
+
+tanium_file_dest_linux: "/tmp/"         # Linux
+
+# (Optional) Any arguments for executing the specific file
+specific_file_exec_arguments: "/some_argument"
