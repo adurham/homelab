@@ -2,7 +2,7 @@
 ---
 - name: Install Tanium client on tagged VMs
   hosts: vmware_tag_tanium_client_314
-  gather_facts: no
+  gather_facts: yes
   roles:
     - tanium_client_314
 
