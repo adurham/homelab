@@ -1,0 +1,158 @@
+# inventory/vsphere_inventory.vmware.yml
+plugin: community.vmware.vmware_vm_inventory
+hostname: amd-vmvc01.lab.amd-e.com
+username: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          38303230393737313633646462303633623036633639656633343236316233373263663538653562
+          6634316536386633663030623966613830366239356231380a313662393037343566303066306132
+          65333332366462323033663164616231636261656535656433373732616233373938346265636630
+          3762386561663366320a303130643365633135313337366263663534633836616635356135316635
+          36313232666637656133626638346533613562363830306238353033356430353135
+password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          61643231333436383239333061336233353231373666376566323532613062633533616335306535
+          3135623230313539356230393434363631663863303836640a373965396130383934663430323438
+          63366136653665393466636636366162393861306130366561663732366130383639313139303431
+          6236366662393630310a633231353539656130316262393134356532343164656237623263633366
+          3836
+validate_certs: False
+
+# Collect detailed VM properties, including hierarchy
+properties:
+  - config.changeVersion
+  - config.modified
+  - config.name
+  - config.guestFullName
+  - config.version
+  - config.uuid
+  - config.instanceUuid
+  - config.npivNodeWorldWideName
+  - config.npivPortWorldWideName
+  - config.npivWorldWideNameType
+  - config.npivDesiredNodeWwns
+  - config.npivDesiredPortWwns
+  - config.npivTemporaryDisabled
+  - config.npivOnNonRdmDisks
+  - config.locationId
+  - config.template
+  - config.guestId
+  - config.alternateGuestName
+  - config.annotation
+  - config.files
+  - config.tools
+  - config.flags
+  - config.consolePreferences
+  - config.defaultPowerOps
+  - config.hardware
+  - config.cpuAllocation
+  - config.memoryAllocation
+  - config.latencySensitivity
+  - config.memoryHotAddEnabled
+  - config.cpuHotAddEnabled
+  - config.cpuHotRemoveEnabled
+  - config.hotPlugMemoryLimit
+  - config.hotPlugMemoryIncrementSize
+  - config.cpuAffinity
+  - config.memoryAffinity
+  - config.networkShaper
+  - config.extraConfig
+  - config.cpuFeatureMask
+  - config.datastoreUrl
+  - config.swapPlacement
+  - config.bootOptions
+  - config.ftInfo
+  - config.vAppConfig
+  - config.vAssertsEnabled
+  - config.changeTrackingEnabled
+  - config.firmware
+  - config.maxMksConnections
+  - config.guestAutoLockEnabled
+  - config.managedBy
+  - config.memoryReservationLockedToMax
+  - config.initialOverhead
+  - config.nestedHVEnabled
+  - config.vPMCEnabled
+  - config.scheduledHardwareUpgradeInfo
+  - config.vFlashCacheReservation
+  - layout.configFile
+  - layout.logFile
+  - layout.disk
+  - layout.snapshot
+  - layout.swapFile
+  - layoutEx.file
+  - layoutEx.disk
+  - layoutEx.snapshot
+  - layoutEx.timestamp
+  - storage.perDatastoreUsage
+  - storage.timestamp
+  - environmentBrowser
+  - resourcePool
+  - summary
+  - runtime.host
+  - runtime.connectionState
+  - runtime.powerState
+  - runtime.faultToleranceState
+  - runtime.dasVmProtection
+  - runtime.toolsInstallerMounted
+  - runtime.suspendTime
+  - runtime.bootTime
+  - runtime.suspendInterval
+  - runtime.question
+  - runtime.memoryOverhead
+  - runtime.maxCpuUsage
+  - runtime.maxMemoryUsage
+  - runtime.numMksConnections
+  - runtime.recordReplayState
+  - runtime.cleanPowerOff
+  - runtime.needSecondaryReason
+  - runtime.onlineStandby
+  - runtime.minRequiredEVCModeKey
+  - runtime.consolidationNeeded
+  - runtime.offlineFeatureRequirement
+  - runtime.featureRequirement
+  - runtime.featureMask
+  - runtime.vFlashCacheAllocation
+  - guest.toolsStatus
+  - guest.toolsVersionStatus
+  - guest.toolsVersionStatus2
+  - guest.toolsRunningStatus
+  - guest.toolsVersion
+  - guest.guestId
+  - guest.guestFamily
+  - guest.guestFullName
+  - guest.hostName
+  - guest.ipAddress
+  - guest.net
+  - guest.ipStack
+  - guest.disk
+  - guest.screen
+  - guest.guestState
+  - guest.appHeartbeatStatus
+  - guest.appState
+  - guest.guestOperationsReady
+  - guest.interactiveGuestOperationsReady
+  - guest.generationInfo
+  - summary.runtime
+  - summary.guest
+  - summary.config
+  - summary.storage
+  - summary.quickStats
+  - overallStatus
+  - customValue
+  - datastore
+  - network
+  - snapshot
+
+# Enable tagging and group by tags
+with_tags: True
+keyed_groups:
+  - key: tags
+    prefix: "vmware_tag_"
+    separator: ""
+groups:
+  vmware: true
+hostnames:
+  - config.name
+filters:
+  - "'tanium_client_314' in tags"
+  - runtime.powerState == "poweredOn"

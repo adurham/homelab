@@ -11,7 +11,13 @@ packer/**/manifests/*.json
 */.terraform.tfstate.lock.info
 .DS_Store
 
+# Ansible
+ansible/*.venv/*
+ansible/.vault_password
+
 # Scratch
 scratch/*
 misc scripts/config.env
 misc scripts/SecureCredentials.xml
+node_modules
+misc scripts/tanium/tanium_creds.env

@@ -1,0 +1,155 @@
+# roles/tanium_client_314/tasks/main.yml
+---
+- import_tasks: setup.yml
+
+- name: Retrieve Tanium Client versions from API
+  uri:
+    url: "{{ tanium_server_url }}{{ tanium_client_version_endpoint }}"
+    method: POST
+    headers:
+      session: "{{ tanium_api_token }}"  # Updated to use 'session' header
+      Content-Type: "application/json"
+    validate_certs: no  # Set to 'yes' if using valid SSL certificates
+    return_content: yes
+  register: tanium_client_versions_response
+  retries: 3
+  delay: 10
+  until: tanium_client_versions_response.status == 200
+  delegate_to: localhost
+  run_once: true
+
+- name: Parse Tanium Client versions JSON
+  set_fact:
+    tanium_client_versions: "{{ tanium_client_versions_response.json.client_versions }}"
+  delegate_to: localhost
+
+- name: Find the specified Tanium Client version details
+  set_fact:
+    selected_tanium_client: "{{ tanium_client_versions | selectattr('version', 'equalto', tanium_client_version) | list | first }}"
+  when: tanium_client_versions is defined and tanium_client_versions | length > 0
+
+- name: Fail if the specified Tanium Client version is not found
+  fail:
+    msg: "Tanium Client version {{ tanium_client_version }} not found in API response."
+  when: selected_tanium_client is not defined
+
+- name: Set architecture suffix
+  set_fact:
+    arch_suffix: >
+      {% if ansible_architecture in ['x86_64', 'amd64'] %}
+        x64
+      {% elif ansible_architecture in ['i386', 'i686'] %}
+        x86
+      {% else %}
+        unsupported
+      {% endif %}
+
+- name: Fail if architecture is unsupported
+  fail:
+    msg: "Unsupported architecture {{ ansible_architecture }}."
+  when: arch_suffix == "unsupported"
+
+- name: Determine target OS platform
+  set_fact:
+    target_os: >
+      {% if ansible_os_family == 'Windows' %}
+        windows
+      {% else %}
+        unsupported
+      {% endif %}
+
+- name: Fail if target OS is unsupported
+  fail:
+    msg: "Unsupported OS family {{ ansible_os_family }}, distribution {{ ansible_distribution }}, version {{ ansible_distribution_version }}, and architecture {{ ansible_architecture }}."
+  when: target_os == "unsupported"
+
+# === Windows-Specific Tasks ===
+
+- name: Ensure destination directory exists on Windows
+  win_file:
+    path: "{{ tanium_file_dest_windows }}"
+    state: directory
+  when: target_os == 'windows'
+
+- name: Check if Tanium Client installer already exists on Windows
+  win_stat:
+    path: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
+  register: installer_file_windows
+  when: target_os == 'windows'
+
+- name: Download Tanium Client installer on Windows
+  win_get_url:
+    url: "{{ tanium_installer_url }}"
+    dest: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
+  when:
+    - target_os == 'windows'
+    - not installer_file_windows.stat.exists
+  register: download_tanium_client_windows
+  retries: 3
+  delay: 10
+  until: download_tanium_client_windows is succeeded
+
+- name: Set Tanium Client installation directory based on architecture
+  set_fact:
+    tanium_install_dir_windows: "{{ tanium_install_base_dir_windows }}"
+  when: target_os == 'windows'
+
+- name: Install Tanium Client on Windows
+  win_command: "{{ tanium_install_command }}"
+  args:
+    creates: "{{ tanium_install_dir_windows }}\\taniumclient.exe"
+  when:
+    - target_os == 'windows'
+    - download_tanium_client_windows is succeeded
+
+- name: Start Tanium Client service on Windows
+  win_service:
+    name: "TaniumClient"
+    state: started
+  when:
+    - target_os == 'windows'
+    - download_tanium_client_windows is succeeded
+
+- name: Stop Tanium Client service on Windows
+  win_service:
+    name: "TaniumClient"
+    state: stopped
+  when:
+    - target_os == 'windows'
+    - download_tanium_client_windows is succeeded
+
+- name: Cleanup Tanium Client installer on Windows
+  win_file:
+    path: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
+    state: absent
+  when:
+    - target_os == 'windows'
+    - download_tanium_client_windows is succeeded
+
+# === Verification Tasks ===
+
+# Windows Verification
+- name: Verify Tanium Client version on Windows
+  win_command: "{{ tanium_current_version_command }}"
+  register: tanium_version_output_windows
+  changed_when: false
+  when:
+    - target_os == 'windows'
+    - download_tanium_client_windows is succeeded
+
+- name: Parse Tanium Client version on Windows
+  set_fact:
+    tanium_installed_version_windows: "{{ tanium_version_output_windows.stdout | regex_search(tanium_current_version_regex, '\\1') }}"
+  when:
+    - target_os == 'windows'
+    - download_tanium_client_windows is succeeded
+
+- name: Assert Tanium Client version on Windows
+  assert:
+    that:
+      - tanium_installed_version_windows is match("^{{ tanium_client_version }}$")
+    fail_msg: "Tanium Client version mismatch on Windows. Expected: {{ tanium_client_version }}, Found: {{ tanium_installed_version_windows }}"
+    success_msg: "Tanium Client version {{ tanium_installed_version_windows }} is correctly installed on Windows."
+  when:
+    - target_os == 'windows'
+    - download_tanium_client_windows is succeeded
