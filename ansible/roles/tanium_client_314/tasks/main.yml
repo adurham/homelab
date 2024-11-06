@@ -191,11 +191,26 @@
         - not tanium_pub_key_exists.stat.exists
 
     - name: Install Tanium Client on Windows
-      ansible.windows.win_command: '"{{ tanium_installed_dir }}\\SetupClient.exe" /S /ServerAddress {{ tanium_server_address }} /LogVerbosityLevel {{ tanium_log_verbosity }} /KeyPath "{{ tanium_file_dest_windows }}\\tanium.pub"'
+      ansible.windows.win_command: '"{{ tanium_file_dest_windows }}\\SetupClient.exe" /S /ServerAddress {{ tanium_server_address }} /LogVerbosityLevel {{ tanium_log_verbosity }} /KeyPath "{{ tanium_file_dest_windows }}\\tanium.pub"'
+
+    - name: Check if Tanium Client service exists on Windows
+      ansible.windows.win_service_info:
+        name: "Tanium Client"
+      register: tanium_service_info_post
+      when: (target_os | trim) == 'windows'
+
+    - name: Extract Tanium Client executable path from service info
+      set_fact:
+        tanium_client_exe_path: "{{ tanium_service_info_post.services[0].path | regex_replace('^[\" ]+|[\" ]+$', '') }}"
+      when:
+        - (target_os | trim) == 'windows'
+        - tanium_service_info_post.services is defined
+        - tanium_service_info_post.services | length > 0
+        - tanium_service_info_post.services[0].path is defined
 
     - name: Set Tanium Client Server Name List
       win_shell: '"{{ tanium_client_exe_path }}" config set ServerNameList {{ tanium_server_address }}'
-
+      when: tanium_client_exe_path is defined
 
     - name: Start Tanium Client service on Windows
       win_service:
