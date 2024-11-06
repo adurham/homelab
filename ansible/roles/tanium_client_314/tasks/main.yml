@@ -114,6 +114,7 @@
         dest: "{{ tanium_file_dest_windows }}\\{{ selected_tanium_client.installers.windows.filename }}"
         headers:
           User-Agent: "Tanium"
+          session: "{{ tanium_api_token }}"
         timeout: 30
       when: target_os == 'windows'
       retries: 3
