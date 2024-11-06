@@ -139,7 +139,7 @@
       when: target_os == 'windows'
 
     - name: Install Tanium Client
-      ansible.windows.win_command: '"{{ tanium_file_dest_windows }}\\SetupClient.exe" /S /ServerAddress={{ tanium_server_address }} /LogVerbosityLevel={{ tanium_log_verbosity }} /KeyPath="{{ tanium_file_dest_windows }}\\tanium.pub"'
+      ansible.windows.win_command: '"{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}" /S /ServerAddress={{ tanium_server_address }} /LogVerbosityLevel={{ tanium_log_verbosity }} /KeyPath="{{ tanium_file_dest_windows }}\\tanium.pub"'
       when: target_os == 'windows'
 
     - name: Check if Tanium Client service exists on Windows
@@ -175,7 +175,7 @@
       block:
         - name: Remove Tanium Client installer
           ansible.windows.win_file:
-            path: "{{ tanium_file_dest_windows }}\\{{ selected_tanium_client.installers.windows.filename }}"
+            path: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
             state: absent
           when: target_os == 'windows'
 
