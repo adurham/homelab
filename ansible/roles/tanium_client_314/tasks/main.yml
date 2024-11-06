@@ -126,12 +126,23 @@
       when: target_os == 'windows'
 
     - name: Install Tanium Client
-      ansible.windows.win_command: '"{{ tanium_file_dest_windows }}\\SetupClient.exe" /S /ServerAddress {{ tanium_server_address }} /LogVerbosityLevel {{ tanium_log_verbosity }} /KeyPath "{{ tanium_file_dest_windows }}\\tanium.pub"'
+      ansible.windows.win_command: '"{{ tanium_file_dest_windows }}\\SetupClient.exe" /S /ServerAddress={{ tanium_server_address }} /LogVerbosityLevel={{ tanium_log_verbosity }} /KeyPath="{{ tanium_file_dest_windows }}\\tanium.pub"'
       when: target_os == 'windows'
 
-    - name: Set Tanium Client Server Name List
-      ansible.windows.win_command: '"{{ selected_tanium_client.installers.windows.executable }}" config set ServerNameList {{ tanium_server_address }}'
+    - name: Check if Tanium Client service exists on Windows
+      ansible.windows.win_service_info:
+        name: "Tanium Client"
+      register: tanium_service_info
       when: target_os == 'windows'
+
+    - name: Set executable path from service info
+      set_fact:
+        tanium_client_exe_path: '{{ tanium_service_info.services[0].path | regex_replace(''^[" ]+|[" ]+$'', '''') }}'
+      when:
+        - target_os == 'windows'
+        - tanium_service_info.services is defined
+        - tanium_service_info.services | length > 0
+        - tanium_service_info.services[0].path is defined
 
     - name: Start Tanium Client service
       ansible.windows.win_service:
@@ -140,10 +151,18 @@
       when: target_os == 'windows'
 
     - name: Cleanup installer and public key
-      ansible.windows.win_file:
-        path: "{{ tanium_file_dest_windows }}\\{{ selected_tanium_client.installers.windows.filename }}"
-        state: absent
-      when: target_os == 'windows'
+      block:
+        - name: Remove Tanium Client installer
+          ansible.windows.win_file:
+            path: "{{ tanium_file_dest_windows }}\\{{ selected_tanium_client.installers.windows.filename }}"
+            state: absent
+          when: target_os == 'windows'
+
+        - name: Remove Tanium public key
+          ansible.windows.win_file:
+            path: "{{ tanium_file_dest_windows }}\\tanium.pub"
+            state: absent
+          when: target_os == 'windows'
 
   when: tanium_needs_install
 
