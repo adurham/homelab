@@ -144,6 +144,14 @@
         - tanium_service_info.services | length > 0
         - tanium_service_info.services[0].path is defined
 
+    - name: Check if Tanium Client version matches
+      ansible.windows.win_command: '"{{ tanium_client_exe_path }}" --version'
+      register: tanium_client_version_output
+      when:
+        - target_os == 'windows'
+        - tanium_client_exe_path is defined
+      changed_when: false
+
     - name: Start Tanium Client service
       ansible.windows.win_service:
         name: "Tanium Client"
