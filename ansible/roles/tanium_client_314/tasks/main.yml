@@ -18,15 +18,15 @@
       delay: 10
       until: tanium_client_versions_response.status == 200
 
-    - name: Set required Tanium Client version data
+    - name: Save full client version data for specified version
       set_fact:
-        selected_tanium_client: "{{ tanium_client_versions_response.json.client_versions | selectattr('version', 'equalto', tanium_client_version) | map(attribute='hash') | first }}"
+        selected_tanium_client_version_data: "{{ tanium_client_versions_response.json.client_versions | selectattr('version', 'equalto', tanium_client_version) | list | first }}"
       when: tanium_client_versions_response.json.client_versions is defined
 
     - name: Fail if specified Tanium Client version is not found
       fail:
         msg: "Tanium Client version {{ tanium_client_version }} not found in API response."
-      when: selected_tanium_client is not defined
+      when: selected_tanium_client_version_data is not defined
 
   delegate_to: localhost
   run_once: true
@@ -108,17 +108,29 @@
         state: directory
       when: target_os == 'windows'
 
-    - name: Download Tanium Client installer if missing
-      ansible.windows.win_get_url:
-        url: "{{ tanium_server_url }}/cache/{{ selected_tanium_client }}"
-        dest: "{{ tanium_file_dest_windows }}\\{{ selected_tanium_client.installers.windows.filename }}"
+    - name: Set installer details for target OS
+      set_fact:
+        tanium_installer_url: "{{ tanium_server_url }}/cache/{{ selected_tanium_client_version_data.installers.windows.hash }}"
+        tanium_installer_filename: "{{ selected_tanium_client_version_data.installers.windows.filename }}"
+        tanium_installer_hash: "{{ selected_tanium_client_version_data.installers.windows.hash }}"
+      when: target_os == 'windows'
+
+    - name: Download Tanium Client installer for each host on localhost
+      get_url:
+        url: "{{ tanium_installer_url }}"
+        dest: "/tmp/{{ tanium_installer_filename }}"
+        mode: '0644'
         headers:
-          User-Agent: "Tanium"
           session: "{{ tanium_api_token }}"
         timeout: 30
+        validate_certs: false
+      delegate_to: localhost
+
+    - name: Copy Tanium Client installer to Windows target
+      ansible.windows.win_copy:
+        src: "/tmp/{{ tanium_installer_filename }}"
+        dest: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
       when: target_os == 'windows'
-      retries: 3
-      delay: 10
 
     - name: Copy Tanium public key to Windows
       ansible.windows.win_copy:
