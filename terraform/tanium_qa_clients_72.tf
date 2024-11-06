@@ -379,6 +379,9 @@ module "homelab-tanium_clients_72-windows_server_2022" {
   windomain             = var.domain
   domain_admin_user     = var.domainuser
   domain_admin_password = var.domainpass
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-windows_server_2019" {
@@ -389,7 +392,7 @@ module "homelab-tanium_clients_72-windows_server_2019" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2019 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -406,6 +409,9 @@ module "homelab-tanium_clients_72-windows_server_2019" {
   windomain             = var.domain
   domain_admin_user     = var.domainuser
   domain_admin_password = var.domainpass
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-windows_server_2016" {
@@ -416,7 +422,7 @@ module "homelab-tanium_clients_72-windows_server_2016" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2016 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -433,6 +439,9 @@ module "homelab-tanium_clients_72-windows_server_2016" {
   windomain             = var.domain
   domain_admin_user     = var.domainuser
   domain_admin_password = var.domainpass
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-windows_server_2012r2" {
@@ -443,7 +452,7 @@ module "homelab-tanium_clients_72-windows_server_2012r2" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2012 R2 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -460,4 +469,7 @@ module "homelab-tanium_clients_72-windows_server_2012r2" {
   windomain             = var.domain
   domain_admin_user     = var.domainuser
   domain_admin_password = var.domainpass
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
