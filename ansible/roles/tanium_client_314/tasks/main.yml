@@ -21,16 +21,25 @@
   set_fact:
     tanium_client_versions: "{{ tanium_client_versions_response.json.client_versions }}"
   delegate_to: localhost
+  run_once: true
 
 - name: Find the specified Tanium Client version details
   set_fact:
     selected_tanium_client: "{{ tanium_client_versions | selectattr('version', 'equalto', tanium_client_version) | list | first }}"
   when: tanium_client_versions is defined and tanium_client_versions | length > 0
+  run_once: true
 
 - name: Fail if the specified Tanium Client version is not found
   fail:
     msg: "Tanium Client version {{ tanium_client_version }} not found in API response."
   when: selected_tanium_client is not defined
+
+- name: Check if Tanium public key exists
+  stat:
+    path: "/tmp/tanium.pub"
+  register: tanium_pub_key
+  delegate_to: localhost
+  run_once: true
 
 - name: Download Tanium public key
   uri:
@@ -44,6 +53,7 @@
   register: tanium_pub_file
   delegate_to: localhost
   run_once: true
+  when: not tanium_pub_key.stat.exists
 
 - name: Save Tanium public key locally
   copy:
@@ -51,6 +61,7 @@
     dest: "/tmp/tanium.pub"
   delegate_to: localhost
   run_once: true
+  when: not tanium_pub_key.stat.exists
 
 - name: Set architecture suffix
   set_fact:
@@ -66,7 +77,7 @@
 - name: Fail if architecture is unsupported
   fail:
     msg: "Unsupported architecture {{ ansible_architecture }}."
-  when: arch_suffix == "unsupported"
+  when: (arch_suffix | trim) == "unsupported"
 
 - name: Determine target OS platform
   set_fact:
@@ -80,7 +91,7 @@
 - name: Fail if target OS is unsupported
   fail:
     msg: "Unsupported OS family {{ ansible_os_family }}, distribution {{ ansible_distribution }}, version {{ ansible_distribution_version }}, and architecture {{ ansible_architecture }}."
-  when: target_os == "unsupported"
+  when: (target_os | trim) == "unsupported"
 
 - name: Set Tanium Installer URL dynamically
   set_fact:
@@ -99,77 +110,148 @@
     - (target_os | trim) in selected_tanium_client.installers
 
 # === Windows-Specific Installation Tasks ===
-
-- name: Ensure destination directory exists on Windows
-  win_file:
-    path: "{{ tanium_file_dest_windows }}"
-    state: directory
-  when: (target_os | trim) == 'windows'
-
-- name: Check if Tanium Client installer already exists on Windows
-  win_stat:
-    path: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
-  register: installer_file_windows
-  when: (target_os | trim) == 'windows'
-
-- name: Download Tanium Client installer on Windows
-  win_get_url:
-    url: "{{ tanium_installer_url }}"
-    dest: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
-    headers:
-      User-Agent: "Tanium"
-  when:
-    - (target_os | trim) == 'windows'
-    - installer_file_windows.stat is not defined or not installer_file_windows.stat.exists
-  register: download_tanium_client_windows
-  retries: 3
-  delay: 10
-  until: download_tanium_client_windows is succeeded
-
-- name: Check if Tanium public key already exists on Windows
-  win_stat:
-    path: "{{ tanium_file_dest_windows }}\\tanium.pub"
-  register: tanium_pub_key_exists
-  when: (target_os | trim) == 'windows'
-
-- name: Copy Tanium public key to Windows VM
-  win_copy:
-    src: "/tmp/tanium.pub"
-    dest: "{{ tanium_file_dest_windows }}\\tanium.pub"
-  when:
-    - (target_os | trim) == 'windows'
-    - not tanium_pub_key_exists.stat.exists
-
-- name: Install Tanium Client on Windows
-  win_command: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }} /S /ServerAddress {{ tanium_server_address }} /LogVerbosityLevel {{ tanium_log_verbosity }} /KeyPath {{ tanium_file_dest_windows }}\\tanium.pub"
-  when:
-    - (target_os | trim) == 'windows'
-    - download_tanium_client_windows is succeeded
-
-- name: Start Tanium Client service on Windows
-  win_service:
+- name: Check if Tanium Client service exists on Windows
+  ansible.windows.win_service_info:
     name: "Tanium Client"
-    state: started
-  when:
-    - (target_os | trim) == 'windows'
-    - download_tanium_client_windows is succeeded
+  register: tanium_service_info_post
+  when: (target_os | trim) == 'windows'
 
-- name: Cleanup Tanium Client installer on Windows
-  win_file:
-    path: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
-    state: absent
+- name: Extract Tanium Client executable path from service info
+  set_fact:
+    tanium_client_exe_path: "{{ tanium_service_info_post.services[0].path | regex_replace('^[\" ]+|[\" ]+$', '') }}"
   when:
     - (target_os | trim) == 'windows'
-    - download_tanium_client_windows is succeeded
+    - tanium_service_info_post.services is defined
+    - tanium_service_info_post.services | length > 0
+    - tanium_service_info_post.services[0].path is defined
+
+- name: Get Tanium Client version on Windows
+  ansible.windows.win_command: '"{{ tanium_client_exe_path }}" --version'
+  register: tanium_client_version_output
+  when:
+    - (target_os | trim) == 'windows'
+    - tanium_client_exe_path is defined
+  ignore_errors: false
+  changed_when: false
+
+- name: Set installed Tanium Client version fact on Windows
+  set_fact:
+    tanium_installed_version_windows: "{{ tanium_client_version_output.stdout | regex_search('\\d+(?:\\.\\d+)+') }}"
+  when:
+    - (target_os | trim) == 'windows'
+    - tanium_client_version_output.stdout is defined
+    - tanium_client_version_output.stdout != "Not Installed"
+
+- name: Determine if Tanium Client installation is required
+  set_fact:
+    tanium_needs_install: >-
+      {{
+        tanium_installed_version_windows is not defined
+        or tanium_installed_version_windows is version(tanium_client_version, '<')
+      }}
+  when:
+    - (target_os | trim) == 'windows'
+    - tanium_client_version is defined
+
+# === Conditional Installation Block ===
+- block:
+    - name: Ensure destination directory exists on Windows
+      win_file:
+        path: "{{ tanium_file_dest_windows }}"
+        state: directory
+
+    - name: Check if Tanium Client installer already exists on Windows
+      win_stat:
+        path: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
+      register: installer_file_windows
+
+    - name: Download Tanium Client installer on Windows
+      win_get_url:
+        url: "{{ tanium_installer_url }}"
+        dest: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
+        headers:
+          User-Agent: "Tanium"
+      when:
+        - (installer_file_windows.stat is not defined or not installer_file_windows.stat.exists)
+      register: download_tanium_client_windows
+      retries: 3
+      delay: 10
+      until: download_tanium_client_windows is succeeded
+
+    - name: Check if Tanium public key already exists on Windows
+      win_stat:
+        path: "{{ tanium_file_dest_windows }}\\tanium.pub"
+      register: tanium_pub_key_exists
+
+    - name: Copy Tanium public key to Windows VM
+      ansible.windows.win_copy:
+        src: "/tmp/tanium.pub"
+        dest: "{{ tanium_file_dest_windows }}\\tanium.pub"
+      when:
+        - not tanium_pub_key_exists.stat.exists
+
+    - name: Install Tanium Client on Windows
+      ansible.windows.win_command: '"{{ tanium_installed_dir }}\\SetupClient.exe" /S /ServerAddress {{ tanium_server_address }} /LogVerbosityLevel {{ tanium_log_verbosity }} /KeyPath "{{ tanium_file_dest_windows }}\\tanium.pub"'
+
+    - name: Set Tanium Client Server Name List
+      win_shell: '"{{ tanium_client_exe_path }}" config set ServerNameList {{ tanium_server_address }}'
+
+
+    - name: Start Tanium Client service on Windows
+      win_service:
+        name: "Tanium Client"
+        state: started
+
+    - name: Cleanup Tanium Client installer on Windows
+      win_file:
+        path: "{{ tanium_file_dest_windows }}\\{{ tanium_installer_filename }}"
+        state: absent
+
+  when: tanium_needs_install
 
 # === Verification Tasks ===
+- name: Retrieve installed Tanium Client version after installation
+  win_shell: '"{{ tanium_client_exe_path }}" --version'
+  register: tanium_installed_version_post
+  when: 
+    - (target_os | trim) == 'windows'
+    - tanium_needs_install
+
+- name: Set installed Tanium Client version fact after installation
+  set_fact:
+    tanium_installed_version_windows: "{{ tanium_installed_version_post.stdout | regex_search('\\d+(?:\\.\\d+)+') | default('') }}"
+  when: 
+    - (target_os | trim) == 'windows'
+    - tanium_needs_install
 
 - name: Assert Tanium Client version on Windows
   assert:
     that:
-      - tanium_installed_version_windows is match("^{{ tanium_client_version }}$")
-    fail_msg: "Tanium Client version mismatch on Windows. Expected: {{ tanium_client_version }}, Found: {{ tanium_installed_version_windows }}"
+      - tanium_installed_version_windows is defined
+      - tanium_installed_version_windows | regex_match("^{{ tanium_client_version }}$")
+    fail_msg: "Tanium Client version mismatch on Windows. Expected: {{ tanium_client_version }}, Found: {{ tanium_installed_version_windows | default('not installed') }}"
     success_msg: "Tanium Client version {{ tanium_installed_version_windows }} is correctly installed on Windows."
   when:
     - (target_os | trim) == 'windows'
-    - download_tanium_client_windows is succeeded
+    - tanium_needs_install
+
+- name: Assert that Tanium Client service exists on Windows
+  assert:
+    that:
+      - tanium_service_info_post.services is defined
+      - tanium_service_info_post.services | length > 0
+    fail_msg: "Tanium Client service does not exist on Windows."
+    success_msg: "Tanium Client service exists on Windows."
+  when: (target_os | trim) == 'windows'
+
+- name: Assert all Tanium Client services are started or running on Windows
+  assert:
+    that:
+      - item.state in ['started', 'running']
+    fail_msg: "One or more Tanium Client services are not running on Windows."
+    success_msg: "All Tanium Client services are running on Windows."
+  loop: "{{ tanium_service_info_post.services }}"
+  when:
+    - (target_os | trim) == 'windows'
+    - tanium_service_info_post.services is defined
+    - tanium_service_info_post.services | length > 0
