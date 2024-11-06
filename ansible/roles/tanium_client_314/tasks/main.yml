@@ -20,7 +20,7 @@
 
     - name: Set required Tanium Client version data
       set_fact:
-        selected_tanium_client: "{{ tanium_client_versions_response.json.client_versions | selectattr('version', 'equalto', tanium_client_version) | list | first }}"
+        selected_tanium_client: "{{ tanium_client_versions_response.json.client_versions | selectattr('version', 'equalto', tanium_client_version) | map(attribute='hash') | first }}"
       when: tanium_client_versions_response.json.client_versions is defined
 
     - name: Fail if specified Tanium Client version is not found
@@ -110,7 +110,7 @@
 
     - name: Download Tanium Client installer if missing
       ansible.windows.win_get_url:
-        url: "{{ selected_tanium_client.installers.windows.url }}"
+        url: "{{ tanium_server_url }}/cache/{{ selected_tanium_client }}"
         dest: "{{ tanium_file_dest_windows }}\\{{ selected_tanium_client.installers.windows.filename }}"
         headers:
           User-Agent: "Tanium"
