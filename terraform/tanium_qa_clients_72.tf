@@ -26,7 +26,7 @@ module "homelab-tanium_clients_72-debian_12" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Debian Linux 12"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -40,6 +40,9 @@ module "homelab-tanium_clients_72-debian_12" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-debian_11" {
@@ -50,7 +53,7 @@ module "homelab-tanium_clients_72-debian_11" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Debian Linux 11"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -64,6 +67,9 @@ module "homelab-tanium_clients_72-debian_11" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-debian_10" {
@@ -74,7 +80,7 @@ module "homelab-tanium_clients_72-debian_10" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Debian Linux 10"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -88,6 +94,9 @@ module "homelab-tanium_clients_72-debian_10" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-ubuntu_22" {
