@@ -149,6 +149,9 @@ keyed_groups:
   - key: tags
     prefix: "vmware_tag_"
     separator: ""
+  - key: guest.guestFamily
+    prefix: "os_"
+    separator: ""
 groups:
   vmware: true
 hostnames:
