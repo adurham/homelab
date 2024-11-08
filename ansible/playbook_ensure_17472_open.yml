@@ -1,0 +1,73 @@
+# playbook_ensure_17472_open.yml
+---
+- name: Ensure TCP port 17472 is open
+  hosts: vmware_tag_tanium_client_314
+  tasks:
+    - name: Ensure TCP port 17472 is open on Linux
+      block:
+        - name: Detect firewall management tool
+          ansible.builtin.shell: |
+            if command -v firewall-cmd > /dev/null 2>&1; then
+              echo firewalld;
+            elif command -v ufw > /dev/null 2>&1; then
+              echo ufw;
+            elif command -v nft > /dev/null 2>&1; then
+              echo nftables;
+            elif command -v iptables > /dev/null 2>&1; then
+              echo iptables;
+            else
+              echo none;
+            fi
+          register: firewall_tool
+          changed_when: false
+
+        - name: Open TCP port 17472 using firewalld
+          ansible.builtin.command: firewall-cmd --add-port=17472/tcp --permanent
+          when: firewall_tool.stdout == "firewalld"
+    
+        - name: Reload firewalld to apply rules
+          ansible.builtin.command: firewall-cmd --reload
+          when: firewall_tool.stdout == "firewalld"
+    
+        - name: Open TCP port 17472 on Linux using ufw
+          ansible.builtin.command: ufw allow 17472/tcp
+          when: firewall_tool.stdout == "ufw"
+
+        - name: Check if iptables rule exists for TCP port 17472
+          ansible.builtin.command: iptables -C INPUT -p tcp --dport 17472 -j ACCEPT
+          register: iptables_check
+          ignore_errors: true
+          changed_when: false
+          failed_when: false
+          when: firewall_tool.stdout == "iptables"
+
+        - name: Add iptables rule for TCP port 17472 if missing
+          ansible.builtin.command: iptables -A INPUT -p tcp --dport 17472 -j ACCEPT
+          when:
+            - firewall_tool.stdout == "iptables"
+            - iptables_check.rc != 0
+
+        - name: Save iptables rules (persistent across reboots for non-Debian 10)
+          ansible.builtin.command: service iptables save
+          when:
+            - firewall_tool.stdout == "iptables"
+            - not (ansible_distribution == "Debian" and ansible_distribution_major_version | int == 10)
+
+        - name: Save iptables rules (Debian 10)
+          ansible.builtin.shell: iptables-save > /etc/iptables/rules.v4
+          when:
+            - firewall_tool.stdout == "iptables"
+            - ansible_distribution == "Debian"
+            - ansible_distribution_major_version | int == 10
+
+      when: ansible_system == "Linux"
+
+    - name: Open TCP port 17472 on Windows using the firewall
+      win_firewall_rule:
+        name: Allow TCP Port 17472
+        localport: 17472
+        protocol: TCP
+        action: allow
+        direction: in
+        state: present
+      when: ansible_system == "Windows"
