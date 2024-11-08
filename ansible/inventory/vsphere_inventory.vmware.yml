@@ -152,6 +152,9 @@ keyed_groups:
   - key: guest.guestFamily
     prefix: "os_"
     separator: ""
+  - key: guest.guestId
+    prefix: "os_"
+    separator: ""
 groups:
   vmware: true
 hostnames:
