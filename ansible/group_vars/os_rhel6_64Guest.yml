@@ -1,0 +1,2 @@
+# Override default python location
+ansible_python_interpreter: /opt/rh/rh-python38/root/usr/bin/python3

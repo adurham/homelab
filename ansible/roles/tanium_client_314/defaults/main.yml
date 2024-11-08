@@ -9,8 +9,11 @@ tanium_server_url: "https://tanium.lab.amd-e.com"
 # API endpoint to list client versions
 tanium_client_version_endpoint: "/plugin/products/client-management/v1/client-version/list"
 
-# Destination path for the Tanium Client installer on Windows
+# Destination path for the Tanium Client installer
+# Windows
 tanium_file_dest_windows: "C:\\Temp"
+# Linux
+tanium_file_dest_linux: "/tmp"
 
 # Base installation directory for Tanium Client on Windows
 tanium_install_base_dir_windows: >
@@ -19,8 +22,6 @@ tanium_install_base_dir_windows: >
   {% else %}
     "C:\\Program Files (x86)\\Tanium\\Tanium Client"
   {% endif %}
-
-tanium_file_dest_linux: "/tmp/"         # Linux
 
 # Tanium Server address for installation
 tanium_server_address: "amd-lxzs01.lab.amd-e.com"

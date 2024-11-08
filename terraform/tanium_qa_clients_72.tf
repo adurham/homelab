@@ -179,7 +179,7 @@ module "homelab-tanium_clients_72-rhel_9" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "RedHat Enterprise Linux 9"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -193,6 +193,9 @@ module "homelab-tanium_clients_72-rhel_9" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-rhel_8" {
@@ -203,7 +206,7 @@ module "homelab-tanium_clients_72-rhel_8" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "RedHat Enterprise Linux 8"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -217,6 +220,9 @@ module "homelab-tanium_clients_72-rhel_8" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-rhel_7" {
@@ -227,7 +233,7 @@ module "homelab-tanium_clients_72-rhel_7" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "RedHat Enterprise Linux 7"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -241,6 +247,9 @@ module "homelab-tanium_clients_72-rhel_7" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-rhel_6" {
@@ -251,7 +260,7 @@ module "homelab-tanium_clients_72-rhel_6" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "RedHat Enterprise Linux 6"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -265,6 +274,9 @@ module "homelab-tanium_clients_72-rhel_6" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-oracle_9" {
@@ -275,7 +287,7 @@ module "homelab-tanium_clients_72-oracle_9" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Oracle Linux 9"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -289,6 +301,9 @@ module "homelab-tanium_clients_72-oracle_9" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-oracle_8" {
@@ -299,7 +314,7 @@ module "homelab-tanium_clients_72-oracle_8" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Oracle Linux 8"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -313,6 +328,9 @@ module "homelab-tanium_clients_72-oracle_8" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-oracle_7" {
@@ -323,7 +341,7 @@ module "homelab-tanium_clients_72-oracle_7" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Oracle Linux 7"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -337,6 +355,9 @@ module "homelab-tanium_clients_72-oracle_7" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-oracle_6" {
@@ -347,7 +368,7 @@ module "homelab-tanium_clients_72-oracle_6" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Oracle Linux 6"
   vmfolder        = vsphere_folder.tanium_clients_72.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -361,6 +382,9 @@ module "homelab-tanium_clients_72-oracle_6" {
   vmgateway = "172.16.3.1"
   dc        = vsphere_datacenter.Homelab.name
   datastore = "vSphere Rust"
+  tags = {
+    "Homelab" = "tanium_client_314"
+  }
 }
 
 module "homelab-tanium_clients_72-windows_server_2022" {

@@ -1,7 +1,8 @@
 ---
-- import_tasks: setup.yml
+# Not needed
+# - import_tasks: setup.yml
 
-- name: Retrieve and parse Tanium Client versions
+- name: Retrieve and parse Tanium Client versions available from Tanium Server
   block:
     - name: Get Tanium Client versions from API
       uri:
@@ -70,7 +71,7 @@
             target_os: >-
               {%- if ansible_os_family == 'Windows' -%}
                 windows
-              {%- elif ansible_os_family == 'RedHat' and ansible_distribution in ['CentOS', 'RedHat', 'Amazon', 'Oracle'] -%}
+              {%- elif ansible_os_family == 'RedHat' and ansible_distribution in ['CentOS', 'RedHat', 'Amazon', 'OracleLinux'] -%}
                 linux
               {%- elif ansible_os_family == 'Debian' and ansible_distribution in ['Debian', 'Ubuntu'] -%}
                 linux
@@ -85,53 +86,53 @@
         msg: "Unsupported architecture {{ ansible_architecture }} or OS family {{ ansible_os_family }}."
       when: arch_suffix == "unsupported" or target_os == "unsupported"
 
-    - name: Check if Tanium Client is installed on Windows
-      block:
-        - name: Check if Tanium Client service exists
-          ansible.windows.win_service_info:
-            name: "Tanium Client"
-          register: tanium_service_info
+- name: Check if Tanium Client is installed on Windows
+  block:
+    - name: Check if Tanium Client service exists
+      ansible.windows.win_service_info:
+        name: "Tanium Client"
+      register: tanium_service_info
 
-        - name: Set executable path from service info
-          set_fact:
-            tanium_client_exe_path: '{{ tanium_service_info.services[0].path | regex_replace(''^[" ]+|[" ]+$'', '''') }}'
-          when:
-            - tanium_service_info.services is defined
-            - tanium_service_info.services | length > 0
-            - tanium_service_info.services[0].path is defined
+    - name: Set executable path from service info
+      set_fact:
+        tanium_client_exe_path: '{{ tanium_service_info.services[0].path | regex_replace(''^[" ]+|[" ]+$'', '''') }}'
+      when:
+        - tanium_service_info.services is defined
+        - tanium_service_info.services | length > 0
+        - tanium_service_info.services[0].path is defined
 
-        - name: Check if Tanium Client version matches
-          ansible.windows.win_command: '"{{ tanium_client_exe_path }}" --version'
-          register: tanium_client_version_output
-          when:
-            - tanium_client_exe_path is defined
-          changed_when: false
+    - name: Check if Tanium Client version matches
+      ansible.windows.win_command: '"{{ tanium_client_exe_path }}" --version'
+      register: tanium_client_version_output
+      when:
+        - tanium_client_exe_path is defined
+      changed_when: false
 
-        - name: Set Tanium installation needed flag
-          set_fact:
-            tanium_needs_install: "{{ tanium_client_version_output.stdout is undefined or (tanium_client_version_output.stdout | default('') | regex_search('\\d+(?:\\.\\d+)+')) != tanium_client_version }}"
+    - name: Set Tanium installation needed flag
+      set_fact:
+        tanium_needs_install: "{{ tanium_client_version_output.stdout is undefined or (tanium_client_version_output.stdout | default('') | regex_search('\\d+(?:\\.\\d+)+')) != tanium_client_version }}"
 
-      when: target_os == 'windows'
+  when: target_os == 'windows'
 
-    - name: Check if Tanium Client is installed on Linux
-      block:
-        - name: Check if Tanium Client binary exists
-          stat:
-            path: "/opt/Tanium/TaniumClient/TaniumClient"
-          register: tanium_client_binary
+- name: Check if Tanium Client is installed on Linux
+  block:
+    - name: Check if Tanium Client binary exists
+      stat:
+        path: "/opt/Tanium/TaniumClient/TaniumClient"
+      register: tanium_client_binary
 
-        - name: Retrieve Tanium Client version if installed
-          command: "{{ tanium_client_binary.stat.path }} --version"
-          register: tanium_client_version_output
-          when:
-            - tanium_client_binary.stat.exists
-          changed_when: false
+    - name: Retrieve Tanium Client version if installed
+      command: "{{ tanium_client_binary.stat.path }} --version"
+      register: tanium_client_version_output
+      when:
+        - tanium_client_binary.stat.exists
+      changed_when: false
 
-        - name: Set Tanium installation needed flag based on version check
-          set_fact:
-            tanium_needs_install: "{{ tanium_client_version_output.stdout | default('') | regex_search('\\d+(?:\\.\\d+)+') != tanium_client_version }}"
+    - name: Set Tanium installation needed flag based on version check
+      set_fact:
+        tanium_needs_install: "{{ tanium_client_version_output.stdout | default('') | regex_search('\\d+(?:\\.\\d+)+') != tanium_client_version }}"
 
-      when: target_os == 'linux'
+  when: target_os == 'linux'
 
 - name: Install Tanium Client if required on Windows
   block:
@@ -217,10 +218,46 @@
       set_fact:
         arch_suffix: "{{ ansible_distribution | lower }}{{ ansible_distribution_major_version }}-{{ 'x64' if ansible_architecture in ['x86_64', 'amd64'] else 'x86' }}"
 
+    - name: Normalize arch_suffix for API compatibility
+      set_fact:
+        arch_suffix: >-
+          {%- if ansible_distribution == 'OracleLinux' -%}
+            {{ 'oracle' + ansible_distribution_major_version + '-x64' if arch_suffix == 'oraclelinux' + ansible_distribution_major_version + '-x64' else arch_suffix }}
+          {%- elif ansible_distribution == 'RedHat' -%}
+            {{ 'rhel' + ansible_distribution_major_version + '-x64' if arch_suffix == 'redhat' + ansible_distribution_major_version + '-x64' else arch_suffix }}
+          {%- else -%}
+            {{ arch_suffix }}
+          {%- endif -%}
+
     - name: Adjust arch_suffix for Debian 10, 11, and 12 if not explicitly supported
       set_fact:
         arch_suffix: "debian9-x64"
       when: arch_suffix in ["debian10-x64", "debian11-x64", "debian12-x64"] and "debian9-x64" in selected_tanium_client_version_data.installers
+
+    - name: Adjust arch_suffix for CentOS 8, and 9 if not explicitly supported
+      set_fact:
+        arch_suffix: "centos7-x64"
+      when: arch_suffix in ["centos8-x64", "centos9-x64"] and "centos7-x64" in selected_tanium_client_version_data.installers
+
+    - name: Adjust arch_suffix for RHEL 6
+      set_fact:
+        arch_suffix: "centos6-x64"
+      when: arch_suffix in ["rhel6-x64"] and "centos6-x64" in selected_tanium_client_version_data.installers
+
+    - name: Adjust arch_suffix for RHEL 7
+      set_fact:
+        arch_suffix: "centos7-x64"
+      when: arch_suffix in ["rhel7-x64"] and "centos7-x64" in selected_tanium_client_version_data.installers
+
+    - name: Adjust arch_suffix for RHEL 8 and 9 if not explicitly supported
+      set_fact:
+        arch_suffix: "centos7-x64"
+      when: arch_suffix in ["rhel8-x64", "rhel9-x64"] and "centos7-x64" in selected_tanium_client_version_data.installers
+
+    - name: Adjust arch_suffix for Oracle 9 if not explicitly supported
+      set_fact:
+        arch_suffix: "oracle8-x64"
+      when: arch_suffix in ["oracle9-x64"] and "oracle8-x64" in selected_tanium_client_version_data.installers
 
     - name: Check if final arch_suffix is supported
       fail:
@@ -254,28 +291,28 @@
         src: "/tmp/tanium.pub"
         dest: "{{ tanium_file_dest_linux }}/tanium.pub"
 
-    - name: Install Tanium Client on Debian-based systems
-      apt:
-        deb: "{{ tanium_file_dest_linux }}/{{ tanium_installer_filename }}"
-        state: present
-      when:
-        - ansible_os_family == 'Debian'
-        - ansible_distribution in ['Debian', 'Ubuntu']
+    - name: Prepare installation command
+      set_fact:
+        install_command: "{{ selected_tanium_client_version_data.installers[arch_suffix].install_command | regex_replace('{{path}}', tanium_file_dest_linux + '/') }}"
 
-    - name: Install Tanium Client on RedHat-based systems (RedHat, CentOS, Oracle, Amazon Linux)
-      yum:
-        name: "{{ tanium_file_dest_linux }}/{{ tanium_installer_filename }}"
-        state: present
-      when:
-        - ansible_os_family == 'RedHat'
-        - ansible_distribution in ['RedHat', 'CentOS', 'OracleLinux', 'Amazon']
+    - name: Modify install_command to use --noscripts if it starts with rpm -i
+      set_fact:
+        install_command: "{{ install_command | regex_replace('^rpm -i', 'rpm --noscripts -i') }}"
+      when: arch_suffix in ["centos7-x64", "oracle7-x64"]
 
-    - name: Install Tanium Client on OpenSUSE
-      zypper:
-        name: "{{ tanium_file_dest_linux }}/{{ tanium_installer_filename }}"
-        state: present
-      when:
-        - ansible_distribution == 'OpenSUSE'
+    - name: Install Tanium Client
+      shell: "{{ install_command }}"
+      args:
+        chdir: "{{ tanium_file_dest_linux }}"
+        executable: /bin/bash
+      environment:
+        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        BASH_ENV: "/etc/profile"
+      become: true
+      register: install_result
+      failed_when:
+        - install_result.rc != 0
+        - "'NOKEY' not in install_result.stderr"
 
     - name: Move tanium.pub file to the TaniumClient directory
       copy:
@@ -283,7 +320,7 @@
         dest: "/opt/Tanium/TaniumClient/tanium.pub"
         owner: root
         group: root
-        mode: '0644'
+        mode: "0644"
 
     - name: Configure TaniumClient server
       command: "/opt/Tanium/TaniumClient/TaniumClient config set ServerName {{ tanium_server_address }}"
