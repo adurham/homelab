@@ -39,7 +39,7 @@ module "homelab-tanium_clients_74-debian_12" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-debian_11" {
@@ -63,7 +63,7 @@ module "homelab-tanium_clients_74-debian_11" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-debian_10" {
@@ -87,7 +87,7 @@ module "homelab-tanium_clients_74-debian_10" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-ubuntu_22" {
@@ -111,7 +111,7 @@ module "homelab-tanium_clients_74-ubuntu_22" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-ubuntu_20" {
@@ -135,7 +135,7 @@ module "homelab-tanium_clients_74-ubuntu_20" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-ubuntu_18" {
@@ -159,7 +159,7 @@ module "homelab-tanium_clients_74-ubuntu_18" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-rhel_9" {
@@ -183,7 +183,7 @@ module "homelab-tanium_clients_74-rhel_9" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-rhel_8" {
@@ -207,7 +207,7 @@ module "homelab-tanium_clients_74-rhel_8" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-rhel_7" {
@@ -231,7 +231,7 @@ module "homelab-tanium_clients_74-rhel_7" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-rhel_6" {
@@ -255,7 +255,7 @@ module "homelab-tanium_clients_74-rhel_6" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-oracle_9" {
@@ -279,7 +279,7 @@ module "homelab-tanium_clients_74-oracle_9" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-oracle_8" {
@@ -303,7 +303,7 @@ module "homelab-tanium_clients_74-oracle_8" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-oracle_7" {
@@ -327,7 +327,7 @@ module "homelab-tanium_clients_74-oracle_7" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-oracle_6" {
@@ -351,7 +351,7 @@ module "homelab-tanium_clients_74-oracle_6" {
   }
   vmgateway = "172.16.4.1"
   dc        = vsphere_datacenter.Homelab.name
-  datastore = "vSphere Flash"
+  datastore = "vSphere Rust"
 }
 
 module "homelab-tanium_clients_74-windows_server_2022" {
@@ -374,7 +374,7 @@ module "homelab-tanium_clients_74-windows_server_2022" {
   }
   vmgateway             = "172.16.4.1"
   dc                    = vsphere_datacenter.Homelab.name
-  datastore             = "vSphere Flash"
+  datastore             = "vSphere Rust"
   is_windows_image      = true
   windomain             = var.domain
   domain_admin_user     = var.domainuser
@@ -401,7 +401,7 @@ module "homelab-tanium_clients_74-windows_server_2019" {
   }
   vmgateway             = "172.16.4.1"
   dc                    = vsphere_datacenter.Homelab.name
-  datastore             = "vSphere Flash"
+  datastore             = "vSphere Rust"
   is_windows_image      = true
   windomain             = var.domain
   domain_admin_user     = var.domainuser
@@ -428,7 +428,7 @@ module "homelab-tanium_clients_74-windows_server_2016" {
   }
   vmgateway             = "172.16.4.1"
   dc                    = vsphere_datacenter.Homelab.name
-  datastore             = "vSphere Flash"
+  datastore             = "vSphere Rust"
   is_windows_image      = true
   windomain             = var.domain
   domain_admin_user     = var.domainuser
@@ -455,7 +455,7 @@ module "homelab-tanium_clients_74-windows_server_2012r2" {
   }
   vmgateway             = "172.16.4.1"
   dc                    = vsphere_datacenter.Homelab.name
-  datastore             = "vSphere Flash"
+  datastore             = "vSphere Rust"
   is_windows_image      = true
   windomain             = var.domain
   domain_admin_user     = var.domainuser
