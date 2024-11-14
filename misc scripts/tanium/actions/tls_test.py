@@ -142,8 +142,22 @@ def decode_domain(domain):
 def validate_proxy(proxy):
     """Validates a proxy by attempting to establish a connection to it."""
     try:
-        parsed_proxy = urlparse(proxy)
-        with socket.create_connection((parsed_proxy.hostname, parsed_proxy.port), timeout=5):
+        # Add 'http://' if the proxy string does not include a scheme
+        if not proxy.startswith(('http://', 'https://', 'socks5://')):
+            proxy_with_scheme = 'http://' + proxy
+        else:
+            proxy_with_scheme = proxy
+
+        parsed_proxy = urlparse(proxy_with_scheme)
+        hostname = parsed_proxy.hostname
+        port = parsed_proxy.port
+
+        if not hostname or not port:
+            print(f"Invalid proxy format: {proxy}")
+            return False
+
+        # Attempt to create a socket connection to the proxy
+        with socket.create_connection((hostname, port), timeout=5):
             print(f"Proxy {proxy} is valid.")
             return True
     except Exception as e:
