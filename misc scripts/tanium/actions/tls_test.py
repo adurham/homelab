@@ -1,22 +1,27 @@
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 import socket
 import ssl
 import json
 import os
 import subprocess
 import platform
+import argparse
+import sys
 from datetime import datetime
 import tanium
 
 # Initialize base path from Tanium client
 base_path = tanium.client.common.get_client_dir()
+if not base_path:
+    print("Tanium client directory not found. Using current working directory as base_path.")
+    base_path = os.getcwd()
 
 # Construct RESULTS_FILE with base_path
 RESULTS_FILE = os.path.join(base_path, "Tools", "tls_results.json")
 
 # List of domains to test
 domain_list = [
-
+    # Example: "google.com"
 ]
 
 # ======================
@@ -51,14 +56,7 @@ def detect_ca_paths():
     print(f"Detected operating system: {os_name}")
 
     if os_name == "Linux":
-        # Detect Linux distribution
-        try:
-            distro = platform.freedesktop_os_release().get("ID", "").lower()
-            print(f"Detected Linux distribution: {distro}")
-        except AttributeError:
-            distro = "unknown"
-
-        # Common CA paths for different distributions
+        # Common CA paths for Linux distributions
         if os.path.exists("/etc/ssl/certs/ca-certificates.crt"):
             ca_paths["cafile"] = "/etc/ssl/certs/ca-certificates.crt"
             ca_paths["capath"] = "/etc/ssl/certs"
@@ -69,7 +67,7 @@ def detect_ca_paths():
             ca_paths["cafile"] = "/etc/ssl/ca-bundle.pem"
             ca_paths["capath"] = "/etc/ssl/certs"
     elif os_name == "Darwin":
-        # macOS (attempt to locate CA certificates)
+        # Common CA paths for macOS
         print("Attempting to detect CA certificates on macOS.")
         possible_cafile_locations = [
             '/private/etc/ssl/cert.pem',
@@ -128,9 +126,18 @@ def configure_ssl_context():
     return context
 
 
+def decode_domain(domain):
+    """
+    Decodes a domain if it is URL-encoded.
+    Returns the decoded domain.
+    """
+    decoded_domain = unquote(domain)
+    return decoded_domain
+
 # ============================
 # 2) Information Gathering Functions
 # ============================
+
 
 def validate_proxy(proxy):
     """Validates a proxy by attempting to establish a connection to it."""
@@ -158,7 +165,7 @@ def detect_proxies():
                 capture_output=True,
                 text=True,
                 check=True,
-                shell=True  # For handling paths with spaces
+                shell=True
             )
             proxies = result.stdout.split()
         elif platform.system() == "Linux":
@@ -171,7 +178,7 @@ def detect_proxies():
                 capture_output=True,
                 text=True,
                 check=True,
-                shell=True
+                shell=False
             )
             proxies = result.stdout.split()
         elif platform.system() == "Darwin":
@@ -184,7 +191,7 @@ def detect_proxies():
                 capture_output=True,
                 text=True,
                 check=True,
-                shell=True
+                shell=False
             )
             proxies = result.stdout.split()
         else:
@@ -199,6 +206,23 @@ def detect_proxies():
         proxy for proxy in proxy_list if validate_proxy(proxy)]
     print(f"Validated proxies: {validated_proxies}")
     return validated_proxies
+
+
+def detect_proxies_external():
+    """Fallback function to detect proxies using the external configuration data."""
+    print("Falling back to external proxy detection method.")
+    proxies = []
+    # Get the configuration data
+    config_data = tanium.client.get_full_config()
+    # Extract 'ProxyServers' from the configuration data
+    proxy_servers = config_data.get('ProxyServers')
+    if proxy_servers:
+        # 'ProxyServers' may contain multiple proxies separated by commas
+        proxies = [proxy.strip() for proxy in proxy_servers.split(',')]
+        print(f"Extracted 'ProxyServers': {proxies}")
+    else:
+        print("No 'ProxyServers' found in external data.")
+    return proxies
 
 
 def resolve_dns(domain):
@@ -307,6 +331,44 @@ def main():
     ensure_results_file()
     results = load_results()
     proxies = detect_proxies()
+
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='TLS Connection Tester')
+    parser.add_argument(
+        'domains',
+        nargs='*',
+        help='List of domains to test'
+    )
+    args = parser.parse_args()
+
+    # Detect if running under Tanium and arguments are unescaped
+    running_under_tanium = hasattr(sys, '_original_argv')
+    domains_from_args = args.domains
+
+    # If running under Tanium and arguments are unescaped, skip decoding
+    if domains_from_args:
+        for domain_arg in domains_from_args:
+            # If domain_arg contains newline characters, split into multiple domains
+            if '\n' in domain_arg or '%0a' in domain_arg.lower():
+                if running_under_tanium:
+                    # Arguments are already unescaped, split directly
+                    domains = [d.strip() for d in domain_arg.split('\n') if d.strip()]
+                    domain_list.extend(domains)
+                else:
+                    # Decode and split
+                    decoded_arg = decode_domain(domain_arg)
+                    domains = [d.strip() for d in decoded_arg.split('\n') if d.strip()]
+                    domain_list.extend(domains)
+            else:
+                # Single domain, add directly
+                domain_list.append(domain_arg if running_under_tanium else decode_domain(domain_arg))
+
+    if not domain_list:
+        print("No domains provided to test.")
+        return
+
+    # Print the domain list before testing
+    print(f"Domains to be tested: {domain_list}")
 
     for base_domain in domain_list:
         print(f"\nTesting domain: {base_domain}")
