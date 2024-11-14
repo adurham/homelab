@@ -69,9 +69,35 @@ def detect_ca_paths():
             ca_paths["cafile"] = "/etc/ssl/ca-bundle.pem"
             ca_paths["capath"] = "/etc/ssl/certs"
     elif os_name == "Darwin":
-        # macOS (uses the system keychain)
-        ca_paths["cafile"] = None
-        ca_paths["capath"] = None
+        # macOS (attempt to locate CA certificates)
+        print("Attempting to detect CA certificates on macOS.")
+        possible_cafile_locations = [
+            '/private/etc/ssl/cert.pem',
+            '/usr/local/etc/openssl@1.1/cert.pem',
+            '/usr/local/etc/openssl/cert.pem',
+            '/etc/ssl/cert.pem',
+            '/System/Library/OpenSSL/certs/cert.pem',
+        ]
+        possible_capath_locations = [
+            '/private/etc/ssl/certs',
+            '/usr/local/etc/openssl@1.1/certs',
+            '/usr/local/etc/openssl/certs',
+            '/etc/ssl/certs',
+            '/System/Library/OpenSSL/certs',
+        ]
+        for cafile in possible_cafile_locations:
+            if os.path.exists(cafile):
+                print(f"Found CA file at {cafile}")
+                ca_paths["cafile"] = cafile
+                break
+        if not ca_paths["cafile"]:
+            for capath in possible_capath_locations:
+                if os.path.exists(capath):
+                    print(f"Found CA directory at {capath}")
+                    ca_paths["capath"] = capath
+                    break
+        if not ca_paths["cafile"] and not ca_paths["capath"]:
+            print("Could not find CA certificates on macOS.")
     elif os_name == "Windows":
         # Windows (uses the system's certificate store)
         ca_paths["cafile"] = None
@@ -87,17 +113,18 @@ def configure_ssl_context():
     """
     Configures and returns an SSL context using the detected CA paths.
     """
+    context = ssl.create_default_context()
     ca_paths = detect_ca_paths()
 
     if ca_paths["cafile"] or ca_paths["capath"]:
         os.environ["SSL_CERT_FILE"] = ca_paths["cafile"] or ""
         os.environ["SSL_CERT_DIR"] = ca_paths["capath"] or ""
-        print("Using OS-specific CA paths for SSL validation.")
+        print("Using detected CA paths for SSL validation.")
+        context.load_verify_locations(
+            cafile=ca_paths["cafile"], capath=ca_paths["capath"])
     else:
         print("Using Python's default SSL validation paths.")
 
-    # Create and return the SSL context
-    context = ssl.create_default_context()
     return context
 
 
