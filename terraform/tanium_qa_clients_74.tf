@@ -26,7 +26,7 @@ module "homelab-tanium_clients_74-debian_12" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Debian Linux 12"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -50,7 +50,7 @@ module "homelab-tanium_clients_74-debian_11" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Debian Linux 11"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -74,7 +74,7 @@ module "homelab-tanium_clients_74-debian_10" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Debian Linux 10"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -98,7 +98,7 @@ module "homelab-tanium_clients_74-ubuntu_22" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Ubuntu Linux 22.04"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -122,7 +122,7 @@ module "homelab-tanium_clients_74-ubuntu_20" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Ubuntu Linux 20.04"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -146,7 +146,7 @@ module "homelab-tanium_clients_74-ubuntu_18" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Ubuntu Linux 18.04"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -170,7 +170,7 @@ module "homelab-tanium_clients_74-rhel_9" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "RedHat Enterprise Linux 9"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -194,7 +194,7 @@ module "homelab-tanium_clients_74-rhel_8" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "RedHat Enterprise Linux 8"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -218,7 +218,7 @@ module "homelab-tanium_clients_74-rhel_7" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "RedHat Enterprise Linux 7"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -242,7 +242,7 @@ module "homelab-tanium_clients_74-rhel_6" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "RedHat Enterprise Linux 6"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -266,7 +266,7 @@ module "homelab-tanium_clients_74-oracle_9" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Oracle Linux 9"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -290,7 +290,7 @@ module "homelab-tanium_clients_74-oracle_8" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Oracle Linux 8"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -314,7 +314,7 @@ module "homelab-tanium_clients_74-oracle_7" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Oracle Linux 7"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -338,7 +338,7 @@ module "homelab-tanium_clients_74-oracle_6" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Oracle Linux 6"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -362,7 +362,7 @@ module "homelab-tanium_clients_74-windows_server_2022" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2022 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -389,7 +389,7 @@ module "homelab-tanium_clients_74-windows_server_2019" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2019 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -416,7 +416,7 @@ module "homelab-tanium_clients_74-windows_server_2016" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2016 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -443,7 +443,7 @@ module "homelab-tanium_clients_74-windows_server_2012r2" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2012 R2 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_74.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size

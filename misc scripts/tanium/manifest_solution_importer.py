@@ -353,11 +353,9 @@ def download_content(content_url, session):
     """Downloads content from a given URL."""
     if not content_url:
         raise ValueError("Content URL is empty.")
-
     logging.debug(f"Downloading content from URL: {content_url}")
     response = session.get(content_url, timeout=DEFAULT_TIMEOUT)
     response.raise_for_status()
-
     logging.debug(f"Content downloaded successfully from {content_url}")
     return response.content
 
@@ -467,17 +465,6 @@ def check_import_status(api_base_url, session, import_id, session_token):
         return None
 
 
-def download_solution_content(content_url, session):
-    """Downloads the solution content from the given URL."""
-    if not content_url:
-        raise ValueError("Content URL is empty.")
-    logging.debug(f"Downloading content from URL: {content_url}")
-    response = session.get(content_url, timeout=DEFAULT_TIMEOUT)
-    response.raise_for_status()
-    logging.debug(f"Content downloaded successfully from {content_url}")
-    return response.content
-
-
 def analyze_solution_conflicts(api_base_url, session, content, session_token):
     """Analyzes import conflicts for the solution content."""
     import_conflicts = analyze_import_conflicts(
@@ -518,31 +505,6 @@ def wait_for_import_completion(
     return False
 
 
-def update_solution(
-    api_base_url, session, solution_info, installed_solution, session_token
-):
-    """Coordinates the update process for a single solution."""
-    try:
-        content = download_solution_content(solution_info["content_url"], session)
-        import_conflicts = analyze_solution_conflicts(
-            api_base_url, session, content, session_token
-        )
-        import_conflict_options = prepare_import_options(import_conflicts)
-        import_id = initiate_solution_import(
-            api_base_url, session, content, import_conflict_options, session_token
-        )
-
-        if import_id:
-            return wait_for_import_completion(
-                api_base_url, session, import_id, session_token
-            )
-        else:
-            return False
-    except Exception as e:
-        logging.error(f"Error updating solution '{solution_info['name']}': {e}")
-        return False
-
-
 def get_manual_mapping(workbench_name, installed_solutions):
     """Attempts to find a manual mapping for a workbench."""
     if workbench_name in MANUAL_WORKBENCH_TO_SOLUTION_MAPPING:
@@ -560,35 +522,53 @@ def match_workbench_to_solution(workbench_name, solution_name, solution_xml_url)
     )
 
 
-def map_workbenches_to_solutions(installed_workbenches, installed_solutions):
-    """Maps each installed workbench to its parent solution."""
+def map_workbenches_to_solutions(installed_workbenches, installed_solutions, available_solutions):
+    """Maps each installed workbench to its parent solution, including available solution details."""
     workbench_solution_map = {}
     for workbench_name, workbench_details in installed_workbenches.items():
         logging.debug(f"Attempting to map workbench '{workbench_name}'")
 
         manual_mapping = get_manual_mapping(workbench_name, installed_solutions)
         if manual_mapping:
-            workbench_solution_map[workbench_name] = {
-                "workbench_details": workbench_details,
-                "solution_details": manual_mapping,
-            }
-            logging.debug(
-                f"Manually mapped Workbench '{workbench_name}' to Solution '{manual_mapping['name']}'"
-            )
+            # Get the corresponding available solution
+            key = (normalize_name(manual_mapping['name']), manual_mapping['id'])
+            available_solution = available_solutions.get(key)
+            if available_solution:
+                workbench_solution_map[workbench_name] = {
+                    "workbench_details": workbench_details,
+                    "installed_solution_details": manual_mapping,
+                    "available_solution_details": available_solution,
+                }
+                logging.debug(
+                    f"Manually mapped Workbench '{workbench_name}' to Solution '{manual_mapping['name']}'"
+                )
+            else:
+                logging.warning(
+                    f"No available solution found for manual mapping of workbench '{workbench_name}'"
+                )
             continue
 
-        for (solution_name, _), solution_details in installed_solutions.items():
-            solution_xml_url = solution_details.get("installed_xml_url", "")
+        for (solution_name, solution_id), installed_solution_details in installed_solutions.items():
+            solution_xml_url = installed_solution_details.get("installed_xml_url", "")
             if match_workbench_to_solution(
                 workbench_name, solution_name, solution_xml_url
             ):
-                workbench_solution_map[workbench_name] = {
-                    "workbench_details": workbench_details,
-                    "solution_details": solution_details,
-                }
-                logging.debug(
-                    f"Matched Workbench '{workbench_name}' to Solution '{solution_name}'"
-                )
+                # Get the corresponding available solution
+                key = (solution_name, solution_id)
+                available_solution_details = available_solutions.get(key)
+                if available_solution_details:
+                    workbench_solution_map[workbench_name] = {
+                        "workbench_details": workbench_details,
+                        "installed_solution_details": installed_solution_details,
+                        "available_solution_details": available_solution_details,
+                    }
+                    logging.debug(
+                        f"Matched Workbench '{workbench_name}' to Solution '{solution_name}'"
+                    )
+                else:
+                    logging.warning(
+                        f"No available solution found for workbench '{workbench_name}'"
+                    )
                 break
         else:
             logging.warning(
@@ -597,75 +577,21 @@ def map_workbenches_to_solutions(installed_workbenches, installed_solutions):
 
     return workbench_solution_map
 
+def update_single_solution(api_base_url, session, solution_info, session_token):
+    """Updates a single solution if needed."""
+    try:
+        content = download_content(solution_info["content_url"], session)
+        import_conflicts = analyze_import_conflicts(api_base_url, session, content, session_token)
+        import_conflict_options = prepare_import_options(import_conflicts)
+        import_id = initiate_import(api_base_url, session, content, import_conflict_options, session_token)
 
-def compare_update_solutions(
-    api_base_url, session, available_solutions, installed_solutions, session_token
-):
-    """Compares available and installed solutions and updates them if necessary."""
-    for key, solution_info in available_solutions.items():
-        normalized_name, manifest_id = key
-        installed_solution = installed_solutions.get(key)
-        if installed_solution:
-            if needs_update(installed_solution, solution_info):
-                logging.info(
-                    f"Updating solution '{normalized_name}' (ID: {manifest_id}) from version '{installed_solution.get('version')}' to '{solution_info['version']}'"
-                )
-                success = update_solution(
-                    api_base_url,
-                    session,
-                    solution_info,
-                    installed_solution,
-                    session_token,
-                )
-                if success:
-                    logging.info(
-                        f"Solution '{normalized_name}' (ID: {manifest_id}) updated successfully."
-                    )
-                else:
-                    logging.error(
-                        f"Failed to update solution '{normalized_name}' (ID: {manifest_id})."
-                    )
-            else:
-                logging.debug(
-                    f"Solution '{normalized_name}' (ID: {manifest_id}) is already up-to-date."
-                )
+        if import_id:
+            return wait_for_import_completion(api_base_url, session, import_id, session_token)
         else:
-            logging.debug(
-                f"No matching installed solution found for '{normalized_name}' (ID: {manifest_id}). Ignoring."
-            )
-
-
-def compare_update_workbenches(
-    api_base_url, session, installed_workbenches, workbench_solution_map, session_token
-):
-    """Compares installed workbenches and updates them if necessary."""
-    for workbench_name, workbench_details in installed_workbenches.items():
-        logging.info(f"Processing workbench: {workbench_name}")
-        solution_entry = workbench_solution_map.get(workbench_name)
-        if not solution_entry:
-            continue
-        solution_details = solution_entry["solution_details"]
-        if needs_update(workbench_details, solution_details):
-            logging.info(
-                f"Updating workbench '{workbench_name}' via solution '{solution_details['name']}' from version '{workbench_details.get('version')}' to '{solution_details['version']}'."
-            )
-            success = update_solution(
-                api_base_url,
-                session,
-                solution_details,
-                workbench_details,
-                session_token,
-            )
-            if success:
-                logging.info(
-                    f"Workbench '{workbench_name}' updated successfully to version '{solution_details['version']}'."
-                )
-            else:
-                logging.error(f"Failed to update workbench '{workbench_name}'.")
-        else:
-            logging.debug(
-                f"Workbench '{workbench_name}' is already up-to-date with version '{workbench_details.get('version')}'."
-            )
+            return False
+    except Exception as e:
+        logging.error(f"Error updating solution '{solution_info['name']}': {e}")
+        return False
 
 
 def log_summary_statistics(
@@ -698,9 +624,7 @@ def main():
     logging.info(f"Log Level: {args.log_level}")
     logging.info(f"Timeout: {args.timeout} seconds")
     if args.available_solutions_xml_url:
-        logging.info(
-            f"Using custom solutions XML URL: {args.available_solutions_xml_url}"
-        )
+        logging.info(f"Using custom solutions XML URL: {args.available_solutions_xml_url}")
     logging.info(SEPARATOR)
 
     global DEFAULT_TIMEOUT
@@ -714,6 +638,7 @@ def main():
     session_validate_url = f"{server_api_base_url}/session/validate"
     session = create_session()
 
+    # Initialize summary statistics
     servers_processed = 0
     total_solutions_checked = 0
     total_workbenches_checked = 0
@@ -722,14 +647,17 @@ def main():
     total_updates_failed = 0
 
     try:
-        session_token = login_to_api(
-            session, api_login_url, tanium_username, tanium_password
-        )
+        # Authentication
+        session_token = login_to_api(session, api_login_url, tanium_username, tanium_password)
         validate_session(session, session_validate_url, session_token)
+
+        # Get server hosts
         server_hosts = get_server_hosts(session, server_api_base_url, session_token)
         if not server_hosts:
             logging.warning("No valid servers found to process.")
             return
+
+        # Server processing loop
         for server in server_hosts:
             servers_processed += 1
             server_name = server["name"]
@@ -740,6 +668,7 @@ def main():
             server_api_base_url = f"{server_address}/api/v2"
             server_info_url = f"{server_api_base_url}/server_info"
 
+            # Initialize per-server statistics
             solutions_checked = 0
             workbenches_checked = 0
             updates_attempted = 0
@@ -747,80 +676,124 @@ def main():
             updates_failed = 0
 
             try:
-                logging.debug(f"Fetching installed solutions for server: {server_name}")
-                installed_solutions = get_installed_solutions(
-                    server_info_url, session, session_token
-                )
+                # Fetch installed solutions and workbenches
+                installed_solutions = get_installed_solutions(server_info_url, session, session_token)
                 solutions_checked = len(installed_solutions)
 
-                logging.debug(
-                    f"Fetching installed workbenches for server: {server_name}"
-                )
-                installed_workbenches = get_installed_workbenches(
-                    server_info_url, session, session_token
-                )
+                installed_workbenches = get_installed_workbenches(server_info_url, session, session_token)
                 workbenches_checked = len(installed_workbenches)
 
-                available_solutions_url = fetch_manifest_url(
-                    session, server_api_base_url, session_token
-                )
-                logging.debug(
-                    f"Fetching available solutions from manifest URL: {available_solutions_url}"
-                )
-                available_solutions = get_available_solutions(
-                    available_solutions_url, session
-                )
+                # Fetch available solutions
+                available_solutions_url = fetch_manifest_url(session, server_api_base_url, session_token)
+                available_solutions = get_available_solutions(available_solutions_url, session)
 
+                # Comparing and updating solutions
                 for key, solution_info in available_solutions.items():
                     normalized_name, manifest_id = key
                     installed_solution = installed_solutions.get(key)
-                    if installed_solution and needs_update(
-                        installed_solution, solution_info
-                    ):
-                        updates_attempted += 1
-                        success = update_solution(
-                            server_api_base_url,
-                            session,
-                            solution_info,
-                            installed_solution,
-                            session_token,
-                        )
-                        if success:
-                            updates_successful += 1
-                        else:
-                            updates_failed += 1
-
-                workbench_solution_map = map_workbenches_to_solutions(
-                    installed_workbenches, installed_solutions
-                )
-
-                for workbench_name, workbench_details in installed_workbenches.items():
-                    solution_entry = workbench_solution_map.get(workbench_name)
-                    if solution_entry:
-                        solution_details = solution_entry["solution_details"]
-                        if needs_update(workbench_details, solution_details):
+                    if installed_solution:
+                        if needs_update(installed_solution, solution_info):
+                            logging.info(
+                                f"Updating solution '{normalized_name}' (ID: {manifest_id}) "
+                                f"from version '{installed_solution.get('version')}' "
+                                f"to '{solution_info['version']}'"
+                            )
                             updates_attempted += 1
-                            success = update_solution(
+                            success = update_single_solution(
                                 server_api_base_url,
                                 session,
-                                solution_details,
-                                workbench_details,
+                                solution_info,
                                 session_token,
                             )
                             if success:
                                 updates_successful += 1
+                                logging.info(
+                                    f"Solution '{normalized_name}' (ID: {manifest_id}) updated successfully."
+                                )
                             else:
                                 updates_failed += 1
+                                logging.error(
+                                    f"Failed to update solution '{normalized_name}' (ID: {manifest_id})."
+                                )
+                        else:
+                            logging.debug(
+                                f"Solution '{normalized_name}' (ID: {manifest_id}) is already up-to-date."
+                            )
+                    else:
+                        logging.debug(
+                            f"No matching installed solution found for '{normalized_name}' (ID: {manifest_id}). Ignoring."
+                        )
+
+                # Mapping workbenches to solutions
+                workbench_solution_map = {}
+                for workbench_name, workbench_details in installed_workbenches.items():
+                    logging.debug(f"Attempting to map workbench '{workbench_name}'")
+
+                    # Try to find a matching solution
+                    matching_solution = None
+                    for key, installed_solution_details in installed_solutions.items():
+                        solution_name, solution_id = key
+                        solution_xml_url = installed_solution_details.get("installed_xml_url", "")
+                        if match_workbench_to_solution(
+                            workbench_name, solution_name, solution_xml_url
+                        ):
+                            # Get the corresponding available solution
+                            available_solution = available_solutions.get(key)
+                            if available_solution:
+                                workbench_solution_map[workbench_name] = {
+                                    "workbench_details": workbench_details,
+                                    "available_solution": available_solution,
+                                }
+                                matching_solution = available_solution
+                                logging.debug(
+                                    f"Matched Workbench '{workbench_name}' to Solution '{solution_name}'"
+                                )
+                                break
+                    if not matching_solution:
+                        logging.warning(f"No matching solution found for workbench: {workbench_name}")
+
+                # Comparing and updating workbenches
+                for workbench_name, details in workbench_solution_map.items():
+                    workbench_details = details["workbench_details"]
+                    available_solution = details["available_solution"]
+
+                    if needs_update(workbench_details, available_solution):
+                        logging.info(
+                            f"Updating workbench '{workbench_name}' via solution '{available_solution['name']}' "
+                            f"from version '{workbench_details.get('version')}' "
+                            f"to '{available_solution['version']}'."
+                        )
+                        updates_attempted += 1
+                        success = update_single_solution(
+                            server_api_base_url,
+                            session,
+                            available_solution,
+                            session_token,
+                        )
+                        if success:
+                            updates_successful += 1
+                            logging.info(
+                                f"Workbench '{workbench_name}' updated successfully to version '{available_solution['version']}'."
+                            )
+                        else:
+                            updates_failed += 1
+                            logging.error(f"Failed to update workbench '{workbench_name}'.")
+                    else:
+                        logging.debug(
+                            f"Workbench '{workbench_name}' is already up-to-date with version '{workbench_details.get('version')}'."
+                        )
 
             except Exception as e:
                 logging.error(f"Error processing server {server_name}: {e}")
 
+            # Update total statistics
             total_solutions_checked += solutions_checked
             total_workbenches_checked += workbenches_checked
             total_updates_attempted += updates_attempted
             total_updates_successful += updates_successful
             total_updates_failed += updates_failed
 
+            # Log per-server summary
             logging.info(SEPARATOR)
             logging.info(f"Completed processing server: {server_name}")
             logging.info(f"Solutions checked: {solutions_checked}")
@@ -829,11 +802,13 @@ def main():
             logging.info(f"Updates successful: {updates_successful}")
             logging.info(f"Updates failed: {updates_failed}")
             logging.info(SEPARATOR)
+
     except Exception as e:
         logging.error(f"Error during session setup: {e}")
     finally:
         session.close()
 
+    # Log total summary statistics
     log_summary_statistics(
         servers_processed,
         total_solutions_checked,
