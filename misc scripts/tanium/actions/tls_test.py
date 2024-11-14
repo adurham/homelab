@@ -140,7 +140,8 @@ def decode_domain(domain):
 
 
 def validate_proxy(proxy):
-    """Validates a proxy by attempting to establish a connection to it."""
+    """Validates a proxy by attempting to establish a connection to it.
+    Returns the properly formatted proxy string if valid, or None if invalid."""
     try:
         # Add 'http://' if the proxy string does not include a scheme
         if not proxy.startswith(('http://', 'https://', 'socks5://')):
@@ -154,15 +155,15 @@ def validate_proxy(proxy):
 
         if not hostname or not port:
             print(f"Invalid proxy format: {proxy}")
-            return False
+            return None
 
         # Attempt to create a socket connection to the proxy
         with socket.create_connection((hostname, port), timeout=5):
             print(f"Proxy {proxy} is valid.")
-            return True
+            return proxy_with_scheme  # Return the formatted proxy string
     except Exception as e:
         print(f"Proxy {proxy} validation failed: {e}")
-        return False
+        return None
 
 
 def detect_proxies():
@@ -216,8 +217,11 @@ def detect_proxies():
         print(f"Unexpected error: {e}")
 
     proxy_list = [proxy.strip() for proxy in proxies if proxy.strip()]
-    validated_proxies = [
-        proxy for proxy in proxy_list if validate_proxy(proxy)]
+    validated_proxies = []
+    for proxy in proxy_list:
+        formatted_proxy = validate_proxy(proxy)
+        if formatted_proxy:
+            validated_proxies.append(formatted_proxy)
     print(f"Validated proxies: {validated_proxies}")
     return validated_proxies
 
@@ -392,10 +396,11 @@ def main():
             continue
 
         for ip in a_records:
-            if proxies:
-                for proxy in proxies:
-                    success = test_tls_connection(ip, base_domain, proxy)
-                    update_results(results, base_domain, ip, success)
+            proxy = proxies[0] if proxies else None
+            if proxy:
+
+                success = test_tls_connection(ip, base_domain, proxy)
+                update_results(results, base_domain, ip, success)
             else:
                 success = test_tls_connection(ip, base_domain)
                 update_results(results, base_domain, ip, success)
