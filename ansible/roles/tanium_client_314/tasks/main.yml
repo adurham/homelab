@@ -63,27 +63,45 @@
 
 - name: Determine architecture and OS support
   block:
-    - name: Determine architecture and OS support, then download and install if necessary
-      block:
-        - name: Set architecture suffix and OS platform
-          set_fact:
-            arch_suffix: "{{ 'x64' if ansible_architecture in ['x86_64', 'amd64', '64-bit'] else 'x86' if ansible_architecture in ['i386', 'i686', '32-bit'] else 'unsupported' }}"
-            target_os: >-
-              {%- if ansible_os_family == 'Windows' -%}
-                windows
-              {%- elif ansible_os_family == 'RedHat' and ansible_distribution in ['CentOS', 'RedHat', 'Amazon', 'OracleLinux'] -%}
-                linux
-              {%- elif ansible_os_family == 'Debian' and ansible_distribution in ['Debian', 'Ubuntu'] -%}
-                linux
-              {%- elif ansible_distribution == 'OpenSUSE' -%}
-                linux
-              {%- else -%}
-                unsupported
-              {%- endif -%}
+    - name: Initialize architecture suffix and OS platform variables
+      set_fact:
+        arch_suffix: ""
+        target_os: ""
+        os_arch_combo: ""
+
+    - name: Set architecture suffix
+      set_fact:
+        arch_suffix: >-
+          {%- if ansible_architecture in ['x86_64', 'amd64', '64-bit'] -%}
+            x64
+          {%- elif ansible_architecture in ['i386', 'i686', '32-bit'] -%}
+            x86
+          {%- else -%}
+            unsupported
+          {%- endif -%}
+
+    - name: Set OS platform
+      set_fact:
+        target_os: >-
+          {%- if ansible_os_family == 'Windows' -%}
+            windows
+          {%- elif ansible_os_family == 'RedHat' and ansible_distribution in ['CentOS', 'RedHat', 'Amazon', 'OracleLinux'] -%}
+            linux
+          {%- elif ansible_os_family == 'Debian' and ansible_distribution in ['Debian', 'Ubuntu'] -%}
+            linux
+          {%- elif ansible_distribution == 'OpenSUSE' -%}
+            linux
+          {%- else -%}
+            unsupported
+          {%- endif -%}
+
+    - name: Set OS and architecture combination
+      set_fact:
+        os_arch_combo: "{{ ansible_distribution | lower ~ ansible_distribution_major_version ~ '-' ~ arch_suffix }}"
 
     - name: Fail if architecture or OS is unsupported
       fail:
-        msg: "Unsupported architecture {{ ansible_architecture }} or OS family {{ ansible_os_family }}."
+        msg: "Unsupported architecture or OS detected: {{ os_arch_combo }}"
       when: arch_suffix == "unsupported" or target_os == "unsupported"
 
 - name: Check if Tanium Client is installed on Windows
@@ -258,6 +276,11 @@
       set_fact:
         arch_suffix: "oracle8-x64"
       when: arch_suffix in ["oracle9-x64"] and "oracle8-x64" in selected_tanium_client_version_data.installers
+
+    - name: Adjust arch_suffix for Ubuntu 22 if not explicitly supported
+      set_fact:
+        arch_suffix: "ubuntu20-x64"
+      when: arch_suffix in ["ubuntu22-x64"] and "ubuntu20-x64" in selected_tanium_client_version_data.installers
 
     - name: Check if final arch_suffix is supported
       fail:

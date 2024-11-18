@@ -362,7 +362,7 @@ module "homelab-tanium_clients_76-windows_server_2022" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2022 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_76.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -389,7 +389,7 @@ module "homelab-tanium_clients_76-windows_server_2019" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2019 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_76.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -416,7 +416,7 @@ module "homelab-tanium_clients_76-windows_server_2016" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2016 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_76.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
@@ -443,7 +443,7 @@ module "homelab-tanium_clients_76-windows_server_2012r2" {
   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
   vmtemp          = "Windows Server 2012 R2 Datacenter"
   vmfolder        = vsphere_folder.tanium_clients_76.path
-  instances       = 0
+  instances       = 1
   cpu_number      = local.low_resource_vm_specs.cpu_number
   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
   ram_size        = local.low_resource_vm_specs.ram_size
