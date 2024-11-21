@@ -7,7 +7,7 @@ import tanium
 base_path = tanium.client.common.get_client_dir()
 
 # Construct RESULTS_FILE with base_path
-RESULTS_FILE = os.path.join(base_path, "Tools", "tls_results.json")
+RESULTS_FILE = os.path.join(base_path, "Tools", "tls_test-Results.json")
 
 # Check if the file exists
 if not os.path.exists(RESULTS_FILE):
