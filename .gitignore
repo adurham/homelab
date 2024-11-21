@@ -21,3 +21,4 @@ misc scripts/config.env
 misc scripts/SecureCredentials.xml
 node_modules
 misc scripts/tanium/tanium_creds.env
+misc scripts/tanium/actions/Tools/*
