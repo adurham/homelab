@@ -30,7 +30,7 @@ def normalize_name(name):
     normalized = name.lower().strip()
     for prefix in prefixes:
         if normalized.startswith(prefix):
-            normalized = normalized[len(prefix) :].strip()
+            normalized = normalized[len(prefix):].strip()
     logging.debug(f"Normalized name: {normalized}")
     return normalized
 
@@ -87,11 +87,13 @@ def setup_logging(log_level, log_file):
     if log_file:
         from logging.handlers import RotatingFileHandler
 
-        handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5)
+        handler = RotatingFileHandler(
+            log_file, maxBytes=5 * 1024 * 1024, backupCount=5)
         handlers.append(handler)
     else:
         handlers.append(logging.StreamHandler())
-    logging.basicConfig(level=numeric_level, format=log_format, handlers=handlers)
+    logging.basicConfig(level=numeric_level,
+                        format=log_format, handlers=handlers)
 
 
 def load_env_vars(filename):
@@ -135,7 +137,8 @@ def create_session():
 
 def login_to_api(session, api_login_url, username, password):
     """Logs into the Tanium API and retrieves the session token."""
-    logging.debug(f"Logging in to API at: {api_login_url} with username: {username}")
+    logging.debug(f"Logging in to API at: {
+                  api_login_url} with username: {username}")
     try:
         response = session.post(
             api_login_url, json={"username": username, "password": password}
@@ -143,7 +146,8 @@ def login_to_api(session, api_login_url, username, password):
         response.raise_for_status()
         session_token = response.json().get("data", {}).get("session")
         if not session_token:
-            raise ValueError("Session token not obtained. Check your credentials.")
+            raise ValueError(
+                "Session token not obtained. Check your credentials.")
         return session_token
     except requests.RequestException as e:
         logging.error(f"Failed to login to API: {e}")
@@ -154,7 +158,8 @@ def validate_session(session, api_validate_url, session_token):
     """Validates the current session token with the Tanium API."""
     logging.debug(f"Validating session token at: {api_validate_url}")
     try:
-        response = session.post(api_validate_url, json={"session": session_token})
+        response = session.post(api_validate_url, json={
+                                "session": session_token})
         response.raise_for_status()
         logging.debug("Session token validated successfully.")
         return True
@@ -165,26 +170,54 @@ def validate_session(session, api_validate_url, session_token):
 
 # 4. Data Retrieval Functions
 def fetch_manifest_url(session, server_api_base_url, session_token):
-    """Fetches the manifestURL from the Tanium server's local settings."""
-    local_settings_url = f"{server_api_base_url}/local_settings"
+    """
+    Fetches the manifestURL from the Tanium server's local settings.
+    If it fails, it attempts to fetch console_manifestURL from global settings.
+    """
     headers = build_headers(session_token, content_type="application/json")
+
+    # Try to fetch manifestURL from local settings
+    local_settings_url = f"{server_api_base_url}/local_settings"
     logging.debug(f"Fetching local settings from: {local_settings_url}")
     try:
         response = session.get(
-            local_settings_url, headers=headers, timeout=DEFAULT_TIMEOUT
-        )
+            local_settings_url, headers=headers, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
         data = response.json().get("data", [])
         for item in data:
             if item.get("name") == "manifestURL":
                 manifest_url = item.get("value")
                 if manifest_url and is_valid_url(manifest_url):
-                    logging.debug(f"Retrieved manifestURL from server: {manifest_url}")
+                    logging.debug(
+                        f"Retrieved manifestURL from local settings: {manifest_url}")
                     return manifest_url
-        raise ValueError("manifestURL not found or invalid in local settings.")
+        logging.warning(
+            "manifestURL not found in local settings. Trying global settings...")
     except requests.RequestException as e:
         logging.error(f"Failed to fetch local settings from server: {e}")
-        raise
+        logging.warning("Falling back to global settings...")
+
+    # Fallback to fetching console_manifestURL from global settings
+    global_settings_url = f"{server_api_base_url}/system_settings"
+    logging.debug(f"Fetching global settings from: {global_settings_url}")
+    try:
+        response = session.get(global_settings_url,
+                               headers=headers, timeout=DEFAULT_TIMEOUT)
+        response.raise_for_status()
+        data = response.json().get("data", [])
+        for item in data:
+            if item.get("name") == "console_manifestURL":
+                manifest_url = item.get("value")
+                if manifest_url and is_valid_url(manifest_url):
+                    logging.debug(
+                        f"Retrieved console_manifestURL from global settings: {manifest_url}")
+                    return manifest_url
+        raise ValueError(
+            "console_manifestURL not found or invalid in global settings.")
+    except requests.RequestException as e:
+        logging.error(f"Failed to fetch global settings from server: {e}")
+        raise ValueError(
+            "Failed to retrieve manifestURL from both local and global settings.")
 
 
 def get_server_hosts(session, server_api_base_url, session_token):
@@ -210,7 +243,8 @@ def get_server_hosts(session, server_api_base_url, session_token):
                 if is_valid_url(address):
                     server_list.append({"name": name, "address": address})
                 else:
-                    logging.warning(f"Invalid server entry found and skipped: {server}")
+                    logging.warning(
+                        f"Invalid server entry found and skipped: {server}")
         logging.info(f"Total valid servers fetched: {len(server_list)}")
         return server_list
     except requests.RequestException as e:
@@ -222,7 +256,8 @@ def get_available_solutions(available_solutions_url, session):
     """Retrieves available solutions from the specified XML URL."""
     logging.debug(f"Fetching XML from URL: {available_solutions_url}")
     try:
-        response = session.get(available_solutions_url, timeout=DEFAULT_TIMEOUT)
+        response = session.get(available_solutions_url,
+                               timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
         xml_content = response.content
         solutions = parse_solutions_xml(xml_content)
@@ -263,7 +298,8 @@ def get_installed_solutions(api_url, session, session_token):
     logging.debug(f"Retrieving installed solutions from API: {api_url}")
     headers = build_headers(session_token, content_type="application/json")
     try:
-        response = session.get(api_url, headers=headers, timeout=DEFAULT_TIMEOUT)
+        response = session.get(api_url, headers=headers,
+                               timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
         server_info = response.json()
         installed_solutions = {}
@@ -299,7 +335,8 @@ def get_installed_workbenches(api_url, session, session_token):
     logging.debug(f"Retrieving installed workbenches from API: {api_url}")
     headers = build_headers(session_token, content_type="application/json")
     try:
-        response = session.get(api_url, headers=headers, timeout=DEFAULT_TIMEOUT)
+        response = session.get(api_url, headers=headers,
+                               timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
         server_info = response.json()
         installed_workbenches = {}
@@ -317,7 +354,8 @@ def get_installed_workbenches(api_url, session, session_token):
             logging.debug(f"Retrieved installed workbench: {workbench}")
             installed_workbenches[name] = workbench
         logging.debug(
-            f"Total installed workbenches retrieved: {len(installed_workbenches)}"
+            f"Total installed workbenches retrieved: {
+                len(installed_workbenches)}"
         )
         return installed_workbenches
     except requests.exceptions.RequestException as e:
@@ -363,15 +401,18 @@ def download_content(content_url, session):
 def analyze_import_conflicts(api_base_url, session, content, session_token):
     """Analyzes import conflicts by posting the content to the Tanium API."""
     import_url = f"{api_base_url}/import?import_analyze_conflicts_only=1"
-    headers = build_headers(session_token, content_type="application/octet-stream")
+    headers = build_headers(
+        session_token, content_type="application/octet-stream")
 
-    logging.debug(f"Posting content to API for conflict analysis at {import_url}")
+    logging.debug(
+        f"Posting content to API for conflict analysis at {import_url}")
     response = session.post(
         import_url, data=content, headers=headers, timeout=DEFAULT_TIMEOUT
     )
     response.raise_for_status()
 
-    logging.debug(f"Conflict analysis response status code: {response.status_code}")
+    logging.debug(f"Conflict analysis response status code: {
+                  response.status_code}")
     return parse_import_conflicts(response.json())
 
 
@@ -391,7 +432,8 @@ def parse_import_conflicts(response_data):
         import_conflicts[conflict_type].append(conflict)
 
     logging.debug(
-        f"Total import conflicts parsed: {sum(len(v) for v in import_conflicts.values())}"
+        f"Total import conflicts parsed: {
+            sum(len(v) for v in import_conflicts.values())}"
     )
     return import_conflicts
 
@@ -402,9 +444,11 @@ def build_import_conflict_options(import_conflicts):
     import_conflict_options = {}
     for conflict_type, conflicts in import_conflicts.items():
         conflict_type_plural = (
-            conflict_type + "s" if not conflict_type.endswith("s") else conflict_type
+            conflict_type +
+            "s" if not conflict_type.endswith("s") else conflict_type
         )
-        import_conflict_options[conflict_type_plural] = [option_value] * len(conflicts)
+        import_conflict_options[conflict_type_plural] = [
+            option_value] * len(conflicts)
     logging.debug(f"Built import conflict options: {import_conflict_options}")
     return import_conflict_options
 
@@ -414,7 +458,8 @@ def initiate_import(
 ):
     """Initiates the import process for the solution content."""
     import_url = f"{api_base_url}/import"
-    tanium_options = json.dumps({"import_conflict_options": import_conflict_options})
+    tanium_options = json.dumps(
+        {"import_conflict_options": import_conflict_options})
     headers = build_headers(
         session_token,
         content_type="application/octet-stream",
@@ -425,7 +470,8 @@ def initiate_import(
     )
 
     logging.debug(
-        f"Initiating import process with headers: {headers} and conflict options: {import_conflict_options}"
+        f"Initiating import process with headers: {
+            headers} and conflict options: {import_conflict_options}"
     )
     response = session.post(
         import_url, data=content, headers=headers, timeout=DEFAULT_TIMEOUT
@@ -436,7 +482,8 @@ def initiate_import(
         logging.info(f"Import successfully initiated with ID: {import_id}")
         return import_id
     else:
-        logging.error(f"Failed to initiate import. Status code: {response.status_code}")
+        logging.error(f"Failed to initiate import. Status code: {
+                      response.status_code}")
         logging.error(f"Response content: {response.text}")
         return None
 
@@ -446,7 +493,8 @@ def check_import_status(api_base_url, session, import_id, session_token):
     import_status_url = f"{api_base_url}/import/{import_id}"
     headers = build_headers(session_token)
 
-    response = session.get(import_status_url, headers=headers, timeout=DEFAULT_TIMEOUT)
+    response = session.get(
+        import_status_url, headers=headers, timeout=DEFAULT_TIMEOUT)
     response.raise_for_status()
 
     import_status = response.json().get("data", {})
@@ -495,7 +543,8 @@ def wait_for_import_completion(
 ):
     """Waits for the import process to complete."""
     for attempt in range(1, max_retries + 1):
-        status = check_import_status(api_base_url, session, import_id, session_token)
+        status = check_import_status(
+            api_base_url, session, import_id, session_token)
         if status is True:
             return True
         elif status is False:
@@ -528,10 +577,12 @@ def map_workbenches_to_solutions(installed_workbenches, installed_solutions, ava
     for workbench_name, workbench_details in installed_workbenches.items():
         logging.debug(f"Attempting to map workbench '{workbench_name}'")
 
-        manual_mapping = get_manual_mapping(workbench_name, installed_solutions)
+        manual_mapping = get_manual_mapping(
+            workbench_name, installed_solutions)
         if manual_mapping:
             # Get the corresponding available solution
-            key = (normalize_name(manual_mapping['name']), manual_mapping['id'])
+            key = (normalize_name(
+                manual_mapping['name']), manual_mapping['id'])
             available_solution = available_solutions.get(key)
             if available_solution:
                 workbench_solution_map[workbench_name] = {
@@ -540,16 +591,19 @@ def map_workbenches_to_solutions(installed_workbenches, installed_solutions, ava
                     "available_solution_details": available_solution,
                 }
                 logging.debug(
-                    f"Manually mapped Workbench '{workbench_name}' to Solution '{manual_mapping['name']}'"
+                    f"Manually mapped Workbench '{
+                        workbench_name}' to Solution '{manual_mapping['name']}'"
                 )
             else:
                 logging.warning(
-                    f"No available solution found for manual mapping of workbench '{workbench_name}'"
+                    f"No available solution found for manual mapping of workbench '{
+                        workbench_name}'"
                 )
             continue
 
         for (solution_name, solution_id), installed_solution_details in installed_solutions.items():
-            solution_xml_url = installed_solution_details.get("installed_xml_url", "")
+            solution_xml_url = installed_solution_details.get(
+                "installed_xml_url", "")
             if match_workbench_to_solution(
                 workbench_name, solution_name, solution_xml_url
             ):
@@ -563,11 +617,13 @@ def map_workbenches_to_solutions(installed_workbenches, installed_solutions, ava
                         "available_solution_details": available_solution_details,
                     }
                     logging.debug(
-                        f"Matched Workbench '{workbench_name}' to Solution '{solution_name}'"
+                        f"Matched Workbench '{
+                            workbench_name}' to Solution '{solution_name}'"
                     )
                 else:
                     logging.warning(
-                        f"No available solution found for workbench '{workbench_name}'"
+                        f"No available solution found for workbench '{
+                            workbench_name}'"
                     )
                 break
         else:
@@ -577,20 +633,24 @@ def map_workbenches_to_solutions(installed_workbenches, installed_solutions, ava
 
     return workbench_solution_map
 
+
 def update_single_solution(api_base_url, session, solution_info, session_token):
     """Updates a single solution if needed."""
     try:
         content = download_content(solution_info["content_url"], session)
-        import_conflicts = analyze_import_conflicts(api_base_url, session, content, session_token)
+        import_conflicts = analyze_import_conflicts(
+            api_base_url, session, content, session_token)
         import_conflict_options = prepare_import_options(import_conflicts)
-        import_id = initiate_import(api_base_url, session, content, import_conflict_options, session_token)
+        import_id = initiate_import(
+            api_base_url, session, content, import_conflict_options, session_token)
 
         if import_id:
             return wait_for_import_completion(api_base_url, session, import_id, session_token)
         else:
             return False
     except Exception as e:
-        logging.error(f"Error updating solution '{solution_info['name']}': {e}")
+        logging.error(f"Error updating solution '{
+                      solution_info['name']}': {e}")
         return False
 
 
@@ -624,7 +684,8 @@ def main():
     logging.info(f"Log Level: {args.log_level}")
     logging.info(f"Timeout: {args.timeout} seconds")
     if args.available_solutions_xml_url:
-        logging.info(f"Using custom solutions XML URL: {args.available_solutions_xml_url}")
+        logging.info(f"Using custom solutions XML URL: {
+                     args.available_solutions_xml_url}")
     logging.info(SEPARATOR)
 
     global DEFAULT_TIMEOUT
@@ -633,6 +694,7 @@ def main():
     tanium_username = env_vars.get("TANIUM_USERNAME")
     tanium_password = env_vars.get("TANIUM_PASSWORD")
     tanium_base_url = env_vars.get("TANIUM_BASE_URL")
+    available_solutions_xml_url = env_vars.get("AVAILABLE_SOLUTIONS_XML_URL")
     server_api_base_url = f"{tanium_base_url}/api/v2"
     api_login_url = f"{server_api_base_url}/session/login"
     session_validate_url = f"{server_api_base_url}/session/validate"
@@ -648,11 +710,13 @@ def main():
 
     try:
         # Authentication
-        session_token = login_to_api(session, api_login_url, tanium_username, tanium_password)
+        session_token = login_to_api(
+            session, api_login_url, tanium_username, tanium_password)
         validate_session(session, session_validate_url, session_token)
 
         # Get server hosts
-        server_hosts = get_server_hosts(session, server_api_base_url, session_token)
+        server_hosts = get_server_hosts(
+            session, server_api_base_url, session_token)
         if not server_hosts:
             logging.warning("No valid servers found to process.")
             return
@@ -663,7 +727,8 @@ def main():
             server_name = server["name"]
             server_address = server["address"]
             logging.info(SEPARATOR)
-            logging.info(f"Processing server: {server_name} ({server_address})")
+            logging.info(f"Processing server: {
+                         server_name} ({server_address})")
             logging.info(SEPARATOR)
             server_api_base_url = f"{server_address}/api/v2"
             server_info_url = f"{server_api_base_url}/server_info"
@@ -677,15 +742,37 @@ def main():
 
             try:
                 # Fetch installed solutions and workbenches
-                installed_solutions = get_installed_solutions(server_info_url, session, session_token)
+                installed_solutions = get_installed_solutions(
+                    server_info_url, session, session_token)
                 solutions_checked = len(installed_solutions)
 
-                installed_workbenches = get_installed_workbenches(server_info_url, session, session_token)
+                installed_workbenches = get_installed_workbenches(
+                    server_info_url, session, session_token)
                 workbenches_checked = len(installed_workbenches)
 
                 # Fetch available solutions
-                available_solutions_url = fetch_manifest_url(session, server_api_base_url, session_token)
-                available_solutions = get_available_solutions(available_solutions_url, session)
+                try:
+                    available_solutions_url = fetch_manifest_url(
+                        session, server_api_base_url, session_token)
+                except ValueError:
+                    if not available_solutions_xml_url:
+                        logging.error(
+                            "Failed to fetch manifestURL from the server, "
+                            "and AVAILABLE_SOLUTIONS_XML_URL is not set in the environment."
+                        )
+                        exit(1)
+                    available_solutions_url = available_solutions_xml_url
+                    logging.warning(f"Using fallback AVAILABLE_SOLUTIONS_XML_URL: {
+                                    available_solutions_url}")
+
+                # Process the fetched or fallback URL
+                if not available_solutions_url or not is_valid_url(available_solutions_url):
+                    logging.error("Invalid manifest URL provided. Exiting.")
+                    exit(1)
+
+                logging.info(f"Using manifest URL: {available_solutions_url}")
+                available_solutions = get_available_solutions(
+                    available_solutions_url, session)
 
                 # Comparing and updating solutions
                 for key, solution_info in available_solutions.items():
@@ -694,8 +781,10 @@ def main():
                     if installed_solution:
                         if needs_update(installed_solution, solution_info):
                             logging.info(
-                                f"Updating solution '{normalized_name}' (ID: {manifest_id}) "
-                                f"from version '{installed_solution.get('version')}' "
+                                f"Updating solution '{
+                                    normalized_name}' (ID: {manifest_id}) "
+                                f"from version '{
+                                    installed_solution.get('version')}' "
                                 f"to '{solution_info['version']}'"
                             )
                             updates_attempted += 1
@@ -708,32 +797,38 @@ def main():
                             if success:
                                 updates_successful += 1
                                 logging.info(
-                                    f"Solution '{normalized_name}' (ID: {manifest_id}) updated successfully."
+                                    f"Solution '{
+                                        normalized_name}' (ID: {manifest_id}) updated successfully."
                                 )
                             else:
                                 updates_failed += 1
                                 logging.error(
-                                    f"Failed to update solution '{normalized_name}' (ID: {manifest_id})."
+                                    f"Failed to update solution '{
+                                        normalized_name}' (ID: {manifest_id})."
                                 )
                         else:
                             logging.debug(
-                                f"Solution '{normalized_name}' (ID: {manifest_id}) is already up-to-date."
+                                f"Solution '{
+                                    normalized_name}' (ID: {manifest_id}) is already up-to-date."
                             )
                     else:
                         logging.debug(
-                            f"No matching installed solution found for '{normalized_name}' (ID: {manifest_id}). Ignoring."
+                            f"No matching installed solution found for '{
+                                normalized_name}' (ID: {manifest_id}). Ignoring."
                         )
 
                 # Mapping workbenches to solutions
                 workbench_solution_map = {}
                 for workbench_name, workbench_details in installed_workbenches.items():
-                    logging.debug(f"Attempting to map workbench '{workbench_name}'")
+                    logging.debug(f"Attempting to map workbench '{
+                                  workbench_name}'")
 
                     # Try to find a matching solution
                     matching_solution = None
                     for key, installed_solution_details in installed_solutions.items():
                         solution_name, solution_id = key
-                        solution_xml_url = installed_solution_details.get("installed_xml_url", "")
+                        solution_xml_url = installed_solution_details.get(
+                            "installed_xml_url", "")
                         if match_workbench_to_solution(
                             workbench_name, solution_name, solution_xml_url
                         ):
@@ -746,11 +841,13 @@ def main():
                                 }
                                 matching_solution = available_solution
                                 logging.debug(
-                                    f"Matched Workbench '{workbench_name}' to Solution '{solution_name}'"
+                                    f"Matched Workbench '{
+                                        workbench_name}' to Solution '{solution_name}'"
                                 )
                                 break
                     if not matching_solution:
-                        logging.warning(f"No matching solution found for workbench: {workbench_name}")
+                        logging.warning(f"No matching solution found for workbench: {
+                                        workbench_name}")
 
                 # Comparing and updating workbenches
                 for workbench_name, details in workbench_solution_map.items():
@@ -759,8 +856,10 @@ def main():
 
                     if needs_update(workbench_details, available_solution):
                         logging.info(
-                            f"Updating workbench '{workbench_name}' via solution '{available_solution['name']}' "
-                            f"from version '{workbench_details.get('version')}' "
+                            f"Updating workbench '{workbench_name}' via solution '{
+                                available_solution['name']}' "
+                            f"from version '{
+                                workbench_details.get('version')}' "
                             f"to '{available_solution['version']}'."
                         )
                         updates_attempted += 1
@@ -773,14 +872,17 @@ def main():
                         if success:
                             updates_successful += 1
                             logging.info(
-                                f"Workbench '{workbench_name}' updated successfully to version '{available_solution['version']}'."
+                                f"Workbench '{workbench_name}' updated successfully to version '{
+                                    available_solution['version']}'."
                             )
                         else:
                             updates_failed += 1
-                            logging.error(f"Failed to update workbench '{workbench_name}'.")
+                            logging.error(f"Failed to update workbench '{
+                                          workbench_name}'.")
                     else:
                         logging.debug(
-                            f"Workbench '{workbench_name}' is already up-to-date with version '{workbench_details.get('version')}'."
+                            f"Workbench '{
+                                workbench_name}' is already up-to-date with version '{workbench_details.get('version')}'."
                         )
 
             except Exception as e:
