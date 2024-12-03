@@ -119,18 +119,28 @@ def load_env_vars(filename):
 
 
 # 3. Session and Authentication Functions
+class SSLDisablingAdapter(HTTPAdapter):
+    """Custom adapter that enforces verify=False during retries."""
+    def __init__(self, *args, **kwargs):
+        kwargs["max_retries"] = Retry(
+            total=5,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "OPTIONS", "POST"],
+        )
+        super().__init__(*args, **kwargs)
+
+    def send(self, request, **kwargs):
+        # Ensure verify=False is applied to every request during retries
+        kwargs["verify"] = False
+        return super().send(request, **kwargs)
+
+
 def create_session():
     """Creates and configures a requests session with retry strategy."""
     session = requests.Session()
-    retries = Retry(
-        total=5,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["HEAD", "GET", "OPTIONS", "POST"],
-    )
-    adapter = HTTPAdapter(max_retries=retries)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
+    session.mount("http://", SSLDisablingAdapter())
+    session.mount("https://", SSLDisablingAdapter())
     session.verify = False
     return session
 
