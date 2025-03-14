@@ -74,6 +74,11 @@ def parse_arguments():
         default=None,
         help="URL to the available solutions XML file",
     )
+    parser.add_argument(
+        "--envvars",
+        default="tanium_creds.env",
+        help="Path to file holding envvars",
+    )
     return parser.parse_args()
 
 
@@ -700,7 +705,7 @@ def main():
 
     global DEFAULT_TIMEOUT
     DEFAULT_TIMEOUT = args.timeout
-    env_vars = load_env_vars("tanium_creds.env")
+    env_vars = load_env_vars(args.envvars)
     tanium_username = env_vars.get("TANIUM_USERNAME")
     tanium_password = env_vars.get("TANIUM_PASSWORD")
     tanium_base_url = env_vars.get("TANIUM_BASE_URL")
