@@ -1,6 +1,6 @@
 # ------------------- Variables ------------------- #
-$url = "https://tanium.lab.amd-e.com"    # e.g., https://tanium.company.com
-$token = "token-"           # Session token
+$url      = "https://"    # e.g., https://tanium.company.com
+$token    = "token-"                          # Session token
 $jsonFile = 'export-users.json'               # Path to the JSON file with users
 
 # ------------------- Read JSON ------------------- #
@@ -64,14 +64,18 @@ foreach ($userObj in $usersFromFile) {
             $groupName = $groupRef.name
             Write-Host "  Assigning user '$username' to group '$groupName'"
 
-            # Lookup the user group by name
+            # Lookup the user group by retrieving the full list from /api/v2/user_groups and searching for a matching name.
             try {
-                $encodedGName = [System.Uri]::EscapeDataString($groupName)
-                $groupLookup = Invoke-RestMethod `
-                    -Uri "$url/api/v2/user_groups/by-name/$encodedGName" `
+                $groupsResponse = Invoke-RestMethod `
+                    -Uri "$url/api/v2/user_groups" `
                     -Method GET `
                     -Headers @{ Session = $token }
-                $groupId = $groupLookup.data.id
+                $groupsList = $groupsResponse.data
+                $groupItem = $groupsList | Where-Object { $_.name -eq $groupName }
+                if ($null -eq $groupItem) {
+                    throw "Group '$groupName' not found in user_groups list."
+                }
+                $groupId = $groupItem.id
                 Write-Host "      Found group '$groupName' (ID: $groupId)"
             }
             catch {
@@ -79,7 +83,7 @@ foreach ($userObj in $usersFromFile) {
                 continue
             }
 
-            # Retrieve current group details to get the existing user_list
+            # Retrieve current group details to get the existing user_list.
             try {
                 $groupDetails = Invoke-RestMethod `
                     -Uri "$url/api/v2/user_groups/$groupId" `
@@ -91,7 +95,7 @@ foreach ($userObj in $usersFromFile) {
                 continue
             }
 
-            # Check if the user is already a member
+            # Check if the user is already a member.
             $userAlreadyInGroup = $false
             if ($groupDetails.data.user_list -and $groupDetails.data.user_list.Count -gt 0) {
                 if ($groupDetails.data.user_list | Where-Object { $_.id -eq $userId }) {
@@ -103,10 +107,10 @@ foreach ($userObj in $usersFromFile) {
                 continue
             }
 
-            # Build the combined user list: start with any existing members and add this user
+            # Build the combined user list: start with current members then add this user.
             $currentUserList = @()
             if ($groupDetails.data.user_list) {
-                # Ensure user_list is an array
+                # Ensure user_list is an array.
                 if ($groupDetails.data.user_list -isnot [System.Collections.IEnumerable]) {
                     $currentUserList = @($groupDetails.data.user_list)
                 }
@@ -114,17 +118,17 @@ foreach ($userObj in $usersFromFile) {
                     $currentUserList = $groupDetails.data.user_list
                 }
             }
-            # Append the new user; our check ensures that this user isn't already present.
+            # Append the new user (as an object with just the id).
             $currentUserList += @{ id = $userId }
 
-            # Build PATCH payload with the current user_list (plus new entry) and also include group name if required
+            # Build PATCH payload. Some APIs require the group name to be sent as well.
             $patchBody = @{
                 name      = $groupName
                 user_list = $currentUserList
             } | ConvertTo-Json
 
             try {
-                $patchResp = Invoke-RestMethod `
+                $assignResp = Invoke-RestMethod `
                     -Uri "$url/api/v2/user_groups/$groupId" `
                     -Method PATCH `
                     -Body $patchBody `
