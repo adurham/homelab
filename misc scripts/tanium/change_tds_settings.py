@@ -2,31 +2,16 @@ import http.client
 import json
 import ssl
 
+# Define host and API token directly
+host = ""  # Replace with your actual host
+api_token = "token-"  # Replace with your actual API token
+
 # Create an SSL context that ignores certificate verification
 context = ssl._create_unverified_context()
 
 # Function to create a new connection
 def create_connection(host):
     return http.client.HTTPSConnection(host, context=context)
-
-# Function to load environment variables from a file
-def load_env_vars(filename):
-    env_vars = {}
-    with open(filename) as file:
-        for line in file:
-            line = line.strip()
-            if line and '=' in line:  # Ensure the line is not empty and contains '='
-                name, value = line.split('=', 1)
-                env_vars[name] = value
-    return env_vars
-
-# Load environment variables from config.env file
-env_vars = load_env_vars('tanium_creds.env')
-
-
-# URL details
-host = env_vars.get("HOST")
-api_token = env_vars.get("API_TOKEN")
 
 # Headers including the API token
 headers = {
@@ -40,8 +25,9 @@ path = "/plugin/products/core-data/v1/settings"
 # Define the JSON body
 payload = {
     "harvest": {
-        "continuous_harvest_interval": {"value": "14400s"},
-        "continuous_harvest_question_expiration": {"value": "1800s"}
+        "continuous_harvest_interval": {"value": "7200s"},
+        "continuous_harvest_question_expiration": {"value": "7200s"},
+        "max_sensors_per_question": {"value": "60"}
     }
 }
 
@@ -57,12 +43,20 @@ conn.request("PATCH", path, body=json_payload, headers=headers)
 # Get the response
 response = conn.getresponse()
 
-# Read the response body
+# Read and decode the response body
 response_body = response.read().decode()
+
+# Try to pretty-print the JSON response
+try:
+    parsed_json = json.loads(response_body)
+    pretty_response = json.dumps(parsed_json, indent=4)
+except json.JSONDecodeError:
+    pretty_response = response_body  # Fallback if response is not valid JSON
 
 # Print the response
 print(f"Status Code: {response.status}")
-print(f"Response Body: {response_body}")
+print("Response Body:")
+print(pretty_response)
 
 # Close the connection
 conn.close()
