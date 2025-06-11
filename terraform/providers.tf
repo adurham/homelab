@@ -1,12 +1,12 @@
 terraform {
   required_providers {
     vsphere = {
-      source  = "hashicorp/vsphere"
-      version = "~> 2.9.1"
+      source  = "vmware/vsphere"
+      version = "~> 2.13.0"
     }
     nsxt = {
       source  = "vmware/nsxt"
-      version = "~> 4.2.0"
+      version = "~> 3.4.0"
     }
     null = {
       source  = "hashicorp/null"
