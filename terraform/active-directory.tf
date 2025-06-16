@@ -8,7 +8,7 @@ resource "nsxt_policy_fixed_segment" "active_directory" {
   transport_zone_path = nsxt_policy_transport_zone.overlay_tz.path
 
   subnet {
-    cidr = local.active_directory_cidr
+    cidr = local.services.active_directory.cidr
     dhcp_v4_config {
       dns_servers = local.dns_servers
       lease_time  = local.lease_time
@@ -38,88 +38,92 @@ resource "vsphere_folder" "active_directory_certificate_authority" {
 }
 
 # Deploy the Active Directory server using a module
-module "homelab-active_directory" {
-  depends_on = [
-    nsxt_policy_fixed_segment.active_directory,
-    vsphere_folder.active_directory
-  ]
+# module "homelab-active_directory" {
+#   depends_on = [
+#     nsxt_policy_fixed_segment.active_directory,
+#     vsphere_folder.active_directory
+#   ]
 
-  source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-  vmtemp          = local.ws22dc_template
-  vmfolder        = vsphere_folder.active_directory.path
-  instances       = var.active_directory_instances
-  cpu_number      = local.active_directory_resource_vm_specs.cpu_number
-  cpu_share_level = local.active_directory_resource_vm_specs.cpu_share_level
-  ram_size        = local.active_directory_resource_vm_specs.ram_size
-  io_share_level  = local.active_directory_resource_vm_specs.io_share_level
-  vmname          = "amd-wnad"
-  vmrp            = local.cl02_resource_pool
+#   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+#   vmtemp          = local.ws22dc_template
+#   vmfolder        = vsphere_folder.active_directory.path
+#   instances       = var.active_directory_instances
+#   cpu_number      = local.services.active_directory.vm_specs.cpu_number
+#   cpu_share_level = local.services.active_directory.vm_specs.cpu_share_level
+#   ram_size        = local.services.active_directory.vm_specs.ram_size
+#   io_share_level  = local.services.active_directory.vm_specs.io_share_level
+#   vmname          = "amd-wnad"
+#   vmrp            = local.cl02_resource_pool
 
-  network = {
-    (nsxt_policy_fixed_segment.active_directory.display_name) = local.active_directory_ips
-  }
+#   network = {
+#     (nsxt_policy_fixed_segment.active_directory.display_name) = local.services.active_directory.ips
+#   }
 
-  vmgateway        = local.active_directory_gateway
-  dc               = local.vsphere_datacenter
-  datastore        = local.datastore_vsan
-  is_windows_image = true
-}
+#   vmgateway        = local.services.active_directory.gateway
+#   dc               = vsphere_datacenter.Homelab.moid
+#   datastore        = local.datastore_vsan
+#   is_windows_image = true
+# }
 
 # Deploy the Active Directory Federation Services (ADFS) server using a module
-module "homelab-active_directory_federation_services" {
-  depends_on = [
-    nsxt_policy_fixed_segment.active_directory,
-    vsphere_folder.active_directory_federation_services
-  ]
+# module "homelab-active_directory_federation_services" {
+#   depends_on = [
+#     nsxt_policy_fixed_segment.active_directory,
+#     vsphere_folder.active_directory_federation_services
+#   ]
 
-  source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-  vmtemp          = local.ws22dc_template
-  vmfolder        = vsphere_folder.active_directory_federation_services.path
-  instances       = var.active_directory_instances
-  cpu_number      = local.active_directory_resource_vm_specs.cpu_number
-  cpu_share_level = local.active_directory_resource_vm_specs.cpu_share_level
-  ram_size        = local.active_directory_resource_vm_specs.ram_size
-  io_share_level  = local.active_directory_resource_vm_specs.io_share_level
-  vmname          = "amd-wnadfs"
-  vmrp            = local.cl02_resource_pool
+#   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+#   vmtemp          = local.ws22dc_template
+#   vmfolder        = vsphere_folder.active_directory_federation_services.path
+#   instances       = var.active_directory_instances
+#   cpu_number      = local.services.active_directory.vm_specs.cpu_number
+#   cpu_share_level = local.services.active_directory.vm_specs.cpu_share_level
+#   ram_size        = local.services.active_directory.vm_specs.ram_size
+#   io_share_level  = local.services.active_directory.vm_specs.io_share_level
+#   vmname          = "amd-wnadfs"
+#   vmrp            = local.cl02_resource_pool
 
-  network = {
-    (nsxt_policy_fixed_segment.active_directory.display_name) = local.federation_services_ips
-  }
+#   network = {
+#     (nsxt_policy_fixed_segment.active_directory.display_name) = [
+#       local.services.active_directory.ips[1]
+#     ]
+#   }
 
-  vmgateway        = local.active_directory_gateway
-  dc               = local.vsphere_datacenter
-  datastore        = local.datastore_vsan
-  is_windows_image = true
-}
+#   vmgateway        = local.services.active_directory.gateway
+#   dc = vsphere_datacenter.Homelab.name
+#   datastore        = local.datastore_vsan
+#   is_windows_image = true
+# }
 
 # Deploy the Active Directory Certificate Authority (ADCA) server using a module
-module "homelab-active_directory_certificate_authority" {
-  depends_on = [
-    nsxt_policy_fixed_segment.active_directory,
-    vsphere_folder.active_directory_certificate_authority
-  ]
+# module "homelab-active_directory_certificate_authority" {
+#   depends_on = [
+#     nsxt_policy_fixed_segment.active_directory,
+#     vsphere_folder.active_directory_certificate_authority
+#   ]
 
-  source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-  vmtemp          = local.ws22dc_template
-  vmfolder        = vsphere_folder.active_directory_certificate_authority.path
-  instances       = var.active_directory_instances
-  cpu_number      = local.active_directory_resource_vm_specs.cpu_number
-  cpu_share_level = local.active_directory_resource_vm_specs.cpu_share_level
-  ram_size        = local.active_directory_resource_vm_specs.ram_size
-  io_share_level  = local.active_directory_resource_vm_specs.io_share_level
-  vmname          = "amd-wnadca"
-  vmrp            = local.cl02_resource_pool
+#   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
+#   vmtemp          = local.ws22dc_template
+#   vmfolder        = vsphere_folder.active_directory_certificate_authority.path
+#   instances       = var.active_directory_instances
+#   cpu_number      = local.services.active_directory.vm_specs.cpu_number
+#   cpu_share_level = local.services.active_directory.vm_specs.cpu_share_level
+#   ram_size        = local.services.active_directory.vm_specs.ram_size
+#   io_share_level  = local.services.active_directory.vm_specs.io_share_level
+#   vmname          = "amd-wnadca"
+#   vmrp            = local.cl02_resource_pool
 
-  network = {
-    (nsxt_policy_fixed_segment.active_directory.display_name) = local.certificate_authority_ips
-  }
+#   network = {
+#     (nsxt_policy_fixed_segment.active_directory.display_name) = [
+#       local.services.active_directory.ips[2]
+#     ]
+#   }
 
-  vmgateway        = local.active_directory_gateway
-  dc               = local.vsphere_datacenter
-  datastore        = local.datastore_vsan
-  is_windows_image = true
-}
+#   vmgateway        = local.services.active_directory.gateway
+#   dc = vsphere_datacenter.Homelab.name
+#   datastore        = local.datastore_vsan
+#   is_windows_image = true
+# }
 
 # Output the segment path for further use or debugging
 output "active_directory_segment_path" {
