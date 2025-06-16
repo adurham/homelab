@@ -146,3 +146,9 @@ variable "vault_instances" {
   description = "Number of Keycloak instances"
   type        = number
 }
+
+# variable "vcenter_thumbprint" {
+#   type        = string
+#   description = "The thumbprint of the vCenter server certificate."
+#   sensitive   = true
+# }

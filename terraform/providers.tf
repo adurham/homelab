@@ -6,7 +6,7 @@ terraform {
     }
     nsxt = {
       source  = "vmware/nsxt"
-      version = "~> 3.4.0"
+      version = "~> 3.8.2"
     }
     null = {
       source  = "hashicorp/null"

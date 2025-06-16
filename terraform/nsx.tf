@@ -98,23 +98,21 @@ resource "nsxt_policy_ip_pool_static_subnet" "edge_host_transport_node_static_po
 
 resource "nsxt_policy_host_transport_node_profile" "tnp1" {
   display_name = "tnp.1"
-
   standard_host_switch {
     ip_assignment {
       assigned_by_dhcp = true
     }
-    host_switch_type = "VDS"
-    host_switch_id   = vsphere_distributed_virtual_switch.vds01.id
+    host_switch_id = vsphere_distributed_virtual_switch.vds01.id
+
     transport_zone_endpoint {
       transport_zone = nsxt_policy_transport_zone.overlay_tz.path
     }
     transport_zone_endpoint {
       transport_zone = nsxt_policy_transport_zone.vlan_tz.path
     }
-    host_switch_profile = [
-      nsxt_policy_uplink_host_switch_profile.esx_host_switch_profile.path
-    ]
+
     is_migrate_pnics = false
+
     uplink {
       vds_uplink_name = "Uplink 1"
       uplink_name     = "Uplink-1"
@@ -129,10 +127,6 @@ resource "nsxt_policy_host_transport_node_profile" "tnp1" {
 resource "nsxt_compute_manager" "Homelab" {
   description  = "Compute Manager"
   display_name = "Homelab"
-  # tag {
-  #   scope = "scope1"
-  #   tag   = "tag1"
-  # }
   server                 = "10.0.2.2"
   create_service_account = true
   set_as_oidc_provider   = true
@@ -140,188 +134,32 @@ resource "nsxt_compute_manager" "Homelab" {
     username_password_login {
       username   = var.vcenter_username
       password   = var.vcenter_password
-      thumbprint = "07:31:4C:28:D0:10:56:7B:6A:2C:C8:72:C9:0F:32:4D:BD:96:FF:32:DC:77:63:83:0D:E9:EC:26:68:2C:6D:A4"
+      thumbprint = "DB:1E:C0:F7:AD:02:37:92:D8:13:89:1A:C9:12:02:5B:36:79:A8:20:B1:C2:2B:D1:6B:0F:9D:B4:F2:4E:58:C8"
     }
   }
   origin_type = "vCenter"
 }
 
-resource "nsxt_policy_host_transport_node_collection" "amd-vmcl01" {
-  display_name                = "amd-vmcl01"
-  compute_collection_id       = "${nsxt_compute_manager.Homelab.id}:${vsphere_compute_cluster.cl01.id}"
-  transport_node_profile_path = nsxt_policy_host_transport_node_profile.tnp1.path
-  tag {
-    scope = "color"
-    tag   = "red"
-  }
-}
-
 resource "nsxt_policy_host_transport_node_collection" "amd-vmcl02" {
   display_name                = "amd-vmcl02"
-  compute_collection_id       = "${nsxt_compute_manager.Homelab.id}:${vsphere_compute_cluster.cl02.id}"
+  compute_collection_id = "${nsxt_compute_manager.Homelab.id}:${vsphere_compute_cluster.cl02.id}"
   transport_node_profile_path = nsxt_policy_host_transport_node_profile.tnp1.path
   tag {
     scope = "color"
     tag   = "red"
-  }
-}
-
-resource "nsxt_transport_node" "edge_node1" {
-  display_name = "amd-nxen01"
-  description  = "Terraform-deployed edge node"
-  standard_host_switch {
-    host_switch_profile = [
-      nsxt_policy_uplink_host_switch_profile.edge_host_switch_profile.realized_id
-    ]
-    // TO-DO Need to dynamically assign this
-    ip_assignment {
-      assigned_by_dhcp = false
-      static_ip_pool   = "fc124b7a-929a-47f0-a985-b2622c18d6ea"
-    }
-    pnic {
-      device_name = "fp-eth0"
-      uplink_name = "Uplink-1"
-    }
-    pnic {
-      device_name = "fp-eth1"
-      uplink_name = "Uplink-2"
-    }
-    transport_zone_endpoint {
-      transport_zone = nsxt_policy_transport_zone.overlay_tz.realized_id
-    }
-    transport_zone_endpoint {
-      transport_zone = nsxt_policy_transport_zone.vlan_tz.realized_id
-    }
-  }
-  edge_node {
-    deployment_config {
-      form_factor = "MEDIUM"
-      node_user_settings {
-        cli_username  = var.nsx_transport_node_cli_username
-        cli_password  = var.nsx_transport_node_cli_password
-        root_password = var.nsx_transport_node_root_password
-      }
-      vm_deployment_config {
-        compute_id = vsphere_compute_cluster.cl02.resource_pool_id
-        data_network_ids = [
-          vsphere_distributed_port_group.vds01_vdpg01.id,
-          vsphere_distributed_port_group.vds01_vdpg01.id
-        ]
-        default_gateway_address = []
-        ipv4_assignment_enabled = true
-        management_network_id   = vsphere_distributed_port_group.vds02_vdpg04.id
-        // TO-DO Need to dynamically assign this
-        storage_id = "datastore-14"
-        vc_id      = nsxt_compute_manager.Homelab.id
-        reservation_info {
-          cpu_reservation_in_mhz        = 0
-          cpu_reservation_in_shares     = "HIGH_PRIORITY"
-          memory_reservation_percentage = 100
-        }
-      }
-    }
-    node_settings {
-      hostname = "amd-nxen01.${var.domain}"
-      dns_servers = [
-        "10.0.2.1"
-      ]
-      enable_ssh      = false
-      enable_upt_mode = true
-      ntp_servers = [
-        "10.0.2.1"
-      ]
-      search_domains = [
-        var.domain
-      ]
-    }
-  }
-}
-
-resource "nsxt_transport_node" "edge_node2" {
-  display_name = "amd-nxen02"
-  description  = "Terraform-deployed edge node"
-  standard_host_switch {
-    host_switch_profile = [
-      nsxt_policy_uplink_host_switch_profile.edge_host_switch_profile.realized_id
-    ]
-    // TO-DO Need to dynamically assign this
-    ip_assignment {
-      assigned_by_dhcp = false
-      static_ip_pool   = "fc124b7a-929a-47f0-a985-b2622c18d6ea"
-    }
-    pnic {
-      device_name = "fp-eth0"
-      uplink_name = "Uplink-1"
-    }
-    pnic {
-      device_name = "fp-eth1"
-      uplink_name = "Uplink-2"
-    }
-    transport_zone_endpoint {
-      transport_zone = nsxt_policy_transport_zone.overlay_tz.realized_id
-    }
-    transport_zone_endpoint {
-      transport_zone = nsxt_policy_transport_zone.vlan_tz.realized_id
-    }
-  }
-  edge_node {
-    deployment_config {
-      form_factor = "MEDIUM"
-      node_user_settings {
-        cli_username  = var.nsx_transport_node_cli_username
-        cli_password  = var.nsx_transport_node_cli_password
-        root_password = var.nsx_transport_node_root_password
-      }
-      vm_deployment_config {
-        compute_id = vsphere_compute_cluster.cl02.resource_pool_id
-        data_network_ids = [
-          vsphere_distributed_port_group.vds01_vdpg01.id,
-          vsphere_distributed_port_group.vds01_vdpg01.id
-        ]
-        default_gateway_address = []
-        ipv4_assignment_enabled = true
-        management_network_id   = vsphere_distributed_port_group.vds02_vdpg04.id
-        // TO-DO Need to dynamically assign this
-        storage_id = "datastore-14"
-        vc_id      = nsxt_compute_manager.Homelab.id
-        reservation_info {
-          cpu_reservation_in_mhz        = 0
-          cpu_reservation_in_shares     = "HIGH_PRIORITY"
-          memory_reservation_percentage = 100
-        }
-      }
-    }
-    node_settings {
-      hostname = "amd-nxen02.${var.domain}"
-      dns_servers = [
-        "10.0.2.1"
-      ]
-      enable_ssh      = false
-      enable_upt_mode = true
-      ntp_servers = [
-        "10.0.2.1"
-      ]
-      search_domains = [
-        var.domain
-      ]
-    }
   }
 }
 
 resource "nsxt_edge_cluster" "edge_cluster" {
   description  = "Terraform provisioned Edge Cluster"
   display_name = "amd-nxec01"
-  depends_on = [
-    nsxt_transport_node.edge_node1,
-    nsxt_transport_node.edge_node2
-  ]
   member {
-    display_name      = nsxt_transport_node.edge_node2.display_name
-    transport_node_id = nsxt_transport_node.edge_node2.id
+    display_name      = "amd-nxen02"
+    transport_node_id = "0e83629a-6eb8-4c68-a5df-c5735e63e700"
   }
   member {
-    display_name      = nsxt_transport_node.edge_node1.display_name
-    transport_node_id = nsxt_transport_node.edge_node1.id
+    display_name      = "amd-nxen01"
+    transport_node_id = "c6f715b0-a2c0-421c-bf93-65774b3102f4"
   }
 }
 
@@ -343,6 +181,7 @@ resource "nsxt_policy_tier0_gateway" "tier0_gw" {
     multipath_relax = true
   }
   edge_cluster_path = data.nsxt_policy_edge_cluster.edge_cluster.path
+  depends_on = [nsxt_edge_cluster.edge_cluster]
 }
 
 resource "nsxt_policy_vlan_segment" "edge_uplink" {
@@ -424,7 +263,7 @@ resource "nsxt_policy_tier1_gateway" "tier1_gw" {
   depends_on = [
     nsxt_edge_cluster.edge_cluster
   ]
-  # edge_cluster_path         = data.nsxt_policy_edge_cluster.edge_cluster.path
+  edge_cluster_path         = data.nsxt_policy_edge_cluster.edge_cluster.path
   ha_mode                   = "ACTIVE_STANDBY"
   failover_mode             = "NON_PREEMPTIVE"
   default_rule_logging      = "false"
