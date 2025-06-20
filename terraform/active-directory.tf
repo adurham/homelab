@@ -126,9 +126,9 @@ resource "vsphere_folder" "active_directory_certificate_authority" {
 # }
 
 # Output the segment path for further use or debugging
-output "active_directory_segment_path" {
-  value = nsxt_policy_fixed_segment.active_directory.path
-}
+# output "active_directory_segment_path" {
+#   value = nsxt_policy_fixed_segment.active_directory.path
+# }
 
 # Output the folder path for Active Directory for further use or debugging
 output "active_directory_folder_path" {
