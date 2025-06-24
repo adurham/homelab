@@ -162,29 +162,32 @@ resource "vsphere_folder" "tanium_clients_76" {
 #   datastore = "vSphere Flash"
 # }
 
-# module "homelab-tanium_clients_76-rhel_9" {
-#   depends_on = [
-#     nsxt_policy_fixed_segment.tanium_clients_76,
-#     vsphere_folder.tanium_clients_76
-#   ]
-#   source          = "git@github.com:adurham/terraform-vsphere-vm.git?ref=v3.8.1"
-#   vmtemp          = "RedHat Enterprise Linux 9"
-#   vmfolder        = vsphere_folder.tanium_clients_76.path
-#   instances       = 1
-#   cpu_number      = local.low_resource_vm_specs.cpu_number
-#   cpu_share_level = local.low_resource_vm_specs.cpu_share_level
-#   ram_size        = local.low_resource_vm_specs.ram_size
-#   io_share_level  = local.low_resource_vm_specs.io_share_level
-#   vmname          = "tn76-rhel9-"
-#   vmrp            = "${vsphere_compute_cluster.cl01.name}/Resources"
-#   domain          = var.domain
-#   network = {
-#     "${nsxt_policy_fixed_segment.tanium_clients_76.display_name}" = ["", ""]
-#   }
-#   vmgateway = "172.16.5.1"
-#   dc        = vsphere_datacenter.Homelab.name
-#   datastore = "vSphere Flash"
-# }
+module "homelab-tanium_clients_76-rhel_9" {
+  depends_on = [
+    nsxt_policy_fixed_segment.tanium_clients_76,
+    vsphere_folder.tanium_clients_76
+  ]
+  source          = "/Users/adam.durham/repos/terraform-vsphere-vm"
+  vmtemp          = "RedHat Enterprise Linux 9"
+  vmfolder        = vsphere_folder.tanium_clients_76.path
+  instances       = 0
+  cpu_number      = local.low_resource_vm_specs.cpu_number
+  cpu_share_level = local.low_resource_vm_specs.cpu_share_level
+  ram_size        = local.low_resource_vm_specs.ram_size
+  io_share_level  = local.low_resource_vm_specs.io_share_level
+  vmname          = "tn76-rhel9-"
+  vmrp            = "${vsphere_compute_cluster.cl02.name}/Resources"
+  domain          = var.domain
+  network = {
+    "${nsxt_policy_fixed_segment.tanium_clients_76.display_name}" = ["","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","",""]
+  }
+  vmgateway = "172.16.5.1"
+  dc        = vsphere_datacenter.Homelab.name
+  datastore = "vSphere Flash"
+  wait_for_guest_net_routable = false
+  wait_for_guest_ip_timeout   = 0
+  wait_for_guest_net_timeout  = 0
+}
 
 # module "homelab-tanium_clients_76-rhel_8" {
 #   depends_on = [

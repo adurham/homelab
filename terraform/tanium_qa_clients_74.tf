@@ -1,16 +1,16 @@
-resource "nsxt_policy_fixed_segment" "tanium_clients_74" {
-  display_name      = "Tanium Clients - 7.4"
-  description       = "Terraform provisioned Segment"
-  connectivity_path = nsxt_policy_tier1_gateway.tier1_gw.path
-  subnet {
-    cidr        = "172.16.4.1/24"
-    dhcp_ranges = ["172.16.4.2-172.16.4.254"]
-    dhcp_v4_config {
-      dns_servers = var.dns_servers
-      lease_time  = var.lease_time
-    }
-  }
-}
+# resource "nsxt_policy_fixed_segment" "tanium_clients_74" {
+#   display_name      = "Tanium Clients - 7.4"
+#   description       = "Terraform provisioned Segment"
+#   connectivity_path = nsxt_policy_tier1_gateway.tier1_gw.path
+#   subnet {
+#     cidr        = "172.16.4.1/24"
+#     dhcp_ranges = ["172.16.4.2-172.16.4.254"]
+#     dhcp_v4_config {
+#       dns_servers = var.dns_servers
+#       lease_time  = var.lease_time
+#     }
+#   }
+# }
 
 resource "vsphere_folder" "tanium_clients_74" {
   path          = "${vsphere_folder.tanium_qa_clients.path}/7.4"

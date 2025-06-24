@@ -25,7 +25,7 @@ resource "vsphere_host" "hosts" {
   username   = "root"
   password   = var.esxi_password
   license    = var.esxi_8_license
-  lockdown   = "normal"
+  lockdown   = "disabled"
   services {
     ntpd {
       enabled     = true
