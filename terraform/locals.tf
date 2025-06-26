@@ -68,8 +68,8 @@ locals {
   low_resource_vm_specs = {
     cpu_number      = 2
     ram_size        = 4096
-    cpu_share_level = "low"
-    io_share_level  = ["low"]
+    cpu_share_level = "normal"
+    io_share_level  = ["normal"]
   }
 
   # Define the unique inputs for each application/service
