@@ -14,7 +14,6 @@ This ensures we catch both outdated servers and inconsistencies between servers.
 
 import json
 import sys
-import time
 import ssl
 from urllib.request import Request, urlopen
 import argparse
@@ -151,11 +150,21 @@ def fetch_api_solutions(client: TaniumClient) -> dict:
         raise
 
 def fetch_manifest_url(client: TaniumClient) -> str:
-    """Retrieve the manifest URL from the Tanium server's system settings."""
+    """Retrieve the manifest URL from the Tanium server's system settings.
+
+    Args:
+        client: Tanium client instance
+
+    Returns:
+        The manifest URL as a string
+
+    Raises:
+        ValueError: If console_manifestURL is not found
+    """
     try:
         raw = client.get("/api/v2/system_settings")
         data = json.loads(raw.decode("utf-8"))
-        
+
         for item in data.get("data", []):
             if item.get("name") == "console_manifestURL":
                 value = item.get("value")
