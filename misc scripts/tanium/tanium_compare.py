@@ -616,21 +616,45 @@ class GlobalLock:
             
             # Try to acquire the lock
             start_time = time.time()
+            
+            # Add small random delay at start to reduce collision probability
+            import random
+            initial_delay = random.uniform(0, 0.5)  # 0-500ms random delay
+            logging.debug(f"Initial random delay: {initial_delay:.3f}s")
+            time.sleep(initial_delay)
+            
             while time.time() - start_time < timeout:
+                logging.debug(f"Lock acquisition attempt (elapsed: {time.time() - start_time:.1f}s)")
+                
+                # Try to acquire the lock normally first
                 if self._try_acquire_lock():
                     logging.info(f"Acquired global import lock (server: {self.server_name})")
                     audit_log("LOCK_ACQUIRED", {"server": self.server_name, "setting_id": self.setting_id})
                     return True
                 
-                # Check if lock might be stale
-                if self._is_lock_stale(stale_lock_timeout):
-                    logging.warning("Detected stale lock, attempting to break it")
-                    if self._break_stale_lock():
-                        logging.info("Successfully broke stale lock")
-                        continue
+                # If we failed to acquire, check if it might be stale
+                # First check if the lock is actually held (value = "1")
+                try:
+                    raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
+                    data = json.loads(raw.decode("utf-8"))
+                    current_value = data.get("data", {}).get("value", "0")
+                    
+                    if current_value == "1" and self._is_lock_stale(stale_lock_timeout):
+                        logging.warning("Detected stale lock, attempting to break and acquire atomically")
+                        if self._break_stale_lock_and_acquire():
+                            logging.info(f"Successfully broke stale lock and acquired it (server: {self.server_name})")
+                            audit_log("LOCK_ACQUIRED", {"server": self.server_name, "setting_id": self.setting_id})
+                            return True
+                        else:
+                            logging.debug("Failed to break stale lock and acquire atomically")
+                except Exception as exc:
+                    logging.debug(f"Could not check lock status: {exc}")
                 
                 logging.debug("Lock is held by another server, waiting...")
-                time.sleep(5)  # Wait 5 seconds before retrying
+                # Add small random delay to reduce collision probability
+                import random
+                delay = 5 + random.uniform(0, 2)  # 5-7 seconds with some randomness
+                time.sleep(delay)
             
             logging.warning(f"Failed to acquire lock within {timeout} seconds")
             return False
@@ -708,13 +732,17 @@ class GlobalLock:
             data = json.loads(raw.decode("utf-8"))
             current_value = data.get("data", {}).get("value", "0")
             
+            logging.debug(f"Lock status check: value={current_value}")
+            
             if current_value != "1":
+                logging.debug("Lock is not held (value is not 1)")
                 return False  # Lock is not held
             
             # Check when the setting was last modified
             modified_time = data.get("data", {}).get("modified_time")
             if not modified_time:
                 # If we can't determine when it was modified, assume it's not stale
+                logging.debug("No modified_time available, assuming lock is not stale")
                 return False
             
             # Parse the timestamp (assuming ISO format)
@@ -724,9 +752,14 @@ class GlobalLock:
                 now_dt = datetime.now(timezone.utc)
                 age_seconds = (now_dt - modified_dt).total_seconds()
                 
+                logging.debug(f"Lock age: {age_seconds:.0f}s, threshold: {stale_timeout}s")
+                
                 if age_seconds > stale_timeout:
                     logging.warning(f"Lock appears stale (age: {age_seconds:.0f}s, threshold: {stale_timeout}s)")
                     return True
+                else:
+                    logging.debug(f"Lock is not stale (age: {age_seconds:.0f}s < {stale_timeout}s)")
+                    return False
                     
             except Exception as parse_exc:
                 logging.debug(f"Could not parse lock timestamp: {parse_exc}")
@@ -735,8 +768,6 @@ class GlobalLock:
         except Exception as exc:
             logging.debug(f"Could not check lock staleness: {exc}")
             return False
-        
-        return False
     
     def _break_stale_lock(self) -> bool:
         """Attempt to break a stale lock by setting it to 0.
@@ -769,6 +800,50 @@ class GlobalLock:
             logging.error(f"Failed to break stale lock: {exc}")
             return False
     
+    def _break_stale_lock_and_acquire(self) -> bool:
+        """Atomically break a stale lock and acquire it.
+        
+        This method attempts to break a stale lock and immediately acquire it
+        to prevent race conditions.
+        
+        Returns:
+            True if lock was broken and acquired, False otherwise
+        """
+        try:
+            # First, verify the lock is still stale (double-check)
+            if not self._is_lock_stale(1800):  # Use 30 minutes as default
+                logging.debug("Lock is no longer stale, skipping break and acquire")
+                return False
+            
+            logging.warning("Atomically breaking stale lock and acquiring it")
+            
+            # Step 1: Break the stale lock
+            patch_data = json.dumps({
+                "value": "0",
+                "value_type": "Numeric"
+            }).encode('utf-8')
+            
+            self.client.patch(f"/api/v2/system_settings/{self.setting_id}", patch_data)
+            
+            # Step 2: Immediately try to acquire it (with minimal delay)
+            time.sleep(0.1)  # Very small delay to ensure the patch is processed
+            
+            # Use the same simple approach as _try_acquire_lock
+            acquire_data = json.dumps({
+                "value": "1",
+                "value_type": "Numeric"
+            }).encode('utf-8')
+            
+            self.client.patch(f"/api/v2/system_settings/{self.setting_id}", acquire_data)
+            
+            # If we got here without an exception, we successfully acquired the lock
+            logging.info("Successfully broke stale lock and acquired it atomically")
+            return True
+                
+        except Exception as exc:
+            logging.error(f"Failed to break stale lock and acquire atomically: {exc}")
+            return False
+    
     def release(self) -> None:
         """Release the global lock."""
         if not self.setting_id:
@@ -790,46 +865,88 @@ class GlobalLock:
     
     
     def _try_acquire_lock(self) -> bool:
-        """Try to acquire the lock by setting it to 1.
+        """Try to acquire the lock using a more robust approach.
+        
+        Since the Tanium API doesn't support true compare-and-swap, we'll use
+        a combination of immediate retry and exponential backoff to handle race conditions.
         
         Returns:
             True if lock acquired, False if already held
         """
-        try:
-            # Get current value first
-            raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
-            data = json.loads(raw.decode("utf-8"))
-            current_value = data.get("data", {}).get("value", "0")
-            
-            if current_value == "1":
-                # Lock is already held
-                logging.debug("Lock is already held by another server")
-                return False
-            
-            # Try to set lock to 1
-            patch_data = json.dumps({
-                "value": "1",
-                "value_type": "Numeric"
-            }).encode('utf-8')
-            
-            self.client.patch(f"/api/v2/system_settings/{self.setting_id}", patch_data)
-            
-            # Verify the lock was actually acquired (double-check for race conditions)
-            raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
-            data = json.loads(raw.decode("utf-8"))
-            new_value = data.get("data", {}).get("value", "0")
-            
-            if new_value == "1":
-                logging.debug(f"Successfully acquired lock (server: {self.server_name})")
-                return True
-            else:
-                # Race condition: another server acquired the lock between our check and set
-                logging.debug("Lock acquisition failed due to race condition")
-                return False
-            
-        except Exception as exc:
-            logging.debug(f"Failed to acquire lock: {exc}")
-            return False
+        import time
+        import random
+        
+        # Try multiple times with exponential backoff to handle race conditions
+        max_attempts = 3
+        base_delay = 0.1  # Start with 100ms
+        
+        for attempt in range(max_attempts):
+            try:
+                # Get current value
+                raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
+                data = json.loads(raw.decode("utf-8"))
+                current_value = data.get("data", {}).get("value", "0")
+                
+                logging.debug(f"Attempting to acquire lock (attempt {attempt + 1}/{max_attempts}): current_value={current_value}")
+                
+                if current_value == "1":
+                    # Lock is already held
+                    logging.debug(f"Lock is already held by another server (value: {current_value})")
+                    return False
+                
+                # Try to set lock to 1
+                patch_data = json.dumps({
+                    "value": "1",
+                    "value_type": "Numeric"
+                }).encode('utf-8')
+                
+                logging.debug(f"Setting lock to 1 (server: {self.server_name}, attempt {attempt + 1})")
+                
+                try:
+                    self.client.patch(f"/api/v2/system_settings/{self.setting_id}", patch_data)
+                    
+                    # Verify we actually got the lock by checking the value again
+                    time.sleep(0.05)  # Small delay to ensure the patch is processed
+                    raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
+                    data = json.loads(raw.decode("utf-8"))
+                    final_value = data.get("data", {}).get("value", "0")
+                    
+                    if final_value == "1":
+                        logging.info(f"Successfully acquired lock (server: {self.server_name})")
+                        return True
+                    else:
+                        logging.debug(f"Lock acquisition failed - value changed to: {final_value} (race condition)")
+                        if attempt < max_attempts - 1:
+                            # Exponential backoff with jitter
+                            delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
+                            logging.debug(f"Retrying in {delay:.3f}s...")
+                            time.sleep(delay)
+                            continue
+                        else:
+                            return False
+                    
+                except Exception as patch_exc:
+                    # If the patch failed, it likely means another server modified the setting
+                    logging.debug(f"Lock acquisition failed due to race condition: {patch_exc}")
+                    if attempt < max_attempts - 1:
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
+                        logging.debug(f"Retrying in {delay:.3f}s...")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        return False
+                
+            except Exception as exc:
+                logging.debug(f"Failed to acquire lock (attempt {attempt + 1}): {exc}")
+                if attempt < max_attempts - 1:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
+                    logging.debug(f"Retrying in {delay:.3f}s...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    return False
+        
+        return False
 
 # --------------------------------------------------------------------------- #
 # Import Functions
@@ -1367,6 +1484,7 @@ def main():
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], help="Logging level")
     parser.add_argument("--timeout", type=int, help="Request timeout in seconds")
     parser.add_argument("--import-out-of-date", action="store_true", help="Import out-of-date solutions")
+    parser.add_argument("--import-missing", action="store_true", help="Import missing solutions (new solutions that have never been imported)")
     parser.add_argument("--dry-run", action="store_true", help="Plan actions but do not execute imports")
     # Reconciled behavior is always used; flag removed
     parser.add_argument("--conflict-default", default="replace", choices=["replace", "skip"], help="Default conflict behavior for unhandled items")
@@ -1561,11 +1679,17 @@ def main():
         except Exception as e:
             logging.warning(f"Failed to read name-map file {args.name_map}: {e}")
 
-    # Ctrl+C handling for graceful stop
-    stop_flag = {"stop": False}
+    # Ctrl+C handling for graceful stop with double-kill
+    stop_flag = {"stop": False, "kill_count": 0}
     def _handle_sigint(signum, frame):
-        stop_flag["stop"] = True
-        logging.warning("Interrupt received; will stop after current operation")
+        stop_flag["kill_count"] += 1
+        if stop_flag["kill_count"] == 1:
+            stop_flag["stop"] = True
+            logging.warning("Interrupt received; will stop after current operation")
+            logging.warning("Press Ctrl+C again to force kill")
+        elif stop_flag["kill_count"] >= 2:
+            logging.error("Force kill requested - exiting immediately")
+            sys.exit(1)
     signal.signal(signal.SIGINT, _handle_sigint)
 
     # Concurrent comparisons
@@ -1581,6 +1705,7 @@ def main():
             results = {"out_of_date": [], "missing": [], "up_to_date": []}
             for sid, ver_info in manifest.items():
                 if stop_flag["stop"]:
+                    logging.warning(f"Stop signal received, breaking comparison loop for {name}")
                     break
                 ver = ver_info.get("version", "")
                 nm = ver_info.get("name", f"Unknown Solution ({sid})")
@@ -1605,10 +1730,14 @@ def main():
     with ThreadPoolExecutor(max_workers=max(1, args.max_compare_concurrency)) as pool:
         futures = [pool.submit(_compare_one, s) for s in servers]
         for fut in as_completed(futures):
+            if stop_flag["stop"]:
+                logging.warning("Stop signal received, cancelling remaining comparisons")
+                # Cancel any remaining futures
+                for f in futures:
+                    f.cancel()
+                break
             name, results = fut.result()
             server_results[name] = results
-            if stop_flag["stop"]:
-                break
 
     # Remove legacy sequential comparison loop (now handled above)
     
@@ -1663,7 +1792,8 @@ def main():
             server_global_lock = None
             if not args.dry_run and not args.skip_global_lock:
                 try:
-                    server_global_lock = GlobalLock(client)
+                    # Use the primary client for the global lock (shared across all servers)
+                    server_global_lock = GlobalLock(primary_client)
                     logging.info(f"Attempting to acquire global import lock for {server_name}...")
                     if not server_global_lock.acquire(timeout=args.global_lock_timeout, stale_lock_timeout=args.stale_lock_timeout):
                         logging.error(f"Could not acquire global import lock for {server_name} within {args.global_lock_timeout} seconds.")
@@ -1694,6 +1824,11 @@ def main():
             server_imports_failed = 0
             
             for solution in results["out_of_date"]:
+                # Check for stop signal before each import
+                if stop_flag["stop"]:
+                    logging.warning(f"Stop signal received, skipping remaining imports for {server_name}")
+                    break
+                
                 sid = solution["sid"]
                 name = solution["name"]
                 manifest_version = solution["manifest_version"]
@@ -1751,6 +1886,139 @@ def main():
             print(f"  Total imports successful: {import_stats['total_successful']}")
             print(f"  Total imports failed: {import_stats['total_failed']}")
             success_rate = (import_stats['total_successful'] / import_stats['total_attempted']) * 100
+            print(f"  Success rate: {success_rate:.1f}%")
+
+    # If --import-missing flag is set, import the missing solutions
+    if args.import_missing:
+        print("\n=== IMPORTING MISSING SOLUTIONS ===")
+        
+        # Import each missing solution on each server where it is missing
+        total_targets = sum(len(results["missing"]) for results in server_results.values())
+        print(f"Queued {total_targets} server-specific imports for missing solutions")
+        
+        # Track import statistics for missing solutions
+        missing_import_stats = {
+            "total_attempted": 0,
+            "total_successful": 0,
+            "total_failed": 0,
+            "servers_processed": 0,
+            "servers_skipped": 0
+        }
+        
+        for server_name, results in server_results.items():
+            if not results["missing"]:
+                continue
+            client = server_clients.get(server_name)
+            if client is None or not client.base:
+                logging.error(f"Server client not available for {server_name}")
+                continue
+            
+            # Test client connectivity once per server (use server_info)
+            try:
+                test_url = client._full("/api/v2/server_info")
+                logging.debug(f"Testing client with GET {test_url}")
+                raw = client.get("/api/v2/server_info")
+                if not raw:
+                    logging.error(f"Test GET to {test_url} returned empty response")
+                    continue
+                data = json.loads(raw.decode("utf-8"))
+                if not data.get("data"):
+                    logging.error(f"Test GET to {test_url} returned no data")
+                    continue
+            except Exception as exc:
+                logging.error(f"Test GET failed for {server_name}: {exc}")
+                continue
+
+            # Acquire global lock for this server's imports
+            server_global_lock = None
+            if not args.dry_run and not args.skip_global_lock:
+                try:
+                    # Use the primary client for the global lock (shared across all servers)
+                    server_global_lock = GlobalLock(primary_client)
+                    logging.info(f"Attempting to acquire global import lock for {server_name}...")
+                    if not server_global_lock.acquire(timeout=args.global_lock_timeout, stale_lock_timeout=args.stale_lock_timeout):
+                        logging.error(f"Could not acquire global import lock for {server_name} within {args.global_lock_timeout} seconds.")
+                        logging.error("Another server may be running imports. Skipping imports for this server.")
+                        continue
+                    
+                    # Register cleanup function for this server
+                    def cleanup_server_lock():
+                        if server_global_lock:
+                            try:
+                                server_global_lock.release()
+                                logging.info(f"Released global import lock for {server_name}")
+                            except Exception as exc:
+                                logging.error(f"Failed to release global import lock for {server_name}: {exc}")
+                    
+                    atexit.register(cleanup_server_lock)
+                    logging.info(f"Successfully acquired global import lock for {server_name}")
+                except Exception as exc:
+                    logging.error(f"Failed to acquire global import lock for {server_name}: {exc}")
+                    continue
+            
+            # Track server-specific import statistics
+            server_imports_attempted = 0
+            server_imports_successful = 0
+            server_imports_failed = 0
+            
+            # Import each missing solution for this server
+            for solution in results["missing"]:
+                if stop_flag["stop"]:
+                    break
+                    
+                solution_id = solution["sid"]
+                solution_name = solution["name"]
+                solution_version = solution["version"]
+                
+                logging.info(f"Importing missing solution {solution_id} ({solution_name}) on {server_name} - Version: {solution_version}")
+                
+                if args.dry_run:
+                    logging.info(f"[DRY RUN] Would import missing solution {solution_id} ({solution_name}) version {solution_version} on {server_name}")
+                    server_imports_attempted += 1
+                    server_imports_successful += 1
+                    missing_import_stats["total_attempted"] += 1
+                    missing_import_stats["total_successful"] += 1
+                    continue
+                
+                try:
+                    server_imports_attempted += 1
+                    missing_import_stats["total_attempted"] += 1
+                    
+                    # Import the missing solution using the same logic as out-of-date imports
+                    import_solution(client, solution_id, manifest[solution_id]["content_url"], conflict_policy_path=args.conflict_policy, conflict_default=args.conflict_default)
+                    logging.info(f"✅ Successfully imported missing solution {solution_id} ({solution_name}) on {server_name}")
+                    server_imports_successful += 1
+                    missing_import_stats["total_successful"] += 1
+                        
+                except Exception as exc:
+                    logging.error(f"❌ Failed to import missing solution {solution_id} ({solution_name}) on {server_name}: {exc}")
+                    server_imports_failed += 1
+                    missing_import_stats["total_failed"] += 1
+            
+            # Track server completion
+            missing_import_stats["servers_processed"] += 1
+            print(f"\n📊 Server {server_name} missing solutions import summary:")
+            print(f"  Attempted: {server_imports_attempted}")
+            print(f"  Successful: {server_imports_successful}")
+            print(f"  Failed: {server_imports_failed}")
+            
+            # Release global lock for this server after all imports are complete
+            if server_global_lock:
+                try:
+                    server_global_lock.release()
+                    logging.info(f"Released global import lock for {server_name}")
+                except Exception as exc:
+                    logging.error(f"Failed to release global import lock for {server_name}: {exc}")
+        
+        # Print final missing solutions import statistics
+        if missing_import_stats["total_attempted"] > 0:
+            print(f"\n🎯 FINAL MISSING SOLUTIONS IMPORT STATISTICS:")
+            print(f"  Servers processed: {missing_import_stats['servers_processed']}")
+            print(f"  Servers skipped: {missing_import_stats['servers_skipped']}")
+            print(f"  Total imports attempted: {missing_import_stats['total_attempted']}")
+            print(f"  Total imports successful: {missing_import_stats['total_successful']}")
+            print(f"  Total imports failed: {missing_import_stats['total_failed']}")
+            success_rate = (missing_import_stats['total_successful'] / missing_import_stats['total_attempted']) * 100
             print(f"  Success rate: {success_rate:.1f}%")
 
     # Write summary JSON if requested
