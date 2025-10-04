@@ -1,0 +1,29 @@
+# Midnight lights off
+# ID: 1749006178316
+# Category: lighting
+# Description: ''
+
+- id: '1749006178316'
+  alias: Midnight lights off
+  description: ''
+  triggers:
+  - at: 00:00:00
+    trigger: time
+  conditions: []
+  actions:
+  - action: switch.turn_off
+    metadata: {}
+    data: {}
+    target:
+      entity_id: switch.front_porch_sconces
+  - action: switch.turn_off
+    metadata: {}
+    data: {}
+    target:
+      entity_id: switch.stairs_main_lights
+  - action: switch.turn_off
+    metadata: {}
+    data: {}
+    target:
+      entity_id: switch.cat_room_main_lights
+  mode: single
