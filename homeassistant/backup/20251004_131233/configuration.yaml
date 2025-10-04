@@ -1,0 +1,36 @@
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+influxdb:
+  host: a0d7b954-influxdb
+  port: 8086
+  database: homeassistant
+  username: homeassistant
+  password: "homeassistant"
+  default_measurement: "state"
+  include:
+    domains:
+      - sensor
+      - binary_sensor
+      - switch
+
+# Timer Management Configuration (Added)
+input_text:
+  timer_states:
+    name: "Timer States Storage"
+    initial: "{}"
+    max: 10000
+
+python_script:
+
+# Include timer management automations and scripts
+automation_timer: !include_dir_list automations/
+script_timer: !include_dir_list scripts/

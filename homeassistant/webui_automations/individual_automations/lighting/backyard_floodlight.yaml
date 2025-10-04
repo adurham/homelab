@@ -1,0 +1,25 @@
+# Backyard floodlight
+# ID: 1757304692374
+# Category: lighting
+# Description: Turn on floodlight on motion, off 15 minutes after last motion
+
+- id: '1757304692374'
+  alias: Backyard floodlight
+  description: Turn on floodlight on motion, off 15 minutes after last motion
+  triggers:
+  - entity_id: event.backyard_camera_motion_2
+    to: 'on'
+    trigger: state
+  actions:
+  - target:
+      entity_id: switch.outdoor_floodlight_switch2
+    action: switch.turn_on
+  - wait_for_trigger:
+    - entity_id: event.backyard_camera_motion_2
+      to: 'off'
+      trigger: state
+  - delay: 00:15:00
+  - target:
+      entity_id: switch.outdoor_floodlight_switch2
+    action: switch.turn_off
+  mode: restart

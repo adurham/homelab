@@ -1,0 +1,18 @@
+# Home Assistant Configuration for Timer Management
+# Add these to your existing configuration.yaml
+
+# Input helpers for timer state management
+input_text:
+  timer_states:
+    name: "Timer States Storage"
+    initial: "{}"
+    max: 10000
+
+# Python script configuration
+python_script:
+
+# Automation configuration
+automation: !include automations/
+
+# Script configuration  
+script: !include scripts/

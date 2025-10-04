@@ -1,0 +1,40 @@
+# Nightly Reboot Automation with Timer Pause/Resume
+# This automation reboots Home Assistant nightly and preserves timer states
+
+- id: 'nightly_reboot_with_timer_pause'
+  alias: 'Nightly Reboot with Timer Pause/Resume'
+  description: 'Reboots Home Assistant nightly at 3 AM, pausing all timers before reboot and resuming them after'
+  trigger:
+    - platform: time
+      at: '03:00:00'
+  condition:
+    - condition: time
+      weekday:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+        - sat
+        - sun
+  action:
+    - alias: 'Log reboot start'
+      service: system_log.write
+      data:
+        message: 'Starting nightly reboot with timer pause/resume'
+        level: info
+        
+    - alias: 'Store and pause all timers'
+      service: python_script.pause_all_timers_script
+      
+    - alias: 'Wait for timers to pause'
+      delay: '00:00:05'
+      
+    - alias: 'Log timer pause completion'
+      service: system_log.write
+      data:
+        message: 'All timers paused, proceeding with reboot'
+        level: info
+        
+    - alias: 'Reboot Home Assistant'
+      service: homeassistant.restart

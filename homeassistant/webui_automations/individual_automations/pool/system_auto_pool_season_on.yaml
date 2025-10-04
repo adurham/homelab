@@ -1,0 +1,19 @@
+# System - Auto Pool Season ON
+# ID: 1752083578214
+# Category: pool
+# Description: Turns on the Pool Season toggle on May 1st.
+
+- id: '1752083578214'
+  alias: System - Auto Pool Season ON
+  description: Turns on the Pool Season toggle on May 1st.
+  triggers:
+  - at: 00:01:00
+    trigger: time
+  conditions:
+  - condition: template
+    value_template: '{{ now().month == 5 and now().day == 1 }}'
+  actions:
+  - target:
+      entity_id: input_boolean.pool_season
+    action: input_boolean.turn_on
+  mode: single

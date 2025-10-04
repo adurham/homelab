@@ -1,24 +1,31 @@
-# Packer
-packer/**/*secrets.auto.pkrvars.hcl
-packer/**/manifests/*.json
+# Home Assistant sensitive configuration files
+homeassistant/ha_config.env
+homeassistant/.env
+homeassistant/*.env
 
-# Terraform
-*/*terraform.tfvars
-*/.terraform/*
-*/terraform.tfstate*
-*/terraform.tfstate.d/*
-*/.terraform.lock.hcl
-*/.terraform.tfstate.lock.info
+# Generated files
+homeassistant/entity_inventory/entity_inventory.json
+homeassistant/entity_inventory/entity_inventory.md
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyo
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
 .DS_Store
+Thumbs.db
 
-# Ansible
-ansible/*.venv/*
-ansible/.vault_password
+# Logs
+*.log
 
-# Scratch
-scratch/*
-misc scripts/config.env
-misc scripts/SecureCredentials.xml
-node_modules
-misc scripts/tanium/tanium_creds.env
-misc scripts/tanium/actions/Tools/*
+# Automation audit files
+homeassistant/entity_inventory/automation_audit_*
+homeassistant/entity_inventory/clean_automations.json
