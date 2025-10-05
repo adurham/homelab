@@ -330,7 +330,8 @@ HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/create_grafana_automations_
 ### API Deployment Best Practices
 - **ALWAYS verify deployment** with API calls after deployment
 - **NEVER trust silent deployments** - check automation configuration
-- **Use proper JSON structure** for complex automations
+- **Use correct API field names**: `"triggers"` and `"actions"` (not `"trigger"` and `"action"`)
+- **Test with minimal automation first** to verify API works
 - **Test automation triggers** after deployment
 - **Monitor Home Assistant logs** for deployment errors
 
