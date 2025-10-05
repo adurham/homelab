@@ -1,0 +1,5 @@
+# Home Assistant Scripts
+# This file includes all script files from the scripts/ directory
+
+# Include all script files from the scripts directory
+script: !include_dir_named scripts/

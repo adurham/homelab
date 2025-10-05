@@ -1,0 +1,180 @@
+# Control Room Vent Script
+# Controls individual room vent based on occupancy and temperature
+
+control_room_vent:
+  alias: 'Control Room Vent'
+  description: 'Controls individual room vent based on occupancy and temperature'
+  fields:
+    room_entity:
+      description: 'Climate entity for the room'
+      example: 'climate.kitchen_room_3'
+    room_name:
+      description: 'Human-readable room name'
+      example: 'Kitchen'
+    occupancy_sensor:
+      description: 'Occupancy sensor for the room'
+      example: 'binary_sensor.kitchen_occupancy_2'
+    vent_entity:
+      description: 'Vent cover entity'
+      example: 'cover.kitchen_d124_vent'
+    target_temp:
+      description: 'Target temperature from Ecobee'
+      example: 72
+    hvac_mode:
+      description: 'HVAC mode from Ecobee'
+      example: 'heat'
+  sequence:
+    # Check if room is occupied
+    - variables:
+        is_occupied: '{{ is_state(occupancy_sensor, "on") }}'
+    # Get current room temperature
+    - variables:
+        current_temp: '{{ state_attr(room_entity, "current_temperature") or 72 }}'
+    # Get current vent position
+    - variables:
+        current_vent_position: '{{ state_attr(vent_entity, "current_tilt_position") or 0 }}'
+    # Calculate temperature difference
+    - variables:
+        temp_diff: '{{ (current_temp | float) - (target_temp | float) }}'
+
+    # Log current status
+    - service: system_log.write
+      data:
+        message: >
+          {{ room_name }}: {{ current_temp }}°F (target: {{ target_temp }}°F, 
+          diff: {{ temp_diff | round(1) }}°F, occupied: {{ is_occupied }}, 
+          vent: {{ current_vent_position }}%)
+        level: info
+
+    # Occupied room logic
+    - if:
+        - condition: template
+          value_template: '{{ is_occupied }}'
+      then:
+        - service: system_log.write
+          data:
+            message: '{{ room_name }} is occupied - optimizing for comfort'
+            level: info
+        # Set room temperature to exact target
+        - service: climate.set_temperature
+          target:
+            entity_id: '{{ room_entity }}'
+          data:
+            temperature: '{{ target_temp }}'
+        - service: climate.set_hvac_mode
+          target:
+            entity_id: '{{ room_entity }}'
+          data:
+            hvac_mode: '{{ hvac_mode | string }}'
+        # Open vent for occupied rooms
+        - service: cover.set_cover_tilt_position
+          target:
+            entity_id: '{{ vent_entity }}'
+          data:
+            tilt_position: 100
+        - service: system_log.write
+          data:
+            message: '{{ room_name }} vent opened to 100% (occupied room)'
+            level: info
+
+    # Unoccupied room logic
+    - if:
+        - condition: template
+          value_template: '{{ not is_occupied }}'
+      then:
+        - service: system_log.write
+          data:
+            message: '{{ room_name }} is unoccupied - allowing drift, optimizing energy'
+            level: info
+
+        # Room is too cold (more than 3°F below target)
+        - if:
+            - condition: template
+              value_template: '{{ temp_diff < -3 }}'
+          then:
+            - service: system_log.write
+              data:
+                message: '{{ room_name }} is {{ temp_diff | round(1) }}°F below target - gentle heating'
+                level: info
+            - service: climate.set_temperature
+              target:
+                entity_id: '{{ room_entity }}'
+              data:
+                temperature: '{{ (target_temp | float) - 1 }}'
+            - service: climate.set_hvac_mode
+              target:
+                entity_id: '{{ room_entity }}'
+              data:
+                hvac_mode: 'heat'
+            # Half-open vent for gentle heating
+            - service: cover.set_cover_tilt_position
+              target:
+                entity_id: '{{ vent_entity }}'
+              data:
+                tilt_position: 50
+            - service: system_log.write
+              data:
+                message: '{{ room_name }} vent set to 50% (gentle heating)'
+                level: info
+
+        # Room is too hot (more than 3°F above target)
+        - if:
+            - condition: template
+              value_template: '{{ temp_diff > 3 }}'
+          then:
+            - service: system_log.write
+              data:
+                message: '{{ room_name }} is {{ temp_diff | round(1) }}°F above target - gentle cooling'
+                level: info
+            - service: climate.set_temperature
+              target:
+                entity_id: '{{ room_entity }}'
+              data:
+                temperature: '{{ (target_temp | float) + 1 }}'
+            - service: climate.set_hvac_mode
+              target:
+                entity_id: '{{ room_entity }}'
+              data:
+                hvac_mode: 'cool'
+            # Half-open vent for gentle cooling
+            - service: cover.set_cover_tilt_position
+              target:
+                entity_id: '{{ vent_entity }}'
+              data:
+                tilt_position: 50
+            - service: system_log.write
+              data:
+                message: '{{ room_name }} vent set to 50% (gentle cooling)'
+                level: info
+
+        # Room is within tolerance - close vent to save energy
+        - if:
+            - condition: template
+              value_template: '{{ temp_diff >= -3 and temp_diff <= 3 }}'
+          then:
+            - service: system_log.write
+              data:
+                message: '{{ room_name }} is within 3°F of target - closing vent to save energy'
+                level: info
+            - service: cover.set_cover_tilt_position
+              target:
+                entity_id: '{{ vent_entity }}'
+              data:
+                tilt_position: 0
+            - service: system_log.write
+              data:
+                message: '{{ room_name }} vent closed (within tolerance)'
+                level: info
+
+    # Wait for Flair API to update (account for latency)
+    - delay:
+        minutes: 2
+        seconds: 0
+
+    # Verify vent position was set correctly
+    - variables:
+        new_vent_position: '{{ state_attr(vent_entity, "current_tilt_position") or 0 }}'
+    - service: system_log.write
+      data:
+        message: '{{ room_name }} vent position updated: {{ current_vent_position }}% → {{ new_vent_position }}%'
+        level: info
