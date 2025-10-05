@@ -1,0 +1,427 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Temperature Balancing System - Comprehensive",
+    "tags": ["homeassistant", "temperature", "flair", "automation"],
+    "style": "dark",
+    "timezone": "browser",
+    "refresh": "5s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Ecobee Setpoint vs Room Temperatures",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        },
+        "targets": [
+          {
+            "expr": "temperature_drift{room_type=\"occupied\"}",
+            "legendFormat": "{{room}} (Occupied)",
+            "refId": "A"
+          },
+          {
+            "expr": "temperature_drift{room_type=\"unoccupied\"}",
+            "legendFormat": "{{room}} (Unoccupied)",
+            "refId": "B"
+          },
+          {
+            "expr": "temperature_drift ecobee_setpoint",
+            "legendFormat": "Ecobee Setpoint",
+            "refId": "C"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Temperature (°F)",
+            "min": 65,
+            "max": 80
+          }
+        ],
+        "xAxis": {
+          "mode": "time"
+        },
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "max": true,
+          "min": true,
+          "avg": true
+        }
+      },
+      {
+        "id": 2,
+        "title": "Temperature Drift from Setpoint",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        },
+        "targets": [
+          {
+            "expr": "temperature_drift drift_from_setpoint",
+            "legendFormat": "{{room}} Drift",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Drift (°F)",
+            "min": -5,
+            "max": 5
+          }
+        ],
+        "xAxis": {
+          "mode": "time"
+        },
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true
+        },
+        "thresholds": [
+          {
+            "value": -2,
+            "colorMode": "critical",
+            "op": "lt",
+            "fill": true,
+            "line": true
+          },
+          {
+            "value": 2,
+            "colorMode": "critical",
+            "op": "gt",
+            "fill": true,
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Room Temperature Variance",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        },
+        "targets": [
+          {
+            "expr": "temperature_variance occupied_variance",
+            "legendFormat": "Occupied Rooms Variance",
+            "refId": "A"
+          },
+          {
+            "expr": "temperature_variance unoccupied_variance",
+            "legendFormat": "Unoccupied Rooms Variance",
+            "refId": "B"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Temperature Variance (°F)",
+            "min": 0,
+            "max": 10
+          }
+        ],
+        "xAxis": {
+          "mode": "time"
+        },
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "avg": true
+        },
+        "thresholds": [
+          {
+            "value": 2,
+            "colorMode": "warning",
+            "op": "gt",
+            "fill": true,
+            "line": true
+          },
+          {
+            "value": 4,
+            "colorMode": "critical",
+            "op": "gt",
+            "fill": true,
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Occupancy Pattern",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        },
+        "targets": [
+          {
+            "expr": "temperature_variance occupied_rooms_count",
+            "legendFormat": "Occupied Rooms",
+            "refId": "A"
+          },
+          {
+            "expr": "temperature_variance unoccupied_rooms_count",
+            "legendFormat": "Unoccupied Rooms",
+            "refId": "B"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Room Count",
+            "min": 0,
+            "max": 7
+          }
+        ],
+        "xAxis": {
+          "mode": "time"
+        },
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true
+        }
+      },
+      {
+        "id": 5,
+        "title": "Vent Position Control",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        },
+        "targets": [
+          {
+            "expr": "temperature_drift vent_position",
+            "legendFormat": "{{room}} Vent Position",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Vent Position (%)",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "xAxis": {
+          "mode": "time"
+        },
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true
+        },
+        "thresholds": [
+          {
+            "value": 50,
+            "colorMode": "critical",
+            "op": "eq",
+            "fill": true,
+            "line": true
+          },
+          {
+            "value": 100,
+            "colorMode": "ok",
+            "op": "eq",
+            "fill": true,
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Temperature Efficiency Score",
+        "type": "singlestat",
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 12,
+          "y": 16
+        },
+        "targets": [
+          {
+            "expr": "efficiency_scores overall_efficiency_score",
+            "legendFormat": "Overall Efficiency",
+            "refId": "A"
+          }
+        ],
+        "valueName": "current",
+        "format": "percent",
+        "thresholds": "70,85",
+        "colorBackground": true,
+        "colorValue": false,
+        "sparkline": {
+          "show": true,
+          "full": false,
+          "lineColor": "rgb(31, 120, 193)",
+          "fillColor": "rgba(31, 118, 189, 0.18)"
+        }
+      },
+      {
+        "id": 7,
+        "title": "Occupancy Efficiency",
+        "type": "singlestat",
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 18,
+          "y": 16
+        },
+        "targets": [
+          {
+            "expr": "efficiency_scores occupancy_percentage",
+            "legendFormat": "Occupancy %",
+            "refId": "A"
+          }
+        ],
+        "valueName": "current",
+        "format": "percent",
+        "thresholds": "30,60",
+        "colorBackground": true,
+        "colorValue": false,
+        "sparkline": {
+          "show": true,
+          "full": false,
+          "lineColor": "rgb(31, 120, 193)",
+          "fillColor": "rgba(31, 118, 189, 0.18)"
+        }
+      },
+      {
+        "id": 8,
+        "title": "Temperature Drift Heatmap",
+        "type": "heatmap",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 24
+        },
+        "targets": [
+          {
+            "expr": "temperature_drift drift_from_setpoint",
+            "legendFormat": "{{room}}",
+            "refId": "A"
+          }
+        ],
+        "heatmap": {
+          "colorMode": "spectrum",
+          "colorScale": "exponential",
+          "exponent": 0.5,
+          "colorScheme": "interpolateBlues"
+        }
+      },
+      {
+        "id": 9,
+        "title": "System Performance Summary",
+        "type": "table",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 24
+        },
+        "targets": [
+          {
+            "expr": "temperature_variance occupied_variance",
+            "legendFormat": "Occupied Variance",
+            "refId": "A"
+          },
+          {
+            "expr": "temperature_variance unoccupied_variance",
+            "legendFormat": "Unoccupied Variance",
+            "refId": "B"
+          },
+          {
+            "expr": "efficiency_scores overall_efficiency_score",
+            "legendFormat": "Efficiency Score",
+            "refId": "C"
+          },
+          {
+            "expr": "efficiency_scores vent_control_efficiency",
+            "legendFormat": "Vent Control Efficiency",
+            "refId": "D"
+          }
+        ],
+        "columns": [
+          {
+            "text": "Metric",
+            "value": "__name__"
+          },
+          {
+            "text": "Current",
+            "value": "current"
+          },
+          {
+            "text": "Average",
+            "value": "avg"
+          },
+          {
+            "text": "Min",
+            "value": "min"
+          },
+          {
+            "text": "Max",
+            "value": "max"
+          }
+        ],
+        "transform": "table"
+      }
+    ],
+    "annotations": {
+      "list": [
+        {
+          "name": "Temperature Balancing Events",
+          "datasource": "InfluxDB",
+          "expr": "temperature_drift",
+          "iconColor": "blue",
+          "enable": true,
+          "showIn": 0
+        }
+      ]
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "room",
+          "type": "query",
+          "datasource": "InfluxDB",
+          "query": "SHOW TAG VALUES FROM temperature_drift WITH KEY = \"room\"",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true,
+          "sort": 1
+        },
+        {
+          "name": "room_type",
+          "type": "query",
+          "datasource": "InfluxDB",
+          "query": "SHOW TAG VALUES FROM temperature_drift WITH KEY = \"room_type\"",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true,
+          "sort": 1
+        }
+      ]
+    }
+  }
+}
