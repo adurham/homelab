@@ -29,3 +29,19 @@ Thumbs.db
 # Automation audit files
 homeassistant/entity_inventory/automation_audit_*
 homeassistant/entity_inventory/clean_automations.json
+
+# Home Assistant sensitive files
+homeassistant/ha_config.env
+homeassistant/.env
+homeassistant/*.env
+homeassistant/backup/
+homeassistant/entity_inventory/entity_inventory.json
+homeassistant/entity_inventory/entity_inventory.md
+homeassistant/entity_inventory/automation_audit_*
+homeassistant/entity_inventory/clean_automations.json
+
+# Temporary files
+homeassistant/*.tmp
+homeassistant/*.temp
+homeassistant/test_*
+homeassistant/temp_*
