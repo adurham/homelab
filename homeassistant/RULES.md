@@ -275,6 +275,10 @@ The bulletproof deployment system prevents automation loss through comprehensive
 - `simple_validate.py` - Simple validation without external dependencies
 - `create_grafana_automations_simple.py` - API-based automation creation
 - `deploy_automations_api.py` - API-based deployment system
+- `complete_deploy.sh` - Complete deployment with Grafana integration
+- `setup_grafana_integration.sh` - Complete Grafana integration setup
+- `import_grafana_dashboard.sh` - Simple Grafana dashboard import
+- `import_grafana_dashboard.py` - Advanced Grafana dashboard import
 
 ### Safety Guarantees
 1. **Never lose automations** - Comprehensive backups before every change
@@ -289,6 +293,15 @@ python3 deployment/simple_validate.py automations/my_automation.yaml
 
 # Deploy via API (recommended method)
 source ha_config.env && HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/create_grafana_automations_simple.py
+
+# Complete deployment with Grafana dashboard import (RECOMMENDED)
+cd deployment && ./complete_deploy.sh
+
+# OR manual deployment
+cd deployment && source ../ha_config.env && HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 create_grafana_automations_simple.py && ./setup_grafana_integration.sh
+
+# Import Grafana dashboard only
+cd deployment && ./import_grafana_dashboard.sh
 
 # Deploy single automation safely (legacy method)
 python3 deployment/bulletproof_deploy.py deploy automations/my_automation.yaml
@@ -317,14 +330,17 @@ HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/create_grafana_automations_
 ### Environment Setup
 - **API Token**: Stored in `ha_config.env` (never committed to git)
 - **Home Assistant URL**: Configured in environment variables
+- **Grafana URL**: Optional, for dashboard import (`http://192.168.86.2:3000`)
+- **Grafana Credentials**: Optional, for dashboard import
 - **Validation**: Uses `simple_validate.py` (no external dependencies)
 
 ### Deployment Process
 1. **Validate** automation syntax with `simple_validate.py`
 2. **Set environment** variables from `ha_config.env`
 3. **Deploy** via API using deployment scripts
-4. **Verify** deployment success
-5. **Monitor** automation functionality
+4. **Import Grafana dashboard** (if Grafana is configured)
+5. **Verify** deployment success
+6. **Monitor** automation functionality
 
 ### Why API-Based Deployment?
 - ✅ **More reliable** than SSH file operations
@@ -332,6 +348,38 @@ HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/create_grafana_automations_
 - ✅ **Built-in Home Assistant validation**
 - ✅ **Better error handling**
 - ✅ **Works with containerized Home Assistant**
+
+### Complete Deployment Workflow
+For full Home Assistant deployment with Grafana integration:
+
+```bash
+# Complete deployment with Grafana dashboard import (RECOMMENDED)
+cd deployment && ./complete_deploy.sh
+
+# OR manual step-by-step deployment:
+cd deployment
+
+# 1. Deploy automations
+source ../ha_config.env
+HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 create_grafana_automations_simple.py
+
+# 2. Import Grafana dashboard (optional)
+./setup_grafana_integration.sh
+```
+
+### Grafana Dashboard Import
+The deployment system includes automated Grafana dashboard import:
+
+```bash
+# Option 1: Complete setup (recommended)
+./setup_grafana_integration.sh
+
+# Option 2: Dashboard import only
+./import_grafana_dashboard.sh
+
+# Option 3: Python script (advanced)
+python3 import_grafana_dashboard.py
+```
 
 ### Legacy SSH Method
 SSH-based deployment is still available but not recommended:
