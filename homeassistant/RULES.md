@@ -13,8 +13,11 @@
 - **ALWAYS** create backups before deploying changes
 - **ALWAYS** test automations in a safe environment first
 - **NEVER** deploy during active use without warning
-- **ALWAYS** use the safe deployment scripts
+- **ALWAYS** use the bulletproof deployment scripts
 - **NEVER** manually edit files on the Home Assistant box
+- **NEVER** modify automations.yaml directly without backup
+- **ALWAYS** validate automation syntax before deployment
+- **ALWAYS** use the emergency restore procedure if needed
 
 ### Automation Rules
 - **ALWAYS** include comprehensive logging
@@ -147,13 +150,13 @@ Code examples and use cases.
 
 ### Before Deploying
 1. **Test locally** with safe values
-2. **Create backup** of current configuration
-3. **Validate** all entity references
+2. **Create comprehensive backup** using `bulletproof_deploy.py backup`
+3. **Validate automation syntax** using `validate_automations.py`
 4. **Check logs** for any errors
 5. **Document changes** in commit message
 
 ### During Deployment
-1. **Use safe deployment scripts**
+1. **Use bulletproof deployment** with `bulletproof_deploy.py deploy`
 2. **Monitor logs** during deployment
 3. **Test critical functions** after deployment
 4. **Verify** all automations are working
@@ -166,23 +169,58 @@ Code examples and use cases.
 4. **Document** any issues found
 5. **Update documentation** if needed
 
+### Safe Deployment Commands
+```bash
+# Validate automation before deployment
+python3 deployment/validate_automations.py automations/my_automation.yaml
+
+# Deploy with full safety checks
+python3 deployment/bulletproof_deploy.py deploy automations/my_automation.yaml
+
+# Create backup from current state
+python3 deployment/bulletproof_deploy.py webui
+
+# Emergency restore
+python3 deployment/bulletproof_deploy.py emergency
+```
+
 ## 🚨 **EMERGENCY PROCEDURES**
 
 ### If Something Breaks
 1. **Stop** the problematic automation
-2. **Restore** from backup if necessary
+2. **Use emergency restore** with `bulletproof_deploy.py emergency`
 3. **Check logs** for error details
 4. **Fix** the issue in development
 5. **Test** thoroughly before redeploying
 6. **Document** the issue and solution
 
+### Emergency Restore Procedure
+```bash
+# Run emergency restore procedure
+python3 deployment/bulletproof_deploy.py emergency
+
+# Or restore from specific backup
+python3 deployment/bulletproof_deploy.py restore backup_name
+
+# Create backup from current web UI state
+python3 deployment/bulletproof_deploy.py webui
+```
+
 ### Rollback Procedure
 1. **Stop** all automations
-2. **Restore** configuration from backup
+2. **Restore** configuration from backup using bulletproof scripts
 3. **Restart** Home Assistant
 4. **Verify** system is working
 5. **Investigate** what went wrong
 6. **Fix** and test before redeploying
+
+### Critical Safety Features
+- **Automatic backups** before every deployment
+- **Syntax validation** before deployment
+- **Safe testing** environment
+- **Automatic rollback** on failure
+- **Comprehensive logging** of all actions
+- **Emergency restore** procedures
 
 ## 📊 **MONITORING REQUIREMENTS**
 
@@ -214,4 +252,48 @@ Code examples and use cases.
 
 ---
 
+## 🛡️ **BULLETPROOF DEPLOYMENT SYSTEM**
+
+### Overview
+The bulletproof deployment system prevents automation loss through comprehensive safety mechanisms:
+- **Automatic backups** before every deployment
+- **Syntax validation** before deployment
+- **Safe testing** environment
+- **Automatic rollback** on failure
+- **Emergency restore** procedures
+
+### Deployment Scripts
+- `bulletproof_deploy.py` - Main deployment script with full safety checks
+- `safe_automation_deploy.py` - Individual automation deployment with validation
+- `automation_backup_restore.py` - Backup and restore management
+- `validate_automations.py` - Syntax and structure validation
+
+### Safety Guarantees
+1. **Never lose automations** - Comprehensive backups before every change
+2. **Never deploy broken code** - Syntax validation prevents bad deployments
+3. **Always have rollback** - Automatic rollback on any failure
+4. **Always have emergency restore** - Multiple restore options available
+
+### Usage Examples
+```bash
+# Deploy single automation safely
+python3 deployment/bulletproof_deploy.py deploy automations/my_automation.yaml
+
+# Validate all automations
+python3 deployment/bulletproof_deploy.py validate
+
+# Create backup from web UI
+python3 deployment/bulletproof_deploy.py webui
+
+# Emergency restore
+python3 deployment/bulletproof_deploy.py emergency
+
+# List available backups
+python3 deployment/bulletproof_deploy.py list
+```
+
+---
+
 **Remember**: These rules exist to keep your Home Assistant system stable, secure, and maintainable. When in doubt, ask for clarification rather than guessing.
+
+**CRITICAL**: Always use the bulletproof deployment system. Never manually edit files on the Home Assistant box without proper backups.

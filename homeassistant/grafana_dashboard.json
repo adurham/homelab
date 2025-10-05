@@ -1,0 +1,353 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Home Assistant Automation Performance",
+    "tags": ["homeassistant", "automation", "performance"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Temperature Balancing Performance",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "homeassistant_sensor_temperature_efficiency_score",
+            "legendFormat": "Efficiency Score"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 5},
+                {"color": "green", "value": 8}
+              ]
+            },
+            "unit": "short",
+            "suffix": "%"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Occupied Rooms Count",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "homeassistant_input_number_occupied_rooms_count",
+            "legendFormat": "Occupied Rooms"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 3},
+                {"color": "red", "value": 6}
+              ]
+            },
+            "unit": "short",
+            "suffix": " rooms"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Temperature Variance - Occupied Rooms",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "homeassistant_input_number_temperature_variance_occupied",
+            "legendFormat": "Variance"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 2}
+              ]
+            },
+            "unit": "fahrenheit",
+            "decimals": 1
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Hot Water Pump Efficiency",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "homeassistant_sensor_hot_water_efficiency_score",
+            "legendFormat": "Efficiency Score"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 50},
+                {"color": "green", "value": 80}
+              ]
+            },
+            "unit": "short",
+            "suffix": "%"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Hot Water Pump Cycles Today",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "homeassistant_input_number_hot_water_pump_cycles_today",
+            "legendFormat": "Cycles"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 10},
+                {"color": "red", "value": 20}
+              ]
+            },
+            "unit": "short",
+            "suffix": " cycles"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Average Pump Runtime",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "homeassistant_input_number_hot_water_pump_runtime",
+            "legendFormat": "Runtime"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 5},
+                {"color": "red", "value": 10}
+              ]
+            },
+            "unit": "short",
+            "suffix": " min"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      },
+      {
+        "id": 7,
+        "title": "Garage Lights Efficiency",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "homeassistant_sensor_garage_lights_efficiency_score",
+            "legendFormat": "Efficiency Score"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 50},
+                {"color": "green", "value": 80}
+              ]
+            },
+            "unit": "short",
+            "suffix": "%"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+      },
+      {
+        "id": 8,
+        "title": "Garage Door Opens Today",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "homeassistant_input_number_garage_door_opens_today",
+            "legendFormat": "Door Opens"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 10},
+                {"color": "red", "value": 20}
+              ]
+            },
+            "unit": "short",
+            "suffix": " opens"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      },
+      {
+        "id": 9,
+        "title": "Room Temperature Trends",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "homeassistant_sensor_climate_kitchen_room_3_current_temperature",
+            "legendFormat": "Kitchen"
+          },
+          {
+            "expr": "homeassistant_sensor_climate_living_room_room_3_current_temperature",
+            "legendFormat": "Living Room"
+          },
+          {
+            "expr": "homeassistant_sensor_climate_main_bedroom_room_2_current_temperature",
+            "legendFormat": "Main Bedroom"
+          },
+          {
+            "expr": "homeassistant_sensor_climate_ecobee_thermostat_temperature",
+            "legendFormat": "Ecobee Target"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "fahrenheit",
+            "decimals": 1
+          }
+        },
+        "gridPos": {"h": 12, "w": 24, "x": 0, "y": 32}
+      },
+      {
+        "id": 10,
+        "title": "Occupancy Trends",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "homeassistant_sensor_binary_sensor_kitchen_occupancy_state",
+            "legendFormat": "Kitchen"
+          },
+          {
+            "expr": "homeassistant_sensor_binary_sensor_living_room_occupancy_state",
+            "legendFormat": "Living Room"
+          },
+          {
+            "expr": "homeassistant_sensor_binary_sensor_main_bedroom_occupancy_state",
+            "legendFormat": "Main Bedroom"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "min": 0,
+            "max": 1,
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 44}
+      },
+      {
+        "id": 11,
+        "title": "Hot Water Pump Activity",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "homeassistant_sensor_switch_shelly1minig3_28372f21c1dc_state",
+            "legendFormat": "Pump State"
+          },
+          {
+            "expr": "homeassistant_input_number_hot_water_pump_cycles_today",
+            "legendFormat": "Daily Cycles"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 52}
+      },
+      {
+        "id": 12,
+        "title": "Garage Lights Activity",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "homeassistant_sensor_switch_garage_main_lights_state",
+            "legendFormat": "Lights State"
+          },
+          {
+            "expr": "homeassistant_input_number_garage_door_opens_today",
+            "legendFormat": "Daily Door Opens"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 60}
+      }
+    ],
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "refresh": "5m",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}
