@@ -1,0 +1,226 @@
+# Optimized Hot Water Circulation Control
+# Tailored for work-from-home setup with basement water heater and Y-branch plumbing
+
+- id: 'hot_water_circulation_optimized'
+  alias: 'Hot Water Circulation - Work From Home Optimized'
+  description: 'Optimized recirculation for basement water heater with Y-branch plumbing, high occupancy WFH setup'
+  triggers:
+    # Trigger when occupancy is detected in any bathroom or kitchen
+    - platform: state
+      entity_id:
+        - binary_sensor.guest_bathroom_occupancy
+        - binary_sensor.half_bathroom_occupancy
+        - binary_sensor.kitchen_occupancy_2
+        - binary_sensor.main_bathroom_occupancy
+      from: 'off'
+      to: 'on'
+      id: occupancy_detected
+  conditions:
+    # Global cooldown check - prevent over-pumping
+    - condition: state
+      entity_id: timer.water_heater_circulator_pump_cooldown
+      state: 'idle'
+    # Don't run if pump is already running
+    - condition: state
+      entity_id: switch.shelly1minig3_28372f21c1dc
+      state: 'off'
+  action:
+    - service: system_log.write
+      data:
+        message: 'Hot water circulation triggered by occupancy'
+        level: info
+    - service: script.smart_hot_water_circulation
+    # Set global cooldown timer - shorter for WFH high occupancy
+    - service: timer.start
+      target:
+        entity_id: timer.water_heater_circulator_pump_cooldown
+      data:
+        duration: '00:20:00'  # Reduced from 30 to 20 minutes for WFH
+  mode: single
+
+# Smart circulation script optimized for your setup
+- id: 'smart_hot_water_circulation'
+  alias: 'Smart Hot Water Circulation Script'
+  description: 'Optimized for basement water heater with Y-branch plumbing'
+  script:
+    smart_hot_water_circulation:
+      alias: 'Smart Hot Water Circulation'
+      sequence:
+        # Determine pump duration based on time of day and occupancy patterns
+        - choose:
+            # Morning routine (6-10 AM) - longer pump for shower/breakfast
+            - conditions:
+                - condition: time
+                  after: '06:00:00'
+                  before: '10:00:00'
+              sequence:
+                - variables:
+                    pump_duration: '00:08:00'  # 8 minutes for morning routine
+                    pump_reason: 'morning routine'
+                - service: system_log.write
+                  data:
+                    message: 'Morning hot water circulation - 8 minutes (shower/breakfast)'
+                    level: info
+            # Evening routine (6-10 PM) - longer pump for dinner/bath time
+            - conditions:
+                - condition: time
+                  after: '18:00:00'
+                  before: '22:00:00'
+              sequence:
+                - variables:
+                    pump_duration: '00:08:00'  # 8 minutes for evening routine
+                    pump_reason: 'evening routine'
+                - service: system_log.write
+                  data:
+                    message: 'Evening hot water circulation - 8 minutes (dinner/bath)'
+                    level: info
+            # Work hours (10 AM-6 PM) - shorter pump for occasional use
+            - conditions:
+                - condition: time
+                  after: '10:00:00'
+                  before: '18:00:00'
+              sequence:
+                - variables:
+                    pump_duration: '00:05:00'  # 5 minutes for work hours
+                    pump_reason: 'work hours'
+                - service: system_log.write
+                  data:
+                    message: 'Work hours hot water circulation - 5 minutes (occasional use)'
+                    level: info
+            # Late night/early morning - minimal pump
+            - conditions:
+                - condition: or
+                  conditions:
+                    - condition: time
+                      after: '22:00:00'
+                    - condition: time
+                      before: '06:00:00'
+              sequence:
+                - variables:
+                    pump_duration: '00:03:00'  # 3 minutes for late night
+                    pump_reason: 'late night'
+                - service: system_log.write
+                  data:
+                    message: 'Late night hot water circulation - 3 minutes (minimal)'
+                    level: info
+        # Start the pump
+        - service: switch.turn_on
+          target:
+            entity_id: switch.shelly1minig3_28372f21c1dc
+        - service: system_log.write
+          data:
+            message: 'Hot water circulation pump started for {{ pump_reason }}'
+            level: info
+        # Wait for the determined duration
+        - delay: '{{ pump_duration }}'
+        # Check if occupancy is still active - extend if needed
+        - choose:
+            - conditions:
+                - condition: or
+                  conditions:
+                    - condition: state
+                      entity_id: binary_sensor.guest_bathroom_occupancy
+                      state: 'on'
+                    - condition: state
+                      entity_id: binary_sensor.half_bathroom_occupancy
+                      state: 'on'
+                    - condition: state
+                      entity_id: binary_sensor.kitchen_occupancy_2
+                      state: 'on'
+                    - condition: state
+                      entity_id: binary_sensor.main_bathroom_occupancy
+                      state: 'on'
+              sequence:
+                - service: system_log.write
+                  data:
+                    message: 'Occupancy still active - extending circulation by 2 minutes'
+                    level: info
+                - delay: '00:02:00'  # Extend by 2 minutes
+                # Check again - if still active, extend once more
+                - choose:
+                    - conditions:
+                        - condition: or
+                          conditions:
+                            - condition: state
+                              entity_id: binary_sensor.guest_bathroom_occupancy
+                              state: 'on'
+                            - condition: state
+                              entity_id: binary_sensor.half_bathroom_occupancy
+                              state: 'on'
+                            - condition: state
+                              entity_id: binary_sensor.kitchen_occupancy_2
+                              state: 'on'
+                            - condition: state
+                              entity_id: binary_sensor.main_bathroom_occupancy
+                              state: 'on'
+                      sequence:
+                        - service: system_log.write
+                          data:
+                            message: 'Extended occupancy - adding final 2 minutes'
+                            level: info
+                        - delay: '00:02:00'
+        # Turn off the pump
+        - service: switch.turn_off
+          target:
+            entity_id: switch.shelly1minig3_28372f21c1dc
+        - service: system_log.write
+          data:
+            message: 'Hot water circulation pump stopped'
+            level: info
+
+# Efficiency monitoring automation
+- id: 'hot_water_efficiency_monitor'
+  alias: 'Hot Water Efficiency Monitor'
+  description: 'Monitors pump usage and provides efficiency insights'
+  triggers:
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.water_heater_circulator_pump_cooldown
+  action:
+    - service: system_log.write
+      data:
+        message: 'Hot water circulation cooldown expired - ready for next cycle'
+        level: info
+  mode: single
+
+# Manual testing automation
+- id: 'manual_hot_water_test'
+  alias: 'Manual Hot Water Test'
+  description: 'Manual trigger for testing hot water circulation'
+  triggers:
+    - platform: event
+      event_type: manual_hot_water_test
+  action:
+    - service: system_log.write
+      data:
+        message: 'Manual hot water circulation test triggered'
+        level: info
+    - service: script.smart_hot_water_circulation
+    - service: timer.start
+      target:
+        entity_id: timer.water_heater_circulator_pump_cooldown
+      data:
+        duration: '00:20:00'
+  mode: single
+
+# Weekend optimization automation
+- id: 'weekend_hot_water_optimization'
+  alias: 'Weekend Hot Water Optimization'
+  description: 'Adjusts pump timing for weekend usage patterns'
+  triggers:
+    - platform: time
+      at: '00:00:00'
+    - platform: time
+      at: '06:00:00'
+  conditions:
+    - condition: time
+      weekday:
+        - sat
+        - sun
+  action:
+    - service: system_log.write
+      data:
+        message: 'Weekend hot water optimization active - extended morning hours'
+        level: info
+  mode: single

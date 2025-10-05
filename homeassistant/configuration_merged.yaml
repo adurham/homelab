@@ -34,3 +34,488 @@ python_script:
 # Include timer management automations and scripts
 automation_timer: !include_dir_list automations/
 script_timer: !include_dir_list scripts/
+# Grafana Logging Configuration
+# Add this to your configuration.yaml to enable comprehensive logging
+
+# Input helpers for automation metrics
+input_number:
+  # Temperature balancing metrics
+  occupied_rooms_count:
+    name: "Occupied Rooms Count"
+    initial: 0
+    min: 0
+    max: 20
+    step: 1
+    unit_of_measurement: "rooms"
+  
+  temperature_variance_occupied:
+    name: "Temperature Variance - Occupied Rooms"
+    initial: 0
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: "°F"
+  
+  temperature_variance_unoccupied:
+    name: "Temperature Variance - Unoccupied Rooms"
+    initial: 0
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: "°F"
+  
+  # Hot water circulation metrics
+  hot_water_pump_runtime:
+    name: "Hot Water Pump Runtime"
+    initial: 0
+    min: 0
+    max: 60
+    step: 1
+    unit_of_measurement: "minutes"
+  
+  hot_water_pump_cycles_today:
+    name: "Hot Water Pump Cycles Today"
+    initial: 0
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "cycles"
+  
+  # Garage lights metrics
+  garage_lights_on_time:
+    name: "Garage Lights On Time"
+    initial: 0
+    min: 0
+    max: 1440
+    step: 1
+    unit_of_measurement: "minutes"
+  
+  garage_door_opens_today:
+    name: "Garage Door Opens Today"
+    initial: 0
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "opens"
+
+# Input text helpers for status tracking
+input_text:
+  # Temperature balancing status
+  temperature_balancing_status:
+    name: "Temperature Balancing Status"
+    initial: "Idle"
+    max: 50
+  
+  last_occupied_room:
+    name: "Last Occupied Room"
+    initial: "None"
+    max: 50
+  
+  # Hot water status
+  hot_water_last_trigger:
+    name: "Hot Water Last Trigger"
+    initial: "None"
+    max: 50
+  
+  # Garage lights status
+  garage_lights_last_trigger:
+    name: "Garage Lights Last Trigger"
+    initial: "None"
+    max: 50
+
+# Utility meters for daily tracking
+utility_meter:
+  # Hot water pump usage
+  hot_water_pump_daily:
+    source: switch.shelly1minig3_28372f21c1dc
+    cycle: daily
+  
+  # Garage lights usage
+  garage_lights_daily:
+    source: switch.garage_main_lights
+    cycle: daily
+  
+  # Temperature balancing activity
+  temperature_balancing_daily:
+    source: automation.temperature_balancing_flair_manual
+    cycle: daily
+
+# Statistics sensors for Grafana
+sensor:
+  # Temperature statistics
+  - platform: statistics
+    name: "Average Occupied Room Temperature"
+    entity_id:
+      - climate.kitchen_room_3
+      - climate.living_room_room_3
+      - climate.main_bedroom_room_2
+      - climate.guest_bedroom_1_room
+      - climate.guest_bedroom_2_room_2
+      - climate.main_bathroom_room_2
+      - climate.guest_bathroom_room_2
+      - climate.half_bathroom_room
+    state_characteristic: mean
+    max_age:
+      minutes: 60
+  
+  - platform: statistics
+    name: "Temperature Standard Deviation"
+    entity_id:
+      - climate.kitchen_room_3
+      - climate.living_room_room_3
+      - climate.main_bedroom_room_2
+      - climate.guest_bedroom_1_room
+      - climate.guest_bedroom_2_room_2
+      - climate.main_bathroom_room_2
+      - climate.guest_bathroom_room_2
+      - climate.half_bathroom_room
+    state_characteristic: standard_deviation
+    max_age:
+      minutes: 60
+  
+  # Occupancy statistics
+  - platform: statistics
+    name: "Average Occupancy Level"
+    entity_id:
+      - binary_sensor.kitchen_occupancy
+      - binary_sensor.living_room_occupancy
+      - binary_sensor.main_bedroom_occupancy
+      - binary_sensor.guest_bedroom_1_occupancy
+      - binary_sensor.guest_bedroom_2_occupancy
+      - binary_sensor.main_bathroom_occupancy
+      - binary_sensor.guest_bathroom_occupancy
+      - binary_sensor.half_bathroom_occupancy
+    state_characteristic: mean
+    max_age:
+      minutes: 30
+
+# Template sensors for derived metrics
+template:
+  - sensor:
+      - name: "Temperature Efficiency Score"
+        state: >
+          {% set occupied_rooms = [
+            states.climate.kitchen_room_3.attributes.current_temperature,
+            states.climate.living_room_room_3.attributes.current_temperature,
+            states.climate.main_bedroom_room_2.attributes.current_temperature
+          ] | select('defined') | list %}
+          {% if occupied_rooms | length > 1 %}
+            {% set variance = (occupied_rooms | map('float') | max) - (occupied_rooms | map('float') | min) %}
+            {{ (10 - variance) | round(1) }}
+          {% else %}
+            0
+          {% endif %}
+        unit_of_measurement: "score"
+        attributes:
+          occupied_rooms: >
+            {{ [
+              states.climate.kitchen_room_3.attributes.current_temperature,
+              states.climate.living_room_room_3.attributes.current_temperature,
+              states.climate.main_bedroom_room_2.attributes.current_temperature
+            ] | select('defined') | map('float') | list }}
+      
+      - name: "Hot Water Efficiency Score"
+        state: >
+          {% set pump_cycles = states('input_number.hot_water_pump_cycles_today') | int %}
+          {% set avg_runtime = states('input_number.hot_water_pump_runtime') | float %}
+          {% if pump_cycles > 0 and avg_runtime > 0 %}
+            {{ (100 - (pump_cycles * avg_runtime / 10)) | round(1) }}
+          {% else %}
+            100
+          {% endif %}
+        unit_of_measurement: "score"
+        attributes:
+          pump_cycles: "{{ states('input_number.hot_water_pump_cycles_today') }}"
+          avg_runtime: "{{ states('input_number.hot_water_pump_runtime') }}"
+      
+      - name: "Garage Lights Efficiency Score"
+        state: >
+          {% set door_opens = states('input_number.garage_door_opens_today') | int %}
+          {% set light_time = states('input_number.garage_lights_on_time') | float %}
+          {% if door_opens > 0 and light_time > 0 %}
+            {{ (100 - (light_time / door_opens / 2)) | round(1) }}
+          {% else %}
+            100
+          {% endif %}
+        unit_of_measurement: "score"
+        attributes:
+          door_opens: "{{ states('input_number.garage_door_opens_today') }}"
+          light_time: "{{ states('input_number.garage_lights_on_time') }}"
+# Simple Grafana Logging Configuration
+# This adds basic metrics without complex configurations
+
+# Input helpers for automation metrics
+input_number:
+  occupied_rooms_count:
+    name: "Occupied Rooms Count"
+    initial: 0
+    min: 0
+    max: 20
+    step: 1
+    unit_of_measurement: "rooms"
+  
+  temperature_variance_occupied:
+    name: "Temperature Variance - Occupied Rooms"
+    initial: 0
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: "°F"
+  
+  hot_water_pump_runtime:
+    name: "Hot Water Pump Runtime"
+    initial: 0
+    min: 0
+    max: 60
+    step: 1
+    unit_of_measurement: "minutes"
+  
+  hot_water_pump_cycles_today:
+    name: "Hot Water Pump Cycles Today"
+    initial: 0
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "cycles"
+  
+  garage_lights_on_time:
+    name: "Garage Lights On Time"
+    initial: 0
+    min: 0
+    max: 1440
+    step: 1
+    unit_of_measurement: "minutes"
+  
+  garage_door_opens_today:
+    name: "Garage Door Opens Today"
+    initial: 0
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "opens"
+
+# Input text helpers for status tracking
+input_text:
+  temperature_balancing_status:
+    name: "Temperature Balancing Status"
+    initial: "Idle"
+    max: 50
+  
+  last_occupied_room:
+    name: "Last Occupied Room"
+    initial: "None"
+    max: 50
+  
+  hot_water_last_trigger:
+    name: "Hot Water Last Trigger"
+    initial: "None"
+    max: 50
+  
+  garage_lights_last_trigger:
+    name: "Garage Lights Last Trigger"
+    initial: "None"
+    max: 50
+# Grafana Logging Configuration
+# Added on Sat Oct  4 20:44:15 CDT 2025
+
+input_number:
+  # Temperature balancing metrics
+  occupied_rooms_count:
+    name: "Occupied Rooms Count"
+    initial: 0
+    min: 0
+    max: 20
+    step: 1
+    unit_of_measurement: "rooms"
+  
+  temperature_variance_occupied:
+    name: "Temperature Variance - Occupied Rooms"
+    initial: 0
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: "°F"
+  
+  temperature_variance_unoccupied:
+    name: "Temperature Variance - Unoccupied Rooms"
+    initial: 0
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: "°F"
+  
+  # Hot water circulation metrics
+  hot_water_pump_runtime:
+    name: "Hot Water Pump Runtime"
+    initial: 0
+    min: 0
+    max: 60
+    step: 1
+    unit_of_measurement: "minutes"
+  
+  hot_water_pump_cycles_today:
+    name: "Hot Water Pump Cycles Today"
+    initial: 0
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "cycles"
+  
+  # Garage lights metrics
+  garage_lights_on_time:
+    name: "Garage Lights On Time"
+    initial: 0
+    min: 0
+    max: 1440
+    step: 1
+    unit_of_measurement: "minutes"
+  
+  garage_door_opens_today:
+    name: "Garage Door Opens Today"
+    initial: 0
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "opens"
+
+# Input text helpers for status tracking
+input_text:
+  # Temperature balancing status
+  temperature_balancing_status:
+    name: "Temperature Balancing Status"
+    initial: "Idle"
+    max: 50
+  
+  last_occupied_room:
+    name: "Last Occupied Room"
+    initial: "None"
+    max: 50
+  
+  # Hot water status
+  hot_water_last_trigger:
+    name: "Hot Water Last Trigger"
+    initial: "None"
+    max: 50
+  
+  # Garage lights status
+  garage_lights_last_trigger:
+    name: "Garage Lights Last Trigger"
+    initial: "None"
+    max: 50
+
+# Utility meters for daily tracking
+utility_meter:
+  # Hot water pump usage
+  hot_water_pump_daily:
+    source: switch.shelly1minig3_28372f21c1dc
+    cycle: daily
+  
+  # Garage lights usage
+  garage_lights_daily:
+    source: switch.garage_main_lights
+    cycle: daily
+  
+  # Temperature balancing activity
+  temperature_balancing_daily:
+    source: automation.temperature_balancing_flair_manual
+    cycle: daily
+
+# Statistics sensors for Grafana
+sensor:
+  # Temperature statistics
+  - platform: statistics
+    name: "Average Occupied Room Temperature"
+    entity_id:
+      - climate.kitchen_room_3
+      - climate.living_room_room_3
+      - climate.main_bedroom_room_2
+      - climate.guest_bedroom_1_room
+      - climate.guest_bedroom_2_room_2
+      - climate.main_bathroom_room_2
+      - climate.guest_bathroom_room_2
+      - climate.half_bathroom_room
+    state_characteristic: mean
+    max_age:
+      minutes: 60
+  
+  - platform: statistics
+    name: "Temperature Standard Deviation"
+    entity_id:
+      - climate.kitchen_room_3
+      - climate.living_room_room_3
+      - climate.main_bedroom_room_2
+      - climate.guest_bedroom_1_room
+      - climate.guest_bedroom_2_room_2
+      - climate.main_bathroom_room_2
+      - climate.guest_bathroom_room_2
+      - climate.half_bathroom_room
+    state_characteristic: standard_deviation
+    max_age:
+      minutes: 60
+  
+  # Occupancy statistics
+  - platform: statistics
+    name: "Average Occupancy Level"
+    entity_id:
+      - binary_sensor.kitchen_occupancy
+      - binary_sensor.living_room_occupancy
+      - binary_sensor.main_bedroom_occupancy
+      - binary_sensor.guest_bedroom_1_occupancy
+      - binary_sensor.guest_bedroom_2_occupancy
+      - binary_sensor.main_bathroom_occupancy
+      - binary_sensor.guest_bathroom_occupancy
+      - binary_sensor.half_bathroom_occupancy
+    state_characteristic: mean
+    max_age:
+      minutes: 30
+
+# Template sensors for derived metrics
+template:
+  - sensor:
+      - name: "Temperature Efficiency Score"
+        state: >
+          {% set occupied_rooms = [
+            states.climate.kitchen_room_3.attributes.current_temperature,
+            states.climate.living_room_room_3.attributes.current_temperature,
+            states.climate.main_bedroom_room_2.attributes.current_temperature
+          ] | select('defined') | list %}
+          {% if occupied_rooms | length > 1 %}
+            {% set variance = (occupied_rooms | map('float') | max) - (occupied_rooms | map('float') | min) %}
+            {{ (10 - variance) | round(1) }}
+          {% else %}
+            0
+          {% endif %}
+        unit_of_measurement: "score"
+        attributes:
+          occupied_rooms: >
+            {{ [
+              states.climate.kitchen_room_3.attributes.current_temperature,
+              states.climate.living_room_room_3.attributes.current_temperature,
+              states.climate.main_bedroom_room_2.attributes.current_temperature
+            ] | select('defined') | map('float') | list }}
+      
+      - name: "Hot Water Efficiency Score"
+        state: >
+          {% set pump_cycles = states('input_number.hot_water_pump_cycles_today') | int %}
+          {% set avg_runtime = states('input_number.hot_water_pump_runtime') | float %}
+          {% if pump_cycles > 0 and avg_runtime > 0 %}
+            {{ (100 - (pump_cycles * avg_runtime / 10)) | round(1) }}
+          {% else %}
+            100
+          {% endif %}
+        unit_of_measurement: "score"
+        attributes:
+          pump_cycles: "{{ states('input_number.hot_water_pump_cycles_today') }}"
+          avg_runtime: "{{ states('input_number.hot_water_pump_runtime') }}"
+      
+      - name: "Garage Lights Efficiency Score"
+        state: >
+          {% set door_opens = states('input_number.garage_door_opens_today') | int %}
+          {% set light_time = states('input_number.garage_lights_on_time') | float %}
+          {% if door_opens > 0 and light_time > 0 %}
+            {{ (100 - (light_time / door_opens / 2)) | round(1) }}
+          {% else %}
+            100
+          {% endif %}
+        unit_of_measurement: "score"
+        attributes:

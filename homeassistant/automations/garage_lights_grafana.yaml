@@ -1,0 +1,162 @@
+# Garage Lights with Grafana Logging
+# Enhanced version that logs metrics to sensors for Grafana visualization
+
+- id: 'garage_lights_with_grafana'
+  alias: 'Garage Lights - With Grafana Logging'
+  description: 'Multi-door motion control with comprehensive Grafana metrics'
+  triggers:
+    # Trigger when any of the 3 garage doors opens
+    - platform: state
+      entity_id:
+        - cover.left_garage_door
+        - cover.middle_garage_bay_door
+        - cover.right_garage_bay_door
+      to: 'open'
+      id: garage_door_opened
+    # Trigger when motion is detected (to reset the timer)
+    - platform: state
+      entity_id: binary_sensor.garage_door_motion
+      to: 'on'
+      id: motion_detected
+  action:
+    # Get current time for duration calculation
+    - variables:
+        start_time: '{{ now() }}'
+    
+    - choose:
+        # When garage door opens - turn on lights ONLY if not already on
+        - conditions:
+            - condition: trigger
+              id: garage_door_opened
+            - condition: state
+              entity_id: switch.garage_main_lights
+              state: 'off'
+          sequence:
+            - service: switch.turn_on
+              target:
+                entity_id: switch.garage_main_lights
+            - service: system_log.write
+              data:
+                message: 'Garage lights turned on - door opened (was off)'
+                level: info
+            # Increment daily door open count
+            - service: input_number.increment
+              target:
+                entity_id: input_number.garage_door_opens_today
+            # Update trigger tracking
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.garage_lights_last_trigger
+              data:
+                value: 'Door opened - {{ trigger.to_state.attributes.friendly_name }}'
+        # When garage door opens but lights already on - just log
+        - conditions:
+            - condition: trigger
+              id: garage_door_opened
+            - condition: state
+              entity_id: switch.garage_main_lights
+              state: 'on'
+          sequence:
+            - service: system_log.write
+              data:
+                message: 'Garage door opened but lights already on - no action needed'
+                level: info
+            # Still count the door open
+            - service: input_number.increment
+              target:
+                entity_id: input_number.garage_door_opens_today
+        # When motion detected - log and continue to timer
+        - conditions:
+            - condition: trigger
+              id: motion_detected
+          sequence:
+            - service: system_log.write
+              data:
+                message: 'Garage motion detected - resetting 15-minute timer'
+                level: info
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.garage_lights_last_trigger
+              data:
+                value: 'Motion detected'
+    
+    # Wait 15 minutes
+    - delay: '00:15:00'
+    
+    # Check if motion occurred during the 15-minute wait
+    - condition: state
+      entity_id: binary_sensor.garage_door_motion
+      state: 'off'
+      for:
+        minutes: 1
+    
+    # Turn off lights if no recent motion
+    - service: switch.turn_off
+      target:
+        entity_id: switch.garage_main_lights
+    
+    # Calculate and log runtime metrics
+    - variables:
+        end_time: '{{ now() }}'
+        light_runtime: >
+          {% set start = strptime(start_time, '%Y-%m-%d %H:%M:%S') %}
+          {% set end = strptime(end_time, '%Y-%m-%d %H:%M:%S') %}
+          {{ ((end - start).total_seconds() / 60) | round(1) }}
+    
+    # Update Grafana metrics
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.garage_lights_on_time
+      data:
+        value: '{{ light_runtime }}'
+    
+    - service: system_log.write
+      data:
+        message: 'Garage lights turned off - 15 minutes after last motion'
+        level: info
+    - service: system_log.write
+      data:
+        message: 'Garage lights runtime: {{ light_runtime }} minutes logged to Grafana'
+        level: info
+  mode: restart
+
+# Garage lights efficiency monitor
+- id: 'garage_lights_efficiency_monitor'
+  alias: 'Garage Lights Efficiency Monitor'
+  description: 'Monitors garage lights usage and provides efficiency insights'
+  triggers:
+    - platform: state
+      entity_id: switch.garage_main_lights
+      from: 'on'
+      to: 'off'
+      id: lights_turned_off
+  action:
+    # Log efficiency metrics when lights turn off
+    - variables:
+        daily_opens: '{{ states("input_number.garage_door_opens_today") }}'
+        total_light_time: '{{ states("input_number.garage_lights_on_time") }}'
+    - service: system_log.write
+      data:
+        message: 'Garage lights efficiency: {{ daily_opens }} door opens, {{ total_light_time }} min total light time'
+        level: info
+    
+    # Calculate efficiency score
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: '{{ daily_opens | int > 0 }}'
+          sequence:
+            - variables:
+                efficiency_score: >
+                  {% set opens = daily_opens | int %}
+                  {% set light_time = total_light_time | float %}
+                  {% if opens > 0 %}
+                    {{ (100 - (light_time / opens / 2)) | round(1) }}
+                  {% else %}
+                    100
+                  {% endif %}
+            - service: system_log.write
+              data:
+                message: 'Garage lights efficiency score: {{ efficiency_score }}%'
+                level: info
+  mode: single

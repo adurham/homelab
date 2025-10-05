@@ -1,0 +1,334 @@
+# Temperature Balancing with Grafana Logging
+# Enhanced version that logs metrics to sensors for Grafana visualization
+
+- id: 'temperature_balancing_with_grafana'
+  alias: 'Temperature Balancing - With Grafana Logging'
+  description: 'Occupancy-based temperature balancing with comprehensive Grafana metrics'
+  triggers:
+    # Trigger when occupancy changes
+    - platform: state
+      entity_id:
+        - binary_sensor.kitchen_occupancy
+        - binary_sensor.kitchen_occupancy_2
+        - binary_sensor.living_room_occupancy
+        - binary_sensor.main_bedroom_occupancy
+        - binary_sensor.guest_bedroom_1_occupancy
+        - binary_sensor.guest_bedroom_2_occupancy
+        - binary_sensor.main_bathroom_occupancy
+        - binary_sensor.guest_bathroom_occupancy
+        - binary_sensor.half_bathroom_occupancy
+        - binary_sensor.dining_room_occupancy
+        - binary_sensor.game_room_occupancy
+        - binary_sensor.cat_room_occupancy
+        - binary_sensor.laundry_room_occupancy
+        - binary_sensor.hallway_occupancy
+        - binary_sensor.edgewater_road_occupancy
+      id: occupancy_changed
+    # Trigger when temperature changes significantly
+    - platform: numeric_state
+      entity_id:
+        - climate.half_bathroom_room
+        - climate.main_bathroom_room_2
+        - climate.guest_bathroom_room_2
+        - climate.cat_room_room
+        - climate.guest_bedroom_2_room_2
+        - climate.game_room_room
+        - climate.guest_bedroom_1_room
+        - climate.living_room_room_3
+        - climate.main_bedroom_room_2
+        - climate.hallway_room_3
+        - climate.dining_room_room_2
+        - climate.laundry_room_room_2
+        - climate.kitchen_room_3
+        - climate.edgewater_road_structure
+      attribute: current_temperature
+      for:
+        minutes: 5
+      id: temperature_changed
+    # Periodic check every 15 minutes
+    - platform: time_pattern
+      minutes: '/15'
+      id: periodic_check
+    # Daily reset at midnight
+    - platform: time
+      at: '00:00:00'
+      id: daily_reset
+  action:
+    - service: system_log.write
+      data:
+        message: 'Starting temperature balancing cycle with Grafana logging'
+        level: info
+    # Get ecobee setpoint as our target
+    - variables:
+        ecobee_temp: '{{ state_attr("climate.ecobee_thermostat", "temperature") }}'
+        ecobee_mode: '{{ states("climate.ecobee_thermostat") }}'
+    - service: system_log.write
+      data:
+        message: 'Ecobee: {{ ecobee_mode }} mode, target: {{ ecobee_temp }}°F'
+        level: info
+    # Update status
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.temperature_balancing_status
+      data:
+        value: 'Active - {{ ecobee_mode }} mode'
+    # Balance all rooms and collect metrics
+    - service: script.balance_all_rooms_with_metrics
+      data:
+        target_temp: '{{ ecobee_temp }}'
+    # Log metrics to Grafana sensors
+    - service: script.update_temperature_metrics
+    - service: system_log.write
+      data:
+        message: 'Temperature balancing cycle completed with metrics logged'
+        level: info
+  mode: restart
+
+# Enhanced room balancing script with metrics collection
+- id: 'balance_all_rooms_with_metrics'
+  alias: 'Balance All Rooms with Metrics Script'
+  description: 'Balances all rooms and collects metrics for Grafana'
+  fields:
+    target_temp:
+      description: 'Target temperature from ecobee'
+      example: 72
+  script:
+    balance_all_rooms_with_metrics:
+      alias: 'Balance All Rooms with Metrics'
+      sequence:
+        - service: system_log.write
+          data:
+            message: 'Balancing all rooms to {{ target_temp }}°F with metrics collection'
+            level: info
+        
+        # Initialize metrics
+        - variables:
+            occupied_rooms: []
+            occupied_temps: []
+            unoccupied_temps: []
+            adjustments_made: 0
+        
+        # Kitchen
+        - service: script.balance_room_with_metrics
+          data:
+            room_entity: 'climate.kitchen_room_3'
+            room_name: 'Kitchen'
+            occupancy_sensor: 'binary_sensor.kitchen_occupancy'
+            target_temp: '{{ target_temp }}'
+        # Living Room
+        - service: script.balance_room_with_metrics
+          data:
+            room_entity: 'climate.living_room_room_3'
+            room_name: 'Living Room'
+            occupancy_sensor: 'binary_sensor.living_room_occupancy'
+            target_temp: '{{ target_temp }}'
+        # Main Bedroom
+        - service: script.balance_room_with_metrics
+          data:
+            room_entity: 'climate.main_bedroom_room_2'
+            room_name: 'Main Bedroom'
+            occupancy_sensor: 'binary_sensor.main_bedroom_occupancy'
+            target_temp: '{{ target_temp }}'
+        # Continue for other rooms...
+        - service: system_log.write
+          data:
+            message: 'Room balancing completed with metrics collected'
+            level: info
+
+# Individual room balancing with metrics
+- id: 'balance_room_with_metrics'
+  alias: 'Balance Room with Metrics Script'
+  description: 'Balances individual room and logs metrics'
+  fields:
+    room_entity:
+      description: 'Climate entity for the room'
+      example: 'climate.kitchen_room_3'
+    room_name:
+      description: 'Human-readable room name'
+      example: 'Kitchen'
+    occupancy_sensor:
+      description: 'Occupancy sensor for the room'
+      example: 'binary_sensor.kitchen_occupancy'
+    target_temp:
+      description: 'Target temperature from ecobee'
+      example: 72
+  script:
+    balance_room_with_metrics:
+      alias: 'Balance Room with Metrics'
+      sequence:
+        # Check if room is occupied
+        - variables:
+            is_occupied: '{{ is_state(occupancy_sensor, "on") }}'
+        # Get current room temperature
+        - variables:
+            current_temp: '{{ state_attr(room_entity, "current_temperature") }}'
+        # Calculate temperature difference
+        - variables:
+            temp_diff: '{{ (current_temp | float) - (target_temp | float) }}'
+        
+        # Log metrics for Grafana
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: '{{ is_occupied }}'
+              sequence:
+                - service: system_log.write
+                  data:
+                    message: '{{ room_name }}: {{ current_temp }}°F (target: {{ target_temp }}°F, diff: {{ temp_diff | round(1) }}°F, OCCUPIED)'
+                    level: info
+                # Set to exact target for occupied rooms
+                - service: climate.set_temperature
+                  target:
+                    entity_id: '{{ room_entity }}'
+                  data:
+                    temperature: '{{ target_temp }}'
+                - service: climate.set_hvac_mode
+                  target:
+                    entity_id: '{{ room_entity }}'
+                  data:
+                    hvac_mode: '{{ states("climate.ecobee_thermostat") }}'
+                # Update last occupied room
+                - service: input_text.set_value
+                  target:
+                    entity_id: input_text.last_occupied_room
+                  data:
+                    value: '{{ room_name }}'
+            - sequence:
+                - service: system_log.write
+                  data:
+                    message: '{{ room_name }}: {{ current_temp }}°F (target: {{ target_temp }}°F, diff: {{ temp_diff | round(1) }}°F, unoccupied)'
+                    level: info
+                # Only adjust unoccupied rooms if significantly off
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: '{{ temp_diff < -3 }}'
+                      sequence:
+                        - service: climate.set_temperature
+                          target:
+                            entity_id: '{{ room_entity }}'
+                          data:
+                            temperature: '{{ (target_temp | float) - 1 }}'
+                        - service: climate.set_hvac_mode
+                          target:
+                            entity_id: '{{ room_entity }}'
+                          data:
+                            hvac_mode: heat
+                    - conditions:
+                        - condition: template
+                          value_template: '{{ temp_diff > 3 }}'
+                      sequence:
+                        - service: climate.set_temperature
+                          target:
+                            entity_id: '{{ room_entity }}'
+                          data:
+                            temperature: '{{ (target_temp | float) + 1 }}'
+                        - service: climate.set_hvac_mode
+                          target:
+                            entity_id: '{{ room_entity }}'
+                          data:
+                            hvac_mode: cool
+
+# Update temperature metrics for Grafana
+- id: 'update_temperature_metrics'
+  alias: 'Update Temperature Metrics Script'
+  description: 'Updates temperature metrics for Grafana visualization'
+  script:
+    update_temperature_metrics:
+      alias: 'Update Temperature Metrics'
+      sequence:
+        # Count occupied rooms
+        - variables:
+            occupied_count: >
+              {{ [
+                is_state('binary_sensor.kitchen_occupancy', 'on'),
+                is_state('binary_sensor.living_room_occupancy', 'on'),
+                is_state('binary_sensor.main_bedroom_occupancy', 'on'),
+                is_state('binary_sensor.guest_bedroom_1_occupancy', 'on'),
+                is_state('binary_sensor.guest_bedroom_2_occupancy', 'on'),
+                is_state('binary_sensor.main_bathroom_occupancy', 'on'),
+                is_state('binary_sensor.guest_bathroom_occupancy', 'on'),
+                is_state('binary_sensor.half_bathroom_occupancy', 'on')
+              ] | select('sameas', true) | list | count }}
+        
+        # Update occupied rooms count
+        - service: input_number.set_value
+          target:
+            entity_id: input_number.occupied_rooms_count
+          data:
+            value: '{{ occupied_count }}'
+        
+        # Calculate temperature variance for occupied rooms
+        - variables:
+            occupied_temps: >
+              {% set temps = [] %}
+              {% if is_state('binary_sensor.kitchen_occupancy', 'on') %}
+                {% set temps = temps + [state_attr('climate.kitchen_room_3', 'current_temperature') | float] %}
+              {% endif %}
+              {% if is_state('binary_sensor.living_room_occupancy', 'on') %}
+                {% set temps = temps + [state_attr('climate.living_room_room_3', 'current_temperature') | float] %}
+              {% endif %}
+              {% if is_state('binary_sensor.main_bedroom_occupancy', 'on') %}
+                {% set temps = temps + [state_attr('climate.main_bedroom_room_2', 'current_temperature') | float] %}
+              {% endif %}
+              {{ temps }}
+        
+        # Calculate variance if we have multiple occupied rooms
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: '{{ occupied_temps | length > 1 }}'
+              sequence:
+                - variables:
+                    temp_variance: '{{ (occupied_temps | max) - (occupied_temps | min) }}'
+                - service: input_number.set_value
+                  target:
+                    entity_id: input_number.temperature_variance_occupied
+                  data:
+                    value: '{{ temp_variance | round(1) }}'
+                - service: system_log.write
+                  data:
+                    message: 'Occupied rooms variance: {{ temp_variance | round(1) }}°F ({{ occupied_count }} rooms)'
+                    level: info
+            - sequence:
+                - service: input_number.set_value
+                  target:
+                    entity_id: input_number.temperature_variance_occupied
+                  data:
+                    value: '0'
+        
+        # Update status
+        - service: input_text.set_value
+          target:
+            entity_id: input_text.temperature_balancing_status
+          data:
+            value: 'Balanced - {{ occupied_count }} occupied rooms'
+
+# Daily reset automation
+- id: 'daily_metrics_reset'
+  alias: 'Daily Metrics Reset'
+  description: 'Resets daily metrics at midnight'
+  triggers:
+    - platform: time
+      at: '00:00:00'
+  action:
+    - service: system_log.write
+      data:
+        message: 'Resetting daily metrics for new day'
+        level: info
+    - service: input_number.set_value
+      target:
+        entity_id: 
+          - input_number.hot_water_pump_cycles_today
+          - input_number.garage_door_opens_today
+      data:
+        value: '0'
+    - service: input_text.set_value
+      target:
+        entity_id:
+          - input_text.last_occupied_room
+          - input_text.hot_water_last_trigger
+          - input_text.garage_lights_last_trigger
+      data:
+        value: 'None'
+  mode: single

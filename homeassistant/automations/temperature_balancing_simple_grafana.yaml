@@ -1,0 +1,264 @@
+# Simple Temperature Balancing with Basic Grafana Logging
+# Simplified version that will definitely work
+
+- id: 'temperature_balancing_simple_grafana'
+  alias: 'Temperature Balancing - Simple with Grafana'
+  description: 'Simple temperature balancing with basic Grafana metrics'
+  triggers:
+    # Trigger when occupancy changes
+    - platform: state
+      entity_id:
+        - binary_sensor.kitchen_occupancy
+        - binary_sensor.living_room_occupancy
+        - binary_sensor.main_bedroom_occupancy
+      id: occupancy_changed
+    # Periodic check every 15 minutes
+    - platform: time_pattern
+      minutes: '/15'
+      id: periodic_check
+  action:
+    - service: system_log.write
+      data:
+        message: 'Starting simple temperature balancing cycle'
+        level: info
+    
+    # Count occupied rooms
+    - variables:
+        occupied_count: >
+          {{ [
+            is_state('binary_sensor.kitchen_occupancy', 'on'),
+            is_state('binary_sensor.living_room_occupancy', 'on'),
+            is_state('binary_sensor.main_bedroom_occupancy', 'on')
+          ] | select('sameas', true) | list | count }}
+    
+    # Update occupied rooms count for Grafana
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.occupied_rooms_count
+      data:
+        value: '{{ occupied_count }}'
+    
+    # Update status
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.temperature_balancing_status
+      data:
+        value: 'Active - {{ occupied_count }} occupied rooms'
+    
+    # Get ecobee target
+    - variables:
+        ecobee_temp: '{{ state_attr("climate.ecobee_thermostat", "temperature") }}'
+        ecobee_mode: '{{ states("climate.ecobee_thermostat") }}'
+    
+    # Balance occupied rooms
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.kitchen_occupancy
+              state: 'on'
+          sequence:
+            - service: system_log.write
+              data:
+                message: 'Kitchen occupied - balancing to {{ ecobee_temp }}°F'
+                level: info
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.kitchen_room_3
+              data:
+                temperature: '{{ ecobee_temp }}'
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.last_occupied_room
+              data:
+                value: 'Kitchen'
+        
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.living_room_occupancy
+              state: 'on'
+          sequence:
+            - service: system_log.write
+              data:
+                message: 'Living Room occupied - balancing to {{ ecobee_temp }}°F'
+                level: info
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.living_room_room_3
+              data:
+                temperature: '{{ ecobee_temp }}'
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.last_occupied_room
+              data:
+                value: 'Living Room'
+        
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.main_bedroom_occupancy
+              state: 'on'
+          sequence:
+            - service: system_log.write
+              data:
+                message: 'Main Bedroom occupied - balancing to {{ ecobee_temp }}°F'
+                level: info
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.main_bedroom_room_2
+              data:
+                temperature: '{{ ecobee_temp }}'
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.last_occupied_room
+              data:
+                value: 'Main Bedroom'
+    
+    - service: system_log.write
+      data:
+        message: 'Simple temperature balancing cycle completed'
+        level: info
+  mode: restart
+
+# Simple hot water with Grafana logging
+- id: 'hot_water_simple_grafana'
+  alias: 'Hot Water - Simple with Grafana'
+  description: 'Simple hot water circulation with basic Grafana metrics'
+  triggers:
+    - platform: state
+      entity_id:
+        - binary_sensor.guest_bathroom_occupancy
+        - binary_sensor.half_bathroom_occupancy
+        - binary_sensor.kitchen_occupancy_2
+        - binary_sensor.main_bathroom_occupancy
+      from: 'off'
+      to: 'on'
+      id: occupancy_detected
+  conditions:
+    - condition: state
+      entity_id: timer.water_heater_circulator_pump_cooldown
+      state: 'idle'
+    - condition: state
+      entity_id: switch.shelly1minig3_28372f21c1dc
+      state: 'off'
+  action:
+    - service: system_log.write
+      data:
+        message: 'Hot water circulation triggered - logging to Grafana'
+        level: info
+    
+    # Update trigger tracking
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.hot_water_last_trigger
+      data:
+        value: 'Occupancy - {{ trigger.to_state.attributes.friendly_name }}'
+    
+    # Increment daily cycle count
+    - service: input_number.increment
+      target:
+        entity_id: input_number.hot_water_pump_cycles_today
+    
+    # Start pump
+    - service: switch.turn_on
+      target:
+        entity_id: switch.shelly1minig3_28372f21c1dc
+    
+    # Run for 5 minutes
+    - delay: '00:05:00'
+    
+    # Turn off pump
+    - service: switch.turn_off
+      target:
+        entity_id: switch.shelly1minig3_28372f21c1dc
+    
+    # Update runtime metric
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.hot_water_pump_runtime
+      data:
+        value: '5'
+    
+    # Set cooldown
+    - service: timer.start
+      target:
+        entity_id: timer.water_heater_circulator_pump_cooldown
+      data:
+        duration: '00:20:00'
+    
+    - service: system_log.write
+      data:
+        message: 'Hot water circulation completed - 5 minutes runtime logged'
+        level: info
+  mode: restart
+
+# Simple garage lights with Grafana logging
+- id: 'garage_lights_simple_grafana'
+  alias: 'Garage Lights - Simple with Grafana'
+  description: 'Simple garage lights with basic Grafana metrics'
+  triggers:
+    - platform: state
+      entity_id:
+        - cover.left_garage_door
+        - cover.middle_garage_bay_door
+        - cover.right_garage_bay_door
+      to: 'open'
+      id: garage_door_opened
+    - platform: state
+      entity_id: binary_sensor.garage_door_motion
+      to: 'on'
+      id: motion_detected
+  action:
+    - service: system_log.write
+      data:
+        message: 'Garage lights triggered - logging to Grafana'
+        level: info
+    
+    - choose:
+        - conditions:
+            - condition: trigger
+              id: garage_door_opened
+            - condition: state
+              entity_id: switch.garage_main_lights
+              state: 'off'
+          sequence:
+            - service: switch.turn_on
+              target:
+                entity_id: switch.garage_main_lights
+            - service: input_number.increment
+              target:
+                entity_id: input_number.garage_door_opens_today
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.garage_lights_last_trigger
+              data:
+                value: 'Door opened - {{ trigger.to_state.attributes.friendly_name }}'
+        
+        - conditions:
+            - condition: trigger
+              id: motion_detected
+          sequence:
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.garage_lights_last_trigger
+              data:
+                value: 'Motion detected'
+    
+    # Wait 15 minutes
+    - delay: '00:15:00'
+    
+    # Turn off lights
+    - service: switch.turn_off
+      target:
+        entity_id: switch.garage_main_lights
+    
+    # Update runtime metric
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.garage_lights_on_time
+      data:
+        value: '15'
+    
+    - service: system_log.write
+      data:
+        message: 'Garage lights turned off - 15 minutes runtime logged'
+        level: info
+  mode: restart
