@@ -1,3 +1,0 @@
-# Python requirements for Home Assistant deployment
-requests>=2.25.0
-ansible>=4.0.0

@@ -1,0 +1,127 @@
+# Control All Room Vents Script
+# Controls all room vents based on occupancy and temperature needs
+
+control_all_room_vents:
+  alias: 'Control All Room Vents'
+  description: 'Controls all room vents based on occupancy and temperature needs'
+  fields:
+    target_temp:
+      description: 'Target temperature from Ecobee'
+      example: 72
+    hvac_mode:
+      description: 'HVAC mode from Ecobee'
+      example: 'heat'
+  sequence:
+    - service: system_log.write
+      data:
+        message: 'Controlling all room vents - target: {{ target_temp }}°F, mode: {{ hvac_mode }}'
+        level: info
+
+    # Kitchen
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.kitchen_room_3'
+        room_name: 'Kitchen'
+        occupancy_sensor: 'binary_sensor.kitchen_occupancy_2'
+        vent_entity: 'cover.kitchen_d124_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+
+    # Living Room (2 vents)
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.living_room_room_3'
+        room_name: 'Living Room'
+        occupancy_sensor: 'binary_sensor.living_room_occupancy'
+        vent_entity: 'cover.living_room_fc56_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.living_room_room_3'
+        room_name: 'Living Room'
+        occupancy_sensor: 'binary_sensor.living_room_occupancy'
+        vent_entity: 'cover.living_room_5d8e_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+
+    # Main Bedroom (3 vents)
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.main_bedroom_room_2'
+        room_name: 'Main Bedroom'
+        occupancy_sensor: 'binary_sensor.main_bedroom_occupancy'
+        vent_entity: 'cover.main_bedroom_883f_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.main_bedroom_room_2'
+        room_name: 'Main Bedroom'
+        occupancy_sensor: 'binary_sensor.main_bedroom_occupancy'
+        vent_entity: 'cover.main_bedroom_a96d_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.main_bedroom_room_2'
+        room_name: 'Main Bedroom'
+        occupancy_sensor: 'binary_sensor.main_bedroom_occupancy'
+        vent_entity: 'cover.main_bedroom_5c2b_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+
+    # Guest Bedroom 2
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.guest_bedroom_2_room_2'
+        room_name: 'Guest Bedroom 2'
+        occupancy_sensor: 'binary_sensor.guest_bedroom_2_occupancy'
+        vent_entity: 'cover.guest_bedroom_2_1ec7_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+
+    # Main Bathroom
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.main_bathroom_room_2'
+        room_name: 'Main Bathroom'
+        occupancy_sensor: 'binary_sensor.main_bathroom_occupancy'
+        vent_entity: 'cover.main_bathroom_f586_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+
+    # Laundry Room
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.laundry_room_room_2'
+        room_name: 'Laundry Room'
+        occupancy_sensor: 'binary_sensor.laundry_room_occupancy'
+        vent_entity: 'cover.laundry_room_d189_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+
+    # Hallway
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.hallway_room_3'
+        room_name: 'Hallway'
+        occupancy_sensor: 'binary_sensor.hallway_occupancy'
+        vent_entity: 'cover.hallway_907e_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+
+    # Dining Room
+    - service: script.control_room_vent
+      data:
+        room_entity: 'climate.dining_room_room_2'
+        room_name: 'Dining Room'
+        occupancy_sensor: 'binary_sensor.dining_room_occupancy'
+        vent_entity: 'cover.dining_room_7a28_vent'
+        target_temp: '{{ target_temp }}'
+        hvac_mode: '{{ hvac_mode }}'
+
+    - service: system_log.write
+      data:
+        message: 'All room vents controlled successfully'
+        level: info
