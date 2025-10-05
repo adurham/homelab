@@ -18,6 +18,8 @@
 - **NEVER** modify automations.yaml directly without backup
 - **ALWAYS** validate automation syntax before deployment
 - **ALWAYS** use the emergency restore procedure if needed
+- **PREFER** API-based deployment over SSH file operations
+- **ALWAYS** use environment variables for API tokens and URLs
 
 ### Automation Rules
 - **ALWAYS** include comprehensive logging
@@ -172,10 +174,13 @@ Code examples and use cases.
 ### Safe Deployment Commands
 ```bash
 # Validate automation before deployment
-python3 deployment/validate_automations.py automations/my_automation.yaml
+python3 deployment/simple_validate.py automations/my_automation.yaml
 
-# Deploy with full safety checks
-python3 deployment/bulletproof_deploy.py deploy automations/my_automation.yaml
+# Deploy with full safety checks (API-based)
+source ha_config.env && HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/create_grafana_automations_simple.py
+
+# Deploy individual automation via API
+source ha_config.env && HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/deploy_automations_api.py
 
 # Create backup from current state
 python3 deployment/bulletproof_deploy.py webui
@@ -266,7 +271,10 @@ The bulletproof deployment system prevents automation loss through comprehensive
 - `bulletproof_deploy.py` - Main deployment script with full safety checks
 - `safe_automation_deploy.py` - Individual automation deployment with validation
 - `automation_backup_restore.py` - Backup and restore management
-- `validate_automations.py` - Syntax and structure validation
+- `validate_automations.py` - Syntax and structure validation (requires PyYAML)
+- `simple_validate.py` - Simple validation without external dependencies
+- `create_grafana_automations_simple.py` - API-based automation creation
+- `deploy_automations_api.py` - API-based deployment system
 
 ### Safety Guarantees
 1. **Never lose automations** - Comprehensive backups before every change
@@ -276,11 +284,14 @@ The bulletproof deployment system prevents automation loss through comprehensive
 
 ### Usage Examples
 ```bash
-# Deploy single automation safely
-python3 deployment/bulletproof_deploy.py deploy automations/my_automation.yaml
+# Validate automation syntax (no external dependencies)
+python3 deployment/simple_validate.py automations/my_automation.yaml
 
-# Validate all automations
-python3 deployment/bulletproof_deploy.py validate
+# Deploy via API (recommended method)
+source ha_config.env && HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/create_grafana_automations_simple.py
+
+# Deploy single automation safely (legacy method)
+python3 deployment/bulletproof_deploy.py deploy automations/my_automation.yaml
 
 # Create backup from web UI
 python3 deployment/bulletproof_deploy.py webui
@@ -291,6 +302,42 @@ python3 deployment/bulletproof_deploy.py emergency
 # List available backups
 python3 deployment/bulletproof_deploy.py list
 ```
+
+## 🚀 **CURRENT DEPLOYMENT METHODS**
+
+### Primary Method: API-Based Deployment
+The current system uses Home Assistant's REST API for deployment, which is more reliable than SSH file operations:
+
+```bash
+# Standard deployment workflow
+source ha_config.env
+HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/create_grafana_automations_simple.py
+```
+
+### Environment Setup
+- **API Token**: Stored in `ha_config.env` (never committed to git)
+- **Home Assistant URL**: Configured in environment variables
+- **Validation**: Uses `simple_validate.py` (no external dependencies)
+
+### Deployment Process
+1. **Validate** automation syntax with `simple_validate.py`
+2. **Set environment** variables from `ha_config.env`
+3. **Deploy** via API using deployment scripts
+4. **Verify** deployment success
+5. **Monitor** automation functionality
+
+### Why API-Based Deployment?
+- ✅ **More reliable** than SSH file operations
+- ✅ **No file system dependencies** 
+- ✅ **Built-in Home Assistant validation**
+- ✅ **Better error handling**
+- ✅ **Works with containerized Home Assistant**
+
+### Legacy SSH Method
+SSH-based deployment is still available but not recommended:
+- ❌ Requires file system access
+- ❌ May not work with containerized Home Assistant
+- ❌ More complex error handling
 
 ---
 
