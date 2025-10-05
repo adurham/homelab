@@ -319,13 +319,20 @@ python3 deployment/bulletproof_deploy.py list
 ## 🚀 **CURRENT DEPLOYMENT METHODS**
 
 ### Primary Method: API-Based Deployment
-The current system uses Home Assistant's REST API for deployment, which is more reliable than SSH file operations:
+**CRITICAL**: Always use API-based deployment for automations. Manual file copying is unreliable and error-prone.
 
 ```bash
 # Standard deployment workflow
 source ha_config.env
 HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/create_grafana_automations_simple.py
 ```
+
+### API Deployment Best Practices
+- **ALWAYS verify deployment** with API calls after deployment
+- **NEVER trust silent deployments** - check automation configuration
+- **Use proper JSON structure** for complex automations
+- **Test automation triggers** after deployment
+- **Monitor Home Assistant logs** for deployment errors
 
 ### Environment Setup
 - **API Token**: Stored in `ha_config.env` (never committed to git)
@@ -338,9 +345,10 @@ HA_URL=$HA_URL HA_TOKEN=$HA_TOKEN python3 deployment/create_grafana_automations_
 1. **Validate** automation syntax with `simple_validate.py`
 2. **Set environment** variables from `ha_config.env`
 3. **Deploy** via API using deployment scripts
-4. **Import Grafana dashboard** (if Grafana is configured)
-5. **Verify** deployment success
-6. **Monitor** automation functionality
+4. **VERIFY deployment** by checking automation configuration via API
+5. **Test automation triggers** to ensure they work
+6. **Import Grafana dashboard** (if Grafana is configured)
+7. **Monitor** automation functionality and logs
 
 ### Why API-Based Deployment?
 - ✅ **More reliable** than SSH file operations
@@ -381,11 +389,29 @@ The deployment system includes automated Grafana dashboard import:
 python3 import_grafana_dashboard.py
 ```
 
+### API Verification Commands
+**ALWAYS run these after deployment to verify automations are working:**
+
+```bash
+# Check automation configuration
+curl -s -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/config/automation/config/AUTOMATION_ID"
+
+# Check automation state
+curl -s -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/states/automation.AUTOMATION_ID"
+
+# List all automations
+curl -s -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/states" | grep "automation\."
+
+# Test automation trigger (if applicable)
+curl -s -X POST -H "Authorization: Bearer $HA_TOKEN" -d '{"entity_id": "automation.AUTOMATION_ID"}' "$HA_URL/api/services/automation/trigger"
+```
+
 ### Legacy SSH Method
 SSH-based deployment is still available but not recommended:
 - ❌ Requires file system access
 - ❌ May not work with containerized Home Assistant
 - ❌ More complex error handling
+- ❌ No automatic verification
 
 ---
 
