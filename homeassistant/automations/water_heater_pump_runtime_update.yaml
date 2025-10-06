@@ -1,0 +1,20 @@
+# Water Heater Circulator Pump - Runtime Update
+# Updates daily runtime when pump turns off
+- id: 'water_heater_pump_runtime_update'
+  alias: 'Water Heater Pump - Runtime Update'
+  description: 'Updates daily runtime when pump turns off'
+  triggers:
+    - platform: state
+      entity_id: switch.shelly1minig3_28372f21c1dc
+      to: 'off'
+  action:
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.water_heater_pump_daily_runtime_hours
+      data:
+        value: "{{ (states('input_number.water_heater_pump_daily_runtime_hours') | float + 0.25) | round(2) }}"
+    - service: system_log.write
+      data:
+        message: 'Water heater pump stopped - Daily runtime: {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h'
+        level: info
+  mode: single

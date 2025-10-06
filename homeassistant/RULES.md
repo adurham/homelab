@@ -30,8 +30,46 @@
 - **No subdirectories**: `!include_dir_merge_list` does NOT support subdirectories - files must be directly in the specified directory
 
 ### Script Organization
-- **Scripts**: `scripts/<system>/<script>.yaml`
-- **Include files**: `scripts.yaml` use `!include_dir_named`
+- **UI-managed scripts**: `scripts.yaml` (managed by Home Assistant UI, do not edit manually)
+- **Custom scripts**: `scripts/<system>/<script>.yaml` (individual files in scripts/ directory)
+- **Include configuration**: `configuration.yaml` uses both:
+  ```yaml
+  script: !include scripts.yaml                    # UI-managed
+  script custom: !include_dir_merge_list scripts/  # Custom files
+  ```
+
+### Scene Organization
+- **UI-managed scenes**: `scenes.yaml` (managed by Home Assistant UI, do not edit manually)
+- **Custom scenes**: `scenes/<scene>.yaml` (individual files in scenes/ directory)
+- **Include configuration**: `configuration.yaml` uses both:
+  ```yaml
+  scene: !include scenes.yaml                    # UI-managed
+  scene custom: !include_dir_merge_list scenes/  # Custom files
+  ```
+
+### Helper Entities Organization
+- **Helper entities**: Must be defined directly in `configuration.yaml`
+- **No custom includes**: Home Assistant does NOT support `input_boolean custom:` syntax
+- **Direct definition**: All helper entities go directly under their domain in `configuration.yaml`:
+  ```yaml
+  input_boolean:
+    entity_name:
+      name: "Entity Name"
+      icon: mdi:icon-name
+  input_number:
+    entity_name:
+      name: "Entity Name"
+      min: 0
+      max: 100
+  counter:
+    entity_name:
+      name: "Entity Name"
+      initial: 0
+  timer:
+    entity_name:
+      name: "Entity Name"
+      duration: "00:15:00"
+  ```
 
 ### Naming Conventions
 - **Files**: Use snake_case for YAML files
@@ -65,15 +103,22 @@
 
 ### 2. Deployment
 ```bash
-# Deploy to Home Assistant
+# Deploy to Home Assistant (normal deployment)
 ./deploy_homeassistant.sh
+
+# Deploy during development (skip safety checks)
+./deploy_homeassistant.sh --skip-config-check --skip-ha-backup
+
+# Deploy with custom backup timeout
+./deploy_homeassistant.sh --backup-timeout 600
 ```
 
 ### Important Configuration Notes
-- **automations.yaml**: Managed by Home Assistant UI, do not edit manually
-- **Custom automations**: Use labeled automation blocks in configuration.yaml with include directives
+- **UI-managed files**: `automations.yaml`, `scripts.yaml`, `scenes.yaml` - do not edit manually
+- **Custom files**: Use `custom:` includes for automations, scripts, and scenes
+- **Helper entities**: Must be defined directly in `configuration.yaml` (no custom includes supported)
 - **No subdirectories**: Home Assistant include directives do not support nested subdirectories
-- **Deployment script**: Checks for external changes to configuration.yaml and may abort deployment
+- **Deployment script**: Use `--skip-config-check` flag during development to bypass safety checks
 ```
 
 ### 3. Testing

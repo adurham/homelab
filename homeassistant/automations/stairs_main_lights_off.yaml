@@ -1,0 +1,16 @@
+# Stairs Main Lights Off at Midnight
+- id: 'stairs_main_lights_off'
+  alias: 'Stairs Main Lights Off'
+  description: 'Turn Stairs Main Lights off at midnight'
+  triggers:
+    - platform: time
+      at: '00:00:00'
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.stairs_main_lights
+    - service: system_log.write
+      data:
+        message: 'Stairs Main Lights turned off at midnight'
+        level: info
+  mode: single

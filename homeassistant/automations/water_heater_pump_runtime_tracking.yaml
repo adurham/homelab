@@ -1,0 +1,22 @@
+# Water Heater Circulator Pump - Runtime Tracking
+# Tracks daily runtime and prevents excessive usage
+- id: 'water_heater_pump_runtime_tracking'
+  alias: 'Water Heater Pump - Runtime Tracking'
+  description: 'Tracks daily runtime and prevents excessive usage'
+  triggers:
+    - platform: state
+      entity_id: switch.shelly1minig3_28372f21c1dc
+      to: 'on'
+  conditions:
+    - condition: numeric_state
+      entity_id: input_number.water_heater_pump_daily_runtime_hours
+      below: 8  # Maximum 8 hours per day
+  action:
+    - service: counter.increment
+      target:
+        entity_id: counter.water_heater_pump_daily_cycles
+    - service: system_log.write
+      data:
+        message: 'Water heater pump started - Daily cycles: {{ states("counter.water_heater_pump_daily_cycles") }}, Runtime: {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h'
+        level: info
+  mode: single

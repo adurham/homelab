@@ -1,0 +1,26 @@
+# Water Heater Circulator Pump - Max Runtime Protection
+# Prevents pump from running if daily limit exceeded
+- id: 'water_heater_pump_max_runtime_protection'
+  alias: 'Water Heater Pump - Max Runtime Protection'
+  description: 'Prevents pump from running if daily runtime limit exceeded'
+  triggers:
+    - platform: state
+      entity_id: input_number.water_heater_pump_daily_runtime_hours
+      to: '8'
+  action:
+    - service: system_log.write
+      data:
+        message: 'Water heater pump daily runtime limit reached (8 hours) - disabling automation'
+        level: warning
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.water_heater_pump_automation_enabled
+    - service: switch.turn_off
+      target:
+        entity_id: switch.shelly1minig3_28372f21c1dc
+    - service: timer.cancel
+      target:
+        entity_id: 
+          - timer.water_heater_pump_runtime
+          - timer.water_heater_pump_cooldown
+  mode: single
