@@ -1,0 +1,17 @@
+# Front Porch Sconces On at Sunset
+- id: 'front_porch_sconces_on'
+  alias: 'Front Porch Sconces On'
+  description: 'Turn Front Porch Sconces on at sunset'
+  triggers:
+    - platform: sun
+      event: sunset
+      offset: 0
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.front_porch_sconces
+    - service: system_log.write
+      data:
+        message: 'Front Porch Sconces turned on at sunset'
+        level: info
+  mode: single

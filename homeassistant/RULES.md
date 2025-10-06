@@ -19,10 +19,19 @@
 
 ## 📁 File Structure Rules
 
-### Modular Organization
-- **Automations**: `automations/<system>/<automation>.yaml`
+### Automation Organization
+- **UI-managed automations**: `automations.yaml` (managed by Home Assistant UI, do not edit manually)
+- **Custom automations**: `automations/<automation>.yaml` (individual files in automations/ directory)
+- **Include configuration**: `configuration.yaml` uses both:
+  ```yaml
+  automation: !include automations.yaml                    # UI-managed
+  automation custom: !include_dir_merge_list automations/  # Custom files
+  ```
+- **No subdirectories**: `!include_dir_merge_list` does NOT support subdirectories - files must be directly in the specified directory
+
+### Script Organization
 - **Scripts**: `scripts/<system>/<script>.yaml`
-- **Include files**: `automations.yaml`, `scripts.yaml` use `!include_dir_named`
+- **Include files**: `scripts.yaml` use `!include_dir_named`
 
 ### Naming Conventions
 - **Files**: Use snake_case for YAML files
@@ -58,6 +67,13 @@
 ```bash
 # Deploy to Home Assistant
 ./deploy_homeassistant.sh
+```
+
+### Important Configuration Notes
+- **automations.yaml**: Managed by Home Assistant UI, do not edit manually
+- **Custom automations**: Use labeled automation blocks in configuration.yaml with include directives
+- **No subdirectories**: Home Assistant include directives do not support nested subdirectories
+- **Deployment script**: Checks for external changes to configuration.yaml and may abort deployment
 ```
 
 ### 3. Testing
