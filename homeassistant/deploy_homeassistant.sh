@@ -12,6 +12,7 @@ BACKUP_DIR="/config/backups"
 MAX_BACKUPS=10
 BACKUP_TIMEOUT=300  # 5 minutes timeout for backup creation
 SKIP_HA_BACKUP=false  # Set to true to skip HA backup creation (faster deployment)
+SKIP_CONFIG_CHECK=false  # Set to true to skip configuration.yaml change check (for development)
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,6 +36,11 @@ error() {
 
 # Check if configuration.yaml has been modified externally
 check_config_changes() {
+    if [ "$SKIP_CONFIG_CHECK" = "true" ]; then
+        warn "Skipping configuration.yaml change check (SKIP_CONFIG_CHECK=true)"
+        return 0
+    fi
+    
     log "Checking for external changes to configuration.yaml..."
     
     if [ -f "configuration.yaml" ]; then
@@ -74,7 +80,7 @@ create_backup() {
     fi
     
     if [ -n "$TIMEOUT_CMD" ]; then
-        backup_result=$($TIMEOUT_CMD $BACKUP_TIMEOUT ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core backup --name $backup_name" 2>&1)
+        backup_result=$($TIMEOUT_CMD $BACKUP_TIMEOUT ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha backup new --name $backup_name" 2>&1)
         backup_exit_code=$?
         
         if [ $backup_exit_code -eq 124 ]; then
@@ -88,7 +94,7 @@ create_backup() {
         fi
     else
         # Fallback without timeout
-        backup_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core backup --name $backup_name" 2>&1)
+        backup_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha backup new --name $backup_name" 2>&1)
         if [ $? -eq 0 ]; then
             log "Backup created successfully: $backup_name"
         else
@@ -101,7 +107,7 @@ create_backup() {
     log "Managing backup rotation..."
     ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "
         # Get list of backups, sorted by date (newest first)
-        backups=\$(ha core backup list --json | jq -r '.data.backups[] | .slug' | sort -r)
+        backups=\$(ha backup list --json | jq -r '.data.backups[] | .slug' | sort -r)
         backup_count=\$(echo \"\$backups\" | wc -l)
         
         # Remove old backups if we exceed MAX_BACKUPS
@@ -109,7 +115,7 @@ create_backup() {
             echo \"Removing old backups...\"
             echo \"\$backups\" | tail -n +\$((MAX_BACKUPS + 1)) | while read backup; do
                 echo \"Removing backup: \$backup\"
-                ha core backup remove \$backup
+                ha backup remove \$backup
             done
         fi
     "
@@ -153,9 +159,11 @@ backup_existing_files() {
             # Backup existing files
             [ -f /config/automations.yaml ] && cp /config/automations.yaml $backup_path/
             [ -f /config/scripts.yaml ] && cp /config/scripts.yaml $backup_path/
+            [ -f /config/scenes.yaml ] && cp /config/scenes.yaml $backup_path/
             [ -f /config/configuration.yaml ] && cp /config/configuration.yaml $backup_path/
             [ -d /config/automations ] && cp -r /config/automations $backup_path/
             [ -d /config/scripts ] && cp -r /config/scripts $backup_path/
+            [ -d /config/scenes ] && cp -r /config/scenes $backup_path/
             
             echo \"Files backed up to: $backup_path\"
         " 2>&1)
@@ -177,9 +185,11 @@ backup_existing_files() {
             # Backup existing files
             [ -f /config/automations.yaml ] && cp /config/automations.yaml $backup_path/
             [ -f /config/scripts.yaml ] && cp /config/scripts.yaml $backup_path/
+            [ -f /config/scenes.yaml ] && cp /config/scenes.yaml $backup_path/
             [ -f /config/configuration.yaml ] && cp /config/configuration.yaml $backup_path/
             [ -d /config/automations ] && cp -r /config/automations $backup_path/
             [ -d /config/scripts ] && cp -r /config/scripts $backup_path/
+            [ -d /config/scenes ] && cp -r /config/scenes $backup_path/
             
             echo \"Files backed up to: $backup_path\"
         " 2>&1)
@@ -229,6 +239,18 @@ deploy_files() {
         log "Copying script files..."
         scp -P $HA_PORT -o StrictHostKeyChecking=no -r scripts/ $HA_HOST:/config/
     fi
+    
+    # Copy scene files
+    if [ -d "scenes" ]; then
+        log "Copying scene files..."
+        scp -P $HA_PORT -o StrictHostKeyChecking=no -r scenes/ $HA_HOST:/config/
+    fi
+    
+    # Copy helper files
+    if [ -d "helpers" ]; then
+        log "Copying helper files..."
+        scp -P $HA_PORT -o StrictHostKeyChecking=no -r helpers/ $HA_HOST:/config/
+    fi
 }
 
 # Validate deployed configuration and restore if needed
@@ -255,11 +277,11 @@ restore_from_backup() {
     log "Restoring from HA CLI backup..."
     
     # Get the most recent backup
-    latest_backup=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core backup list --json | jq -r '.data.backups[0].slug'")
+    latest_backup=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha backup list --json | jq -r '.data.backups[0].slug'")
     
     if [ -n "$latest_backup" ] && [ "$latest_backup" != "null" ]; then
         log "Restoring from backup: $latest_backup"
-        restore_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core backup restore $latest_backup" 2>&1)
+        restore_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha backup restore $latest_backup" 2>&1)
         
         if [ $? -eq 0 ]; then
             log "Backup restored successfully"
@@ -338,17 +360,20 @@ show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --skip-ha-backup    Skip Home Assistant backup creation (faster deployment)"
-    echo "  --backup-timeout N  Set backup timeout in seconds (default: 300)"
-    echo "  --help              Show this help message"
+    echo "  --skip-ha-backup      Skip Home Assistant backup creation (faster deployment)"
+    echo "  --skip-config-check   Skip configuration.yaml change check (for development)"
+    echo "  --backup-timeout N    Set backup timeout in seconds (default: 300)"
+    echo "  --help                Show this help message"
     echo ""
     echo "Environment Variables:"
     echo "  SKIP_HA_BACKUP      Set to 'true' to skip HA backup creation"
+    echo "  SKIP_CONFIG_CHECK   Set to 'true' to skip configuration.yaml change check"
     echo "  BACKUP_TIMEOUT      Set backup timeout in seconds"
     echo ""
     echo "Examples:"
     echo "  $0                           # Normal deployment with full backup"
     echo "  $0 --skip-ha-backup          # Skip HA backup for faster deployment"
+    echo "  $0 --skip-config-check       # Skip config check for development"
     echo "  $0 --backup-timeout 600      # Set 10 minute backup timeout"
     echo ""
 }
@@ -358,6 +383,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-ha-backup)
             SKIP_HA_BACKUP=true
+            shift
+            ;;
+        --skip-config-check)
+            SKIP_CONFIG_CHECK=true
             shift
             ;;
         --backup-timeout)

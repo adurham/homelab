@@ -1,0 +1,70 @@
+# Garage Lights - Door Open and Motion Control
+- id: 'garage_lights_door_motion_control'
+  alias: 'Garage Lights - Door Open and Motion Control'
+  description: 'Turns on garage lights when any garage door opens or motion is detected, stays on for 15 minutes after last motion'
+  trigger:
+    # Trigger when any garage door opens
+    - platform: state
+      entity_id:
+        - binary_sensor.garage_door_contact
+        - binary_sensor.left_garage_bay_garage_door
+        - binary_sensor.middle_garage_bay_garage_door
+        - binary_sensor.shelly1minig3_b08184ee0fd0_garage_door
+      to: 'on'
+    # Trigger when motion is detected in garage
+    - platform: state
+      entity_id: binary_sensor.garage_door_motion
+      to: 'on'
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.garage_main_lights
+    - service: timer.start
+      target:
+        entity_id: timer.garage_lights_motion_timeout
+    - service: system_log.write
+      data:
+        message: "Garage Lights: Turned ON by {{ trigger.to_state.name if trigger.to_state else 'motion detection' }}"
+        level: info
+  mode: single
+
+# Garage Lights - Turn Off After Motion Timeout
+- id: 'garage_lights_turn_off_timeout'
+  alias: 'Garage Lights - Turn Off After Motion Timeout'
+  description: 'Turns off garage lights when motion timeout expires'
+  trigger:
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.garage_lights_motion_timeout
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.garage_main_lights
+    - service: system_log.write
+      data:
+        message: "Garage Lights: Turned OFF after 15 minutes of no motion"
+        level: info
+  mode: single
+
+# Garage Lights - Reset Timer on Motion
+- id: 'garage_lights_reset_timer_on_motion'
+  alias: 'Garage Lights - Reset Timer on Motion'
+  description: 'Resets the motion timeout timer when motion is detected while lights are on'
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.garage_door_motion
+      to: 'on'
+  condition:
+    - condition: state
+      entity_id: switch.garage_main_lights
+      state: 'on'
+  action:
+    - service: timer.start
+      target:
+        entity_id: timer.garage_lights_motion_timeout
+    - service: system_log.write
+      data:
+        message: "Garage Lights: Motion detected, resetting 15-minute timeout"
+        level: info
+  mode: single

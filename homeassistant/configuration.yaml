@@ -8,7 +8,45 @@ frontend:
 automation: !include automations.yaml
 automation custom: !include_dir_merge_list automations/
 script: !include scripts.yaml
+script custom: !include_dir_merge_list scripts/
 scene: !include scenes.yaml
+scene custom: !include_dir_merge_list scenes/
+
+# Helper Entities
+input_boolean:
+  water_heater_pump_automation_enabled:
+    name: "Water Heater Pump Automation"
+    icon: mdi:water-pump
+
+input_number:
+  water_heater_pump_daily_runtime_hours:
+    name: "Water Heater Pump Daily Runtime"
+    min: 0
+    max: 24
+    step: 0.25
+    unit_of_measurement: "hours"
+    icon: mdi:clock
+
+counter:
+  water_heater_pump_daily_cycles:
+    name: "Water Heater Pump Daily Cycles"
+    initial: 0
+    step: 1
+    icon: mdi:counter
+
+timer:
+  water_heater_pump_runtime:
+    name: "Water Heater Pump Runtime"
+    duration: "00:15:00"
+    icon: mdi:timer
+  water_heater_pump_cooldown:
+    name: "Water Heater Pump Cooldown"
+    duration: "00:45:00"
+    icon: mdi:timer-pause
+  garage_lights_motion_timeout:
+    name: "Garage Lights Motion Timeout"
+    duration: "00:15:00"
+    icon: mdi:timer
 
 influxdb:
   host: a0d7b954-influxdb

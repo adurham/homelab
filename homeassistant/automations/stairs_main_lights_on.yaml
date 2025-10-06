@@ -1,0 +1,17 @@
+# Stairs Main Lights On at Sunset
+- id: 'stairs_main_lights_on'
+  alias: 'Stairs Main Lights On'
+  description: 'Turn Stairs Main Lights on at sunset'
+  triggers:
+    - platform: sun
+      event: sunset
+      offset: 0
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.stairs_main_lights
+    - service: system_log.write
+      data:
+        message: 'Stairs Main Lights turned on at sunset'
+        level: info
+  mode: single

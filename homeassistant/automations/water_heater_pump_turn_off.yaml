@@ -1,0 +1,27 @@
+# Water Heater Circulator Pump - Turn Off
+# Turns off pump after 15 minutes and starts cooldown timer
+- id: 'water_heater_pump_turn_off'
+  alias: 'Water Heater Pump - Turn Off'
+  description: 'Turns off pump after 15 minutes and starts 45-minute cooldown'
+  triggers:
+    - platform: state
+      entity_id: timer.water_heater_pump_runtime
+      to: 'active'
+      for: '00:15:00'
+  action:
+    - service: system_log.write
+      data:
+        message: 'Water heater pump runtime complete - turning off and starting cooldown'
+        level: info
+    - service: switch.turn_off
+      target:
+        entity_id: switch.shelly1minig3_28372f21c1dc
+    - service: timer.start
+      target:
+        entity_id: timer.water_heater_pump_cooldown
+      data:
+        duration: '00:45:00'
+    - service: timer.cancel
+      target:
+        entity_id: timer.water_heater_pump_runtime
+  mode: single

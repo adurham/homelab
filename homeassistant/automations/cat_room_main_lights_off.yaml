@@ -1,0 +1,16 @@
+# Cat Room Main Lights Off at Midnight
+- id: 'cat_room_main_lights_off'
+  alias: 'Cat Room Main Lights Off'
+  description: 'Turn Cat Room Main Lights off at midnight'
+  triggers:
+    - platform: time
+      at: '00:00:00'
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.cat_room_main_lights
+    - service: system_log.write
+      data:
+        message: 'Cat Room Main Lights turned off at midnight'
+        level: info
+  mode: single
