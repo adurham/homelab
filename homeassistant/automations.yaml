@@ -1,5 +1,2 @@
 # Home Assistant Automations
-# This file includes all automation files from the automations/ directory
-
-# Include all automation files from the automations directory
-automation: !include_dir_named automations/
+# This file is managed by the UI - do not edit manually

@@ -10,6 +10,8 @@ HA_HOST="root@homeassistant.local"
 HA_PORT="2222"
 BACKUP_DIR="/config/backups"
 MAX_BACKUPS=10
+BACKUP_TIMEOUT=300  # 5 minutes timeout for backup creation
+SKIP_HA_BACKUP=false  # Set to true to skip HA backup creation (faster deployment)
 
 # Colors for output
 RED='\033[0;31m'
@@ -54,14 +56,45 @@ check_config_changes() {
 create_backup() {
     log "Creating Home Assistant backup..."
     
-    # Create backup using HA CLI
+    # Create backup using HA CLI with timeout
     backup_name="deployment_backup_$(date +%Y%m%d_%H%M%S)"
-    backup_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core backup --name $backup_name" 2>&1)
+    log "Starting backup creation: $backup_name (timeout: ${BACKUP_TIMEOUT}s)"
     
-    if [ $? -eq 0 ]; then
-        log "Backup created successfully: $backup_name"
+    # Use timeout to prevent hanging indefinitely
+    if command -v gtimeout >/dev/null 2>&1; then
+        # macOS with GNU coreutils
+        TIMEOUT_CMD="gtimeout"
+    elif command -v timeout >/dev/null 2>&1; then
+        # Linux or macOS with timeout
+        TIMEOUT_CMD="timeout"
     else
-        error "Failed to create backup: $backup_result"
+        # Fallback: run without timeout but with warning
+        warn "No timeout command available. Backup may hang indefinitely."
+        TIMEOUT_CMD=""
+    fi
+    
+    if [ -n "$TIMEOUT_CMD" ]; then
+        backup_result=$($TIMEOUT_CMD $BACKUP_TIMEOUT ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core backup --name $backup_name" 2>&1)
+        backup_exit_code=$?
+        
+        if [ $backup_exit_code -eq 124 ]; then
+            error "Backup creation timed out after ${BACKUP_TIMEOUT}s. Continuing with file backup only..."
+            return 1
+        elif [ $backup_exit_code -ne 0 ]; then
+            error "Failed to create backup: $backup_result"
+            return 1
+        else
+            log "Backup created successfully: $backup_name"
+        fi
+    else
+        # Fallback without timeout
+        backup_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core backup --name $backup_name" 2>&1)
+        if [ $? -eq 0 ]; then
+            log "Backup created successfully: $backup_name"
+        else
+            error "Failed to create backup: $backup_result"
+            return 1
+        fi
     fi
     
     # Manage backup rotation
@@ -110,18 +143,54 @@ backup_existing_files() {
     backup_timestamp=$(date +%Y%m%d_%H%M%S)
     backup_path="$BACKUP_DIR/manual_backup_$backup_timestamp"
     
-    ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "
-        mkdir -p $backup_path
+    # Use shorter timeout for file operations (30 seconds should be plenty)
+    file_backup_timeout=30
+    
+    if [ -n "$TIMEOUT_CMD" ]; then
+        backup_result=$($TIMEOUT_CMD $file_backup_timeout ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "
+            mkdir -p $backup_path
+            
+            # Backup existing files
+            [ -f /config/automations.yaml ] && cp /config/automations.yaml $backup_path/
+            [ -f /config/scripts.yaml ] && cp /config/scripts.yaml $backup_path/
+            [ -f /config/configuration.yaml ] && cp /config/configuration.yaml $backup_path/
+            [ -d /config/automations ] && cp -r /config/automations $backup_path/
+            [ -d /config/scripts ] && cp -r /config/scripts $backup_path/
+            
+            echo \"Files backed up to: $backup_path\"
+        " 2>&1)
         
-        # Backup existing files
-        [ -f /config/automations.yaml ] && cp /config/automations.yaml $backup_path/
-        [ -f /config/scripts.yaml ] && cp /config/scripts.yaml $backup_path/
-        [ -f /config/configuration.yaml ] && cp /config/configuration.yaml $backup_path/
-        [ -d /config/automations ] && cp -r /config/automations $backup_path/
-        [ -d /config/scripts ] && cp -r /config/scripts $backup_path/
+        if [ $? -eq 124 ]; then
+            error "File backup timed out after ${file_backup_timeout}s"
+            return 1
+        elif [ $? -ne 0 ]; then
+            error "File backup failed: $backup_result"
+            return 1
+        else
+            log "File backup completed: $backup_result"
+        fi
+    else
+        # Fallback without timeout
+        backup_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "
+            mkdir -p $backup_path
+            
+            # Backup existing files
+            [ -f /config/automations.yaml ] && cp /config/automations.yaml $backup_path/
+            [ -f /config/scripts.yaml ] && cp /config/scripts.yaml $backup_path/
+            [ -f /config/configuration.yaml ] && cp /config/configuration.yaml $backup_path/
+            [ -d /config/automations ] && cp -r /config/automations $backup_path/
+            [ -d /config/scripts ] && cp -r /config/scripts $backup_path/
+            
+            echo \"Files backed up to: $backup_path\"
+        " 2>&1)
         
-        echo \"Files backed up to: $backup_path\"
-    "
+        if [ $? -eq 0 ]; then
+            log "File backup completed: $backup_result"
+        else
+            error "File backup failed: $backup_result"
+            return 1
+        fi
+    fi
 }
 
 # Deploy files
@@ -232,8 +301,19 @@ main() {
     # 2. Validate local configuration FIRST
     validate_config
     
-    # 3. Create backups
-    create_backup
+    # 3. Create backups (continue even if HA backup fails)
+    log "Creating backups..."
+    if [ "$SKIP_HA_BACKUP" = "true" ]; then
+        warn "Skipping HA backup creation (SKIP_HA_BACKUP=true)"
+    else
+        if create_backup; then
+            log "HA backup created successfully"
+        else
+            warn "HA backup failed, continuing with file backup only"
+        fi
+    fi
+    
+    # Always create file backups regardless of HA backup status
     backup_existing_files
     
     # 4. Deploy files
@@ -250,6 +330,51 @@ main() {
         exit 1
     fi
 }
+
+# Help function
+show_help() {
+    echo "Home Assistant Deployment Script"
+    echo ""
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --skip-ha-backup    Skip Home Assistant backup creation (faster deployment)"
+    echo "  --backup-timeout N  Set backup timeout in seconds (default: 300)"
+    echo "  --help              Show this help message"
+    echo ""
+    echo "Environment Variables:"
+    echo "  SKIP_HA_BACKUP      Set to 'true' to skip HA backup creation"
+    echo "  BACKUP_TIMEOUT      Set backup timeout in seconds"
+    echo ""
+    echo "Examples:"
+    echo "  $0                           # Normal deployment with full backup"
+    echo "  $0 --skip-ha-backup          # Skip HA backup for faster deployment"
+    echo "  $0 --backup-timeout 600      # Set 10 minute backup timeout"
+    echo ""
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --skip-ha-backup)
+            SKIP_HA_BACKUP=true
+            shift
+            ;;
+        --backup-timeout)
+            BACKUP_TIMEOUT="$2"
+            shift 2
+            ;;
+        --help)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+done
 
 # Run main function
 main "$@"

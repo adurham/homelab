@@ -1,0 +1,16 @@
+# Front Porch Sconces Off at Midnight
+- id: 'front_porch_sconces_off'
+  alias: 'Front Porch Sconces Off'
+  description: 'Turn Front Porch Sconces off at midnight'
+  triggers:
+    - platform: time
+      at: '00:00:00'
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.front_porch_sconces
+    - service: system_log.write
+      data:
+        message: 'Front Porch Sconces turned off at midnight'
+        level: info
+  mode: single
