@@ -247,63 +247,82 @@ fi
 # Create starship config directory
 mkdir -p "$HOME/.config"
 
-# Create your exact starship configuration
+# Create starship configuration from template
 echo -e "${YELLOW}Creating starship configuration...${NC}"
-cat > "$HOME/.config/starship.toml" << 'EOF'
-format = """\
-[ ](bg:#030B16 fg:#7DF9AA)\
-[ ](bg:#7DF9AA fg:#090c0c)\
-[ ](fg:#7DF9AA bg:#1C3A5E)\
-$time\
-[ ](fg:#1C3A5E bg:#3B76F0)\
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Copy the starship.toml template to the user's config directory
+if [ -f "$SCRIPT_DIR/starship.toml" ]; then
+    cp "$SCRIPT_DIR/starship.toml" "$HOME/.config/starship.toml"
+    echo -e "${GREEN}✅ Created starship configuration from template${NC}"
+else
+    echo -e "${RED}❌ starship.toml template not found at $SCRIPT_DIR/starship.toml${NC}"
+    echo -e "${YELLOW}Creating basic starship configuration...${NC}"
+    # Fallback to basic configuration if template not found
+    cat > "$HOME/.config/starship.toml" << 'EOF'
+format = """
+[ ](color_orange)\
+$os\
+$username\
+[ ](bg:color_yellow fg:color_orange)\
 $directory\
-[ ](fg:#3B76F0 bg:#FCF392)\
+[ ](fg:color_yellow bg:color_aqua)\
 $git_branch\
 $git_status\
-$git_metrics\
-[ ](fg:#FCF392 bg:#030B16)\
-$character\
-"""
+[ ](fg:color_aqua bg:color_blue)\
+$time\
+[ ](fg:color_bg1)\
+$character"""
+
+palette = 'gruvbox_dark'
+
+[palettes.gruvbox_dark]
+color_fg0 = '#fbf1c7'
+color_bg1 = '#3c3836'
+color_blue = '#458588'
+color_aqua = '#689d6a'
+color_green = '#98971a'
+color_orange = '#d65d0e'
+color_red = '#cc241d'
+color_yellow = '#d79921'
+
+[os]
+disabled = false
+style = "bg:color_orange fg:color_fg0"
+
+[username]
+show_always = true
+style_user = "bg:color_orange fg:color_fg0"
+format = '[ $user ]($style)'
 
 [directory]
-format = "[  $path ]($style)"
-style = "fg:#E4E4E4 bg:#3B76F0"
+style = "fg:color_fg0 bg:color_yellow"
+format = "[ $path ]($style)"
 
 [git_branch]
-format = '[ $symbol$branch(:$remote_branch) ]($style)'
-symbol = "   "
-style = "fg:#1C3A5E bg:#FCF392"
+symbol = ""
+style = "bg:color_aqua"
+format = '[[ $symbol $branch ](fg:color_fg0 bg:color_aqua)]($style)'
 
 [git_status]
-format = '[$all_status]($style)'
-style = "fg:#1C3A5E bg:#FCF392"
-
-[git_metrics]
-format = "([+$added]($added_style))[]($added_style)"
-added_style = "fg:#1C3A5E bg:#FCF392"
-deleted_style = "fg:bright-red bg:235"
-disabled = false
-
-[hg_branch]
-format = "[ $symbol$branch ]($style)"
-symbol = " "
-
-[cmd_duration]
-format = "[  $duration ]($style)"
-style = "fg:bright-white bg:18"
-
-[character]
-success_symbol = '[ ➜](bold green) '
-error_symbol = '[ ✗](#E84D44) '
+style = "bg:color_aqua"
+format = '[[($all_status$ahead_behind )](fg:color_fg0 bg:color_aqua)]($style)'
 
 [time]
 disabled = false
-time_format = "%R" # Hour:Minute Format
-style = "bg:#1d2230"
-format = '[[  $time ](bg:#1C3A5E fg:#8DFBD2)]($style)'
-EOF
+time_format = "%R"
+style = "bg:color_bg1"
+format = '[[  $time ](fg:color_fg0 bg:color_bg1)]($style)'
 
-echo -e "${GREEN}✅ Created starship configuration${NC}"
+[character]
+disabled = false
+success_symbol = '[ ](bold fg:color_green)'
+error_symbol = '[ ](bold fg:color_red)'
+EOF
+    echo -e "${GREEN}✅ Created basic starship configuration${NC}"
+fi
 
 # =============================================================================
 # ZSH CONFIGURATION
