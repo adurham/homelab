@@ -1,47 +1,110 @@
-# Home Assistant sensitive configuration files
-homeassistant/ha_config.env
-homeassistant/.env
-homeassistant/*.env
+# =============================================================================
+# SYSTEM FILES
+# =============================================================================
 
-# Generated files
-homeassistant/entity_inventory/entity_inventory.json
-homeassistant/entity_inventory/entity_inventory.md
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# Python cache
+# =============================================================================
+# DEVELOPMENT ENVIRONMENT
+# =============================================================================
+
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
 # IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS files
-.DS_Store
-Thumbs.db
+# =============================================================================
+# LOGS AND TEMPORARY FILES
+# =============================================================================
 
 # Logs
 *.log
+logs/
+*.log.*
 
-# Automation audit files
-homeassistant/entity_inventory/automation_audit_*
-homeassistant/entity_inventory/clean_automations.json
+# Temporary files
+*.tmp
+*.temp
+*_temp_*
+temp_*
+test_*
 
-# Home Assistant sensitive files
+# =============================================================================
+# TERRAFORM
+# =============================================================================
+
+# Terraform files
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+
+# =============================================================================
+# HOME ASSISTANT
+# =============================================================================
+
+# Sensitive configuration files
 homeassistant/ha_config.env
 homeassistant/.env
 homeassistant/*.env
-homeassistant/backup/
-homeassistant/entity_inventory/entity_inventory.json
-homeassistant/entity_inventory/entity_inventory.md
-homeassistant/entity_inventory/automation_audit_*
-homeassistant/entity_inventory/clean_automations.json
 
-# Temporary files
-homeassistant/*.tmp
-homeassistant/*.temp
-homeassistant/test_*
-homeassistant/temp_*
+# Generated and inventory files
+homeassistant/entity_inventory/
+homeassistant/backup/
+
+# Automation audit files
+homeassistant/automation_audit_*
+homeassistant/clean_automations.json
+
+# =============================================================================
+# PROJECT SPECIFIC
+# =============================================================================
+
+# Ansible
+*.retry
+
+# Backup directories
+backup/
