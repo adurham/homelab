@@ -17,6 +17,9 @@
         entity_id: counter.water_heater_pump_daily_cycles
     - service: system_log.write
       data:
-        message: 'Water heater pump started - Daily cycles: {{ states("counter.water_heater_pump_daily_cycles") }}, Runtime: {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h'
+        message: >
+          Water heater pump started - Daily cycles:
+          {{ states("counter.water_heater_pump_daily_cycles") }},
+          Runtime: {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h
         level: info
   mode: single

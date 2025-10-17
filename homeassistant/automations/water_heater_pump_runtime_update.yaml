@@ -15,6 +15,8 @@
         value: "{{ (states('input_number.water_heater_pump_daily_runtime_hours') | float + 0.25) | round(2) }}"
     - service: system_log.write
       data:
-        message: 'Water heater pump stopped - Daily runtime: {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h'
+        message: >
+          Water heater pump stopped - Daily runtime:
+          {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h
         level: info
   mode: single

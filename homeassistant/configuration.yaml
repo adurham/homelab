@@ -49,12 +49,13 @@ timer:
     icon: mdi:timer
 
 influxdb:
-  host: a0d7b954-influxdb
+  host: homeassistant.local
   port: 8086
   database: homeassistant
   username: homeassistant
-  password: "homeassistant"
-  default_measurement: "state"
+  password: homeassistant
+  max_retries: 3
+  default_measurement: state
   include:
     domains:
       - sensor

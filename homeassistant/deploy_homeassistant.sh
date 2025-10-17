@@ -50,8 +50,25 @@ check_config_changes() {
         # Get hash of remote configuration.yaml
         remote_hash=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "sha256sum /config/configuration.yaml 2>/dev/null | awk '{print \$1}'" || echo "")
         
-        if [ -n "$remote_hash" ] && [ "$local_hash" != "$remote_hash" ]; then
-            error "configuration.yaml has been modified externally. Aborting deployment to prevent overwriting changes."
+        # Get hash of git HEAD version
+        git_head_hash=$(git ls-tree HEAD configuration.yaml 2>/dev/null | awk '{print $3}' || echo "")
+        if [ -n "$git_head_hash" ]; then
+            git_head_sha256=$(git show "$git_head_hash" 2>/dev/null | sha256sum | awk '{print $1}' || echo "")
+        else
+            git_head_sha256=""
+        fi
+        
+        # Check if local file matches git HEAD (no uncommitted changes)
+        if [ "$local_hash" = "$git_head_sha256" ]; then
+            # No local changes - safe to check for external modifications
+            if [ -n "$remote_hash" ] && [ "$remote_hash" != "$git_head_sha256" ]; then
+                error "configuration.yaml has been modified externally on the server. Aborting deployment to prevent overwriting changes."
+            fi
+        else
+            # Local file has uncommitted changes - just warn but allow deployment
+            if [ -n "$remote_hash" ] && [ "$remote_hash" != "$local_hash" ] && [ "$remote_hash" != "$git_head_sha256" ]; then
+                warn "Remote configuration.yaml differs from both local and git HEAD. Proceeding with deployment of local version."
+            fi
         fi
         
         log "configuration.yaml is safe to deploy"
@@ -107,7 +124,7 @@ create_backup() {
     log "Managing backup rotation..."
     ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "
         # Get list of backups, sorted by date (newest first)
-        backups=\$(ha backup list --json | jq -r '.data.backups[] | .slug' | sort -r)
+        backups=\$(ha backups list --raw-json | jq -r '.data.backups[] | .slug' | sort -r)
         backup_count=\$(echo \"\$backups\" | wc -l)
         
         # Remove old backups if we exceed MAX_BACKUPS
@@ -277,7 +294,7 @@ restore_from_backup() {
     log "Restoring from HA CLI backup..."
     
     # Get the most recent backup
-    latest_backup=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha backup list --json | jq -r '.data.backups[0].slug'")
+    latest_backup=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha backups list --raw-json | jq -r '.data.backups[0].slug'")
     
     if [ -n "$latest_backup" ] && [ "$latest_backup" != "null" ]; then
         log "Restoring from backup: $latest_backup"

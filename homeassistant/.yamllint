@@ -1,28 +1,31 @@
 extends: default
 
+ignore: |
+  venv/
+
 rules:
   # Home Assistant specific rules
   line-length:
     max: 120
     level: warning
-  
+
   # Allow comments at end of lines
   comments:
     min-spaces-from-content: 1
-  
+
   # Allow trailing spaces in YAML (common in HA configs)
   trailing-spaces:
     level: warning
-  
+
   # Allow multiple documents
   document-start:
     present: false
-  
+
   # Allow flow style for simple values
   braces:
     min-spaces-inside: 0
     max-spaces-inside: 1
-  
+
   brackets:
     min-spaces-inside: 0
     max-spaces-inside: 1
