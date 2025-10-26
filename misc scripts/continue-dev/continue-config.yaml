@@ -1,0 +1,180 @@
+name: Local + Cloud AI Hybrid
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Qwen3 Coder 30B [LOCAL]
+    provider: openai
+    model: qwen/qwen3-coder-30b
+    apiBase: http://localhost:1234/v1
+    roles:
+      - chat
+      - edit
+      - apply
+      - autocomplete
+  
+  - name: Qwen2.5 Coder 32B [LOCAL]
+    provider: openai
+    model: qwen/qwen2.5-coder-32b
+    apiBase: http://localhost:1234/v1
+    roles:
+      - chat
+      - edit
+      - apply
+  
+  - name: GPT-OSS 20B [LOCAL]
+    provider: openai
+    model: openai/gpt-oss-20b
+    apiBase: http://localhost:1234/v1
+    roles:
+      - chat
+      - edit
+  
+  - name: DeepSeek Coder 33B 4bit [LOCAL]
+    provider: openai
+    model: mlx-community/deepseek-coder-33b-instruct-hf-4bit-mlx
+    apiBase: http://localhost:1234/v1
+    roles:
+      - chat
+      - edit
+  
+  - name: Claude 3.5 Sonnet [CLOUD]
+    provider: anthropic
+    model: claude-3-5-sonnet-20241022
+    apiKey: ${ANTHROPIC_API_KEY}
+    roles:
+      - chat
+      - edit
+      - apply
+  
+  - name: GPT-4o [CLOUD]
+    provider: openai
+    model: gpt-4o
+    apiKey: ${OPENAI_API_KEY}
+    roles:
+      - chat
+      - edit
+      - apply
+  
+  - name: Voyage Reranker
+    provider: voyage
+    apiKey: ${VOYAGE_API_KEY}
+    model: rerank-2
+    roles:
+      - rerank
+
+context:
+  - provider: file
+  - provider: code
+  - provider: diff
+  - provider: currentFile
+  - provider: terminal
+  - provider: open
+  - provider: tree
+  - provider: problems
+  - provider: debugger
+    params:
+      stackDepth: 3
+  - provider: repo-map
+    params:
+      includeSignatures: false # default true
+  - provider: os
+
+rules:
+  - Use local models for 90% of tasks to optimize cost
+  - Only escalate to cloud models for complex architectural decisions
+  - Provide clear, actionable code suggestions
+  - Follow existing code patterns and conventions
+  - When analyzing a codebase, review the entire repository structure, not just individual directories
+  - Check for README files, project structure, and main configuration files to understand the full scope
+  - Don't generalize from a single directory - look at the whole project context
+
+prompts:
+  - name: cursor-agent
+    description: Smart autonomous agent with intelligent model selection
+    prompt: |
+      You are an autonomous coding agent with intelligent model selection. Before proceeding with any task, I'll analyze the complexity and recommend the optimal model:
+      
+      **MODEL RECOMMENDATIONS:**
+      - **🧠 Local Models (Free)**: For 90% of coding tasks
+      - **☁️ Cloud Models (Paid)**: Only for complex architectural decisions
+      
+      **SMART WORKFLOW:**
+      1. I analyze your task complexity and type
+      2. I recommend the optimal model for this specific task
+      3. You switch to the recommended model (one click)
+      4. I proceed with the task using the model's strengths
+      
+      **CAPABILITIES:**
+      - Analyze codebases and understand project structure
+      - Generate complete functions, classes, and modules
+      - Refactor code across multiple files
+      - Debug complex issues systematically
+      - Write comprehensive test suites
+      - Execute terminal commands and build tools
+      - Update documentation and create guides
+      
+      I'll provide context-aware solutions that fit your project's architecture and use existing patterns. Ready to analyze your task and recommend the best model!
+  
+  - name: cloud-architect
+    description: Complex problems requiring cloud AI (Claude/GPT-4)
+    prompt: |
+      I recommend **Claude 3.5 Sonnet** or **GPT-4o** for complex architectural decisions. Please switch to Claude 3.5 Sonnet or GPT-4o for this task. I will help you with:
+      
+      - Complex multi-file architecture redesigns
+      - Novel algorithms and advanced patterns
+      - Security audits requiring latest threat knowledge
+      - System design for scalability and performance
+      - Integration patterns across complex systems
+      - Performance-critical code optimization
+      
+      When local models can't fully solve the problem, cloud AI provides the extra intelligence needed for sophisticated solutions.
+      
+      What complex architectural challenge are you facing?
+  
+  - name: analyze-codebase
+    description: Analyze codebase components against the project's architecture (use with /init)
+    prompt: |
+      I help analyze specific parts of this codebase in the context of the project's established architecture.
+      
+      **IMPORTANT:** This works hand-in-hand with the `/init` command which creates `.continue/rules/CONTINUE.md` with the project's architecture and guidelines.
+      
+      **BEST WORKFLOW:**
+      1. First run `/init` to generate the CONTINUE.md architecture document
+      2. Then use `analyze-codebase` to analyze specific components against that architecture
+      
+      **HOW I WORK:**
+      - I read the `.continue/rules/CONTINUE.md` file to understand the project's architecture
+      - I examine the files or components you're asking about
+      - I explain how they fit into the overall architecture
+      - I check for alignment with coding standards and patterns
+      - I suggest improvements to better align with the project's standards
+      
+      **WHAT TO TELL ME:**
+      - Which files or components should I analyze?
+      - Or highlight/select the code you want me to examine
+      
+      What would you like me to analyze? (Make sure you've run `/init` first to generate the architecture document!)
+
+  - name: find-docs
+    description: Automatically analyze the repo and ingest relevant docs
+    prompt: |
+      You are an autonomous research agent. Your goal is to find, ingest, and save the documentation for the technologies used in this repository.
+
+      **WORKFLOW:**
+      1.  **Analyze Stack:** Use the `@tree` provider and built-in file exploration tools to examine the repository's file structure. Look for key files like `package.json`, `requirements.txt`, `*.tf`, `docker-compose.yml`, etc., to identify the main 3-5 frameworks, libraries, and services used.
+      2.  **Report Plan:** List the technologies you've identified.
+      3.  **Find Docs:** For each technology, use the **Brave Search** tool to find its *official* documentation homepage.
+      4.  **Ingest Docs:** Use the **Context7** (preferred) or **fetch** tool to ingest the content from the URLs you found.
+      5.  **Save to Memory:** For each technology, use the **memory** tool to save the ingested content (or at least the URL) as a new note or fact.
+      6.  **Confirm:** Report back with a list of the documentation you successfully ingested and saved.
+
+      Begin your analysis. What is the tech stack for this project?
+
+mcpServers:
+  - name: MCP_DOCKER
+    command: docker
+    args:
+      - mcp
+      - gateway
+      - run
