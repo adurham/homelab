@@ -701,14 +701,41 @@ class PerformanceTest:
         def calculate_stats(results):
             completed = [r for r in results if r["status"] == "Completed"]
             if not completed:
-                return {"count": 0, "avg_duration": 0, "avg_throughput": 0}
+                return {
+                    "count": 0,
+                    "avg_duration": 0,
+                    "avg_throughput": 0,
+                    "min_duration": 0,
+                    "max_duration": 0,
+                    "stddev_duration": 0,
+                    "stddev_throughput": 0
+                }
+
+            durations = [r["duration"] for r in completed]
+            throughputs = [r["throughput_mbps"] for r in completed]
+
+            avg_duration = sum(durations) / len(durations)
+            avg_throughput = sum(throughputs) / len(throughputs)
+
+            # Calculate standard deviation
+            if len(durations) > 1:
+                variance_duration = sum((x - avg_duration) ** 2 for x in durations) / len(durations)
+                stddev_duration = variance_duration ** 0.5
+
+                variance_throughput = sum((x - avg_throughput) ** 2 for x in throughputs) / len(throughputs)
+                stddev_throughput = variance_throughput ** 0.5
+            else:
+                stddev_duration = 0
+                stddev_throughput = 0
 
             return {
                 "count": len(completed),
-                "avg_duration": sum(r["duration"] for r in completed) / len(completed),
-                "avg_throughput": sum(r["throughput_mbps"] for r in completed) / len(completed),
-                "min_duration": min(r["duration"] for r in completed),
-                "max_duration": max(r["duration"] for r in completed)
+                "avg_duration": avg_duration,
+                "avg_throughput": avg_throughput,
+                "min_duration": min(durations),
+                "max_duration": max(durations),
+                "stddev_duration": stddev_duration,
+                "stddev_throughput": stddev_throughput
             }
 
         legacy_stats = calculate_stats(legacy_results)
@@ -717,29 +744,48 @@ class PerformanceTest:
         print(f"\nLegacy (Port 17472):")
         print(f"  Completed: {legacy_stats['count']}/{len(legacy_results)}")
         if legacy_stats['count'] > 0:
-            print(f"  Avg Duration: {legacy_stats['avg_duration']:.2f}s")
-            print(f"  Min Duration: {legacy_stats['min_duration']:.2f}s")
-            print(f"  Max Duration: {legacy_stats['max_duration']:.2f}s")
-            print(f"  Avg Throughput: {legacy_stats['avg_throughput']:.2f} Mbps")
+            print(f"  Duration:")
+            print(f"    Average: {legacy_stats['avg_duration']:.2f}s")
+            print(f"    Min: {legacy_stats['min_duration']:.2f}s")
+            print(f"    Max: {legacy_stats['max_duration']:.2f}s")
+            print(f"    Std Dev: {legacy_stats['stddev_duration']:.2f}s")
+            print(f"  Throughput:")
+            print(f"    Average: {legacy_stats['avg_throughput']:.2f} Mbps")
+            print(f"    Std Dev: {legacy_stats['stddev_throughput']:.2f} Mbps")
 
         print(f"\nCDN (Port 443):")
         print(f"  Completed: {cdn_stats['count']}/{len(cdn_results)}")
         if cdn_stats['count'] > 0:
-            print(f"  Avg Duration: {cdn_stats['avg_duration']:.2f}s")
-            print(f"  Min Duration: {cdn_stats['min_duration']:.2f}s")
-            print(f"  Max Duration: {cdn_stats['max_duration']:.2f}s")
-            print(f"  Avg Throughput: {cdn_stats['avg_throughput']:.2f} Mbps")
+            print(f"  Duration:")
+            print(f"    Average: {cdn_stats['avg_duration']:.2f}s")
+            print(f"    Min: {cdn_stats['min_duration']:.2f}s")
+            print(f"    Max: {cdn_stats['max_duration']:.2f}s")
+            print(f"    Std Dev: {cdn_stats['stddev_duration']:.2f}s")
+            print(f"  Throughput:")
+            print(f"    Average: {cdn_stats['avg_throughput']:.2f} Mbps")
+            print(f"    Std Dev: {cdn_stats['stddev_throughput']:.2f} Mbps")
 
-        # Calculate improvement
+        # Calculate comparison
         if legacy_stats['count'] > 0 and cdn_stats['count'] > 0:
-            duration_improvement = ((legacy_stats['avg_duration'] - cdn_stats['avg_duration']) /
-                                   legacy_stats['avg_duration'] * 100)
-            throughput_improvement = ((cdn_stats['avg_throughput'] - legacy_stats['avg_throughput']) /
-                                     legacy_stats['avg_throughput'] * 100)
+            duration_diff_pct = ((legacy_stats['avg_duration'] - cdn_stats['avg_duration']) /
+                                legacy_stats['avg_duration'] * 100)
+            throughput_diff_pct = ((cdn_stats['avg_throughput'] - legacy_stats['avg_throughput']) /
+                                  legacy_stats['avg_throughput'] * 100)
 
-            print(f"\nComparison:")
-            print(f"  Duration improvement: {duration_improvement:+.1f}%")
-            print(f"  Throughput improvement: {throughput_improvement:+.1f}%")
+            print(f"\nCDN vs Legacy Comparison:")
+            if duration_diff_pct > 0:
+                print(f"  Duration: CDN is {duration_diff_pct:.1f}% faster")
+            elif duration_diff_pct < 0:
+                print(f"  Duration: CDN is {abs(duration_diff_pct):.1f}% slower")
+            else:
+                print(f"  Duration: Same performance")
+
+            if throughput_diff_pct > 0:
+                print(f"  Throughput: CDN is {throughput_diff_pct:.1f}% higher")
+            elif throughput_diff_pct < 0:
+                print(f"  Throughput: CDN is {abs(throughput_diff_pct):.1f}% lower")
+            else:
+                print(f"  Throughput: Same performance")
 
         # Save to file
         output_file = f"tanium_perf_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
