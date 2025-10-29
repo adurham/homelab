@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 from __future__ import division
 from __future__ import print_function
 import sys
@@ -113,8 +113,15 @@ def command_line_parser():
         metavar="Seconds"
     )
     mon_parser.add_argument(
-        "-omit-completed",
-        help="Omit displaying already completed requests.",
+        "-forever",
+        help="Keep monitoring even when there are no more URLs to report",
+        required=False,
+        default=False,
+        action="store_true"
+    )
+    mon_parser.add_argument(
+        "-include-completed",
+        help="Display already completed requests.",
         required=False,
         default=False,
         action="store_true"
@@ -166,7 +173,14 @@ class PrettyPrintET(ET.ElementTree):
 # Setup Tanium Server HTTPs request tools
 import ssl
 # SSL context for urlopen -> TS queries
-ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+if PY2: ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+elif PY3:
+    ssl_ctx = ssl.SSLContext( ssl.PROTOCOL_TLS_CLIENT )
+    ssl_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ssl_ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+else:
+    msg = "Don't know how to run on Python v{0}.{1}."
+    raise NotImplementedError(msg.format(sys.version_info))
 ssl_ctx.verify_flags = ssl.CERT_NONE
 ssl_ctx.check_hostname = False
 
@@ -190,24 +204,25 @@ def tc_api_request(xml_et, verbose=False):
 
     return ret
 
-def tc_path(opts):
+def get_tc_dir():
     """
     This script must be placed in the Tanium Client installation directory.
     ... because I'm lazy to go hunt in the Windows registry.
     """
     tc_dir = os.path.dirname(os.path.realpath(__file__))
-    # Test for the existence of a TaniumClient or TaniumClient.exe file
-    if os.path.isfile("TaniumClient"):
-        tc_file = os.path.join(tc_dir, "TaniumClient")
-    elif os.path.isfile("TaniumClient.exe"):
-        tc_file = os.path.join(tc_dir, "TaniumClient.exe")
-    else:
-        msg = "You must put this script in the Tanium Client directory"
+    # Check for expected files and directories
+    if not os.path.isfile(os.path.join(tc_dir, "soap_session")):
+        msg  = "You must put this script in the Tanium Client directory"
+        msg += " where the 'soap_session' file is located"
+        raise ValueError(msg)
+    if not os.path.isdir(os.path.join(tc_dir, "Downloads")):
+        msg  = "You must put this script in the Tanium Client directory"
+        msg += " where the 'Download' directory is located"
         raise ValueError(msg)
     return tc_dir
 
 def soap_session(opts):
-    soap_session_path = os.path.join(opts.tc_path, "soap_session")
+    soap_session_path = os.path.join(opts.tc_dir, "soap_session")
     if not os.path.isfile(soap_session_path): return None
     with open(soap_session_path, "r") as f:
         return f.read().strip()
@@ -275,21 +290,16 @@ def validate_command_line(opts):
     Make sure the target directory is indeed a directory and that our running
     process has the same effective user ID as the owner of the target.
     """
-    opts.tc_path = tc_path(opts)
+    opts.tc_dir = get_tc_dir()
 
-    if not opts.URLs:
-        opts.URLs = [""]
-    else:
-        # Make all URLs have an actual path
-        for url in opts.URLs:
-            f_name = urlparse(url).path.split("/")[-1]
-            if not f_name or f_name.isspace():
-                msg = "URLs must have a path and not just a server name: {}"
-                raise ValueError(msg.format(url))
+    if opts.command is None:
+        raise ValueError("Command ERROR: Please use the -help option")
+
+    if "URLs" not in opts or not opts.URLs: opts.URLs = [""]
 
     # Tracking already completed URL requests
-    try: opts.omit_completed
-    except AttributeError: opts.omit_completed = False
+    try: opts.include_completed
+    except AttributeError: opts.include_completed = False
     finally: opts.seen_completed = {}
 
 def report_result(reply):
@@ -304,11 +314,12 @@ def report_result(reply):
         try: status = dld.find(".//status").text
         except AttributeError: status = "N/A"
 
-        # Don't report on already Completed requests if opts.omit_completed
-        if status == "Completed":
-            if url in opts.seen_completed and opts.omit_completed is True:
+        # Skip already Completed requests if opts.include_completed is False
+        if status in ("Completed", "TimedOut", "NotFound"):
+            if url in opts.seen_completed and opts.include_completed is False:
+                # Skip reporting if it was already seen as completed
                 continue
-            # Just note that this has URL has completed now
+            # Note that this has URL has completed now
             opts.seen_completed[url] = True
 
         # Just separate pretty
@@ -322,7 +333,8 @@ def report_result(reply):
         print(" Status: {0}".format(status))
 
         # Check whether this one is completed
-        if "Completed" != status: all_completed = False
+        if status not in ("Completed", "TimedOut", "NotFound"):
+            all_completed = False
 
     return all_completed
 
@@ -338,45 +350,62 @@ def download_command(opts):
         # For -force downloads remove the target file
         if opts.force:
             f_name = dld_et.find("./name").text
-            try: os.unlink(os.path.join(opts.tc_path, "Downloads", f_name))
+            try: os.unlink(os.path.join(opts.tc_dir, "Downloads", f_name))
             except OSError as e: pass
 
-    rep = tc_api_request(req, verbose=opts.verbose)
-    report_result(rep)
-
-    # And keep monitoring
-    if opts.interval > 0: monitor_command(opts)
+    try:
+        rep = tc_api_request(req, verbose=opts.verbose)
+        report_result(rep)
+        # And keep monitoring
+        if opts.interval > 0: monitor_command(opts)
+    except (ConnectionError, URLError) as e:
+        print("Request failed: {}".format(e))
 
 def monitor_command(opts):
     while True:
         try:
-            print("\n[{0}] Monitoring".format(datetime.now().isoformat()))
             req = monitor_xml(opts)
             rep = tc_api_request(req, verbose=opts.verbose)
-            if report_result(rep) is True: break
+            print("\n[{0}] Monitoring".format(datetime.now().isoformat()))
+            all_done = report_result(rep) is True
+            if all_done and ("forever" not in opts or opts.forever is False):
+                break
             if opts.interval > 0: time.sleep(opts.interval)
             else: break
+        except (ConnectionError, URLError) as e:
+            print("\n[{0}] Monitoring failed: {1}".format(
+                datetime.now().isoformat(), e
+            ))
+            time.sleep(1)
         except KeyboardInterrupt:
             print("\n\nExiting")
             break
 
 def cancel_command(opts):
     req = cancel_xml(opts)
-    rep = tc_api_request(req, verbose=opts.verbose)
-    report_result(rep)
-
-    # And keep monitoring
-    if opts.interval > 0: monitor_command(opts)
+    try:
+        rep = tc_api_request(req, verbose=opts.verbose)
+        report_result(rep)
+        # And keep monitoring
+        if opts.interval > 0: monitor_command(opts)
+    except (ConnectionError, URLError) as e:
+        print("Request failed: {}".format(e))
 
 if __name__ == "__main__":
     opts_parser = command_line_parser()
     # Parse and validate
     opts = opts_parser.parse_args()
-    validate_command_line(opts)
-    print("Opts: {0}".format(opts))
+    try:
+        validate_command_line(opts)
+        print("Opts: {0}".format(opts))
+    except ValueError as e:
+        print("{}\n".format(e))
+        opts_parser.print_help()
+        sys.exit(2)
 
     # Run them commands
     if opts.command == "download": download_command(opts)
     elif opts.command == "monitor": monitor_command(opts)
     elif opts.command == "cancel": cancel_command(opts)
     print("")
+
