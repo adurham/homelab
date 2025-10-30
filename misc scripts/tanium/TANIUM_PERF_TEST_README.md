@@ -4,9 +4,24 @@ Python script to test and compare Tanium Client download performance between:
 - **Legacy mode**: Downloads via port 17472
 - **CDN mode**: Downloads via port 443
 
+## Part of a 2-Step Workflow
+
+This script is **Step 1** of the performance analysis workflow:
+
+1. **Generate Test Data** (this script): `tanium_download_perf_test.py`
+   - Runs performance tests
+   - Captures network traffic (optional with `--capture-traffic`)
+   - Creates directory with PCAPs: `tanium_pcaps_YYYYMMDD_HHMMSS/`
+
+2. **Analyze Results**: `analyze_tanium_pcaps.py`
+   - Analyzes captured packets
+   - Identifies throttling, latency, and performance issues
+   - See: `ANALYZE_TANIUM_PCAPS_GUIDE.md` for details
+
 ## Features
 
 - Runs configurable number of iterations (default: 5) for each mode
+- **Captures network packets** for detailed analysis (with `--capture-traffic`)
 - Clears Downloads directory between each test to avoid cache hits
 - Automatically starts/stops Tanium Client service
 - Toggles CDN configuration between test phases
@@ -20,41 +35,69 @@ Python script to test and compare Tanium Client download performance between:
 - Tanium Client installed
 - Administrative/sudo privileges (for service control)
 - Access to Tanium Client directory
+- **tcpdump** (for packet capture with `--capture-traffic`)
 
 ## Usage
 
+### Basic Usage (Timing Only)
+```bash
+python3 tanium_download_perf_test.py \
+  --tc-dir /opt/Tanium/TaniumClient \
+  --file-url https://your-tanium-server/path/to/test-file.bin \
+  --iterations 5
+```
+
+### Recommended: With Packet Capture (For Deep Analysis)
 ```bash
 python3 tanium_download_perf_test.py \
   --tc-dir /opt/Tanium/TaniumClient \
   --file-url https://your-tanium-server/path/to/test-file.bin \
   --iterations 5 \
-  --verbose
+  --capture-traffic
 ```
+
+This creates a directory `tanium_pcaps_YYYYMMDD_HHMMSS/` with packet captures for analysis.
 
 ### Arguments
 
-- `--tc-dir`: Path to Tanium Client installation directory (required)
+- `--tc-dir`: Path to Tanium Client installation directory (auto-detected if not specified)
 - `--file-url`: URL of the file to download for testing (required)
+- `--file-hash`: SHA-256 hash of file (alternative to --file-url, constructs URL as https://127.0.0.1/cache/<HASH>)
 - `--iterations`: Number of test runs per mode (default: 5)
+- `--capture-traffic`: **Capture network packets for detailed analysis** (recommended)
 - `--verbose`: Show SOAP request/response XML (optional)
 
-### Example
+### Examples
 
+**Linux (with packet capture)**
 ```bash
-# Linux
 sudo python3 tanium_download_perf_test.py \
   --tc-dir /opt/Tanium/TaniumClient \
-  --file-url https://tanium-server.corp.com/downloads/test-100mb.bin
+  --file-url https://tanium-server.corp.com/downloads/test-100mb.bin \
+  --capture-traffic
+```
 
-# macOS
+**macOS (with packet capture)**
+```bash
 sudo python3 tanium_download_perf_test.py \
   --tc-dir /Library/Tanium/TaniumClient \
-  --file-url https://tanium-server.corp.com/downloads/test-100mb.bin
+  --file-url https://tanium-server.corp.com/downloads/test-100mb.bin \
+  --capture-traffic
+```
 
-# Windows (run as Administrator)
+**Windows (run as Administrator, with packet capture)**
+```powershell
 python tanium_download_perf_test.py ^
   --tc-dir "C:\Program Files\Tanium\Tanium Client" ^
-  --file-url https://tanium-server.corp.com/downloads/test-100mb.bin
+  --file-url https://tanium-server.corp.com/downloads/test-100mb.bin ^
+  --capture-traffic
+```
+
+**Using file hash instead of URL**
+```bash
+sudo python3 tanium_download_perf_test.py \
+  --file-hash a1b2c3d4e5f6... \
+  --capture-traffic
 ```
 
 ## How It Works
@@ -163,6 +206,47 @@ Comparison:
 }
 ```
 
+## Output Files
+
+### Without --capture-traffic
+- **Console**: Real-time progress and summary statistics
+- **JSON file**: `tanium_perf_test_YYYYMMDD_HHMMSS.json` with detailed timing data
+
+### With --capture-traffic (Recommended)
+- **Console**: Real-time progress and summary statistics
+- **JSON file**: `tanium_perf_test_YYYYMMDD_HHMMSS.json` with detailed timing data
+- **PCAP directory**: `tanium_pcaps_YYYYMMDD_HHMMSS/` containing:
+  - `legacy_iteration_1.pcap` through `legacy_iteration_N.pcap`
+  - `cdn_iteration_1.pcap` through `cdn_iteration_N.pcap`
+
+## Complete Analysis Workflow
+
+**Step 1: Run this script with packet capture**
+```bash
+sudo python3 tanium_download_perf_test.py \
+  --file-url https://your-server/test-file.bin \
+  --capture-traffic
+```
+
+Output: `tanium_pcaps_20250130_143052/` (directory with PCAPs)
+
+**Step 2: Analyze the packet captures**
+```bash
+python3 analyze_tanium_pcaps.py --pcap-dir tanium_pcaps_20250130_143052/
+```
+
+Output:
+- Console analysis comparing CDN vs Legacy
+- Diagnosis of throttling, latency, and performance issues
+- JSON file with detailed metrics
+
+**Step 3: Review results**
+See `ANALYZE_TANIUM_PCAPS_GUIDE.md` for:
+- Understanding each metric
+- Interpreting results
+- Diagnosing root causes
+- Recommendations for Tanium support
+
 ## Notes
 
 - Script requires sudo/admin privileges to control the Tanium Client service
@@ -170,6 +254,7 @@ Comparison:
 - The script assumes TaniumClient.ini is in the tc-dir (will be created if missing)
 - Each test iteration clears the Downloads directory to avoid cached results
 - Results are calculated only for successfully completed downloads
+- **Packet capture requires tcpdump** and may require additional permissions
 
 ## Troubleshooting
 
@@ -177,3 +262,5 @@ Comparison:
 - **Service control fails**: Check service name matches your platform
 - **SOAP session error**: Ensure Tanium Client is running and soap_session file exists
 - **Download timeout**: Increase timeout in code or choose smaller test file
+- **tcpdump not found**: Install tcpdump package (e.g., `apt install tcpdump`, `brew install tcpdump`)
+- **Packet capture fails**: Ensure sudo/admin rights and tcpdump is in PATH
