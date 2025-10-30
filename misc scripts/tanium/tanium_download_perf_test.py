@@ -508,6 +508,7 @@ class TaniumAPIClient:
                 # Check for timeout
                 elapsed = time.time() - start_time
                 if elapsed > max_wait_time:
+                    print()  # Move to new line after progress updates
                     print(f"  [!] Monitoring timed out after {max_wait_time} seconds")
                     return "Timeout", None, elapsed, 0
 
@@ -538,14 +539,16 @@ class TaniumAPIClient:
                         if status == "Completed" and path and os.path.exists(path):
                             file_size = os.path.getsize(path)
 
+                        print()  # Move to new line after progress updates
                         return status, path, duration, file_size
 
                     # Still in progress
-                    print(f"    Status: {status} (elapsed: {elapsed:.1f}s)")
+                    print(f"\r    Status: {status} (elapsed: {elapsed:.1f}s)", end='', flush=True)
 
                 time.sleep(2)  # Poll every 2 seconds
 
             except (ConnectionError, URLError) as e:
+                print()  # Move to new line after progress updates
                 print(f"  [!] Monitoring failed: {e}")
                 return "Error", None, time.time() - start_time, 0
 
