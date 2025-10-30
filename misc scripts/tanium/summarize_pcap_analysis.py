@@ -60,6 +60,8 @@ def analyze_mode(results):
     server_windows = []
     dup_acks = []
     zero_windows = []
+    server_response_latencies = []
+    inter_packet_delays = []
 
     for result in results:
         m = result.get('metrics', {})
@@ -91,6 +93,13 @@ def analyze_mode(results):
         if 'tcp_flags' in m:
             dup_acks.append(m['tcp_flags'].get('duplicate_acks', 0))
             zero_windows.append(m['tcp_flags'].get('zero_windows', 0))
+
+        # Server behavior metrics (ROOT CAUSE INDICATORS)
+        if 'server_response_latency' in m and m['server_response_latency'].get('samples', 0) > 0:
+            server_response_latencies.append(m['server_response_latency']['avg_ms'])
+
+        if 'inter_packet_delay' in m and m['inter_packet_delay'].get('samples', 0) > 0:
+            inter_packet_delays.append(m['inter_packet_delay']['avg_ms'])
 
     # Print summary
     if throughputs:
@@ -130,6 +139,18 @@ def analyze_mode(results):
     if zero_windows:
         print(f"  Zero Windows: {statistics.mean(zero_windows):.1f} avg per capture")
 
+    if server_response_latencies:
+        print(f"\n⚠️ Server Response Latency (ROOT CAUSE INDICATOR):")
+        print(f"  Average: {statistics.mean(server_response_latencies):.2f} ms")
+        print(f"  Min: {min(server_response_latencies):.2f} ms")
+        print(f"  Max: {max(server_response_latencies):.2f} ms")
+
+    if inter_packet_delays:
+        print(f"\n⚠️ Inter-Packet Delay (ROOT CAUSE INDICATOR):")
+        print(f"  Average: {statistics.mean(inter_packet_delays):.3f} ms")
+        print(f"  Min: {min(inter_packet_delays):.3f} ms")
+        print(f"  Max: {max(inter_packet_delays):.3f} ms")
+
 
 def compare_and_diagnose(legacy_results, cdn_results):
     """Compare legacy vs CDN and generate diagnosis"""
@@ -153,6 +174,17 @@ def compare_and_diagnose(legacy_results, cdn_results):
     cdn_windows = [r['metrics']['window_sizes']['server_advertised_avg_bytes']
                    for r in cdn_results if 'window_sizes' in r['metrics'] and 'server_advertised_avg_bytes' in r['metrics']['window_sizes']]
 
+    # ROOT CAUSE INDICATORS
+    legacy_inter_packet_delays = [r['metrics']['inter_packet_delay']['avg_ms']
+                                   for r in legacy_results if 'inter_packet_delay' in r['metrics'] and r['metrics']['inter_packet_delay'].get('samples', 0) > 0]
+    cdn_inter_packet_delays = [r['metrics']['inter_packet_delay']['avg_ms']
+                                for r in cdn_results if 'inter_packet_delay' in r['metrics'] and r['metrics']['inter_packet_delay'].get('samples', 0) > 0]
+
+    legacy_server_response = [r['metrics']['server_response_latency']['avg_ms']
+                               for r in legacy_results if 'server_response_latency' in r['metrics'] and r['metrics']['server_response_latency'].get('samples', 0) > 0]
+    cdn_server_response = [r['metrics']['server_response_latency']['avg_ms']
+                            for r in cdn_results if 'server_response_latency' in r['metrics'] and r['metrics']['server_response_latency'].get('samples', 0) > 0]
+
     # Print comparison
     print(f"\nPerformance Comparison:")
     if legacy_throughput and cdn_throughput:
@@ -173,73 +205,108 @@ def compare_and_diagnose(legacy_results, cdn_results):
 
     # Diagnosis
     print("\n" + "="*80)
-    print("DIAGNOSIS - Why is CDN slower than expected?")
+    print("ROOT CAUSE DIAGNOSIS")
     print("="*80)
 
     issues = []
 
-    # Issue 1: Check CDN throughput
+    # ROOT CAUSE ANALYSIS: Check Inter-Packet Delays (PRIMARY INDICATOR)
+    if cdn_inter_packet_delays and legacy_inter_packet_delays:
+        cdn_avg_delay = statistics.mean(cdn_inter_packet_delays)
+        legacy_avg_delay = statistics.mean(legacy_inter_packet_delays)
+        ratio = cdn_avg_delay / legacy_avg_delay if legacy_avg_delay > 0 else 0
+
+        print(f"\n🔍 Inter-Packet Delay Analysis:")
+        print(f"  Legacy: {legacy_avg_delay:.3f} ms")
+        print(f"  CDN: {cdn_avg_delay:.3f} ms")
+        print(f"  Ratio: {ratio:.1f}x slower")
+
+        if ratio > 3:  # CDN is 3x slower at sending consecutive packets
+            issues.append({
+                'severity': 'CRITICAL',
+                'issue': '🔴 ROOT CAUSE: CDN Server Slow at Sustained Data Delivery',
+                'details': f'CDN inter-packet delay is {ratio:.1f}x slower than Legacy',
+                'explanation': [
+                    'The CDN server is slow to send consecutive data packets',
+                    'This indicates the server is pausing/throttling between sends',
+                    'NOT a network latency issue - the server itself is slow',
+                    'Small TCP windows are a SYMPTOM of this, not the cause'
+                ],
+                'causes': [
+                    'CDN server rate limiting or throttling configuration',
+                    'CDN server buffer/queue management issues',
+                    'CDN application-level delays (slow disk I/O, CPU)',
+                    'CDN deliberately limiting bandwidth per connection'
+                ],
+                'recommendations': [
+                    'Contact Tanium to investigate CDN server configuration',
+                    'Check if CDN has per-connection rate limits',
+                    'Request CDN server logs/metrics for this time period',
+                    'Workaround: Use multiple parallel connections',
+                    'Verify CDN is not under heavy load'
+                ]
+            })
+
+    # Check Server Response Latency (Initial Response)
+    if cdn_server_response and legacy_server_response:
+        cdn_avg_response = statistics.mean(cdn_server_response)
+        legacy_avg_response = statistics.mean(legacy_server_response)
+        response_ratio = cdn_avg_response / legacy_avg_response if legacy_avg_response > 0 else 0
+
+        print(f"\n🔍 Server Response Latency:")
+        print(f"  Legacy: {legacy_avg_response:.2f} ms")
+        print(f"  CDN: {cdn_avg_response:.2f} ms")
+        print(f"  Ratio: {response_ratio:.1f}x slower" if response_ratio >= 1 else f"  Ratio: {1/response_ratio:.1f}x faster")
+
+        if cdn_avg_response > 10 and response_ratio > 2:
+            issues.append({
+                'severity': 'MEDIUM',
+                'issue': 'CDN Server Slow to Initially Respond',
+                'details': f'CDN takes {response_ratio:.1f}x longer to respond to requests',
+                'explanation': [
+                    'CDN takes longer to respond to initial requests',
+                    'Different from sustained delivery issues'
+                ],
+                'causes': [
+                    'CDN processing overhead',
+                    'Geographic distance to CDN endpoint',
+                    'CDN under load'
+                ]
+            })
+
+    # Check for packet loss (secondary issue)
+    if cdn_retrans:
+        cdn_retrans_avg = statistics.mean(cdn_retrans)
+        if cdn_retrans_avg > 1.0:
+            issues.append({
+                'severity': 'MEDIUM',
+                'issue': 'Elevated Packet Loss',
+                'details': f'Retransmission rate: {cdn_retrans_avg:.3f}% (should be <1%)',
+                'explanation': [
+                    'Some packets being lost/retransmitted',
+                    'This exacerbates the slow server issue'
+                ],
+                'causes': [
+                    'Network path congestion to CDN',
+                    'Firewall/middlebox issues'
+                ],
+                'recommendations': [
+                    'Run MTR to CDN endpoint to identify packet loss location',
+                    'Check firewall logs'
+                ]
+            })
+
+    # Throughput check (outcome, not cause)
     if cdn_throughput:
         cdn_avg = statistics.mean(cdn_throughput)
         if cdn_avg < 100:
             issues.append({
                 'severity': 'HIGH',
-                'issue': 'CDN throughput below 100 Mbps target',
-                'details': f'Average CDN throughput is {cdn_avg:.2f} Mbps'
-            })
-
-    # Issue 2: Check RTT
-    if cdn_rtt:
-        cdn_rtt_avg = statistics.mean(cdn_rtt)
-        if cdn_rtt_avg > 50:
-            issues.append({
-                'severity': 'MEDIUM' if cdn_rtt_avg < 100 else 'HIGH',
-                'issue': 'High CDN latency',
-                'details': f'Average CDN RTT is {cdn_rtt_avg:.2f} ms',
-                'causes': [
-                    'CDN endpoint may be geographically distant',
-                    'Routing inefficiencies to CDN',
-                    'Internet/ISP latency'
-                ]
-            })
-
-    # Issue 3: Check retransmissions
-    if cdn_retrans:
-        cdn_retrans_avg = statistics.mean(cdn_retrans)
-        if cdn_retrans_avg > 1.0:
-            issues.append({
-                'severity': 'HIGH' if cdn_retrans_avg > 3.0 else 'MEDIUM',
-                'issue': 'High packet loss on CDN connection',
-                'details': f'Retransmission rate is {cdn_retrans_avg:.3f}% (should be <1%)',
-                'causes': [
-                    'Network congestion',
-                    'Lossy path to CDN',
-                    'Firewall/middlebox issues'
-                ]
-            })
-
-    # Issue 4: Bandwidth-Delay Product
-    if cdn_rtt and cdn_windows:
-        cdn_rtt_avg = statistics.mean(cdn_rtt) / 1000  # Convert to seconds
-        cdn_window_avg = statistics.mean(cdn_windows)
-        max_throughput_mbps = (cdn_window_avg * 8) / (cdn_rtt_avg * 1_000_000)
-
-        if max_throughput_mbps < 100:
-            issues.append({
-                'severity': 'HIGH',
-                'issue': 'TCP window size limiting throughput (Bandwidth-Delay Product)',
-                'details': f'RTT: {cdn_rtt_avg*1000:.2f} ms, Window: {cdn_window_avg/1024:.2f} KB',
+                'issue': 'Low CDN Throughput (SYMPTOM)',
+                'details': f'Average throughput: {cdn_avg:.2f} Mbps (expected >100 Mbps)',
                 'explanation': [
-                    f'Maximum theoretical throughput = Window / RTT = {max_throughput_mbps:.2f} Mbps',
-                    f'This limits CDN downloads to ~{max_throughput_mbps:.0f} Mbps regardless of available bandwidth',
-                    f'To achieve 100 Mbps with {cdn_rtt_avg*1000:.2f} ms RTT, need window size of {(100 * 1_000_000 * cdn_rtt_avg / 8) / 1024:.0f} KB'
-                ],
-                'recommendations': [
-                    'Enable TCP window scaling on CDN server (may not be configurable)',
-                    'Increase TCP receive buffers on client:',
-                    '  - net.ipv4.tcp_rmem = "4096 87380 16777216"',
-                    '  - net.core.rmem_max = 16777216',
-                    'Consider using multiple parallel connections to work around window limit'
+                    'This is the OUTCOME of the slow server behavior above',
+                    'Fixing the server inter-packet delays will fix this'
                 ]
             })
 
