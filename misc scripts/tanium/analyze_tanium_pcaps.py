@@ -603,6 +603,161 @@ class PCAPAnalyzer:
             "stddev_ms": statistics.stdev(inter_packet_delays) if len(inter_packet_delays) > 1 else 0
         }
 
+    def analyze_burst_pattern(self, burst_threshold_ms=10):
+        """
+        Detect burst patterns in server sending behavior.
+        A burst is defined as a series of packets sent with very short delays,
+        followed by a longer gap. This indicates pacing/throttling.
+        """
+        self._log(f"  [*] Analyzing burst patterns...")
+
+        if not self.server_port:
+            self.metrics["burst_pattern"] = {"error": "Server port not specified"}
+            return
+
+        # Get data packets from server with timestamps
+        output = self._run_tshark(
+            ["frame.time_relative"],
+            display_filter=f"tcp.srcport == {self.server_port} and tcp.len > 0"
+        )
+
+        if not output:
+            self.metrics["burst_pattern"] = {"samples": 0}
+            return
+
+        lines = output.strip().split('\n')[1:]  # Skip header
+
+        packet_times = []
+        for line in lines:
+            if not line:
+                continue
+            try:
+                time = float(line.strip())
+                packet_times.append(time)
+            except ValueError:
+                continue
+
+        if len(packet_times) < 2:
+            self.metrics["burst_pattern"] = {"samples": 0}
+            return
+
+        # Calculate inter-packet delays
+        delays = []
+        for i in range(1, len(packet_times)):
+            delay_ms = (packet_times[i] - packet_times[i-1]) * 1000
+            delays.append(delay_ms)
+
+        # Detect bursts: periods of fast sending followed by gaps
+        bursts = []
+        current_burst = []
+        burst_gaps = []
+
+        for i, delay in enumerate(delays):
+            if delay < burst_threshold_ms:
+                # Fast packet, part of current burst
+                current_burst.append(i)
+            else:
+                # Gap found
+                if len(current_burst) > 0:
+                    bursts.append(len(current_burst) + 1)  # +1 for first packet
+                    burst_gaps.append(delay)
+                    current_burst = []
+
+        # Don't forget last burst
+        if len(current_burst) > 0:
+            bursts.append(len(current_burst) + 1)
+
+        if bursts:
+            self.metrics["burst_pattern"] = {
+                "total_bursts": len(bursts),
+                "avg_burst_size": statistics.mean(bursts),
+                "min_burst_size": min(bursts),
+                "max_burst_size": max(bursts),
+                "avg_gap_ms": statistics.mean(burst_gaps) if burst_gaps else 0,
+                "total_packets": len(packet_times)
+            }
+        else:
+            self.metrics["burst_pattern"] = {
+                "total_bursts": 0,
+                "total_packets": len(packet_times)
+            }
+
+    def analyze_pacing_precision(self):
+        """
+        Analyze if inter-packet delays are too uniform/precise.
+        Algorithmic pacing has very consistent delays.
+        Organic TCP behavior has more natural variation.
+        """
+        self._log(f"  [*] Analyzing pacing precision...")
+
+        if not self.server_port:
+            self.metrics["pacing_precision"] = {"error": "Server port not specified"}
+            return
+
+        # Get data packets from server with timestamps
+        output = self._run_tshark(
+            ["frame.time_relative"],
+            display_filter=f"tcp.srcport == {self.server_port} and tcp.len > 0"
+        )
+
+        if not output:
+            self.metrics["pacing_precision"] = {"samples": 0}
+            return
+
+        lines = output.strip().split('\n')[1:]  # Skip header
+
+        packet_times = []
+        for line in lines:
+            if not line:
+                continue
+            try:
+                time = float(line.strip())
+                packet_times.append(time)
+            except ValueError:
+                continue
+
+        if len(packet_times) < 10:
+            self.metrics["pacing_precision"] = {"samples": 0}
+            return
+
+        # Calculate inter-packet delays
+        delays = []
+        for i in range(1, len(packet_times)):
+            delay_ms = (packet_times[i] - packet_times[i-1]) * 1000
+            delays.append(delay_ms)
+
+        # Filter out obvious bursts (very small delays) and gaps (very large delays)
+        # Focus on the "typical" pacing delays
+        filtered_delays = [d for d in delays if 0.01 < d < 10]
+
+        if not filtered_delays:
+            self.metrics["pacing_precision"] = {"samples": 0}
+            return
+
+        avg_delay = statistics.mean(filtered_delays)
+        stddev = statistics.stdev(filtered_delays) if len(filtered_delays) > 1 else 0
+        coefficient_of_variation = (stddev / avg_delay * 100) if avg_delay > 0 else 0
+
+        # Check for clustering around specific values (sign of algorithmic pacing)
+        delay_buckets = defaultdict(int)
+        bucket_size = 0.1  # ms
+        for delay in filtered_delays:
+            bucket = round(delay / bucket_size) * bucket_size
+            delay_buckets[bucket] += 1
+
+        # Find most common delay values
+        sorted_buckets = sorted(delay_buckets.items(), key=lambda x: x[1], reverse=True)
+        top_3_buckets = sorted_buckets[:3] if len(sorted_buckets) >= 3 else sorted_buckets
+        top_3_percentage = sum(count for _, count in top_3_buckets) / len(filtered_delays) * 100
+
+        self.metrics["pacing_precision"] = {
+            "samples": len(filtered_delays),
+            "avg_delay_ms": avg_delay,
+            "stddev_ms": stddev,
+            "coefficient_of_variation": coefficient_of_variation,
+            "top_3_clustering_pct": top_3_percentage
+        }
+
     @staticmethod
     def _percentile(data, percentile):
         """Calculate percentile of a list"""
@@ -627,11 +782,13 @@ class PCAPAnalyzer:
         self.analyze_connection_time()
         self.analyze_rtt()
         self.analyze_retransmissions()
-        self.analyze_window_sizes()
+        # self.analyze_window_sizes()  # Removed - window size is a symptom, not a cause
         self.analyze_tcp_flags()
         self.analyze_throughput_over_time()
         self.analyze_server_response_latency()
         self.analyze_inter_packet_delay()
+        self.analyze_burst_pattern()
+        self.analyze_pacing_precision()
 
         return self.metrics
 
@@ -674,19 +831,7 @@ class PCAPAnalyzer:
             print(f"  Spurious Retransmissions: {r['spurious_retransmissions']}")
             print(f"  Retransmission Rate: {r['retransmission_rate_pct']:.3f}%")
 
-        if "window_sizes" in self.metrics and "client_advertised_samples" in self.metrics["window_sizes"]:
-            w = self.metrics["window_sizes"]
-            print(f"\n[TCP Window Sizes]")
-            if w.get("server_advertised_samples", 0) > 0:
-                print(f"  Server Window (advertised by server):")
-                print(f"    Average: {w['server_advertised_avg_bytes'] / 1024:.2f} KB")
-                print(f"    Min: {w['server_advertised_min_bytes'] / 1024:.2f} KB")
-                print(f"    Max: {w['server_advertised_max_bytes'] / 1024:.2f} KB")
-            if w.get("client_advertised_samples", 0) > 0:
-                print(f"  Client Window (advertised by client):")
-                print(f"    Average: {w['client_advertised_avg_bytes'] / 1024:.2f} KB")
-                print(f"    Min: {w['client_advertised_min_bytes'] / 1024:.2f} KB")
-                print(f"    Max: {w['client_advertised_max_bytes'] / 1024:.2f} KB")
+        # Window sizes section removed - it's a symptom, not a cause of performance issues
 
         if "tcp_flags" in self.metrics:
             f = self.metrics["tcp_flags"]
@@ -729,6 +874,34 @@ class PCAPAnalyzer:
             print(f"  Max: {i['max_ms']:.3f} ms")
             print(f"  95th percentile: {i['p95_ms']:.3f} ms")
             print(f"  99th percentile: {i['p99_ms']:.3f} ms")
+
+        if "burst_pattern" in self.metrics and self.metrics["burst_pattern"].get("total_bursts", 0) > 0:
+            b = self.metrics["burst_pattern"]
+            print(f"\n[Burst Pattern Analysis] ⚠️ THROTTLING INDICATOR")
+            print(f"  Detecting if server sends in bursts vs continuous stream...")
+            print(f"  Total bursts: {b['total_bursts']}")
+            print(f"  Average burst size: {b['avg_burst_size']:.1f} packets")
+            print(f"  Average gap between bursts: {b['avg_gap_ms']:.2f} ms")
+            if b['total_bursts'] > 100 and b['avg_gap_ms'] > 1:
+                print(f"  🔴 THROTTLING: Server pacing data in bursts - algorithmic rate limiting")
+            elif b['total_bursts'] > 10:
+                print(f"  ⚠️  Moderate burst behavior detected")
+            else:
+                print(f"  ✓ Continuous sending")
+
+        if "pacing_precision" in self.metrics and self.metrics["pacing_precision"].get("samples", 0) > 0:
+            p = self.metrics["pacing_precision"]
+            print(f"\n[Pacing Precision Analysis] ⚠️ THROTTLING INDICATOR")
+            print(f"  Checking if delays are algorithmically precise vs organic...")
+            print(f"  Average delay: {p['avg_delay_ms']:.3f} ms")
+            print(f"  Coefficient of Variation: {p['coefficient_of_variation']:.1f}%")
+            print(f"  Top 3 delay clustering: {p['top_3_clustering_pct']:.1f}%")
+            if p['coefficient_of_variation'] < 20 and p['top_3_clustering_pct'] > 60:
+                print(f"  🔴 THROTTLING: Highly precise/algorithmic pacing detected")
+            elif p['coefficient_of_variation'] < 40:
+                print(f"  ⚠️  Consistent pacing detected")
+            else:
+                print(f"  ✓ Natural TCP variation")
 
 
 def _analyze_single_pcap(pcap_file):
@@ -866,6 +1039,10 @@ class MultiPCAPAnalyzer:
             handshake_times = []
             server_response_latencies = []
             inter_packet_delays = []
+            burst_counts = []
+            burst_gaps = []
+            pacing_covs = []
+            pacing_clusters = []
 
             for result in mode_results:
                 m = result["metrics"]
@@ -887,6 +1064,15 @@ class MultiPCAPAnalyzer:
 
                 if "inter_packet_delay" in m and m["inter_packet_delay"].get("samples", 0) > 0:
                     inter_packet_delays.append(m["inter_packet_delay"]["avg_ms"])
+
+                if "burst_pattern" in m and m["burst_pattern"].get("total_bursts", 0) > 0:
+                    burst_counts.append(m["burst_pattern"]["total_bursts"])
+                    if m["burst_pattern"].get("avg_gap_ms", 0) > 0:
+                        burst_gaps.append(m["burst_pattern"]["avg_gap_ms"])
+
+                if "pacing_precision" in m and m["pacing_precision"].get("samples", 0) > 0:
+                    pacing_covs.append(m["pacing_precision"]["coefficient_of_variation"])
+                    pacing_clusters.append(m["pacing_precision"]["top_3_clustering_pct"])
 
             if throughputs:
                 print(f"  Throughput: {statistics.mean(throughputs):.2f} Mbps "
@@ -912,6 +1098,20 @@ class MultiPCAPAnalyzer:
                 print(f"  Inter-Packet Delay: {statistics.mean(inter_packet_delays):.3f} ms "
                       f"(±{statistics.stdev(inter_packet_delays) if len(inter_packet_delays) > 1 else 0:.3f})")
 
+            if burst_counts:
+                print(f"  Burst Count: {statistics.mean(burst_counts):.0f} bursts "
+                      f"(±{statistics.stdev(burst_counts) if len(burst_counts) > 1 else 0:.0f})")
+                if burst_gaps:
+                    print(f"  Burst Gap: {statistics.mean(burst_gaps):.2f} ms "
+                          f"(±{statistics.stdev(burst_gaps) if len(burst_gaps) > 1 else 0:.2f})")
+
+            if pacing_covs:
+                print(f"  Pacing CoV: {statistics.mean(pacing_covs):.1f}% "
+                      f"(±{statistics.stdev(pacing_covs) if len(pacing_covs) > 1 else 0:.1f})")
+                if pacing_clusters:
+                    print(f"  Pacing Clustering: {statistics.mean(pacing_clusters):.1f}% "
+                          f"(±{statistics.stdev(pacing_clusters) if len(pacing_clusters) > 1 else 0:.1f})")
+
         # Generate diagnosis
         self.generate_diagnosis()
 
@@ -933,14 +1133,19 @@ class MultiPCAPAnalyzer:
         cdn_throughputs = []
         cdn_rtts = []
         cdn_retrans_rates = []
-        cdn_windows = []
         cdn_server_response_latencies = []
         cdn_inter_packet_delays = []
+        cdn_burst_counts = []
+        cdn_burst_gaps = []
+        cdn_pacing_covs = []
+        cdn_pacing_clusters = []
 
         # Collect Legacy metrics for comparison
         legacy_results = self.results.get('legacy', [])
         legacy_server_response_latencies = []
         legacy_inter_packet_delays = []
+        legacy_burst_counts = []
+        legacy_burst_gaps = []
 
         for result in cdn_results:
             m = result["metrics"]
@@ -954,14 +1159,20 @@ class MultiPCAPAnalyzer:
             if "retransmissions" in m:
                 cdn_retrans_rates.append(m["retransmissions"]["retransmission_rate_pct"])
 
-            if "window_sizes" in m and "server_advertised_avg_bytes" in m["window_sizes"]:
-                cdn_windows.append(m["window_sizes"]["server_advertised_avg_bytes"])
-
             if "server_response_latency" in m and m["server_response_latency"].get("samples", 0) > 0:
                 cdn_server_response_latencies.append(m["server_response_latency"]["avg_ms"])
 
             if "inter_packet_delay" in m and m["inter_packet_delay"].get("samples", 0) > 0:
                 cdn_inter_packet_delays.append(m["inter_packet_delay"]["avg_ms"])
+
+            if "burst_pattern" in m and m["burst_pattern"].get("total_bursts", 0) > 0:
+                cdn_burst_counts.append(m["burst_pattern"]["total_bursts"])
+                if m["burst_pattern"].get("avg_gap_ms", 0) > 0:
+                    cdn_burst_gaps.append(m["burst_pattern"]["avg_gap_ms"])
+
+            if "pacing_precision" in m and m["pacing_precision"].get("samples", 0) > 0:
+                cdn_pacing_covs.append(m["pacing_precision"]["coefficient_of_variation"])
+                cdn_pacing_clusters.append(m["pacing_precision"]["top_3_clustering_pct"])
 
         for result in legacy_results:
             m = result["metrics"]
@@ -972,11 +1183,61 @@ class MultiPCAPAnalyzer:
             if "inter_packet_delay" in m and m["inter_packet_delay"].get("samples", 0) > 0:
                 legacy_inter_packet_delays.append(m["inter_packet_delay"]["avg_ms"])
 
+            if "burst_pattern" in m and m["burst_pattern"].get("total_bursts", 0) > 0:
+                legacy_burst_counts.append(m["burst_pattern"]["total_bursts"])
+                if m["burst_pattern"].get("avg_gap_ms", 0) > 0:
+                    legacy_burst_gaps.append(m["burst_pattern"]["avg_gap_ms"])
+
         issues_found = []
 
         # ROOT CAUSE ANALYSIS: Check CDN server behavior
 
-        # 1. Check Inter-Packet Delays (PRIMARY ROOT CAUSE INDICATOR)
+        # 1. Check Burst Pattern (PRIMARY THROTTLING INDICATOR)
+        if cdn_burst_counts and legacy_burst_counts:
+            cdn_avg_bursts = statistics.mean(cdn_burst_counts)
+            legacy_avg_bursts = statistics.mean(legacy_burst_counts)
+            burst_ratio = cdn_avg_bursts / legacy_avg_bursts if legacy_avg_bursts > 0 else 0
+
+            if cdn_avg_bursts > 100 and burst_ratio > 3:
+                issues_found.append({
+                    "issue": "🔴 ROOT CAUSE: Server Burst Pacing/Throttling",
+                    "severity": "CRITICAL",
+                    "details": f"CDN bursts: {cdn_avg_bursts:.0f} vs Legacy: {legacy_avg_bursts:.0f} ({burst_ratio:.1f}x more)",
+                    "explanation": [
+                        "CDN server sends data in many small bursts with gaps between them",
+                        "This is characteristic of algorithmic rate limiting/throttling",
+                        "Legacy server sends continuously without burst behavior",
+                        "NOT a network issue - this is server-side pacing"
+                    ],
+                    "causes": [
+                        "CDN configured with per-connection rate limits",
+                        "Token bucket or leaky bucket rate limiting algorithm",
+                        "CDN deliberately pacing downloads to manage load"
+                    ]
+                })
+
+        # 2. Check Pacing Precision (ALGORITHMIC THROTTLING INDICATOR)
+        if cdn_pacing_covs and cdn_pacing_clusters:
+            cdn_avg_cov = statistics.mean(cdn_pacing_covs)
+            cdn_avg_cluster = statistics.mean(cdn_pacing_clusters)
+
+            if cdn_avg_cov < 20 and cdn_avg_cluster > 60:
+                issues_found.append({
+                    "issue": "🔴 THROTTLING: Algorithmic Pacing Detected",
+                    "severity": "CRITICAL",
+                    "details": f"CoV: {cdn_avg_cov:.1f}%, Clustering: {cdn_avg_cluster:.1f}%",
+                    "explanation": [
+                        "Inter-packet delays are too precise and clustered",
+                        "Natural TCP has more variation in timing",
+                        "This precision indicates programmatic rate limiting"
+                    ],
+                    "causes": [
+                        "CDN using software-based pacing algorithm",
+                        "Likely token bucket or similar rate limiter"
+                    ]
+                })
+
+        # 3. Check Inter-Packet Delays (PRIMARY ROOT CAUSE INDICATOR)
         if cdn_inter_packet_delays and legacy_inter_packet_delays:
             cdn_avg_delay = statistics.mean(cdn_inter_packet_delays)
             legacy_avg_delay = statistics.mean(legacy_inter_packet_delays)
@@ -998,13 +1259,6 @@ class MultiPCAPAnalyzer:
                         "CDN server buffer/queue management issues",
                         "CDN application-level delays (slow disk I/O, CPU)",
                         "CDN deliberately limiting bandwidth per connection"
-                    ],
-                    "recommendations": [
-                        "Contact Tanium to investigate CDN server configuration",
-                        "Check if CDN has per-connection rate limits",
-                        "Request CDN server logs/metrics for this time period",
-                        "Workaround: Use multiple parallel connections",
-                        "Verify CDN is not under heavy load"
                     ]
                 })
 
@@ -1046,10 +1300,6 @@ class MultiPCAPAnalyzer:
                     "causes": [
                         "Network path congestion to CDN",
                         "Firewall/middlebox issues"
-                    ],
-                    "recommendations": [
-                        "Run MTR to CDN endpoint to identify packet loss location",
-                        "Check firewall logs"
                     ]
                 })
 
@@ -1083,11 +1333,6 @@ class MultiPCAPAnalyzer:
                     print(f"  Explanation:")
                     for exp in issue['explanation']:
                         print(f"    - {exp}")
-
-                if 'recommendations' in issue:
-                    print(f"  Recommendations:")
-                    for rec in issue['recommendations']:
-                        print(f"    - {rec}")
 
                 print()  # Blank line between issues
         else:

@@ -339,7 +339,9 @@ class TaniumClientController:
         if self.tcpdump_process is None:
             return False
 
-        print(f"  [+] Stopping packet capture...", flush=True)
+        sys.stdout.write('\r\033[K')  # Clear any status line
+        sys.stdout.flush()
+        print(f"\n  [+] Stopping packet capture...", flush=True)
         try:
             self.tcpdump_process.terminate()
             self.tcpdump_process.wait(timeout=5)
@@ -508,8 +510,9 @@ class TaniumAPIClient:
                 # Check for timeout
                 elapsed = time.time() - start_time
                 if elapsed > max_wait_time:
-                    print()  # Move to new line after progress updates
-                    print(f"  [!] Monitoring timed out after {max_wait_time} seconds")
+                    sys.stdout.write('\r\033[K')  # Clear status line
+                    sys.stdout.flush()
+                    print(f"\n  [!] Monitoring timed out after {max_wait_time} seconds")
                     return "Timeout", None, elapsed, 0
 
                 reply = self.make_request(base)
@@ -539,17 +542,19 @@ class TaniumAPIClient:
                         if status == "Completed" and path and os.path.exists(path):
                             file_size = os.path.getsize(path)
 
-                        print()  # Move to new line after progress updates
+                        sys.stdout.write('\r\033[K')  # Clear status line
+                        sys.stdout.flush()
                         return status, path, duration, file_size
 
-                    # Still in progress
-                    print(f"\r    Status: {status} (elapsed: {elapsed:.1f}s)", end='', flush=True)
+                    # Still in progress - clear line and print status
+                    print(f"\r\033[K    Status: {status} (elapsed: {elapsed:.1f}s)", end='', flush=True)
 
                 time.sleep(2)  # Poll every 2 seconds
 
             except (ConnectionError, URLError) as e:
-                print()  # Move to new line after progress updates
-                print(f"  [!] Monitoring failed: {e}")
+                sys.stdout.write('\r\033[K')  # Clear status line
+                sys.stdout.flush()
+                print(f"\n  [!] Monitoring failed: {e}")
                 return "Error", None, time.time() - start_time, 0
 
 
@@ -590,8 +595,10 @@ class PerformanceTest:
             self.controller.start_tcpdump(pcap_file, "port 443 or port 17472")
 
         # Request download
+        sys.stdout.write('\r\033[K')  # Return to start and clear line
+        sys.stdout.flush()
         identifier_type = "hash" if self.is_hash else "URL"
-        print(f"  [+] Requesting download ({identifier_type}): {self.file_identifier}", flush=True)
+        print(f"\n  [+] Requesting download ({identifier_type}): {self.file_identifier}", flush=True)
         success, file_name = self.api_client.download_file(self.file_identifier, is_hash=self.is_hash)
 
         if not success:
@@ -610,7 +617,9 @@ class PerformanceTest:
             }
 
         # Monitor download
-        print(f"  [+] Monitoring download...", flush=True)
+        sys.stdout.write('\r\033[K')  # Return to start and clear line
+        sys.stdout.flush()
+        print(f"\n  [+] Monitoring download...", flush=True)
         status, path, duration, file_size = self.api_client.monitor_download(self.file_identifier, is_hash=self.is_hash)
 
         # Stop packet capture if enabled
@@ -635,6 +644,8 @@ class PerformanceTest:
         if self.capture_traffic:
             result["pcap_file"] = pcap_file
 
+        sys.stdout.write('\r\033[K')  # Clear any status line
+        sys.stdout.flush()
         print(f"\n  Results:", flush=True)
         print(f"    Status: {status}", flush=True)
         print(f"    Duration: {duration:.2f} seconds", flush=True)
