@@ -37,17 +37,24 @@ from multiprocessing import Pool, cpu_count
 class PCAPAnalyzer:
     """Analyzes PCAP files for TCP performance metrics"""
 
-    def __init__(self, pcap_file, server_port=None):
+    def __init__(self, pcap_file, server_port=None, quiet=False):
         self.pcap_file = pcap_file
         self.server_port = server_port
         self.metrics = {}
+        self.quiet = quiet
 
         # Verify tshark is available
         try:
             subprocess.run(["tshark", "--version"], capture_output=True, check=True)
         except (FileNotFoundError, subprocess.CalledProcessError):
-            print("[!] Error: tshark not found. Please install Wireshark.")
+            if not quiet:
+                print("[!] Error: tshark not found. Please install Wireshark.")
             sys.exit(1)
+
+    def _log(self, message):
+        """Print message unless in quiet mode"""
+        if not self.quiet:
+            print(message)
 
     def _run_tshark(self, fields, display_filter=None):
         """Run tshark with specified fields and filter"""
@@ -69,22 +76,25 @@ class PCAPAnalyzer:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             return result.stdout
         except subprocess.CalledProcessError as e:
-            print(f"[!] tshark error: {e.stderr}")
+            self._log(f"[!] tshark error: {e.stderr}")
             return None
 
     def detect_server_port(self):
         """Auto-detect which port is the server port (17472 for legacy, 443 for CDN)"""
-        print(f"  [*] Auto-detecting server port...")
+        if not self.quiet:
+            self._log(f"  [*] Auto-detecting server port...")
 
         # First, check filename to determine expected mode
         basename = os.path.basename(self.pcap_file).lower()
         expected_port = None
         if 'cdn' in basename:
             expected_port = 443
-            print(f"  [*] Filename indicates CDN mode, using port 443")
+            if not self.quiet:
+                self._log(f"  [*] Filename indicates CDN mode, using port 443")
         elif 'legacy' in basename:
             expected_port = 17472
-            print(f"  [*] Filename indicates Legacy mode, using port 17472")
+            if not self.quiet:
+                self._log(f"  [*] Filename indicates Legacy mode, using port 17472")
 
         if expected_port:
             return expected_port
@@ -117,12 +127,12 @@ class PCAPAnalyzer:
         # Most common port is likely the server
         server_port = max(port_counts, key=port_counts.get)
         port_name = "Legacy" if server_port == "17472" else "CDN"
-        print(f"  [+] Detected server port: {server_port} ({port_name})")
+        self._log(f"  [+] Detected server port: {server_port} ({port_name})")
         return int(server_port)
 
     def analyze_basic_stats(self):
         """Get basic connection statistics"""
-        print(f"  [*] Analyzing basic statistics...")
+        self._log(f"  [*] Analyzing basic statistics...")
 
         # Get packet count and duration
         output = self._run_tshark(
@@ -151,11 +161,11 @@ class PCAPAnalyzer:
                 "avg_throughput_mbps": (total_bytes * 8) / (duration * 1_000_000) if duration > 0 else 0
             }
         except (ValueError, IndexError) as e:
-            print(f"  [!] Error parsing basic stats: {e}")
+            self._log(f"  [!] Error parsing basic stats: {e}")
 
     def analyze_rtt(self):
         """Analyze Round-Trip Time (RTT) from TCP handshake and data transfer"""
-        print(f"  [*] Analyzing RTT...")
+        self._log(f"  [*] Analyzing RTT...")
 
         # Get RTT measurements from tshark's TCP analysis
         output = self._run_tshark(
@@ -197,7 +207,7 @@ class PCAPAnalyzer:
 
     def analyze_retransmissions(self):
         """Analyze packet retransmissions and loss"""
-        print(f"  [*] Analyzing retransmissions...")
+        self._log(f"  [*] Analyzing retransmissions...")
 
         # Count retransmissions
         output = self._run_tshark(
@@ -253,7 +263,7 @@ class PCAPAnalyzer:
 
     def analyze_window_sizes(self):
         """Analyze TCP window sizes"""
-        print(f"  [*] Analyzing TCP window sizes...")
+        self._log(f"  [*] Analyzing TCP window sizes...")
 
         if not self.server_port:
             self.metrics["window_sizes"] = {"error": "Server port not specified"}
@@ -305,7 +315,7 @@ class PCAPAnalyzer:
 
     def analyze_connection_time(self):
         """Analyze TCP connection establishment time"""
-        print(f"  [*] Analyzing connection establishment...")
+        self._log(f"  [*] Analyzing connection establishment...")
 
         # Find SYN and SYN-ACK packets
         output = self._run_tshark(
@@ -351,7 +361,7 @@ class PCAPAnalyzer:
 
     def analyze_throughput_over_time(self, interval_seconds=1):
         """Calculate throughput over time intervals"""
-        print(f"  [*] Analyzing throughput over time (interval: {interval_seconds}s)...")
+        self._log(f"  [*] Analyzing throughput over time (interval: {interval_seconds}s)...")
 
         if not self.server_port:
             self.metrics["throughput_timeline"] = {"error": "Server port not specified"}
@@ -415,7 +425,7 @@ class PCAPAnalyzer:
 
     def analyze_tcp_flags(self):
         """Analyze TCP flags for connection issues"""
-        print(f"  [*] Analyzing TCP flags...")
+        self._log(f"  [*] Analyzing TCP flags...")
 
         # Count resets
         rst_output = self._run_tshark(
@@ -453,6 +463,146 @@ class PCAPAnalyzer:
             "zero_windows": zero_window_count
         }
 
+    def analyze_server_response_latency(self):
+        """Measure how long the SERVER takes to respond to requests (not RTT)"""
+        self._log(f"  [*] Analyzing server response latency...")
+
+        if not self.server_port:
+            self.metrics["server_response_latency"] = {"error": "Server port not specified"}
+            return
+
+        # Get all TCP packets with timestamps, sequence numbers, and ports
+        output = self._run_tshark(
+            ["frame.time_relative", "tcp.srcport", "tcp.dstport", "tcp.len", "tcp.flags.syn", "tcp.flags.ack"]
+        )
+
+        if not output:
+            self.metrics["server_response_latency"] = {"error": "No data"}
+            return
+
+        lines = output.strip().split('\n')[1:]  # Skip header
+
+        # Track request/response pairs
+        client_requests = []  # Time when client sends data to server
+        server_responses = []  # Time when server sends data back
+
+        for line in lines:
+            if not line:
+                continue
+            parts = line.split('|')
+            if len(parts) < 6:
+                continue
+
+            try:
+                time = float(parts[0])
+                src_port = parts[1].strip()
+                dst_port = parts[2].strip()
+                tcp_len = int(parts[3]) if parts[3] else 0
+                syn = parts[4].strip()
+                ack = parts[5].strip()
+
+                # Skip handshake packets
+                if syn == '1':
+                    continue
+
+                # Client sending request to server (dst_port = server_port)
+                if dst_port == str(self.server_port) and tcp_len > 0:
+                    client_requests.append(time)
+
+                # Server sending data to client (src_port = server_port)
+                elif src_port == str(self.server_port) and tcp_len > 0:
+                    server_responses.append(time)
+
+            except (ValueError, IndexError):
+                continue
+
+        # Calculate time between client requests and server responses
+        response_delays = []
+
+        # Sort both lists for efficient matching
+        client_requests.sort()
+        server_responses.sort()
+
+        # Use pointer-based matching instead of nested loops
+        req_idx = 0
+        for resp_time in server_responses:
+            # Move pointer forward to find most recent request before this response
+            while req_idx < len(client_requests) - 1 and client_requests[req_idx + 1] < resp_time:
+                req_idx += 1
+
+            # If we found a request before this response
+            if req_idx < len(client_requests) and client_requests[req_idx] < resp_time:
+                delay = (resp_time - client_requests[req_idx]) * 1000  # Convert to ms
+                if delay < 1000:  # Sanity check - ignore delays > 1 second
+                    response_delays.append(delay)
+
+        if response_delays:
+            self.metrics["server_response_latency"] = {
+                "samples": len(response_delays),
+                "min_ms": min(response_delays),
+                "max_ms": max(response_delays),
+                "avg_ms": statistics.mean(response_delays),
+                "median_ms": statistics.median(response_delays),
+                "p95_ms": self._percentile(response_delays, 95),
+                "p99_ms": self._percentile(response_delays, 99),
+                "stddev_ms": statistics.stdev(response_delays) if len(response_delays) > 1 else 0
+            }
+        else:
+            self.metrics["server_response_latency"] = {"samples": 0}
+
+    def analyze_inter_packet_delay(self):
+        """Measure delays between consecutive packets from the server"""
+        self._log(f"  [*] Analyzing inter-packet delays from server...")
+
+        if not self.server_port:
+            self.metrics["inter_packet_delay"] = {"error": "Server port not specified"}
+            return
+
+        # Get data packets from server with timestamps
+        output = self._run_tshark(
+            ["frame.time_relative", "tcp.len"],
+            display_filter=f"tcp.srcport == {self.server_port} and tcp.len > 0"
+        )
+
+        if not output:
+            self.metrics["inter_packet_delay"] = {"samples": 0}
+            return
+
+        lines = output.strip().split('\n')[1:]  # Skip header
+
+        packet_times = []
+        for line in lines:
+            if not line:
+                continue
+            parts = line.split('|')
+            if len(parts) >= 1:
+                try:
+                    time = float(parts[0])
+                    packet_times.append(time)
+                except ValueError:
+                    continue
+
+        if len(packet_times) < 2:
+            self.metrics["inter_packet_delay"] = {"samples": 0}
+            return
+
+        # Calculate delays between consecutive packets
+        inter_packet_delays = []
+        for i in range(1, len(packet_times)):
+            delay_ms = (packet_times[i] - packet_times[i-1]) * 1000
+            inter_packet_delays.append(delay_ms)
+
+        self.metrics["inter_packet_delay"] = {
+            "samples": len(inter_packet_delays),
+            "min_ms": min(inter_packet_delays),
+            "max_ms": max(inter_packet_delays),
+            "avg_ms": statistics.mean(inter_packet_delays),
+            "median_ms": statistics.median(inter_packet_delays),
+            "p95_ms": self._percentile(inter_packet_delays, 95),
+            "p99_ms": self._percentile(inter_packet_delays, 99),
+            "stddev_ms": statistics.stdev(inter_packet_delays) if len(inter_packet_delays) > 1 else 0
+        }
+
     @staticmethod
     def _percentile(data, percentile):
         """Calculate percentile of a list"""
@@ -467,7 +617,7 @@ class PCAPAnalyzer:
 
     def run_full_analysis(self):
         """Run all analysis methods"""
-        print(f"\n[+] Analyzing: {self.pcap_file}")
+        self._log(f"\n[+] Analyzing: {self.pcap_file}")
 
         # Auto-detect server port if not provided
         if not self.server_port:
@@ -480,6 +630,8 @@ class PCAPAnalyzer:
         self.analyze_window_sizes()
         self.analyze_tcp_flags()
         self.analyze_throughput_over_time()
+        self.analyze_server_response_latency()
+        self.analyze_inter_packet_delay()
 
         return self.metrics
 
@@ -553,11 +705,37 @@ class PCAPAnalyzer:
             print(f"  Max: {t['max_mbps']:.2f} Mbps")
             print(f"  Std Dev: {t['stddev_mbps']:.2f} Mbps")
 
+        if "server_response_latency" in self.metrics and self.metrics["server_response_latency"].get("samples", 0) > 0:
+            s = self.metrics["server_response_latency"]
+            print(f"\n[Server Response Latency] ⚠️ ROOT CAUSE INDICATOR")
+            print(f"  How long does the server take to respond after receiving a request?")
+            print(f"  Samples: {s['samples']}")
+            print(f"  Average: {s['avg_ms']:.2f} ms")
+            print(f"  Median: {s['median_ms']:.2f} ms")
+            print(f"  Min: {s['min_ms']:.2f} ms")
+            print(f"  Max: {s['max_ms']:.2f} ms")
+            print(f"  95th percentile: {s['p95_ms']:.2f} ms")
+            print(f"  99th percentile: {s['p99_ms']:.2f} ms")
+            print(f"  Std Dev: {s['stddev_ms']:.2f} ms")
+
+        if "inter_packet_delay" in self.metrics and self.metrics["inter_packet_delay"].get("samples", 0) > 0:
+            i = self.metrics["inter_packet_delay"]
+            print(f"\n[Inter-Packet Delays from Server] ⚠️ ROOT CAUSE INDICATOR")
+            print(f"  How much time between consecutive data packets from server?")
+            print(f"  Samples: {i['samples']}")
+            print(f"  Average: {i['avg_ms']:.3f} ms")
+            print(f"  Median: {i['median_ms']:.3f} ms")
+            print(f"  Min: {i['min_ms']:.3f} ms")
+            print(f"  Max: {i['max_ms']:.3f} ms")
+            print(f"  95th percentile: {i['p95_ms']:.3f} ms")
+            print(f"  99th percentile: {i['p99_ms']:.3f} ms")
+
 
 def _analyze_single_pcap(pcap_file):
     """Helper function for parallel processing - analyzes a single PCAP file"""
     try:
-        analyzer = PCAPAnalyzer(pcap_file)
+        # Use quiet mode to avoid interleaved output from parallel workers
+        analyzer = PCAPAnalyzer(pcap_file, quiet=True)
         metrics = analyzer.run_full_analysis()
 
         # Determine category
@@ -628,23 +806,24 @@ class MultiPCAPAnalyzer:
             # Parallel processing
             num_workers = min(cpu_count(), len(pcap_files))
             print(f"[+] Using {num_workers} parallel workers")
+            print(f"[+] Analyzing {len(pcap_files)} files in parallel...\n")
 
+            completed = 0
             with Pool(num_workers) as pool:
-                results = pool.map(_analyze_single_pcap, pcap_files)
+                # Use imap_unordered to get results as they complete
+                for result in pool.imap_unordered(_analyze_single_pcap, pcap_files):
+                    completed += 1
+                    if result["success"] and result["category"]:
+                        self.results[result["category"]].append({
+                            "filename": result["filename"],
+                            "metrics": result["metrics"]
+                        })
+                        print(f"  [{completed}/{len(pcap_files)}] ✓ {result['filename']}")
+                    elif not result["success"]:
+                        print(f"  [{completed}/{len(pcap_files)}] ✗ {result['filename']}: {result.get('error', 'Unknown error')}")
+                    sys.stdout.flush()
 
-            # Process results
-            for result in results:
-                if result["success"] and result["category"]:
-                    self.results[result["category"]].append({
-                        "filename": result["filename"],
-                        "metrics": result["metrics"]
-                    })
-                    # Print summary for each
-                    print(f"\n{'='*70}")
-                    print(f"COMPLETED: {result['filename']}")
-                    print(f"{'='*70}")
-                elif not result["success"]:
-                    print(f"\n[!] Error analyzing {result['filename']}: {result.get('error', 'Unknown error')}")
+            print(f"\n[+] All files analyzed!")
         else:
             # Sequential processing
             if not self.parallel:
@@ -685,6 +864,8 @@ class MultiPCAPAnalyzer:
             rtts = []
             retrans_rates = []
             handshake_times = []
+            server_response_latencies = []
+            inter_packet_delays = []
 
             for result in mode_results:
                 m = result["metrics"]
@@ -701,6 +882,12 @@ class MultiPCAPAnalyzer:
                 if "connection" in m and "handshake_time_ms" in m["connection"]:
                     handshake_times.append(m["connection"]["handshake_time_ms"])
 
+                if "server_response_latency" in m and m["server_response_latency"].get("samples", 0) > 0:
+                    server_response_latencies.append(m["server_response_latency"]["avg_ms"])
+
+                if "inter_packet_delay" in m and m["inter_packet_delay"].get("samples", 0) > 0:
+                    inter_packet_delays.append(m["inter_packet_delay"]["avg_ms"])
+
             if throughputs:
                 print(f"  Throughput: {statistics.mean(throughputs):.2f} Mbps "
                       f"(±{statistics.stdev(throughputs) if len(throughputs) > 1 else 0:.2f})")
@@ -716,6 +903,14 @@ class MultiPCAPAnalyzer:
             if handshake_times:
                 print(f"  Handshake Time: {statistics.mean(handshake_times):.2f} ms "
                       f"(±{statistics.stdev(handshake_times) if len(handshake_times) > 1 else 0:.2f})")
+
+            if server_response_latencies:
+                print(f"  Server Response Latency: {statistics.mean(server_response_latencies):.2f} ms "
+                      f"(±{statistics.stdev(server_response_latencies) if len(server_response_latencies) > 1 else 0:.2f})")
+
+            if inter_packet_delays:
+                print(f"  Inter-Packet Delay: {statistics.mean(inter_packet_delays):.3f} ms "
+                      f"(±{statistics.stdev(inter_packet_delays) if len(inter_packet_delays) > 1 else 0:.3f})")
 
         # Generate diagnosis
         self.generate_diagnosis()
@@ -739,6 +934,13 @@ class MultiPCAPAnalyzer:
         cdn_rtts = []
         cdn_retrans_rates = []
         cdn_windows = []
+        cdn_server_response_latencies = []
+        cdn_inter_packet_delays = []
+
+        # Collect Legacy metrics for comparison
+        legacy_results = self.results.get('legacy', [])
+        legacy_server_response_latencies = []
+        legacy_inter_packet_delays = []
 
         for result in cdn_results:
             m = result["metrics"]
@@ -755,106 +957,113 @@ class MultiPCAPAnalyzer:
             if "window_sizes" in m and "server_advertised_avg_bytes" in m["window_sizes"]:
                 cdn_windows.append(m["window_sizes"]["server_advertised_avg_bytes"])
 
+            if "server_response_latency" in m and m["server_response_latency"].get("samples", 0) > 0:
+                cdn_server_response_latencies.append(m["server_response_latency"]["avg_ms"])
+
+            if "inter_packet_delay" in m and m["inter_packet_delay"].get("samples", 0) > 0:
+                cdn_inter_packet_delays.append(m["inter_packet_delay"]["avg_ms"])
+
+        for result in legacy_results:
+            m = result["metrics"]
+
+            if "server_response_latency" in m and m["server_response_latency"].get("samples", 0) > 0:
+                legacy_server_response_latencies.append(m["server_response_latency"]["avg_ms"])
+
+            if "inter_packet_delay" in m and m["inter_packet_delay"].get("samples", 0) > 0:
+                legacy_inter_packet_delays.append(m["inter_packet_delay"]["avg_ms"])
+
         issues_found = []
 
-        # Check throughput
-        if cdn_throughputs:
-            avg_throughput = statistics.mean(cdn_throughputs)
-            if avg_throughput < 100:
-                issues_found.append({
-                    "issue": "Low CDN Throughput",
-                    "severity": "HIGH",
-                    "details": f"Average throughput is {avg_throughput:.2f} Mbps (expected >100 Mbps)",
-                    "investigation": []
-                })
+        # ROOT CAUSE ANALYSIS: Check CDN server behavior
 
-        # Check RTT
-        if cdn_rtts:
-            avg_rtt = statistics.mean(cdn_rtts)
-            if avg_rtt > 50:
+        # 1. Check Inter-Packet Delays (PRIMARY ROOT CAUSE INDICATOR)
+        if cdn_inter_packet_delays and legacy_inter_packet_delays:
+            cdn_avg_delay = statistics.mean(cdn_inter_packet_delays)
+            legacy_avg_delay = statistics.mean(legacy_inter_packet_delays)
+            ratio = cdn_avg_delay / legacy_avg_delay if legacy_avg_delay > 0 else 0
+
+            if ratio > 3:  # CDN is 3x slower at sending consecutive packets
                 issues_found.append({
-                    "issue": "High Round-Trip Time (RTT)",
-                    "severity": "MEDIUM" if avg_rtt < 100 else "HIGH",
-                    "details": f"Average RTT is {avg_rtt:.2f} ms",
+                    "issue": "🔴 ROOT CAUSE: CDN Server Slow at Sustained Data Delivery",
+                    "severity": "CRITICAL",
+                    "details": f"CDN inter-packet delay: {cdn_avg_delay:.3f} ms vs Legacy: {legacy_avg_delay:.3f} ms ({ratio:.1f}x slower)",
+                    "explanation": [
+                        "The CDN server is slow to send consecutive data packets",
+                        "This indicates the server is pausing/throttling between sends",
+                        "NOT a network latency issue - the server itself is slow",
+                        "Small TCP windows are a SYMPTOM of this, not the cause"
+                    ],
                     "causes": [
-                        "CDN endpoint may be geographically distant",
-                        "Network routing inefficiencies",
-                        "Internet connectivity issues"
+                        "CDN server rate limiting or throttling configuration",
+                        "CDN server buffer/queue management issues",
+                        "CDN application-level delays (slow disk I/O, CPU)",
+                        "CDN deliberately limiting bandwidth per connection"
                     ],
                     "recommendations": [
-                        "Verify CDN endpoint location with traceroute",
-                        "Check if CDN is selecting the correct regional endpoint",
-                        "Test during different times of day to rule out congestion"
+                        "Contact Tanium to investigate CDN server configuration",
+                        "Check if CDN has per-connection rate limits",
+                        "Request CDN server logs/metrics for this time period",
+                        "Workaround: Use multiple parallel connections",
+                        "Verify CDN is not under heavy load"
                     ]
                 })
 
-        # Check retransmissions
+        # 2. Check Server Response Latency (INITIAL RESPONSE)
+        if cdn_server_response_latencies and legacy_server_response_latencies:
+            cdn_avg_response = statistics.mean(cdn_server_response_latencies)
+            legacy_avg_response = statistics.mean(legacy_server_response_latencies)
+            response_ratio = cdn_avg_response / legacy_avg_response if legacy_avg_response > 0 else 0
+
+            # Only flag if initial response is also slow (less common based on data)
+            if cdn_avg_response > 10 and response_ratio > 2:
+                issues_found.append({
+                    "issue": "CDN Server Slow to Initially Respond",
+                    "severity": "MEDIUM",
+                    "details": f"CDN response time: {cdn_avg_response:.2f} ms vs Legacy: {legacy_avg_response:.2f} ms",
+                    "explanation": [
+                        "CDN takes longer to respond to initial requests",
+                        "Different from sustained delivery issues"
+                    ],
+                    "causes": [
+                        "CDN processing overhead",
+                        "Geographic distance to CDN endpoint",
+                        "CDN under load"
+                    ]
+                })
+
+        # 3. Check for packet loss (secondary issue)
         if cdn_retrans_rates:
             avg_retrans = statistics.mean(cdn_retrans_rates)
             if avg_retrans > 1.0:
                 issues_found.append({
-                    "issue": "High Packet Loss / Retransmission Rate",
-                    "severity": "HIGH" if avg_retrans > 3.0 else "MEDIUM",
-                    "details": f"Retransmission rate is {avg_retrans:.3f}% (should be <1%)",
-                    "causes": [
-                        "Network congestion",
-                        "Lossy network path",
-                        "Firewall/middlebox interference",
-                        "Wi-Fi issues if client is wireless"
-                    ],
-                    "recommendations": [
-                        "Check for network congestion on local network",
-                        "Test from wired connection if currently on Wi-Fi",
-                        "Run MTR (My Traceroute) to identify where packets are being lost",
-                        "Check firewall logs for dropped packets"
-                    ]
-                })
-
-        # Check window sizes
-        if cdn_windows:
-            avg_window = statistics.mean(cdn_windows)
-            if avg_window < 65535:  # Less than default TCP window
-                issues_found.append({
-                    "issue": "Small TCP Window Size",
+                    "issue": "Elevated Packet Loss",
                     "severity": "MEDIUM",
-                    "details": f"Average TCP window is {avg_window / 1024:.2f} KB",
+                    "details": f"Retransmission rate: {avg_retrans:.3f}% (should be <1%)",
+                    "explanation": [
+                        "Some packets being lost/retransmitted",
+                        "This exacerbates the slow server issue"
+                    ],
                     "causes": [
-                        "Server may not have TCP window scaling enabled",
-                        "Network middlebox stripping TCP options",
-                        "Receiver (client) advertising small window"
+                        "Network path congestion to CDN",
+                        "Firewall/middlebox issues"
                     ],
                     "recommendations": [
-                        "Verify TCP window scaling is enabled on both ends",
-                        "Check sysctl settings: net.ipv4.tcp_window_scaling",
-                        "Increase receive buffer: net.core.rmem_max and net.ipv4.tcp_rmem"
+                        "Run MTR to CDN endpoint to identify packet loss location",
+                        "Check firewall logs"
                     ]
                 })
 
-        # Bandwidth-Delay Product check
-        if cdn_rtts and cdn_windows:
-            avg_rtt_sec = statistics.mean(cdn_rtts) / 1000
-            avg_window_bytes = statistics.mean(cdn_windows)
-            max_theoretical_mbps = (avg_window_bytes * 8) / (avg_rtt_sec * 1_000_000)
-
-            if max_theoretical_mbps < 100:
+        # 4. Throughput check (outcome, not cause)
+        if cdn_throughputs:
+            avg_throughput = statistics.mean(cdn_throughputs)
+            if avg_throughput < 100:
                 issues_found.append({
-                    "issue": "TCP Window Size Limits Throughput (Bandwidth-Delay Product)",
+                    "issue": "Low CDN Throughput (SYMPTOM)",
                     "severity": "HIGH",
-                    "details": (
-                        f"RTT: {avg_rtt_sec * 1000:.2f} ms, "
-                        f"Window: {avg_window_bytes / 1024:.2f} KB\n"
-                        f"      Maximum theoretical throughput: {max_theoretical_mbps:.2f} Mbps"
-                    ),
+                    "details": f"Average throughput: {avg_throughput:.2f} Mbps (expected >100 Mbps)",
                     "explanation": [
-                        "Throughput is limited by: Window Size / RTT",
-                        "To achieve higher throughput with this RTT, a larger window is needed"
-                    ],
-                    "recommendations": [
-                        f"To achieve 100+ Mbps with {avg_rtt_sec * 1000:.2f} ms RTT, "
-                        f"need window size of at least {(100 * 1_000_000 * avg_rtt_sec / 8) / 1024:.0f} KB",
-                        "Enable TCP window scaling on server",
-                        "Increase TCP receive buffers on client",
-                        "Consider using multiple parallel connections"
+                        "This is the OUTCOME of the slow server behavior above",
+                        "Fixing the server inter-packet delays will fix this"
                     ]
                 })
 

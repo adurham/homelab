@@ -297,7 +297,7 @@ class TaniumClientController:
         Returns:
             bool: True if started successfully
         """
-        print(f"  [+] Starting packet capture: {output_file}")
+        print(f"  [+] Starting packet capture: {output_file}", flush=True)
 
         # Build tcpdump command
         if self.platform == "Windows":
@@ -318,14 +318,14 @@ class TaniumClientController:
                 stderr=subprocess.DEVNULL
             )
             time.sleep(1)  # Give it a moment to start
-            print(f"  [+] Packet capture started (PID: {self.tcpdump_process.pid})")
+            print(f"  [+] Packet capture started (PID: {self.tcpdump_process.pid})", flush=True)
             return True
         except FileNotFoundError:
-            print(f"  [!] Warning: tcpdump/tshark not found, skipping packet capture")
+            print(f"  [!] Warning: tcpdump/tshark not found, skipping packet capture", flush=True)
             self.tcpdump_process = None
             return False
         except Exception as e:
-            print(f"  [!] Warning: Failed to start packet capture: {e}")
+            print(f"  [!] Warning: Failed to start packet capture: {e}", flush=True)
             self.tcpdump_process = None
             return False
 
@@ -339,20 +339,20 @@ class TaniumClientController:
         if self.tcpdump_process is None:
             return False
 
-        print(f"  [+] Stopping packet capture...")
+        print(f"  [+] Stopping packet capture...", flush=True)
         try:
             self.tcpdump_process.terminate()
             self.tcpdump_process.wait(timeout=5)
-            print(f"  [+] Packet capture stopped")
+            print(f"  [+] Packet capture stopped", flush=True)
             self.tcpdump_process = None
             return True
         except subprocess.TimeoutExpired:
-            print(f"  [!] Warning: Packet capture did not stop gracefully, killing...")
+            print(f"  [!] Warning: Packet capture did not stop gracefully, killing...", flush=True)
             self.tcpdump_process.kill()
             self.tcpdump_process = None
             return False
         except Exception as e:
-            print(f"  [!] Warning: Failed to stop packet capture: {e}")
+            print(f"  [!] Warning: Failed to stop packet capture: {e}", flush=True)
             self.tcpdump_process = None
             return False
 
@@ -574,9 +574,9 @@ class PerformanceTest:
     def run_single_test(self, iteration, cdn_enabled):
         """Run a single download test"""
         mode = "CDN" if cdn_enabled else "Legacy"
-        print(f"\n{'='*60}")
-        print(f"[{mode}] Iteration {iteration + 1}/{self.iterations}")
-        print(f"{'='*60}")
+        print(f"\n{'='*60}", flush=True)
+        print(f"[{mode}] Iteration {iteration + 1}/{self.iterations}", flush=True)
+        print(f"{'='*60}", flush=True)
 
         # Start packet capture if enabled
         pcap_file = None
@@ -591,7 +591,7 @@ class PerformanceTest:
 
         # Request download
         identifier_type = "hash" if self.is_hash else "URL"
-        print(f"  [+] Requesting download ({identifier_type}): {self.file_identifier}")
+        print(f"  [+] Requesting download ({identifier_type}): {self.file_identifier}", flush=True)
         success, file_name = self.api_client.download_file(self.file_identifier, is_hash=self.is_hash)
 
         if not success:
@@ -610,7 +610,7 @@ class PerformanceTest:
             }
 
         # Monitor download
-        print(f"  [+] Monitoring download...")
+        print(f"  [+] Monitoring download...", flush=True)
         status, path, duration, file_size = self.api_client.monitor_download(self.file_identifier, is_hash=self.is_hash)
 
         # Stop packet capture if enabled
@@ -635,13 +635,13 @@ class PerformanceTest:
         if self.capture_traffic:
             result["pcap_file"] = pcap_file
 
-        print(f"\n  Results:")
-        print(f"    Status: {status}")
-        print(f"    Duration: {duration:.2f} seconds")
-        print(f"    File Size: {file_size / (1024*1024):.2f} MB")
-        print(f"    Throughput: {throughput_mbps:.2f} Mbps")
+        print(f"\n  Results:", flush=True)
+        print(f"    Status: {status}", flush=True)
+        print(f"    Duration: {duration:.2f} seconds", flush=True)
+        print(f"    File Size: {file_size / (1024*1024):.2f} MB", flush=True)
+        print(f"    Throughput: {throughput_mbps:.2f} Mbps", flush=True)
         if self.capture_traffic and pcap_file:
-            print(f"    Packet capture: {pcap_file}")
+            print(f"    Packet capture: {pcap_file}", flush=True)
 
         return result
 
