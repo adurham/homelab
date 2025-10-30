@@ -16,7 +16,7 @@ This script is **Step 1** of the performance analysis workflow:
 2. **Analyze Results**: `analyze_tanium_pcaps.py`
    - Analyzes captured packets
    - Identifies throttling, latency, and performance issues
-   - See: `ANALYZE_TANIUM_PCAPS_GUIDE.md` for details
+   - See: `ANALYZE_TANIUM_PCAPS_README.md` for details
 
 ## Features
 
@@ -241,7 +241,7 @@ Output:
 - JSON file with detailed metrics
 
 **Step 3: Review results**
-See `ANALYZE_TANIUM_PCAPS_GUIDE.md` for:
+See `ANALYZE_TANIUM_PCAPS_README.md` for:
 - Understanding each metric
 - Interpreting results
 - Diagnosing root causes
