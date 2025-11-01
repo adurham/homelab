@@ -12,11 +12,8 @@ models:
       - edit
       - apply
       - autocomplete
-    completionOptions:
-      temperature: 0.1
-      topP: 0.95
-      maxTokens: 4096
-      contextLength: 131072
+    capabilities:
+      - tool_use
 
   - name: "Qwen2.5 Coder 32B [LOCAL]"
     provider: openai
@@ -26,11 +23,8 @@ models:
       - chat
       - edit
       - apply
-    completionOptions:
-      temperature: 0.1
-      topP: 0.95
-      maxTokens: 4096
-      contextLength: 131072
+    capabilities:
+      - tool_use
 
   - name: "GPT-OSS 20B [LOCAL]"
     provider: openai
@@ -39,11 +33,8 @@ models:
     roles:
       - chat
       - edit
-    completionOptions:
-      temperature: 0.2
-      topP: 0.95
-      maxTokens: 2048
-      contextLength: 65536
+    capabilities:
+      - tool_use
 
   - name: "DeepSeek Coder 33B 4bit [LOCAL]"
     provider: openai
@@ -52,11 +43,8 @@ models:
     roles:
       - chat
       - edit
-    completionOptions:
-      temperature: 0.3
-      topP: 0.95
-      maxTokens: 4096
-      contextLength: 131072
+    capabilities:
+      - tool_use
 
   - name: "CodeLlama 13B [LOCAL]"
     provider: openai
@@ -65,9 +53,8 @@ models:
     roles:
       - chat
       - edit
-    completionOptions:
-      temperature: 0.1
-      maxTokens: 2048
+    capabilities:
+      - tool_use
 
   - name: "Claude 3.5 Sonnet [CLOUD]"
     provider: anthropic
@@ -77,9 +64,9 @@ models:
       - chat
       - edit
       - apply
-    completionOptions:
-      temperature: 0.1
-      maxTokens: 4096
+    capabilities:
+      - tool_use
+      - image_input
 
   - name: "GPT-4o [CLOUD]"
     provider: openai
@@ -89,10 +76,9 @@ models:
       - chat
       - edit
       - apply
-    completionOptions:
-      temperature: 0.1
-      topP: 0.95
-      maxTokens: 4096
+    capabilities:
+      - tool_use
+      - image_input
 
   - name: "Minimax-M2 [OLLAMA CLOUD]"
     provider: openai
@@ -103,13 +89,8 @@ models:
       - chat
       - edit
       - apply
-
-  - name: "Voyage Reranker"
-    provider: voyage
-    apiKey: ${VOYAGE_API_KEY}
-    model: rerank-2
-    roles:
-      - rerank
+    capabilities:
+      - tool_use
 
 context:
   - provider: file
@@ -136,7 +117,7 @@ context:
       stackDepth: 3
   - provider: repo-map
     params:
-      includeSignatures: false # default true
+      includeSignatures: false
   - provider: os
   - provider: folder
     params:
@@ -160,8 +141,6 @@ context:
 rules:
   - Use local models for 90% of tasks to optimize cost
   - Only escalate to cloud models for complex architectural decisions
-  - Provide clear, actionable code suggestions
-  - Follow existing code patterns and conventions
   - Leverage Docker MCP servers for research, debugging, and analysis
   - Save important findings to Memory MCP for persistent knowledge
   - Use Sequential Thinking MCP for complex problem decomposition
@@ -262,6 +241,77 @@ prompts:
 
       Begin your analysis. What is the tech stack for this project?
   
+  - name: /summarize-conversation
+    description: Summarize current conversation and suggest next steps
+    prompt: |
+      You are a conversation summarization specialist. Your job is to:
+      
+      **TASK:** Summarize the current conversation to preserve essential context while freeing up tokens.
+      
+      **OUTPUT FORMAT:**
+      ## Conversation Summary
+      - **Main Goal:** [What we're trying to accomplish]
+      - **Key Decisions Made:** [Important choices and rationale]
+      - **Current Status:** [Where we are in the process]
+      - **Files Modified:** [List of important files and changes]
+      - **Outstanding Issues:** [Remaining tasks or problems]
+      - **Next Steps:** [What should happen next]
+      
+      **CONTEXT TO PRESERVE:**
+      - Important architectural decisions
+      - File locations and modifications
+      - System configurations and settings
+      - Any unique problem-solving approaches used
+      
+      **CONTEXT TO DISCARD:**
+      - Routine debugging steps
+      - Repeated error messages
+      - Extended exploration that didn't lead to solutions
+      - Verbose technical details that aren't critical
+      
+      Provide a concise but comprehensive summary that allows us to continue efficiently in a new conversation.
+      
+      **IMPORTANT:** Also provide a suggested "context prompt" that can be used to start a new chat session with all the essential information.
+      
+      Begin the summary:
+
+  - name: /compact-context
+    description: Request conversation compaction and provide context for new chat
+    prompt: |
+      You are a context compaction specialist. Help prepare for a new chat session.
+      
+      **TASK:** Extract only the most essential context from our conversation for use in a fresh chat.
+      
+      **CONTEXT ELEMENTS TO EXTRACT:**
+      1. **Project Overview:** Key files, structure, purpose
+      2. **Current State:** What was recently working/done
+      3. **Next Objective:** What needs to be accomplished
+      4. **Critical Information:** Unique configurations, commands, approaches
+      5. **Available Resources:** Files, tools, systems ready to use
+      
+      **OUTPUT FORMAT:**
+      ## Project Context
+      - **Repository:** [Name and purpose]
+      - **Key Technologies:** [Main tech stack]
+      - **Current Focus:** [What we're working on]
+      
+      ## Essential History
+      - **Recent Progress:** [Key accomplishments]
+      - **Configuration:** [Important settings]
+      - **Tested Approaches:** [What worked/didn't work]
+      
+      ## Next Steps
+      - **Immediate Task:** [What to do next]
+      - **Context Needed:** [Information a new chat needs]
+      - **Resources Available:** [Files, commands, systems]
+      
+      Then provide a single "Context Prompt" that could be used to start a new chat:
+      
+      **Context Prompt:**
+      "I'm working on [project]. [Current status]. Need help with [next task]. Key files: [list]."
+      
+      Provide this structured summary:
+
   - name: /homelab
     description: Homelab infrastructure and automation specialist
     prompt: |
@@ -604,15 +654,6 @@ prompts:
       
       What VMware infrastructure challenge can I help you solve?
 
-embeddingsProvider:
-  - title: "Local Embeddings"
-    provider: local
-    apiBase: http://localhost:1234/v1
-
-cache:
-  embeddings: true
-  context: true
-
 mcpServers:
   - name: MCP_DOCKER
     command: docker
@@ -620,5 +661,3 @@ mcpServers:
       - mcp
       - gateway
       - run
-
-
