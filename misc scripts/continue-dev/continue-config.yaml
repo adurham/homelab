@@ -95,8 +95,6 @@ models:
 rules:
   - Use local models for 90% of tasks to optimize cost
   - Only escalate to cloud models for complex architectural decisions
-  - Use Desktop Commander MCP for file operations, terminal commands, and system management instead of built-in alternatives
-  - Use Desktop Commander for reading/writing files, executing commands, and managing processes
   - Leverage MCP servers for research, debugging, and analysis (Brave Search, Context7, Memory, Fetch)
   - Save important findings to Memory MCP for persistent knowledge graph
   - Use Sequential Thinking MCP for complex problem decomposition and architectural analysis
@@ -414,7 +412,6 @@ prompts:
       - **Fetch**: Retrieve and analyze specific web content and URLs
       - **Memory**: Persistent knowledge graph for saving research findings
       - **Sequential Thinking**: Advanced reasoning for complex research problems
-      - **Desktop Commander**: System-level operations when needed
       
       **RESEARCH WORKFLOW:**
       1. Start with **Brave Search** for current information and examples
@@ -443,7 +440,6 @@ prompts:
       3. **Sequential Thinking**: Break down complex debugging scenarios systematically
       4. **Context7**: Access official documentation and API references
       5. **Fetch**: Retrieve specific error pages, bug reports, or documentation
-      6. **Desktop Commander**: Perform system-level operations if needed
       
       **DEBUGGING STRATEGY:**
       - Start by checking Memory for related past problems and solutions
