@@ -122,21 +122,6 @@ context:
   - provider: folder
     params:
       folder: "./"
-  - provider: testfiles
-    params:
-      includeCoverage: true
-      includeFailed: true
-  - provider: git-diff
-    params:
-      maxFiles: 10
-      maxDiff: 50000
-  - provider: git-history
-    params:
-      maxCommits: 20
-  - provider: dockerfile
-  - provider: kubernetes
-  - provider: terraform
-  - provider: ansible
 
 rules:
   - Use local models for 90% of tasks to optimize cost
