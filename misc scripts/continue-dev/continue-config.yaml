@@ -126,9 +126,11 @@ context:
 rules:
   - Use local models for 90% of tasks to optimize cost
   - Only escalate to cloud models for complex architectural decisions
-  - Leverage Docker MCP servers for research, debugging, and analysis
-  - Save important findings to Memory MCP for persistent knowledge
-  - Use Sequential Thinking MCP for complex problem decomposition
+  - PREFER MCP TOOLS OVER BUILT-IN: Use Desktop Commander MCP for file operations, terminal commands, and system management instead of built-in alternatives
+  - Use Desktop Commander for reading/writing files, executing commands, and managing processes
+  - Leverage MCP servers for research, debugging, and analysis (Brave Search, Context7, Memory, Fetch)
+  - Save important findings to Memory MCP for persistent knowledge graph
+  - Use Sequential Thinking MCP for complex problem decomposition and architectural analysis
   - Apply security-first mindset to all infrastructure decisions
   - Optimize for resource constraints typical in homelab environments
   - Consider airgap security requirements for sensitive workloads
@@ -141,7 +143,7 @@ rules:
   - When analyzing codebases, review entire repository structure
   - Check README files, project structure, and main config files
   - Don't generalize from single directory - consider full project context
-  - Use Brave Search for current information and best practices
+  - Use Brave Search MCP for current information and best practices
   - Reference official documentation via Context7 MCP server
 
 prompts:
@@ -646,3 +648,11 @@ mcpServers:
       - mcp
       - gateway
       - run
+
+  - name: Desktop Commander (Standalone)
+    command: docker
+    args:
+      - run
+      - -i
+      - --rm
+      - mcp/desktop-commander:latest
