@@ -92,37 +92,6 @@ models:
     capabilities:
       - tool_use
 
-context:
-  - provider: file
-    params:
-      includeSnippet: true
-  - provider: code
-    params:
-      includeSnippet: true
-      maxSnippets: 10
-  - provider: diff
-    params:
-      maxFiles: 10
-      maxDiff: 50000
-  - provider: currentFile
-  - provider: terminal
-    params:
-      historyLimit: 100
-      commandTimeout: 30000
-  - provider: open
-  - provider: tree
-  - provider: problems
-  - provider: debugger
-    params:
-      stackDepth: 3
-  - provider: repo-map
-    params:
-      includeSignatures: false
-  - provider: os
-  - provider: folder
-    params:
-      folder: "./"
-
 rules:
   - Use local models for 90% of tasks to optimize cost
   - Only escalate to cloud models for complex architectural decisions
@@ -648,11 +617,3 @@ mcpServers:
       - mcp
       - gateway
       - run
-
-  - name: Desktop Commander (Standalone)
-    command: docker
-    args:
-      - run
-      - -i
-      - --rm
-      - mcp/desktop-commander:latest
