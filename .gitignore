@@ -109,3 +109,11 @@ homeassistant/clean_automations.json
 
 # Backup directories
 backup/
+
+# =============================================================================
+# CONTINUE.DEV AI CONFIGURATION
+
+# Continue.dev AI configuration
+.continue/config.local.yaml
+.continue/index/
+.continue/sessions/

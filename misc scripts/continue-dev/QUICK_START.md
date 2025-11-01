@@ -1,85 +1,100 @@
-# Quick Start: Get Running in 5 Minutes ⚡
+# Continue.dev Quick Start Guide
 
-## Prerequisites
+## 🚀 Immediate Setup
 
-- ✅ VSCode with Continue.dev extension
-- ✅ LM Studio installed
-- ✅ Docker Desktop (for MCP servers)
-- ✅ M4 MacBook Pro 36GB RAM
-
-## Steps
-
-### 1. Download Models (2-3 min)
-
-In **LM Studio**, download:
-- **qwen/qwen3-coder-30b** (primary)
-- **qwen/qwen2.5-coder-32b** (backup)
-- Optional: **mlx-community/deepseek-coder-33b-instruct-hf-4bit-mlx**
-
-**How**: LM Studio → Search → Search name → Download
-
-### 2. Start LM Studio Server (30 sec)
-
-1. LM Studio → "Local Server" tab
-2. Click "Start Server"
-3. Load a model (double-click)
-4. ✅ Server runs on `http://localhost:1234/v1`
-
-### 3. Copy Config (10 sec)
-
+### 1. Apply Optimized Configuration
 ```bash
 cp "misc scripts/continue-dev/continue-config.yaml" ~/.continue/config.yaml
 ```
 
-### 4. Start Docker (optional, 30 sec)
-
-1. Open Docker Desktop
-2. Wait for it to start
-3. MCP servers auto-connect
-
-### 5. Restart VSCode (10 sec)
-
-1. Quit VSCode completely (Cmd+Q)
-2. Reopen VSCode
-3. Open Continue chat (Cmd+L)
-
-## 🎉 Done! Try It
-
-Open Continue and type:
-- `/cursor-agent` - Smart agent
-- Ask about your code
-- Use `@code` to search codebase
-
-## Optional: Add Cloud API Keys
-
-Create `~/.continue/.env`:
+### 2. Start LM Studio (if not running)
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-VOYAGE_API_KEY=pa-...
+# Manual method (recommended):
+# 1. Open LM Studio from Applications
+# 2. Load qwen/qwen3-coder-30b model
+# 3. Go to "Local Server" tab
+# 4. Click "Start Server"
+
+# Or use startup script:
+./misc scripts/continue-dev/start-lm-studio-ai.sh
 ```
 
-Get keys: [Anthropic](https://console.anthropic.com/) | [OpenAI](https://platform.openai.com/) | [Voyage](https://www.voyageai.com/)
+### 3. Verify Setup
+```bash
+curl -s http://localhost:1234/v1/models | jq -r '.data[] | select(.id | contains("qwen3-coder-30b")) | .id'
+```
 
-## What You Got
+## 🎯 Quick Test Commands
 
-✅ 4 local models (free, fast, private)  
-✅ 2 cloud models (optional, paid)  
-✅ Smart commands (`/cursor-agent`, `/cloud-architect`, etc.)  
-✅ MCP servers for enhanced capabilities  
-✅ Context providers (`@code`, `@file`, `@tree`, etc.)
+In VS Code with Continue.dev:
 
-## Troubleshooting
+**General Homelab Work:**
+```
+/homelab "Explain the terraform infrastructure setup"
+```
 
-**LM Studio not connecting?**  
-→ Check server is running, verify `http://localhost:1234/v1`
+**Terraform Expertise:**
+```
+/terraform "Review the Tanium client configurations"
+```
 
-**Models not showing?**  
-→ Verify model names, restart VSCode
+**Home Assistant Help:**
+```
+/homeassistant "Review this automation for safety"
+```
 
-**Need help?**  
-→ See `README.md` for detailed guide
+**Quick Fixes:**
+```
+/quick-fix "Fix YAML syntax errors"
+```
 
----
+**Complex Debugging:**
+```
+/debug @terminal @problems Help debug this issue
+```
 
-**Next**: Read `README.md` for full setup details | `USAGE_TIPS.md` for best practices
+## ✅ What's Optimized
+
+- ✅ 17 enhanced context providers (vs 9 default)
+- ✅ Homelab-specific commands (/homelab, /terraform, /homeassistant, /ansible, /quick-fix, /debug)
+- ✅ Optimized model parameters (temperature 0.1, context 131k tokens)
+- ✅ Project-aware configuration (auto-loads in homelab repo)
+- ✅ Performance caching enabled
+- ✅ VS Code integration settings
+
+## 📋 Files Modified/Created
+
+**Configuration Files:**
+- `misc scripts/continue-dev/continue-config.yaml` - Main optimized config
+- `.continue/config.local.yaml` - Project-specific overrides (gitignored)
+- `.vscode/settings.json` - VS Code integration
+
+**Scripts:**
+- `misc scripts/continue-dev/start-lm-studio-ai.sh` - LM Studio startup script
+- `misc scripts/continue-dev/SETUP_GUIDE.md` - Detailed setup guide
+
+**Documentation:**
+- `misc scripts/continue-dev/README.md` - Main documentation
+- `misc scripts/continue-dev/QUICK_START.md` - This quick start guide
+
+## 🔧 Troubleshooting
+
+**LM Studio won't start:**
+1. Open LM Studio manually
+2. Download qwen/qwen3-coder-30b model
+3. Go to "Local Server" tab
+4. Click "Start Server"
+
+**Continue.dev not connecting:**
+1. Verify server: `curl http://localhost:1234/v1/models`
+2. Check config: `~/.continue/config.yaml` exists
+3. Restart VS Code
+
+**Models not showing:**
+1. Ensure LM Studio shows the model as "Loaded"
+2. Check exact model names match config
+3. Restart Continue.dev in VS Code
+
+## 🎉 You're Ready!
+
+Your Continue.dev setup is optimized for homelab development with enterprise-grade AI assistance!
