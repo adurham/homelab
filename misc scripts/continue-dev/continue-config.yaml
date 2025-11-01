@@ -126,7 +126,7 @@ context:
 rules:
   - Use local models for 90% of tasks to optimize cost
   - Only escalate to cloud models for complex architectural decisions
-  - PREFER MCP TOOLS OVER BUILT-IN: Use Desktop Commander MCP for file operations, terminal commands, and system management instead of built-in alternatives
+  - Use Desktop Commander MCP for file operations, terminal commands, and system management instead of built-in alternatives
   - Use Desktop Commander for reading/writing files, executing commands, and managing processes
   - Leverage MCP servers for research, debugging, and analysis (Brave Search, Context7, Memory, Fetch)
   - Save important findings to Memory MCP for persistent knowledge graph
