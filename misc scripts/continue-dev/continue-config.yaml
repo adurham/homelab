@@ -3,6 +3,13 @@ version: 1.0.0
 schema: v1
 
 models:
+  - name: "StarCoder2 3B [LOCAL] (Autocomplete)"
+    provider: openai
+    model: starcoder2-3b
+    apiBase: http://localhost:1234/v1
+    roles:
+      - autocomplete
+
   - name: "Qwen3 Coder 30B [LOCAL]"
     provider: openai
     model: qwen/qwen3-coder-30b
@@ -11,9 +18,9 @@ models:
       - chat
       - edit
       - apply
-      - autocomplete
     capabilities:
       - tool_use
+
   - name: "Qwen2.5 Coder 32B [LOCAL]"
     provider: openai
     model: qwen/qwen2.5-coder-32b
@@ -24,6 +31,7 @@ models:
       - apply
     capabilities:
       - tool_use
+
   - name: "GPT-OSS 20B [LOCAL]"
     provider: openai
     model: openai/gpt-oss-20b
@@ -33,6 +41,7 @@ models:
       - edit
     capabilities:
       - tool_use
+
   - name: "DeepSeek Coder 33B 4bit [LOCAL]"
     provider: openai
     model: mlx-community/deepseek-coder-33b-instruct-hf-4bit-mlx
@@ -42,6 +51,7 @@ models:
       - edit
     capabilities:
       - tool_use
+
   - name: "CodeLlama 13B [LOCAL]"
     provider: openai
     model: codellama/CodeLlama-13b-Instruct-hf
@@ -51,6 +61,7 @@ models:
       - edit
     capabilities:
       - tool_use
+
   - name: "Claude 3.5 Sonnet [CLOUD]"
     provider: anthropic
     model: claude-3-5-sonnet-20241022
@@ -62,6 +73,7 @@ models:
     capabilities:
       - tool_use
       - image_input
+
   - name: "GPT-4o [CLOUD]"
     provider: openai
     model: gpt-4o
@@ -73,6 +85,7 @@ models:
     capabilities:
       - tool_use
       - image_input
+
   - name: "Minimax-M2 [OLLAMA CLOUD]"
     provider: openai
     model: minimax-m2:cloud
@@ -84,6 +97,16 @@ models:
       - apply
     capabilities:
       - tool_use
+    requestOptions:
+      extraBodyProperties:
+        num_ctx: 200000
+
+  - name: Voyage Reranker
+    provider: voyage
+    apiKey: ${VOYAGE_API_KEY}
+    model: rerank-2
+    roles:
+      - rerank
 
 rules:
   - Use local models for 90% of tasks to optimize cost
