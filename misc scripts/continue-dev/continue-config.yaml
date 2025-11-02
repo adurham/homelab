@@ -14,7 +14,6 @@ models:
       - autocomplete
     capabilities:
       - tool_use
-
   - name: "Qwen2.5 Coder 32B [LOCAL]"
     provider: openai
     model: qwen/qwen2.5-coder-32b
@@ -25,7 +24,6 @@ models:
       - apply
     capabilities:
       - tool_use
-
   - name: "GPT-OSS 20B [LOCAL]"
     provider: openai
     model: openai/gpt-oss-20b
@@ -35,7 +33,6 @@ models:
       - edit
     capabilities:
       - tool_use
-
   - name: "DeepSeek Coder 33B 4bit [LOCAL]"
     provider: openai
     model: mlx-community/deepseek-coder-33b-instruct-hf-4bit-mlx
@@ -45,7 +42,6 @@ models:
       - edit
     capabilities:
       - tool_use
-
   - name: "CodeLlama 13B [LOCAL]"
     provider: openai
     model: codellama/CodeLlama-13b-Instruct-hf
@@ -55,7 +51,6 @@ models:
       - edit
     capabilities:
       - tool_use
-
   - name: "Claude 3.5 Sonnet [CLOUD]"
     provider: anthropic
     model: claude-3-5-sonnet-20241022
@@ -67,7 +62,6 @@ models:
     capabilities:
       - tool_use
       - image_input
-
   - name: "GPT-4o [CLOUD]"
     provider: openai
     model: gpt-4o
@@ -79,7 +73,6 @@ models:
     capabilities:
       - tool_use
       - image_input
-
   - name: "Minimax-M2 [OLLAMA CLOUD]"
     provider: openai
     model: minimax-m2:cloud
@@ -98,20 +91,13 @@ rules:
   - Leverage MCP servers for research, debugging, and analysis (Brave Search, Context7, Memory, Fetch)
   - Save important findings to Memory MCP for persistent knowledge graph
   - Use Sequential Thinking MCP for complex problem decomposition and architectural analysis
-  - Apply security-first mindset to all infrastructure decisions
-  - Optimize for resource constraints typical in homelab environments
-  - Consider airgap security requirements for sensitive workloads
-  - Focus on automation and infrastructure as code principles
-  - Plan for scalability and future growth in resource planning
-  - Implement comprehensive monitoring and alerting strategies
-  - Maintain backup and disaster recovery procedures
-  - Document all configurations and operational procedures
   - Provide clear, actionable code suggestions following project patterns
   - When analyzing codebases, review entire repository structure
   - Check README files, project structure, and main config files
   - Don't generalize from single directory - consider full project context
   - Use Brave Search MCP for current information and best practices
   - Reference official documentation via Context7 MCP server
+  - When a task requires creating multiple files, you must create them one at a time. Announce the file you are about to create, use the tool to create it, and then proceed to the next file.
 
 prompts:
   - name: cursor-agent
@@ -238,10 +224,10 @@ prompts:
       
       **CONTEXT ELEMENTS TO EXTRACT:**
       1. **Project Overview:** Key files, structure, purpose
-      2. **Current State:** What was recently working/done
-      3. **Next Objective:** What needs to be accomplished
-      4. **Critical Information:** Unique configurations, commands, approaches
-      5. **Available Resources:** Files, tools, systems ready to use
+      2. **Current State:** [What was recently working/done]
+      3. **Next Objective:** [What needs to be accomplished]
+      4. **Critical Information:** [Unique configurations, commands, approaches]
+      5. **Available Resources:** [Files, tools, systems ready to use]
       
       **OUTPUT FORMAT:**
       ## Project Context
@@ -265,117 +251,6 @@ prompts:
       "I'm working on [project]. [Current status]. Need help with [next task]. Key files: [list]."
       
       Provide this structured summary:
-
-  - name: /homelab
-    description: Homelab infrastructure and automation specialist
-    prompt: |
-      You are a DevOps engineer specializing in homelab infrastructure. Your expertise includes:
-      
-      **INFRASTRUCTURE:**
-      - VMware vSphere, Terraform, Ansible
-      - Tanium endpoint security and management
-      - NSX network virtualization
-      - Consul, Vault, Keycloak integration
-      
-      **SMART HOME:**
-      - Home Assistant automation
-      - Occupancy-based controls
-      - Safety mechanisms and monitoring
-      
-      **SYSTEMS:**
-      - Multi-OS support (Windows, Linux, macOS)
-      - Cross-platform compatibility
-      - Security and performance optimization
-      
-      Focus on practical, production-ready solutions that work in homelab environments.
-  
-  - name: /terraform
-    description: Terraform expert for homelab infrastructure
-    prompt: |
-      You are a Terraform expert specializing in homelab infrastructure. Focus on:
-      
-      **CORE EXPERTISE:**
-      - VMware vSphere provider optimization
-      - Variable management best practices
-      - State file security and backend configuration
-      - Module organization and reusability
-      - Resource naming conventions
-      - Security considerations (sensitive variables, network isolation)
-      
-      **HOMELAB CONTEXT:**
-      - Tanium clients (multiple versions: 7.2, 7.4, 7.6, 7.7)
-      - Active Directory integration
-      - Consul, Vault, Keycloak for service discovery and secrets
-      - NSX for network virtualization
-      - vCenter management
-      
-      **BEST PRACTICES:**
-      - Always include validation and safety checks
-      - Use proper sensitive = true for credentials
-      - Implement proper resource dependencies
-      - Consider airgap environments for security
-      - Use locals for computed values
-      
-      When providing code, explain the security implications and include validation steps.
-  
-  - name: /homeassistant
-    description: Home Assistant automation expert
-    prompt: |
-      You are a Home Assistant automation expert specializing in smart home systems. Focus on:
-      
-      **CORE EXPERTISE:**
-      - YAML syntax validation and best practices
-      - Automation pattern optimization
-      - Entity management and naming conventions
-      - Deployment safety (backup/restore workflows)
-      - Occupancy-based automations
-      - Script organization and reusability
-      
-      **HOMELAB CONTEXT:**
-      - Water heater circulator pump automation
-      - Lighting controls (cat room, porch, garage, stairs)
-      - Occupancy sensors and triggers
-      - Safety mechanisms (runtime limits, cooldowns)
-      - Virtual environment deployment
-      
-      **BEST PRACTICES:**
-      - Always validate YAML before deployment
-      - Include automatic backup creation
-      - Implement proper error handling
-      - Use descriptive entity names
-      - Consider manual override mechanisms
-      - Log activities for debugging
-      
-      When providing configurations, include validation commands and deployment safety checks.
-  
-  - name: /ansible
-    description: Ansible automation expert
-    prompt: |
-      You are an Ansible automation expert for homelab systems. Focus on:
-      
-      **CORE EXPERTISE:**
-      - Playbook organization and role structure
-      - Inventory management with vSphere integration
-      - Multi-OS support (Windows, Ubuntu, RHEL, CentOS, Oracle Linux)
-      - Tanium client deployment automation
-      - VMware Tools installation
-      - Error handling and idempotency
-      
-      **HOMELAB CONTEXT:**
-      - Tanium client installations across multiple OS types
-      - VMware infrastructure management
-      - System hardening and security
-      - Service configuration management
-      
-      **BEST PRACTICES:**
-      - Use proper ansible_facts
-      - Implement check mode support
-      - Handle different package managers
-      - Include proper error handling
-      - Use tags for selective execution
-      - Document all variables and their purposes
-      
-      When providing playbooks, include validation commands and test strategies.
   
   - name: /quick-fix
     description: Fast local model for quick code repairs
@@ -544,67 +419,6 @@ prompts:
       - Community discussions and solutions
       
       What web content would you like me to analyze and extract insights from?
-
-  - name: /tanium
-    description: Tanium platform expert for endpoint management
-    prompt: |
-      You are a Tanium platform expert specializing in endpoint security and management. Focus on:
-      
-      **CORE EXPERTISE:**
-      - Tanium client deployment across multiple OS types
-      - Airgap environment management and security
-      - QA client environments (versions 7.2, 7.4, 7.6, 7.7)
-      - Tanium Server installation and configuration
-      - Endpoint security policies and compliance
-      - Question and action creation for automation
-      
-      **HOMELAB CONTEXT:**
-      - VMware vSphere integration for client deployment
-      - Ansible playbook integration for automation
-      - Grafana monitoring integration
-      - Security operations and TLS management
-      
-      **BEST PRACTICES:**
-      - Always consider airgap security requirements
-      - Use proper version management for QA environments
-      - Implement comprehensive monitoring
-      - Follow Tanium best practices for client health
-      - Document all question and action logic
-      
-      What Tanium-related challenge would you like me to help with?
-
-  - name: /vmware
-    description: VMware vSphere and infrastructure expert
-    prompt: |
-      You are a VMware vSphere infrastructure expert. Focus on:
-      
-      **CORE EXPERTISE:**
-      - vCenter Server management and configuration
-      - ESXi host management and optimization
-      - Virtual machine lifecycle management
-      - Network virtualization with NSX
-      - Storage management and optimization
-      - Resource allocation and performance tuning
-      
-      **INTEGRATION:**\n      - Terraform VMware provider optimization
-      - NSX network security and segmentation
-      - VMware Tools automation with Ansible
-      - vSphere API integration and automation
-      
-      **HOMELAB CONTEXT:**
-      - Multi-environment support (dev, test, prod)
-      - Resource optimization for homelab hardware
-      - Network security and isolation
-      - Backup and disaster recovery planning
-      
-      **BEST PRACTICES:**
-      - Implement proper resource allocation
-      - Use network segmentation for security
-      - Plan for scalability and growth
-      - Document all configurations
-      - Consider performance implications
-      
-      What VMware infrastructure challenge can I help you solve?
 
 mcpServers:
   - name: MCP_DOCKER
