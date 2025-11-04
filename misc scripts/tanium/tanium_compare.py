@@ -16,6 +16,7 @@ import json
 import sys
 import ssl
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 import argparse
 import logging
 import os
@@ -23,7 +24,7 @@ import xml.etree.ElementTree as ET
 import time
 import re
 import time as _time
-from typing import Any, Dict, List, Tuple, Optional, Union
+from typing import Any, Dict, List, Optional
 import signal
 from dataclasses import dataclass
 from enum import Enum
@@ -118,6 +119,9 @@ class TaniumClient:
 
     def __init__(self, host: str, config: Optional[Dict[str, Any]] = None):
         self.host = host  # Store original host for debugging
+        if config is None:
+            config = load_config()
+
         if host.startswith("http"):
             self.base = host
         else:
@@ -194,11 +198,8 @@ class TaniumClient:
                 # Retry on 429/5xx with backoff; honor Retry-After if present
                 if code in (HTTP_TOO_MANY_REQUESTS,) + HTTP_SERVER_ERRORS and attempt < DEFAULT_MAX_RETRIES:
                     retry_after = None
-                    try:
-                        if hasattr(exc, 'headers'):
-                            retry_after = exc.headers.get('Retry-After')
-                    except Exception:
-                        retry_after = None
+                    if isinstance(exc, HTTPError) and exc.headers:
+                        retry_after = exc.headers.get('Retry-After')
                     sleep_secs = float(retry_after) if retry_after else backoff
                     logging.warning(f"GET {self._full(path)} failed with {code}; retrying in {sleep_secs:.1f}s (attempt {attempt+1}/5)")
                     _time.sleep(sleep_secs)
@@ -258,11 +259,8 @@ class TaniumClient:
                     sys.exit(1)
                 if code in (HTTP_TOO_MANY_REQUESTS,) + HTTP_SERVER_ERRORS and attempt < DEFAULT_MAX_RETRIES:
                     retry_after = None
-                    try:
-                        if hasattr(exc, 'headers'):
-                            retry_after = exc.headers.get('Retry-After')
-                    except Exception:
-                        retry_after = None
+                    if isinstance(exc, HTTPError) and exc.headers:
+                        retry_after = exc.headers.get('Retry-After')
                     sleep_secs = float(retry_after) if retry_after else backoff
                     logging.warning(f"POST {self._full(path)} failed with {code}; retrying in {sleep_secs:.1f}s (attempt {attempt+1}/5)")
                     _time.sleep(sleep_secs)
@@ -270,11 +268,11 @@ class TaniumClient:
                     backoff = min(backoff * 2, 30)
                     continue
                 logging.error(f"POST {self._full(path)} failed: {exc}")
-                if hasattr(exc, 'read'):
+                if isinstance(exc, HTTPError):
                     try:
                         error_content = exc.read().decode('utf-8')
                         logging.error(f"Error response content: {error_content}")
-                    except AttributeError:
+                    except Exception:
                         pass
                 raise
 
@@ -312,11 +310,8 @@ class TaniumClient:
                     sys.exit(1)
                 if code in (HTTP_TOO_MANY_REQUESTS,) + HTTP_SERVER_ERRORS and attempt < DEFAULT_MAX_RETRIES:
                     retry_after = None
-                    try:
-                        if hasattr(exc, 'headers'):
-                            retry_after = exc.headers.get('Retry-After')
-                    except Exception:
-                        retry_after = None
+                    if isinstance(exc, HTTPError) and exc.headers:
+                        retry_after = exc.headers.get('Retry-After')
                     sleep_secs = float(retry_after) if retry_after else backoff
                     logging.warning(f"PATCH {self._full(path)} failed with {code}; retrying in {sleep_secs:.1f}s (attempt {attempt+1}/{DEFAULT_MAX_RETRIES})")
                     _time.sleep(sleep_secs)
@@ -637,8 +632,8 @@ class GlobalLock:
                 try:
                     raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
                     data = json.loads(raw.decode("utf-8"))
-                    current_value = data.get("data", {}).get("value", "0")
-                    
+                    current_value = str(data.get("data", {}).get("value", "0"))
+
                     if current_value == "1" and self._is_lock_stale(stale_lock_timeout):
                         logging.warning("Detected stale lock, attempting to break and acquire atomically")
                         if self._break_stale_lock_and_acquire():
@@ -730,8 +725,8 @@ class GlobalLock:
         try:
             raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
             data = json.loads(raw.decode("utf-8"))
-            current_value = data.get("data", {}).get("value", "0")
-            
+            current_value = str(data.get("data", {}).get("value", "0"))
+
             logging.debug(f"Lock status check: value={current_value}")
             
             if current_value != "1":
@@ -787,8 +782,8 @@ class GlobalLock:
             # Verify the lock was broken
             raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
             data = json.loads(raw.decode("utf-8"))
-            new_value = data.get("data", {}).get("value", "0")
-            
+            new_value = str(data.get("data", {}).get("value", "0"))
+
             if new_value == "0":
                 logging.info("Successfully broke stale lock")
                 return True
@@ -885,12 +880,12 @@ class GlobalLock:
                 # Get current value
                 raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
                 data = json.loads(raw.decode("utf-8"))
-                current_value = data.get("data", {}).get("value", "0")
-                
+                current_value = str(data.get("data", {}).get("value", "0"))
+
                 logging.debug(f"Attempting to acquire lock (attempt {attempt + 1}/{max_attempts}): current_value={current_value}")
                 
                 if current_value == "1":
-                    # Lock is already held
+                    # Lock is already held - stop trying
                     logging.debug(f"Lock is already held by another server (value: {current_value})")
                     return False
                 
@@ -909,8 +904,8 @@ class GlobalLock:
                     time.sleep(0.05)  # Small delay to ensure the patch is processed
                     raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
                     data = json.loads(raw.decode("utf-8"))
-                    final_value = data.get("data", {}).get("value", "0")
-                    
+                    final_value = str(data.get("data", {}).get("value", "0"))
+
                     if final_value == "1":
                         logging.info(f"Successfully acquired lock (server: {self.server_name})")
                         return True
@@ -952,7 +947,7 @@ class GlobalLock:
 # Import Functions
 # ---------------------------------------------------------------------------
 
-def import_solution(client: TaniumClient, solution_id: str, content_url: str, conflict_policy_path: str = None, conflict_default: str = "replace") -> dict:
+def import_solution(client: TaniumClient, solution_id: str, content_url: str, conflict_policy_path: Optional[str] = None, conflict_default: str = "replace") -> dict:
     if not client.base:
         raise ValueError(f"Client for {client.host} has no base URL set")
 
@@ -1137,18 +1132,16 @@ def import_solution(client: TaniumClient, solution_id: str, content_url: str, co
 
     except Exception as exc:
         # Detailed error handling
-        if hasattr(exc, 'code'):
+        if isinstance(exc, HTTPError):
             logging.error(f"HTTP {exc.code} when importing solution {solution_id}")
-        else:
-            logging.error(f"Unknown error importing solution {solution_id}: {exc}")
-
-        # Try to get more context from the response
-        if hasattr(exc, 'fp'):
+            # Try to get more context from the response
             try:
-                error_content = exc.fp.read().decode('utf-8')
+                error_content = exc.read().decode('utf-8')
                 logging.error(f"Error response: {error_content[:500]}")
             except Exception as e:
                 logging.debug(f"Could not read error response: {e}")
+        else:
+            logging.error(f"Unknown error importing solution {solution_id}: {exc}")
 
         raise
 
@@ -1305,7 +1298,7 @@ def compare_servers(server_results: dict) -> dict:
 # Security Functions
 # ---------------------------------------------------------------------------
 
-def validate_file_path(file_path: str, allowed_dirs: list = None) -> bool:
+def validate_file_path(file_path: str, allowed_dirs: Optional[List[str]] = None) -> bool:
     """Validate file path to prevent path traversal attacks.
     
     Args:
@@ -1355,7 +1348,7 @@ def secure_file_permissions(file_path: str) -> None:
     except Exception as e:
         logging.warning(f"Failed to set secure permissions on {file_path}: {e}")
 
-def audit_log(operation: str, details: dict = None) -> None:
+def audit_log(operation: str, details: Optional[Dict[str, Any]] = None) -> None:
     """Log security-relevant operations for audit purposes.
     
     Args:
@@ -1422,7 +1415,7 @@ def validate_manifest(manifest: dict, strict: bool = False) -> None:
             logging.error(e)
         sys.exit(1)
 
-def print_comparison_summary(server_results: Dict[str, ComparisonResult], 
+def print_comparison_summary(server_results: Dict[str, Dict[str, Any]],
                            inconsistencies: Dict[str, Any]) -> None:
     """Print a formatted summary of comparison results.
     
@@ -1609,8 +1602,8 @@ def main():
             # Get current lock value
             raw = primary_client.get(f"/api/v2/system_settings/{setting_id}")
             data = json.loads(raw.decode("utf-8"))
-            current_value = data.get("data", {}).get("value", "0")
-            
+            current_value = str(data.get("data", {}).get("value", "0"))
+
             if current_value == "1":
                 logging.info("Lock is currently HELD (value: 1)")
                 print("Lock is currently HELD (value: 1)")
@@ -1746,7 +1739,25 @@ def main():
     
     # Display results
     print_comparison_summary(server_results, inconsistencies)
-    
+
+    # Initialize import statistics (used for final combined summary)
+    import_stats = {
+        "total_attempted": 0,
+        "total_successful": 0,
+        "total_skipped": 0,
+        "total_failed": 0,
+        "servers_processed": 0,
+        "servers_skipped": 0
+    }
+    missing_import_stats = {
+        "total_attempted": 0,
+        "total_successful": 0,
+        "total_skipped": 0,
+        "total_failed": 0,
+        "servers_processed": 0,
+        "servers_skipped": 0
+    }
+
     # If --import-out-of-date flag is set, import the out-of-date solutions
     if args.import_out_of_date:
         print("\n=== IMPORTING OUT-OF-DATE SOLUTIONS ===")
@@ -1754,16 +1765,7 @@ def main():
         # Import each out-of-date solution on each server where it is out-of-date
         total_targets = sum(len(results["out_of_date"]) for results in server_results.values())
         print(f"Queued {total_targets} server-specific imports based on manifest deltas")
-        
-        # Track import statistics
-        import_stats = {
-            "total_attempted": 0,
-            "total_successful": 0,
-            "total_failed": 0,
-            "servers_processed": 0,
-            "servers_skipped": 0
-        }
-        
+
         for server_name, results in server_results.items():
             if not results["out_of_date"]:
                 continue
@@ -1801,15 +1803,15 @@ def main():
                         continue
                     
                     # Register cleanup function for this server
-                    def cleanup_server_lock():
+                    def cleanup_outofdate_lock():
                         if server_global_lock:
                             try:
                                 server_global_lock.release()
                                 logging.info(f"Released global import lock for {server_name}")
                             except Exception as cleanup_exc:
                                 logging.error(f"Error releasing lock for {server_name}: {cleanup_exc}")
-                    
-                    atexit.register(cleanup_server_lock)
+
+                    atexit.register(cleanup_outofdate_lock)
                     logging.info(f"Successfully acquired global import lock for {server_name}")
                     
                 except Exception as lock_exc:
@@ -1821,8 +1823,9 @@ def main():
             # Track this server's imports
             server_imports_attempted = 0
             server_imports_successful = 0
+            server_imports_skipped = 0
             server_imports_failed = 0
-            
+
             for solution in results["out_of_date"]:
                 # Check for stop signal before each import
                 if stop_flag["stop"]:
@@ -1851,6 +1854,8 @@ def main():
                     current_ver = current_map.get(sid, {}).get("version")
                     if current_ver == manifest_version:
                         print(f"  Skipping {sid} on {server_name}: already at manifest version")
+                        server_imports_skipped += 1
+                        import_stats["total_skipped"] += 1
                         continue
                 except Exception:
                     pass
@@ -1870,6 +1875,7 @@ def main():
             print(f"\n📊 Server {server_name} import summary:")
             print(f"  Attempted: {server_imports_attempted}")
             print(f"  Successful: {server_imports_successful}")
+            print(f"  Skipped: {server_imports_skipped} (already up-to-date)")
             print(f"  Failed: {server_imports_failed}")
             
             # Release global lock for this server after all imports are complete
@@ -1879,14 +1885,17 @@ def main():
         
         # Print final import statistics
         if import_stats["total_attempted"] > 0:
-            print(f"\n🎯 FINAL IMPORT STATISTICS:")
+            print("\n🎯 FINAL IMPORT STATISTICS:")
             print(f"  Servers processed: {import_stats['servers_processed']}")
             print(f"  Servers skipped: {import_stats['servers_skipped']}")
             print(f"  Total imports attempted: {import_stats['total_attempted']}")
             print(f"  Total imports successful: {import_stats['total_successful']}")
+            print(f"  Total imports skipped: {import_stats['total_skipped']} (already up-to-date)")
             print(f"  Total imports failed: {import_stats['total_failed']}")
-            success_rate = (import_stats['total_successful'] / import_stats['total_attempted']) * 100
-            print(f"  Success rate: {success_rate:.1f}%")
+            # Calculate success rate including skipped as successful (reached desired state)
+            effective_success = import_stats['total_successful'] + import_stats['total_skipped']
+            success_rate = (effective_success / import_stats['total_attempted']) * 100
+            print(f"  Success rate: {success_rate:.1f}% ({effective_success}/{import_stats['total_attempted']})")
 
     # If --import-missing flag is set, import the missing solutions
     if args.import_missing:
@@ -1895,16 +1904,7 @@ def main():
         # Import each missing solution on each server where it is missing
         total_targets = sum(len(results["missing"]) for results in server_results.values())
         print(f"Queued {total_targets} server-specific imports for missing solutions")
-        
-        # Track import statistics for missing solutions
-        missing_import_stats = {
-            "total_attempted": 0,
-            "total_successful": 0,
-            "total_failed": 0,
-            "servers_processed": 0,
-            "servers_skipped": 0
-        }
-        
+
         for server_name, results in server_results.items():
             if not results["missing"]:
                 continue
@@ -1942,15 +1942,15 @@ def main():
                         continue
                     
                     # Register cleanup function for this server
-                    def cleanup_server_lock():
+                    def cleanup_missing_lock():
                         if server_global_lock:
                             try:
                                 server_global_lock.release()
                                 logging.info(f"Released global import lock for {server_name}")
                             except Exception as exc:
                                 logging.error(f"Failed to release global import lock for {server_name}: {exc}")
-                    
-                    atexit.register(cleanup_server_lock)
+
+                    atexit.register(cleanup_missing_lock)
                     logging.info(f"Successfully acquired global import lock for {server_name}")
                 except Exception as exc:
                     logging.error(f"Failed to acquire global import lock for {server_name}: {exc}")
@@ -1959,8 +1959,9 @@ def main():
             # Track server-specific import statistics
             server_imports_attempted = 0
             server_imports_successful = 0
+            server_imports_skipped = 0
             server_imports_failed = 0
-            
+
             # Import each missing solution for this server
             for solution in results["missing"]:
                 if stop_flag["stop"]:
@@ -2000,6 +2001,7 @@ def main():
             print(f"\n📊 Server {server_name} missing solutions import summary:")
             print(f"  Attempted: {server_imports_attempted}")
             print(f"  Successful: {server_imports_successful}")
+            print(f"  Skipped: {server_imports_skipped} (already up-to-date)")
             print(f"  Failed: {server_imports_failed}")
             
             # Release global lock for this server after all imports are complete
@@ -2012,14 +2014,45 @@ def main():
         
         # Print final missing solutions import statistics
         if missing_import_stats["total_attempted"] > 0:
-            print(f"\n🎯 FINAL MISSING SOLUTIONS IMPORT STATISTICS:")
+            print("\n🎯 FINAL MISSING SOLUTIONS IMPORT STATISTICS:")
             print(f"  Servers processed: {missing_import_stats['servers_processed']}")
             print(f"  Servers skipped: {missing_import_stats['servers_skipped']}")
             print(f"  Total imports attempted: {missing_import_stats['total_attempted']}")
             print(f"  Total imports successful: {missing_import_stats['total_successful']}")
+            print(f"  Total imports skipped: {missing_import_stats['total_skipped']} (already up-to-date)")
             print(f"  Total imports failed: {missing_import_stats['total_failed']}")
-            success_rate = (missing_import_stats['total_successful'] / missing_import_stats['total_attempted']) * 100
-            print(f"  Success rate: {success_rate:.1f}%")
+            # Calculate success rate including skipped as successful (reached desired state)
+            effective_success = missing_import_stats['total_successful'] + missing_import_stats['total_skipped']
+            success_rate = (effective_success / missing_import_stats['total_attempted']) * 100
+            print(f"  Success rate: {success_rate:.1f}% ({effective_success}/{missing_import_stats['total_attempted']})")
+
+    # Print combined final summary if any imports ran
+    if args.import_out_of_date or args.import_missing:
+        if import_stats["total_attempted"] > 0 or missing_import_stats["total_attempted"] > 0:
+            combined_attempted = import_stats["total_attempted"] + missing_import_stats["total_attempted"]
+            combined_successful = import_stats["total_successful"] + missing_import_stats["total_successful"]
+            combined_skipped = import_stats["total_skipped"] + missing_import_stats["total_skipped"]
+            combined_failed = import_stats["total_failed"] + missing_import_stats["total_failed"]
+            combined_servers = max(import_stats["servers_processed"], missing_import_stats["servers_processed"])
+
+            separator = "=" * 60
+            print(f"\n{separator}")
+            print("🏆 COMBINED IMPORT SUMMARY (ALL PHASES)")
+            print(separator)
+            print(f"  Servers processed: {combined_servers}")
+            if import_stats["total_attempted"] > 0:
+                print(f"  Out-of-date solutions imported: {import_stats['total_successful']}")
+            if missing_import_stats["total_attempted"] > 0:
+                print(f"  Missing solutions imported: {missing_import_stats['total_successful']}")
+            print(f"  Total imports attempted: {combined_attempted}")
+            print(f"  Total imports successful: {combined_successful}")
+            print(f"  Total imports skipped: {combined_skipped} (already up-to-date)")
+            print(f"  Total imports failed: {combined_failed}")
+            if combined_attempted > 0:
+                combined_effective_success = combined_successful + combined_skipped
+                combined_success_rate = (combined_effective_success / combined_attempted) * 100
+                print(f"  Overall success rate: {combined_success_rate:.1f}% ({combined_effective_success}/{combined_attempted})")
+            print(separator)
 
     # Write summary JSON if requested
     if args.summary_out:
