@@ -1,14 +1,14 @@
 # Water Heater Circulator Pump Automation System
 
 ## Overview
-This system automatically controls a water heater circulator pump based on occupancy detection in rooms with sinks. The pump runs for 15 minutes when presence is detected, followed by a 45-minute cooldown period to prevent excessive heating.
+This system automatically controls a water heater circulator pump based on occupancy detection in rooms with sinks. The base cycle runs the pump for 15 minutes followed by a 45-minute cooldown to prevent excessive heating. Kitchen activity now receives a priority boost that extends the runtime to 20 minutes and shortens the cooldown to 25 minutes so that the long kitchen branch gets hot water faster.
 
 ## Components
 
 ### Automations
-1. **water_heater_pump_presence_detection.yaml** - Detects occupancy in any sink room
-2. **water_heater_pump_cycle_control.yaml** - Manages the 15-min ON / 45-min OFF cycle
-3. **water_heater_pump_turn_off.yaml** - Turns off pump after 15 minutes
+1. **water_heater_pump_presence_detection.yaml** - Detects occupancy in any sink room and elevates kitchen requests
+2. **water_heater_pump_cycle_control.yaml** - Manages dynamic runtime (15 or 20 minutes) and cooldown durations
+3. **water_heater_pump_turn_off.yaml** - Turns off pump when the runtime timer completes
 4. **water_heater_pump_daily_reset.yaml** - Resets daily statistics at midnight
 5. **water_heater_pump_runtime_tracking.yaml** - Tracks daily runtime
 6. **water_heater_pump_runtime_update.yaml** - Updates runtime when pump stops
@@ -16,10 +16,11 @@ This system automatically controls a water heater circulator pump based on occup
 
 ### Helper Entities
 - `input_boolean.water_heater_pump_automation_enabled` - Manual override toggle
+- `input_boolean.water_heater_pump_kitchen_priority` - Tracks whether the current cycle is running with kitchen priority settings
 - `input_number.water_heater_pump_daily_runtime_hours` - Daily runtime tracking
 - `counter.water_heater_pump_daily_cycles` - Daily cycle counter
-- `timer.water_heater_pump_runtime` - 15-minute pump runtime timer
-- `timer.water_heater_pump_cooldown` - 45-minute cooldown timer
+- `timer.water_heater_pump_runtime` - Runtime timer (15 minutes baseline, overridden to 20 for kitchen priority)
+- `timer.water_heater_pump_cooldown` - Cooldown timer (45 minutes baseline, shortened to 25 for kitchen priority)
 
 ### Scripts
 - `water_heater_pump_manual_on` - Manually turn on pump
@@ -35,7 +36,7 @@ This system automatically controls a water heater circulator pump based on occup
 
 ## Safety Features
 - **Daily Runtime Limit**: Maximum 8 hours per day
-- **Cooldown Period**: 45 minutes between cycles
+- **Cooldown Period**: 45 minutes between cycles (reduced to 25 minutes for kitchen priority cycles)
 - **Manual Override**: Can be disabled via `input_boolean.water_heater_pump_automation_enabled`
 - **Automatic Shutdown**: Disables automation if daily limit exceeded
 

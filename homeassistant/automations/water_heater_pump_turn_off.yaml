@@ -1,17 +1,22 @@
 # Water Heater Circulator Pump - Turn Off
-# Turns off pump after 15 minutes and starts cooldown timer
+# Turns off pump when runtime timer completes and starts cooldown timer
 - id: 'water_heater_pump_turn_off'
   alias: 'Water Heater Pump - Turn Off'
-  description: 'Turns off pump after 15 minutes and starts 45-minute cooldown'
+  description: 'Turns off pump when runtime timer completes and starts cooldown'
   triggers:
-    - platform: state
-      entity_id: timer.water_heater_pump_runtime
-      to: 'active'
-      for: '00:15:00'
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.water_heater_pump_runtime
   action:
+    - variables:
+        kitchen_priority: "{{ is_state('input_boolean.water_heater_pump_kitchen_priority', 'on') }}"
+        cooldown_duration: "{{ '00:25:00' if kitchen_priority else '00:45:00' }}"
     - service: system_log.write
       data:
-        message: 'Water heater pump runtime complete - turning off and starting cooldown'
+        message: >-
+          Water heater pump runtime complete - turning off and starting cooldown ({{ cooldown_duration
+          }}) - Kitchen priority: {{ 'enabled' if kitchen_priority else 'disabled' }}
         level: info
     - service: switch.turn_off
       target:
@@ -20,8 +25,11 @@
       target:
         entity_id: timer.water_heater_pump_cooldown
       data:
-        duration: '00:45:00'
+        duration: "{{ cooldown_duration }}"
     - service: timer.cancel
       target:
         entity_id: timer.water_heater_pump_runtime
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.water_heater_pump_kitchen_priority
   mode: single

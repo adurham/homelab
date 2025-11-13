@@ -13,6 +13,7 @@ MAX_BACKUPS=10
 BACKUP_TIMEOUT=300  # 5 minutes timeout for backup creation
 SKIP_HA_BACKUP=false  # Set to true to skip HA backup creation (faster deployment)
 SKIP_CONFIG_CHECK=false  # Set to true to skip configuration.yaml change check (for development)
+SKIP_HA_VALIDATION=false  # Set to true to skip ha core check after deployment
 
 # Colors for output
 RED='\033[0;31m'
@@ -255,11 +256,16 @@ deploy_files() {
 
 # Validate deployed configuration and restore if needed
 validate_and_restore_if_needed() {
+    if [ "$SKIP_HA_VALIDATION" = "true" ]; then
+        warn "Skipping ha core check validation (SKIP_HA_VALIDATION=true)"
+        return 0
+    fi
+    
     log "Validating deployed configuration..."
     
     # Check configuration using HA CLI
     log "Running ha core check on deployed configuration..."
-    check_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core check" 2>&1)
+    check_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core check --config /config" 2>&1)
     
     if [ $? -eq 0 ]; then
         log "Deployed configuration validation passed"
@@ -362,12 +368,14 @@ show_help() {
     echo "Options:"
     echo "  --skip-ha-backup      Skip Home Assistant backup creation (faster deployment)"
     echo "  --skip-config-check   Skip configuration.yaml change check (for development)"
+    echo "  --skip-ha-validation  Skip ha core check validation step (use with caution)"
     echo "  --backup-timeout N    Set backup timeout in seconds (default: 300)"
     echo "  --help                Show this help message"
     echo ""
     echo "Environment Variables:"
     echo "  SKIP_HA_BACKUP      Set to 'true' to skip HA backup creation"
     echo "  SKIP_CONFIG_CHECK   Set to 'true' to skip configuration.yaml change check"
+    echo "  SKIP_HA_VALIDATION  Set to 'true' to skip ha core check validation step"
     echo "  BACKUP_TIMEOUT      Set backup timeout in seconds"
     echo ""
     echo "Examples:"
@@ -387,6 +395,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-config-check)
             SKIP_CONFIG_CHECK=true
+            shift
+            ;;
+        --skip-ha-validation)
+            SKIP_HA_VALIDATION=true
             shift
             ;;
         --backup-timeout)

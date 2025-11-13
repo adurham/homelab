@@ -17,9 +17,6 @@ input_boolean:
   water_heater_pump_automation_enabled:
     name: "Water Heater Pump Automation"
     icon: mdi:water-pump
-  water_heater_pump_kitchen_priority:
-    name: "Water Heater Pump Kitchen Priority"
-    icon: mdi:stove
 
 input_number:
   water_heater_pump_daily_runtime_hours:

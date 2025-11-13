@@ -12,11 +12,17 @@
       entity_id: input_number.water_heater_pump_daily_runtime_hours
       below: 8  # Maximum 8 hours per day
   action:
+    - variables:
+        kitchen_priority: "{{ is_state('input_boolean.water_heater_pump_kitchen_priority', 'on') }}"
+        target_runtime: "{{ 20 if kitchen_priority else 15 }}"
     - service: counter.increment
       target:
         entity_id: counter.water_heater_pump_daily_cycles
     - service: system_log.write
       data:
-        message: 'Water heater pump started - Daily cycles: {{ states("counter.water_heater_pump_daily_cycles") }}, Runtime: {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h'
+        message: >-
+          Water heater pump started - Daily cycles: {{ states("counter.water_heater_pump_daily_cycles")
+          }}, Runtime: {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h,
+          Target cycle length: {{ target_runtime }} minutes (kitchen priority: {{ 'enabled' if kitchen_priority else 'disabled' }})
         level: info
   mode: single
