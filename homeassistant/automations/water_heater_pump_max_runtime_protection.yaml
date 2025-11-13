@@ -20,7 +20,7 @@
         entity_id: switch.shelly1minig3_28372f21c1dc
     - service: timer.cancel
       target:
-        entity_id: 
+        entity_id:
           - timer.water_heater_pump_runtime
           - timer.water_heater_pump_cooldown
   mode: single

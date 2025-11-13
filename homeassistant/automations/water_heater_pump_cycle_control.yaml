@@ -1,8 +1,8 @@
 # Water Heater Circulator Pump - Cycle Control
-# Manages the 15-min ON / 45-min OFF cycle
+# Manages dynamic runtime and cooldown window
 - id: 'water_heater_pump_cycle_control'
   alias: 'Water Heater Pump - Cycle Control'
-  description: 'Controls the 15-minute pump cycle with 45-minute cooldown'
+  description: 'Controls the pump cycle with dynamic runtime and cooldown handling'
   triggers:
     - platform: event
       event_type: automation.water_heater_pump_presence_detected
@@ -14,9 +14,14 @@
       entity_id: timer.water_heater_pump_cooldown
       state: 'idle'
   action:
+    - variables:
+        kitchen_priority: "{{ is_state('input_boolean.water_heater_pump_kitchen_priority', 'on') }}"
+        runtime_duration: "{{ '00:20:00' if kitchen_priority else '00:15:00' }}"
     - service: system_log.write
       data:
-        message: 'Starting water heater pump cycle - 15 min ON, 45 min cooldown'
+        message: >-
+          Starting water heater pump cycle - Target runtime {{ runtime_duration }} (kitchen priority:
+          {{ 'enabled' if kitchen_priority else 'disabled' }})
         level: info
     - service: switch.turn_on
       target:
@@ -25,7 +30,7 @@
       target:
         entity_id: timer.water_heater_pump_runtime
       data:
-        duration: '00:15:00'
+        duration: "{{ runtime_duration }}"
     - service: automation.trigger
       target:
         entity_id: automation.water_heater_pump_turn_off
