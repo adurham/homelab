@@ -17,6 +17,9 @@ input_boolean:
   water_heater_pump_automation_enabled:
     name: "Water Heater Pump Automation"
     icon: mdi:water-pump
+  water_heater_pump_kitchen_priority:
+    name: "Water Heater Pump Kitchen Priority"
+    icon: mdi:stove
 
 input_number:
   water_heater_pump_daily_runtime_hours:
@@ -26,6 +29,25 @@ input_number:
     step: 0.25
     unit_of_measurement: "hours"
     icon: mdi:clock
+  basement_virtual_setpoint:
+    name: "Basement Virtual Setpoint"
+    min: 60
+    max: 80
+    step: 1
+    unit_of_measurement: "°F"
+    icon: mdi:thermostat
+    initial: 70
+
+input_select:
+  basement_virtual_mode:
+    name: "Basement Virtual Mode"
+    options:
+      - "auto"
+      - "heat"
+      - "cool"
+      - "off"
+    icon: mdi:sync
+    initial: "auto"
 
 counter:
   water_heater_pump_daily_cycles:
@@ -61,3 +83,60 @@ influxdb:
       - sensor
       - binary_sensor
       - switch
+
+template:
+  - switch:
+      - name: "Basement Heatpump Heat"
+        unique_id: basement_heatpump_heat_switch
+        icon: mdi:radiator
+        availability: >-
+          {{ states('climate.basement_heatpump_basement_office_ac') not in
+          ['unavailable', 'unknown'] }}
+        state: >-
+          {{ 'on' if is_state_attr('climate.basement_heatpump_basement_office_ac',
+          'hvac_mode', 'heat') else 'off' }}
+        turn_on:
+          - service: climate.set_hvac_mode
+            data:
+              entity_id: climate.basement_heatpump_basement_office_ac
+              hvac_mode: 'heat'
+          - service: climate.set_swing_mode
+            data:
+              entity_id: climate.basement_heatpump_basement_office_ac
+              swing_mode: vertical
+          - service: climate.set_temperature
+            data:
+              entity_id: climate.basement_heatpump_basement_office_ac
+              temperature: 86
+        turn_off:
+          - service: climate.set_hvac_mode
+            data:
+              entity_id: climate.basement_heatpump_basement_office_ac
+              hvac_mode: 'off'
+      - name: "Basement Heatpump Cool"
+        unique_id: basement_heatpump_cool_switch
+        icon: mdi:snowflake
+        availability: >-
+          {{ states('climate.basement_heatpump_basement_office_ac') not in
+          ['unavailable', 'unknown'] }}
+        state: >-
+          {{ 'on' if is_state_attr('climate.basement_heatpump_basement_office_ac',
+          'hvac_mode', 'cool') else 'off' }}
+        turn_on:
+          - service: climate.set_hvac_mode
+            data:
+              entity_id: climate.basement_heatpump_basement_office_ac
+              hvac_mode: 'cool'
+          - service: climate.set_swing_mode
+            data:
+              entity_id: climate.basement_heatpump_basement_office_ac
+              swing_mode: vertical
+          - service: climate.set_temperature
+            data:
+              entity_id: climate.basement_heatpump_basement_office_ac
+              temperature: 60
+        turn_off:
+          - service: climate.set_hvac_mode
+            data:
+              entity_id: climate.basement_heatpump_basement_office_ac
+              hvac_mode: 'off'

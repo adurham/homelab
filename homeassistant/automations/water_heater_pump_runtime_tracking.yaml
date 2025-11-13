@@ -21,8 +21,10 @@
     - service: system_log.write
       data:
         message: >-
-          Water heater pump started - Daily cycles: {{ states("counter.water_heater_pump_daily_cycles")
-          }}, Runtime: {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h,
-          Target cycle length: {{ target_runtime }} minutes (kitchen priority: {{ 'enabled' if kitchen_priority else 'disabled' }})
+          Water heater pump started - Daily cycles:
+          {{ states("counter.water_heater_pump_daily_cycles") }}, Runtime:
+          {{ states("input_number.water_heater_pump_daily_runtime_hours") }}h,
+          Target cycle length: {{ target_runtime }} minutes,
+          Kitchen priority: {{ 'enabled' if kitchen_priority else 'disabled' }}
         level: info
   mode: single

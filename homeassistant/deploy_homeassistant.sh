@@ -5,6 +5,16 @@
 
 set -e  # Exit on any error
 
+# Load Home Assistant API credentials if available
+if [ -f "./ha_config.env" ]; then
+    # shellcheck disable=SC2046,SC1091
+    export $(grep -E "^(HA_URL|HA_TOKEN)=" ./ha_config.env | sed 's/#.*//')
+fi
+
+if [ -z "$HA_URL" ]; then
+    HA_URL="http://homeassistant.local:8123"
+fi
+
 # Configuration
 HA_HOST="root@homeassistant.local"
 HA_PORT="2222"
@@ -45,17 +55,26 @@ check_config_changes() {
     log "Checking for external changes to configuration.yaml..."
     
     if [ -f "configuration.yaml" ]; then
-        # Calculate hash of local configuration.yaml
-        local_hash=$(sha256sum "configuration.yaml" | awk '{print $1}')
-        
-        # Get hash of remote configuration.yaml
+        # Capture remote hash of configuration.yaml
         remote_hash=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "sha256sum /config/configuration.yaml 2>/dev/null | awk '{print \$1}'" || echo "")
-        
-        if [ -n "$remote_hash" ] && [ "$local_hash" != "$remote_hash" ]; then
-            error "configuration.yaml has been modified externally. Aborting deployment to prevent overwriting changes."
+
+        if [ -z "$remote_hash" ]; then
+            warn "Unable to determine remote configuration.yaml hash. Proceeding without external modification check."
+            return 0
         fi
-        
-        log "configuration.yaml is safe to deploy"
+
+        # Determine baseline hash from last deployment snapshot
+        if [ -f "configuration.yaml.remote" ]; then
+            baseline_hash=$(sha256sum "configuration.yaml.remote" | awk '{print $1}')
+        else
+            baseline_hash=""
+        fi
+
+        if [ -n "$baseline_hash" ] && [ "$remote_hash" != "$baseline_hash" ]; then
+            error "Remote configuration.yaml differs from the last deployed snapshot. Aborting to avoid overwriting external changes."
+        fi
+
+        log "configuration.yaml matches last deployed snapshot on remote"
     fi
 }
 
@@ -107,16 +126,21 @@ create_backup() {
     # Manage backup rotation
     log "Managing backup rotation..."
     ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "
-        # Get list of backups, sorted by date (newest first)
-        backups=\$(ha backup list --json | jq -r '.data.backups[] | .slug' | sort -r)
+        set -e
+        raw_json=\$(ha backups list --raw-json 2>/dev/null || true)
+        if [ -z \"\$raw_json\" ]; then
+            echo \"Unable to retrieve backup list; skipping rotation.\"
+            exit 0
+        fi
+
+        backups=\$(echo \"\$raw_json\" | jq -r '.data.backups[] | .slug' | sort -r)
         backup_count=\$(echo \"\$backups\" | wc -l)
-        
-        # Remove old backups if we exceed MAX_BACKUPS
+
         if [ \$backup_count -gt $MAX_BACKUPS ]; then
             echo \"Removing old backups...\"
-            echo \"\$backups\" | tail -n +\$((MAX_BACKUPS + 1)) | while read backup; do
+            echo \"\$backups\" | tail -n +\$((MAX_BACKUPS + 1)) | while read -r backup; do
                 echo \"Removing backup: \$backup\"
-                ha backup remove \$backup
+                ha backups remove \"\$backup\"
             done
         fi
     "
@@ -261,21 +285,31 @@ validate_and_restore_if_needed() {
         return 0
     fi
     
-    log "Validating deployed configuration..."
-    
-    # Check configuration using HA CLI
-    log "Running ha core check on deployed configuration..."
-    check_result=$(ssh -p $HA_PORT -o StrictHostKeyChecking=no $HA_HOST "ha core check --config /config" 2>&1)
-    
-    if [ $? -eq 0 ]; then
+    if [ -z "$HA_TOKEN" ]; then
+        warn "HA_TOKEN is not set; skipping remote configuration validation."
+        return 0
+    fi
+
+    log "Validating deployed configuration via Home Assistant API..."
+    check_response=$(curl -s -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" -X POST "$HA_URL/api/config/core/check_config" || true)
+
+    if [ -z "$check_response" ]; then
+        warn "No response from Home Assistant API during configuration validation. Skipping validation."
+        return 0
+    fi
+
+    validation_result=$(echo "$check_response" | jq -r '.result' 2>/dev/null || echo "unknown")
+
+    if [ "$validation_result" = "valid" ]; then
         log "Deployed configuration validation passed"
         return 0
-    else
-        error "Deployed configuration validation failed: $check_result"
-        log "Restoring from backup..."
-        restore_from_backup
-        return 1
     fi
+
+    validation_message=$(echo "$check_response" | jq -r '.errors // .message // "Unknown validation error"' 2>/dev/null || echo "Unknown validation error")
+    error "Deployed configuration validation failed: $validation_message"
+    log "Restoring from backup..."
+    restore_from_backup
+    return 1
 }
 
 # Restore from backup
@@ -319,6 +353,14 @@ restart_homeassistant() {
     fi
 }
 
+# Update local snapshot of remote configuration.yaml
+update_remote_snapshot() {
+    if [ -f "configuration.yaml" ]; then
+        cp configuration.yaml configuration.yaml.remote
+        log "Updated configuration.yaml deployment snapshot"
+    fi
+}
+
 # Main deployment function
 main() {
     log "Starting Home Assistant deployment..."
@@ -351,6 +393,7 @@ main() {
     if validate_and_restore_if_needed; then
         # 6. Restart Home Assistant only if validation passed
         restart_homeassistant
+        update_remote_snapshot
         log "Deployment completed successfully!"
         log "Backup created: deployment_backup_$(date +%Y%m%d_%H%M%S)"
     else

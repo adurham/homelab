@@ -58,6 +58,14 @@ homeassistant/
 - **Automation**: `automations/vent_control/smart_vent_control_system.yaml`
 - **Scripts**: `scripts/vent_control/control_all_room_vents.yaml`, `scripts/vent_control/control_room_vent.yaml`
 
+### Basement Climate Control
+- **Purpose**: Maintain basement temperature around 70°F using HomeKit sensor data
+- **Sensor**: `sensor.7wq7_temperature` (Basement Temperature)
+- **Setpoint Helpers**: `input_number.basement_virtual_setpoint`, `input_select.basement_virtual_mode`
+- **Actuation**: Template switches drive `climate.basement_heatpump_basement_office_ac` in heat/cool with max output
+- **Automation**: `automations/basement_virtual_thermostat.yaml` orchestrates heating/cooling logic
+- **Configuration**: See `configuration.yaml` `template`, `input_number`, and `input_select` sections
+
 ## 🛡️ Security Features
 
 ### Deployment Safety
