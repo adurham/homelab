@@ -1,0 +1,106 @@
+- id: basement_virtual_thermostat_control
+  alias: Basement Virtual Thermostat Control
+  description: Maintain basement temperature around the virtual setpoint
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.7wq7_temperature
+        - input_number.basement_virtual_setpoint
+        - input_select.basement_virtual_mode
+  variables:
+    current_temp: "{{ states('sensor.7wq7_temperature') | float(default=nan) }}"
+    target_temp: "{{ states('input_number.basement_virtual_setpoint') | float(70) }}"
+    mode: "{{ states('input_select.basement_virtual_mode') }}"
+    tolerance: 0.5
+  condition:
+    - condition: template
+      value_template: "{{ current_temp == current_temp }}"
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ mode == 'off' }}"
+          sequence:
+            - service: switch.turn_off
+              target:
+                entity_id:
+                  - switch.basement_heatpump_heat
+                  - switch.basement_heatpump_cool
+        - conditions:
+            - condition: template
+              value_template: "{{ mode == 'heat' }}"
+          sequence:
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ current_temp <= (target_temp - tolerance) }}"
+                  sequence:
+                    - service: switch.turn_on
+                      target:
+                        entity_id: switch.basement_heatpump_heat
+                - conditions:
+                    - condition: template
+                      value_template: "{{ current_temp >= (target_temp + tolerance) }}"
+                  sequence:
+                    - service: switch.turn_off
+                      target:
+                        entity_id: switch.basement_heatpump_heat
+              default: []
+            - service: switch.turn_off
+              target:
+                entity_id: switch.basement_heatpump_cool
+        - conditions:
+            - condition: template
+              value_template: "{{ mode == 'cool' }}"
+          sequence:
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ current_temp >= (target_temp + tolerance) }}"
+                  sequence:
+                    - service: switch.turn_on
+                      target:
+                        entity_id: switch.basement_heatpump_cool
+                - conditions:
+                    - condition: template
+                      value_template: "{{ current_temp <= (target_temp - tolerance) }}"
+                  sequence:
+                    - service: switch.turn_off
+                      target:
+                        entity_id: switch.basement_heatpump_cool
+              default: []
+            - service: switch.turn_off
+              target:
+                entity_id: switch.basement_heatpump_heat
+        - conditions:
+            - condition: template
+              value_template: "{{ mode == 'auto' }}"
+          sequence:
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ current_temp <= (target_temp - tolerance) }}"
+                  sequence:
+                    - service: switch.turn_on
+                      target:
+                        entity_id: switch.basement_heatpump_heat
+                    - service: switch.turn_off
+                      target:
+                        entity_id: switch.basement_heatpump_cool
+                - conditions:
+                    - condition: template
+                      value_template: "{{ current_temp >= (target_temp + tolerance) }}"
+                  sequence:
+                    - service: switch.turn_on
+                      target:
+                        entity_id: switch.basement_heatpump_cool
+                    - service: switch.turn_off
+                      target:
+                        entity_id: switch.basement_heatpump_heat
+              default:
+                - service: switch.turn_off
+                  target:
+                    entity_id:
+                      - switch.basement_heatpump_heat
+                      - switch.basement_heatpump_cool

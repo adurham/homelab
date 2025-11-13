@@ -1,7 +1,9 @@
 # Garage Lights - Door Open and Motion Control
 - id: 'garage_lights_door_motion_control'
   alias: 'Garage Lights - Door Open and Motion Control'
-  description: 'Turns on garage lights when any garage door opens or motion is detected, stays on for 15 minutes after last motion'
+  description: >-
+    Turns on garage lights when any garage door opens or motion is detected,
+    stays on for 15 minutes after last motion
   trigger:
     # Trigger when any garage door opens
     - platform: state
