@@ -10,9 +10,8 @@ This system automatically controls a water heater circulator pump based on occup
 2. **water_heater_pump_cycle_control.yaml** - Manages dynamic runtime (15 or 20 minutes) and cooldown durations
 3. **water_heater_pump_turn_off.yaml** - Turns off pump when the runtime timer completes
 4. **water_heater_pump_daily_reset.yaml** - Resets daily statistics at midnight
-5. **water_heater_pump_runtime_tracking.yaml** - Tracks daily runtime
+5. **water_heater_pump_runtime_tracking.yaml** - Tracks daily runtime statistics
 6. **water_heater_pump_runtime_update.yaml** - Updates runtime when pump stops
-7. **water_heater_pump_max_runtime_protection.yaml** - Prevents excessive usage
 
 ### Helper Entities
 - `input_boolean.water_heater_pump_automation_enabled` - Manual override toggle
@@ -35,10 +34,8 @@ This system automatically controls a water heater circulator pump based on occup
 - Guest Bathroom (`binary_sensor.guest_bathroom_occupancy`)
 
 ## Safety Features
-- **Daily Runtime Limit**: Maximum 8 hours per day
 - **Cooldown Period**: 45 minutes between cycles (reduced to 25 minutes for kitchen priority cycles)
 - **Manual Override**: Can be disabled via `input_boolean.water_heater_pump_automation_enabled`
-- **Automatic Shutdown**: Disables automation if daily limit exceeded
 
 ## Installation Steps
 1. Add helper entities to `configuration.yaml`:
