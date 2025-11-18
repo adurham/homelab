@@ -60,11 +60,13 @@ homeassistant/
 
 ### Basement Climate Control
 - **Purpose**: Maintain basement temperature around 70°F using HomeKit sensor data
+- **Virtual Thermostat**: Create via UI (see `create_basement_climate_helper.sh` for instructions) - shows on dashboards, voice assistant compatible
 - **Sensor**: `sensor.7wq7_temperature` (Basement Temperature)
 - **Setpoint Helpers**: `input_number.basement_virtual_setpoint`, `input_select.basement_virtual_mode`
-- **Actuation**: Template switches drive `climate.basement_heatpump_basement_office_ac` in heat/cool with max output
+- **Actuation**: Template switches drive `climate.basement_heatpump_basement_office_ac` in heat/cool with max output and vertical swing
 - **Automation**: `automations/basement_virtual_thermostat.yaml` orchestrates heating/cooling logic
-- **Configuration**: See `configuration.yaml` `template`, `input_number`, and `input_select` sections
+- **Setup**: After deployment, run `./create_basement_climate_helper.sh` for UI setup instructions
+- **Configuration**: See `configuration.yaml` `template` (switches), `input_number`, and `input_select` sections
 
 ## 🛡️ Security Features
 
