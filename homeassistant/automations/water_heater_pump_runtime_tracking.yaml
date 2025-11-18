@@ -1,16 +1,12 @@
 # Water Heater Circulator Pump - Runtime Tracking
-# Tracks daily runtime and prevents excessive usage
+# Tracks daily runtime statistics
 - id: 'water_heater_pump_runtime_tracking'
   alias: 'Water Heater Pump - Runtime Tracking'
-  description: 'Tracks daily runtime and prevents excessive usage'
+  description: 'Tracks daily runtime statistics'
   triggers:
     - platform: state
       entity_id: switch.shelly1minig3_28372f21c1dc
       to: 'on'
-  conditions:
-    - condition: numeric_state
-      entity_id: input_number.water_heater_pump_daily_runtime_hours
-      below: 8  # Maximum 8 hours per day
   action:
     - variables:
         kitchen_priority: "{{ is_state('input_boolean.water_heater_pump_kitchen_priority', 'on') }}"
