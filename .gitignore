@@ -117,3 +117,4 @@ backup/
 .continue/config.local.yaml
 .continue/index/
 .continue/sessions/
+misc scripts/grafana_token.txt
