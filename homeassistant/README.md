@@ -78,9 +78,10 @@ homeassistant/
 - **Error Handling**: Comprehensive error checking and reporting
 
 ### File Security
-- **Sensitive files**: `ha_config.env` is gitignored
-- **Example config**: `ha_config.env.example` provided for setup
+- **Sensitive files**: `ha_config.env` and `secrets.yaml` are gitignored
+- **Example configs**: `ha_config.env.example` and `secrets.yaml.example` provided for setup
 - **Virtual environment**: `venv/` directory is gitignored
+- **Secrets management**: Home Assistant uses `secrets.yaml` for sensitive configuration values
 
 ## 🔄 Deployment Process
 
@@ -106,7 +107,11 @@ homeassistant/
 ### Environment Setup
 1. Copy `ha_config.env.example` to `ha_config.env`
 2. Edit `ha_config.env` with your Home Assistant credentials
-3. Run `./setup_venv.sh` to install dependencies
+3. Copy `secrets.yaml.example` to `secrets.yaml`
+4. Edit `secrets.yaml` with your InfluxDB credentials and other secrets
+5. Run `./setup_venv.sh` to install dependencies
+
+**Note**: For Grafana datasource provisioning, ensure `INFLUXDB_USERNAME` and `INFLUXDB_PASSWORD` environment variables are set in your Grafana container, or update the default values in `grafana/provisioning/datasources/influxdb.yaml`.
 
 ### Adding New Systems
 1. Create new directories in `automations/` and `scripts/`

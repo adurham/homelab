@@ -1,0 +1,6 @@
+---
+- name: Deploy Home Assistant Configuration
+  hosts: homeassistant
+  gather_facts: no
+  roles:
+    - homeassistant_deploy

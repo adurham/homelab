@@ -1,0 +1,67 @@
+---
+- name: Run local yamllint
+  delegate_to: localhost
+  command: yamllint .
+  args:
+    chdir: "{{ playbook_dir }}/../homeassistant"
+  register: lint_result
+  changed_when: false
+  failed_when: lint_result.rc != 0
+
+- name: Check for remote configuration changes
+  block:
+    - name: Get remote configuration.yaml checksum
+      delegate_to: localhost
+      shell: "ssh -p {{ ansible_port }} -o StrictHostKeyChecking=no {{ ansible_user }}@{{ ansible_host }} \"sha256sum /config/configuration.yaml 2>/dev/null | awk '{print \\$1}'\""
+      register: remote_config_sum
+      changed_when: false
+
+    - name: Get local known checksum
+      stat:
+        path: "{{ playbook_dir }}/../homeassistant/configuration.yaml.remote"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      register: local_known_stat
+
+    - name: Fail if remote config has changed externally
+      fail:
+        msg: "Remote configuration.yaml differs from the last deployed snapshot. Aborting to avoid overwriting external changes."
+      when:
+        - remote_config_sum.stdout | length > 0
+        - local_known_stat.stat.exists
+        - remote_config_sum.stdout.strip() != local_known_stat.stat.checksum
+        - not skip_config_check | default(false)
+
+- name: Validate InfluxDB configuration
+  block:
+    - name: Check InfluxDB host in configuration
+      delegate_to: localhost
+      shell: "grep -A 5 '^influxdb:' {{ playbook_dir }}/../homeassistant/configuration.yaml | grep 'host:' | awk '{print $2}'"
+      register: influxdb_host
+      changed_when: false
+
+    - name: Fail if InfluxDB host is a Docker service name
+      fail:
+        msg: "InfluxDB host '{{ influxdb_host.stdout | default('') | trim }}' appears to be a Docker service name (matches pattern: 8 hex chars + dash + name). Home Assistant runs on the host, not in Docker. Use 'homeassistant.local' or the actual hostname/IP."
+      when: 
+        - influxdb_host.stdout | default('') | trim != ''
+        - influxdb_host.stdout | default('') | trim | regex_search('^[a-f0-9]{8}-') is not none
+        - not skip_influxdb_check | default(false)
+
+    - name: Test InfluxDB connectivity
+      delegate_to: localhost
+      uri:
+        url: "http://{{ influxdb_host.stdout.strip() | default('homeassistant.local') }}:8086/ping"
+        method: GET
+        status_code: [204, 200]
+      register: influxdb_test
+      failed_when: false
+      changed_when: false
+      when: not skip_influxdb_check | default(false)
+
+    - name: Warn if InfluxDB is not reachable
+      debug:
+        msg: "WARNING: InfluxDB at {{ influxdb_host.stdout.strip() }}:8086 is not reachable. This may cause data recording issues."
+      when:
+        - influxdb_test.status | default(0) != 204
+        - not skip_influxdb_check | default(false)

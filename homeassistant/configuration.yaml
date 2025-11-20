@@ -71,20 +71,50 @@ timer:
     icon: mdi:timer
 
 influxdb:
-  host: homeassistant.local
+  host: a0d7b954-influxdb
   port: 8086
   database: homeassistant
-  username: homeassistant
-  password: homeassistant
+  username: !secret influxdb_username
+  password: !secret influxdb_password
   max_retries: 3
   default_measurement: state
+  component_config_glob:
+    sensor.*:
+      override_measurement: state
   include:
     domains:
       - sensor
       - binary_sensor
       - switch
+      - counter
+      - input_number
+    entities:
+      - sensor.water_heater_pump_daily_runtime_hours
+      - input_number.water_heater_pump_daily_runtime_hours
+  exclude:
+    domains:
+      - media_player  # Huge bloat (album art/titles)
+      - device_tracker # Huge bloat (location history)
+    entity_globs:
+      - sensor.clock*
+      - sensor.date*
+      - sensor.time*
+      - sensor.uptime*
+      - sensor.*_signal_strength
+      - sensor.*_ssid
+      - sensor.*_bssid
+      - sensor.*_battery_level # Optional: remove if you care about battery history
+    entities:
+      - sun.sun
 
 template:
+  - sensor:
+      - name: "Water Heater Pump Daily Runtime Hours"
+        unique_id: water_heater_pump_daily_runtime_hours_sensor
+        state: "{{ states('input_number.water_heater_pump_daily_runtime_hours') | float(0) }}"
+        unit_of_measurement: "hours"
+        icon: mdi:clock
+        device_class: duration
   - switch:
       - name: "Basement Heatpump Heat"
         unique_id: basement_heatpump_heat_switch
