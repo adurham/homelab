@@ -1,0 +1,9 @@
+all:
+  children:
+    homeassistant:
+      hosts:
+        homeassistant.local:
+          ansible_host: homeassistant.local
+          ansible_user: root
+          ansible_port: 2222
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no'

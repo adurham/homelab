@@ -71,7 +71,7 @@ timer:
     icon: mdi:timer
 
 influxdb:
-  host: homeassistant.local
+  host: a0d7b954-influxdb  # vital for HA Yellow Add-on
   port: 8086
   database: homeassistant
   username: homeassistant
@@ -83,6 +83,8 @@ influxdb:
       - sensor
       - binary_sensor
       - switch
+      - counter
+      - input_number
 
 template:
   - switch:

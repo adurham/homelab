@@ -91,6 +91,7 @@ crash.*.log
 homeassistant/ha_config.env
 homeassistant/.env
 homeassistant/*.env
+homeassistant/secrets.yaml
 
 # Generated and inventory files
 homeassistant/entity_inventory/

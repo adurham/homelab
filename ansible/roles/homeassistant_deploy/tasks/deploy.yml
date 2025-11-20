@@ -1,0 +1,21 @@
+---
+- name: Deploy configuration files
+  delegate_to: localhost
+  command: >
+    bash -c "if [ -e '{{ playbook_dir }}/../homeassistant/{{ item }}' ]; then
+    scp -P {{ ansible_port }} -o StrictHostKeyChecking=no -r
+    '{{ playbook_dir }}/../homeassistant/{{ item }}'
+    {{ ansible_user }}@{{ ansible_host }}:/config/;
+    fi"
+  with_items:
+    - automations.yaml
+    - scripts.yaml
+    - scenes.yaml
+    - configuration.yaml
+    - groups.yaml
+    - automations
+    - scripts
+    - scenes
+    - helpers
+    - grafana
+  ignore_errors: yes

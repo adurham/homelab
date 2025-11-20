@@ -1,0 +1,60 @@
+---
+- name: Set backup timestamp
+  set_fact:
+    backup_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+
+- name: Create Home Assistant Backup via CLI
+  delegate_to: localhost
+  command: "ssh -p {{ ansible_port }} -o StrictHostKeyChecking=no {{ ansible_user }}@{{ ansible_host }} \"ha backup new --name deployment_backup_{{ backup_timestamp }}\""
+  register: ha_backup_result
+  failed_when: ha_backup_result.rc != 0
+  when: not skip_ha_backup | default(false)
+
+- name: Rotate Backups
+  delegate_to: localhost
+  shell: |
+    ssh -p {{ ansible_port }} -o StrictHostKeyChecking=no {{ ansible_user }}@{{ ansible_host }} "
+    set -e
+    raw_json=\$(ha backups list --raw-json 2>/dev/null || true)
+    if [ -z \"\$raw_json\" ]; then exit 0; fi
+    
+    backups=\$(echo \"\$raw_json\" | jq -r '.data.backups[] | .slug' | sort -r)
+    backup_count=\$(echo \"\$backups\" | wc -l)
+    
+    if [ \$backup_count -gt {{ max_backups | default(10) }} ]; then
+        echo \"\$backups\" | tail -n +$(( {{ max_backups | default(10) }} + 1 )) | while read -r backup; do
+            ha backups remove \"\$backup\"
+        done
+    fi
+    "
+  register: rotation_result
+  changed_when: "'Removing backup' in rotation_result.stdout"
+
+- name: Create file-level backup directory
+  delegate_to: localhost
+  command: "ssh -p {{ ansible_port }} -o StrictHostKeyChecking=no {{ ansible_user }}@{{ ansible_host }} \"mkdir -p {{ backup_dir | default('/config/backups') }}/manual_backup_{{ backup_timestamp }}\""
+
+- name: Backup configuration files
+  delegate_to: localhost
+  shell: |
+    ssh -p {{ ansible_port }} -o StrictHostKeyChecking=no {{ ansible_user }}@{{ ansible_host }} "
+    cp /config/{{ item }} {{ backup_dir | default('/config/backups') }}/manual_backup_{{ backup_timestamp }}/ 2>/dev/null || true
+    "
+  with_items:
+    - automations.yaml
+    - scripts.yaml
+    - scenes.yaml
+    - configuration.yaml
+  ignore_errors: yes
+
+- name: Backup configuration directories
+  delegate_to: localhost
+  shell: |
+    ssh -p {{ ansible_port }} -o StrictHostKeyChecking=no {{ ansible_user }}@{{ ansible_host }} "
+    cp -r /config/{{ item }} {{ backup_dir | default('/config/backups') }}/manual_backup_{{ backup_timestamp }}/ 2>/dev/null || true
+    "
+  with_items:
+    - automations
+    - scripts
+    - scenes
+  ignore_errors: yes
