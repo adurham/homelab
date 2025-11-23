@@ -1,0 +1,44 @@
+---
+# Water Heater Pump - Temperature Lockout
+# Prevents pump from running if tank temperature is too low
+- id: 'water_heater_pump_temperature_check'
+  alias: 'Water Heater Pump - Temperature Check'
+  description: 'Checks tank temperature before allowing pump to run'
+  triggers:
+    - platform: event
+      event_type: automation.water_heater_pump_presence_detected
+  conditions:
+    - condition: state
+      entity_id: input_boolean.water_heater_pump_automation_enabled
+      state: 'on'
+  action:
+    - variables:
+        upper_tank_temp: "{{ states('sensor.econet_hpwh_upper_tank_temperature') | float(0) }}"
+        min_temp_threshold: "{{ states('input_number.water_heater_min_temp_threshold') | float(100) }}"
+        temp_lockout_active: "{{ upper_tank_temp < min_temp_threshold }}"
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ temp_lockout_active }}"
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.water_heater_pump_low_temp_lockout
+            - service: system_log.write
+              data:
+                message: >-
+                  Water heater pump temperature lockout active - Upper tank: {{ upper_tank_temp }}°F,
+                  Minimum threshold: {{ min_temp_threshold }}°F - Pump will not run
+                level: warning
+            - stop: 'Temperature too low for circulation'
+      default:
+        - service: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.water_heater_pump_low_temp_lockout
+        - service: system_log.write
+          data:
+            message: >-
+              Water heater pump temperature check passed - Upper tank: {{ upper_tank_temp }}°F
+              (threshold: {{ min_temp_threshold }}°F) - Allowing pump cycle
+            level: info
+  mode: single

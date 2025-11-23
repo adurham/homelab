@@ -13,15 +13,13 @@
     - condition: state
       entity_id: timer.water_heater_pump_cooldown
       state: 'idle'
+    - condition: state
+      entity_id: input_boolean.water_heater_pump_low_temp_lockout
+      state: 'off'
   action:
-    - variables:
-        kitchen_priority: "{{ is_state('input_boolean.water_heater_pump_kitchen_priority', 'on') }}"
-        runtime_duration: "{{ '00:20:00' if kitchen_priority else '00:15:00' }}"
     - service: system_log.write
       data:
-        message: >-
-          Starting water heater pump cycle - Target runtime {{ runtime_duration }} (kitchen priority:
-          {{ 'enabled' if kitchen_priority else 'disabled' }})
+        message: 'Starting water heater pump cycle'
         level: info
     - service: switch.turn_on
       target:
@@ -30,8 +28,9 @@
       target:
         entity_id: timer.water_heater_pump_runtime
       data:
-        duration: "{{ runtime_duration }}"
+        duration: '00:15:00'
     - service: automation.trigger
       target:
         entity_id: automation.water_heater_pump_turn_off
   mode: single
+

@@ -1,0 +1,36 @@
+---
+# Force periodic state updates for water pump entities to ensure InfluxDB recording
+# This automation triggers every 1 minute and forces Home Assistant to re-evaluate
+# and record the current state of water pump entities to InfluxDB
+
+- id: water_heater_pump_influxdb_periodic_recording
+  alias: "Water Heater Pump - Force InfluxDB Recording"
+  description: "Force periodic recording of water pump data to InfluxDB every 1 minute"
+  trigger:
+    - platform: time_pattern
+      minutes: "/1"  # Every 1 minute
+  action:
+    - service: homeassistant.update_entity
+      target:
+        entity_id:
+          # Water pump entities
+          - switch.shelly1minig3_28372f21c1dc
+          - input_number.water_heater_pump_daily_runtime_hours
+          - sensor.water_heater_pump_daily_runtime_hours
+          - counter.water_heater_pump_daily_cycles
+          # Heat pump water heater entities
+          - sensor.econet_hpwh_upper_tank_temperature
+          - sensor.econet_hpwh_lower_tank_temperature
+          - sensor.econet_hpwh_ambient_temperature
+          - sensor.econet_hpwh_evaporator_temperature
+          - sensor.econet_hpwh_suction_temperature
+          - sensor.econet_hpwh_discharge_temperature
+          - sensor.econet_hpwh_power
+          - sensor.econet_hpwh_energy
+          - sensor.econet_hpwh_hot_water
+          - binary_sensor.econet_hpwh_compressor
+          - sensor.econet_hpwh_mode
+          - sensor.econet_hpwh_heating_element_state
+          - climate.econet_hpwh
+  mode: single
+
