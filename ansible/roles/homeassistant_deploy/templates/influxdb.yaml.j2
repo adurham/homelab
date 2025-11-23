@@ -1,0 +1,14 @@
+apiVersion: 1
+
+datasources:
+  - name: Home Assistant
+    type: influxdb
+    access: proxy
+    url: http://a0d7b954-influxdb:8086
+    database: homeassistant
+    user: {{ influxdb_username | default('homeassistant') }}
+    secureJsonData:
+      password: {{ influxdb_password | default('homeassistant') }}
+    jsonData:
+      httpMode: GET
+

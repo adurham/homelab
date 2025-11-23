@@ -137,7 +137,7 @@ template:
           - service: climate.set_temperature
             data:
               entity_id: climate.basement_heatpump_basement_office_ac
-              temperature: 86
+              temperature: 85
         turn_off:
           - service: climate.set_hvac_mode
             data:

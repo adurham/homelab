@@ -33,4 +33,3 @@
       target:
         entity_id: automation.water_heater_pump_turn_off
   mode: single
-

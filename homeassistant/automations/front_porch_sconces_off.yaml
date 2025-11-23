@@ -2,7 +2,7 @@
 - id: 'front_porch_sconces_off'
   alias: 'Front Porch Sconces Off'
   description: 'Turn Front Porch Sconces off at midnight'
-  triggers:
+  trigger:
     - platform: time
       at: '00:00:00'
   action:

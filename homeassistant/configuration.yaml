@@ -41,6 +41,14 @@ input_number:
     step: 0.25
     unit_of_measurement: "hours"
     icon: mdi:clock
+  influxdb_recording_minute:
+    name: "InfluxDB Recording Minute"
+    min: 0
+    max: 1440
+    step: 1
+    unit_of_measurement: "min"
+    icon: mdi:database-export
+    initial: 0
   basement_virtual_setpoint:
     name: "Basement Virtual Setpoint"
     min: 60
@@ -164,9 +172,20 @@ template:
       - name: "Water Heater Pump Daily Runtime Hours"
         unique_id: water_heater_pump_daily_runtime_hours_sensor
         state: "{{ states('input_number.water_heater_pump_daily_runtime_hours') | float(0) }}"
-        unit_of_measurement: "hours"
+        unit_of_measurement: "h"
         icon: mdi:clock
         device_class: duration
+      - name: "Water Heater Pump Status (Recording)"
+        unique_id: water_heater_pump_status_recording
+        state: "{{ 1 if is_state('switch.shelly1minig3_28372f21c1dc', 'on') else 0 }}"
+        unit_of_measurement: ""
+        icon: mdi:water-pump
+        availability: "{{ states('switch.shelly1minig3_28372f21c1dc') not in ['unavailable', 'unknown'] }}"
+      - name: "InfluxDB Recording Trigger"
+        unique_id: influxdb_recording_trigger
+        state: "{{ states('input_number.influxdb_recording_minute') | int(0) }}"
+        unit_of_measurement: "min"
+        icon: mdi:database-export
   - switch:
       - name: "Basement Heatpump Heat"
         unique_id: basement_heatpump_heat_switch
@@ -189,7 +208,7 @@ template:
           - service: climate.set_temperature
             data:
               entity_id: climate.basement_heatpump_basement_office_ac
-              temperature: 86
+              temperature: 85
         turn_off:
           - service: climate.set_hvac_mode
             data:

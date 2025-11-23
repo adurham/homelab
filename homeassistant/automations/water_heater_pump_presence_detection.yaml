@@ -57,4 +57,3 @@
       target:
         entity_id: automation.water_heater_pump_cycle_control
   mode: single
-
