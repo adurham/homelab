@@ -7,18 +7,30 @@
   alias: "Water Heater Pump - Force InfluxDB Recording"
   description: "Force periodic recording of water pump data to InfluxDB every 1 minute"
   trigger:
+    # Trigger every minute
     - platform: time_pattern
       minutes: "/1"  # Every 1 minute
   action:
+    # Increment the trigger counter to force a state change every minute
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.influxdb_recording_minute
+      data:
+        value: "{{ ((states('input_number.influxdb_recording_minute') | int(0)) + 1) % 1440 }}"
+    # Force update all entities - this triggers state refresh
     - service: homeassistant.update_entity
       target:
         entity_id:
-          # Water pump entities
+          # Water pump entities (critical for Pump Status Over Time panel)
           - switch.shelly1minig3_28372f21c1dc
           - input_number.water_heater_pump_daily_runtime_hours
           - sensor.water_heater_pump_daily_runtime_hours
           - counter.water_heater_pump_daily_cycles
-          # Heat pump water heater entities
+          - sensor.water_heater_pump_status_recording
+          # Heat pump water heater entities (critical for Pump Status Over Time panel)
+          - binary_sensor.econet_hpwh_compressor
+          - sensor.econet_hpwh_heating_element_state
+          # Additional heat pump water heater entities
           - sensor.econet_hpwh_upper_tank_temperature
           - sensor.econet_hpwh_lower_tank_temperature
           - sensor.econet_hpwh_ambient_temperature
@@ -28,9 +40,6 @@
           - sensor.econet_hpwh_power
           - sensor.econet_hpwh_energy
           - sensor.econet_hpwh_hot_water
-          - binary_sensor.econet_hpwh_compressor
           - sensor.econet_hpwh_mode
-          - sensor.econet_hpwh_heating_element_state
           - climate.econet_hpwh
   mode: single
-

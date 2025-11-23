@@ -23,7 +23,7 @@
 
 - name: Run pre-deployment checks
   import_tasks: pre_checks.yml
-  tags: ['pre_check']
+  tags: ['always', 'pre_check']
 
 - name: Perform backups
   import_tasks: backup.yml

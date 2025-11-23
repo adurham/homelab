@@ -17,6 +17,45 @@
     - scripts
     - scenes
     - helpers
-    - grafana
     - secrets.yaml
   ignore_errors: yes
+
+- name: Deploy InfluxDB datasource configuration
+  block:
+    - name: Render InfluxDB datasource template locally
+      delegate_to: localhost
+      template:
+        src: influxdb.yaml.j2
+        dest: "{{ playbook_dir }}/../homeassistant/grafana/provisioning/datasources/influxdb.yaml"
+        mode: '0644'
+      vars:
+        influxdb_username: "{{ lookup('env', 'INFLUXDB_USERNAME') | default('homeassistant', true) }}"
+        influxdb_password: "{{ lookup('env', 'INFLUXDB_PASSWORD') | default('homeassistant', true) }}"
+
+    - name: Upload Grafana configuration (with template applied)
+      delegate_to: localhost
+      command: >
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no -r
+        '{{ playbook_dir }}/../homeassistant/grafana'
+        {{ ansible_user }}@{{ ansible_host }}:/config/
+
+  always:
+    - name: Revert local InfluxDB datasource config to placeholders
+      delegate_to: localhost
+      copy:
+        dest: "{{ playbook_dir }}/../homeassistant/grafana/provisioning/datasources/influxdb.yaml"
+        content: |
+          apiVersion: 1
+
+          datasources:
+            - name: Home Assistant
+              type: influxdb
+              access: proxy
+              url: http://a0d7b954-influxdb:8086
+              database: homeassistant
+              user: ${INFLUXDB_USERNAME:-homeassistant}
+              secureJsonData:
+                password: ${INFLUXDB_PASSWORD:-homeassistant}
+              jsonData:
+                httpMode: GET
+        mode: '0644'

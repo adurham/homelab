@@ -1,5 +1,12 @@
 ---
-- name: Run local yamllint
+- name: Validate YAML syntax for all files
+  delegate_to: localhost
+  command: "{{ playbook_dir }}/../homeassistant/venv/bin/python {{ role_path }}/files/validate_yaml_syntax.py {{ playbook_dir }}/../homeassistant"
+  register: yaml_validate_result
+  changed_when: false
+  failed_when: yaml_validate_result.rc != 0
+
+- name: Run local yamllint (style checks)
   delegate_to: localhost
   command: yamllint .
   args:
@@ -7,6 +14,7 @@
   register: lint_result
   changed_when: false
   failed_when: lint_result.rc != 0
+  when: (yamllint_enabled | default(true) | bool)
 
 - name: Check for remote configuration changes
   block:

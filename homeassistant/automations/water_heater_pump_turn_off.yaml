@@ -25,4 +25,3 @@
       target:
         entity_id: timer.water_heater_pump_runtime
   mode: single
-

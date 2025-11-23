@@ -2,7 +2,7 @@
 - id: 'front_porch_sconces_on'
   alias: 'Front Porch Sconces On'
   description: 'Turn Front Porch Sconces on at sunset'
-  triggers:
+  trigger:
     - platform: sun
       event: sunset
       offset: 0
