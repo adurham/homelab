@@ -9,14 +9,9 @@
       event_data:
         entity_id: timer.water_heater_pump_runtime
   action:
-    - variables:
-        kitchen_priority: "{{ is_state('input_boolean.water_heater_pump_kitchen_priority', 'on') }}"
-        cooldown_duration: "{{ '00:25:00' if kitchen_priority else '00:45:00' }}"
     - service: system_log.write
       data:
-        message: >-
-          Water heater pump runtime complete - turning off and starting cooldown ({{ cooldown_duration
-          }}) - Kitchen priority: {{ 'enabled' if kitchen_priority else 'disabled' }}
+        message: 'Water heater pump runtime complete - turning off and starting 10-minute cooldown'
         level: info
     - service: switch.turn_off
       target:
@@ -25,11 +20,9 @@
       target:
         entity_id: timer.water_heater_pump_cooldown
       data:
-        duration: "{{ cooldown_duration }}"
+        duration: '00:10:00'
     - service: timer.cancel
       target:
         entity_id: timer.water_heater_pump_runtime
-    - service: input_boolean.turn_off
-      target:
-        entity_id: input_boolean.water_heater_pump_kitchen_priority
   mode: single
+

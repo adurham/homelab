@@ -1,0 +1,75 @@
+---
+# Water Heater Pump - Dynamic Runtime Control
+# Uses lower tank temperature feedback to determine when circulation is complete
+- id: 'water_heater_pump_dynamic_runtime'
+  alias: 'Water Heater Pump - Dynamic Runtime'
+  description: 'Monitors lower tank temperature to stop pump when circulation completes'
+  triggers:
+    - platform: state
+      entity_id: switch.shelly1minig3_28372f21c1dc
+      to: 'on'
+  action:
+    # Record starting lower tank temperature
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.water_heater_pump_start_lower_temp
+      data:
+        value: "{{ states('sensor.econet_hpwh_lower_tank_temperature') | float(0) }}"
+    
+    - service: system_log.write
+      data:
+        message: >-
+          Water heater pump started - Recording lower tank temp: 
+          {{ states('sensor.econet_hpwh_lower_tank_temperature') }}°F
+        level: info
+    
+    # Wait a bit for circulation to start
+    - delay: '00:00:30'
+    
+    # Monitor for temperature drop (circulation complete)
+    - wait_template: >-
+        {% set start_temp = states('input_number.water_heater_pump_start_lower_temp') | float(0) %}
+        {% set current_temp = states('sensor.econet_hpwh_lower_tank_temperature') | float(0) %}
+        {% set threshold = states('input_number.water_heater_pump_temp_drop_threshold') | float(5) %}
+        {% set temp_drop = start_temp - current_temp %}
+        {{ temp_drop >= threshold }}
+      timeout: '00:20:00'
+      continue_on_timeout: true
+    
+    - variables:
+        start_temp: "{{ states('input_number.water_heater_pump_start_lower_temp') | float(0) }}"
+        current_temp: "{{ states('sensor.econet_hpwh_lower_tank_temperature') | float(0) }}"
+        temp_drop: "{{ start_temp - current_temp }}"
+        threshold: "{{ states('input_number.water_heater_pump_temp_drop_threshold') | float(5) }}"
+        timed_out: "{{ wait.completed == false }}"
+    
+    - choose:
+        # Temperature drop detected - circulation complete
+        - conditions:
+            - condition: template
+              value_template: "{{ not timed_out }}"
+          sequence:
+            - service: system_log.write
+              data:
+                message: >-
+                  Water heater pump circulation complete - Lower tank temp dropped {{ temp_drop | round(1) }}°F
+                  ({{ start_temp | round(1) }}°F → {{ current_temp | round(1) }}°F, threshold: {{ threshold }}°F)
+                  - Stopping pump
+                level: info
+            - service: switch.turn_off
+              target:
+                entity_id: switch.shelly1minig3_28372f21c1dc
+            - service: timer.cancel
+              target:
+                entity_id: timer.water_heater_pump_runtime
+      
+      # Timeout - use normal timer-based shutoff
+      default:
+        - service: system_log.write
+          data:
+            message: >-
+              Water heater pump dynamic runtime timeout - No significant temp drop detected
+              ({{ temp_drop | round(1) }}°F drop, threshold: {{ threshold }}°F)
+              - Falling back to timer-based shutoff
+            level: warning
+  mode: single

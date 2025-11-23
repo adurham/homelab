@@ -18,4 +18,5 @@
     - scenes
     - helpers
     - grafana
+    - secrets.yaml
   ignore_errors: yes

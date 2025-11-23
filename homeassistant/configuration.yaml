@@ -20,6 +20,18 @@ input_boolean:
   water_heater_pump_kitchen_priority:
     name: "Water Heater Pump Kitchen Priority"
     icon: mdi:stove
+  water_heater_pump_low_temp_lockout:
+    name: "Water Heater Pump Low Temperature Lockout"
+    icon: mdi:thermometer-low
+    initial: false
+  water_heater_recovery_mode:
+    name: "Water Heater Recovery Mode"
+    icon: mdi:flash
+    initial: false
+  basement_heatpump_occupancy_control_enabled:
+    name: "Basement Heat Pump Occupancy Control"
+    icon: mdi:motion-sensor
+    initial: true
 
 input_number:
   water_heater_pump_daily_runtime_hours:
@@ -37,6 +49,46 @@ input_number:
     unit_of_measurement: "°F"
     icon: mdi:thermostat
     initial: 70
+  water_heater_min_temp_threshold:
+    name: "Minimum Temperature for Circulation"
+    min: 90
+    max: 120
+    step: 1
+    unit_of_measurement: "°F"
+    icon: mdi:thermometer
+    initial: 100
+  water_heater_critical_hot_water_threshold:
+    name: "Critical Hot Water Threshold"
+    min: 0
+    max: 50
+    step: 5
+    unit_of_measurement: "%"
+    icon: mdi:water-percent-alert
+    initial: 30
+  water_heater_pump_temp_drop_threshold:
+    name: "Pump Stop Temperature Drop Threshold"
+    min: 3
+    max: 15
+    step: 1
+    unit_of_measurement: "°F"
+    icon: mdi:thermometer-chevron-down
+    initial: 5
+  water_heater_pump_start_lower_temp:
+    name: "Pump Start Lower Tank Temperature"
+    min: 50
+    max: 130
+    step: 0.1
+    unit_of_measurement: "°F"
+    icon: mdi:thermometer
+    initial: 100
+  basement_heatpump_unoccupied_delay:
+    name: "Basement Heat Pump Unoccupied Delay"
+    min: 0
+    max: 120
+    step: 5
+    unit_of_measurement: "minutes"
+    icon: mdi:timer-off
+    initial: 30
 
 input_select:
   basement_virtual_mode:
@@ -170,3 +222,27 @@ template:
             data:
               entity_id: climate.basement_heatpump_basement_office_ac
               hvac_mode: 'off'
+
+climate:
+  - platform: generic_thermostat
+    name: Basement Virtual Thermostat
+    unique_id: basement_virtual_thermostat
+    heater: switch.basement_heatpump_heat
+    ac_mode: false
+    target_sensor: sensor.7wq7_temperature
+    min_temp: 60
+    max_temp: 80
+    cold_tolerance: 0.5
+    hot_tolerance: 0.5
+    initial_hvac_mode: "off"
+  - platform: generic_thermostat
+    name: Basement Virtual AC
+    unique_id: basement_virtual_ac
+    heater: switch.basement_heatpump_cool
+    ac_mode: true
+    target_sensor: sensor.7wq7_temperature
+    min_temp: 60
+    max_temp: 80
+    cold_tolerance: 0.5
+    hot_tolerance: 0.5
+    initial_hvac_mode: "off"
