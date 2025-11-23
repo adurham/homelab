@@ -3,7 +3,9 @@
     "list": [
       {
         "builtIn": 1,
-        "datasource": "-- Grafana --",
+        "datasource": {
+          "uid": "-- Grafana --"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -13,13 +15,16 @@
     ]
   },
   "editable": true,
-  "gnetId": null,
+  "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": null,
+  "id": 4,
   "links": [],
   "panels": [
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -31,7 +36,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           },
@@ -51,6 +56,7 @@
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -58,12 +64,18 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
-      "pluginVersion": "8.0.0",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Daily Runtime",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -107,6 +119,10 @@
         },
         {
           "alias": "Daily Runtime (Sensor)",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -153,7 +169,10 @@
       "type": "stat"
     },
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -165,7 +184,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           },
@@ -185,6 +204,7 @@
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -192,12 +212,18 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
-      "pluginVersion": "8.0.0",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Daily Cycles",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -244,7 +270,10 @@
       "type": "stat"
     },
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -282,7 +311,7 @@
             "steps": [
               {
                 "color": "red",
-                "value": null
+                "value": 0
               },
               {
                 "color": "red",
@@ -310,6 +339,7 @@
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -317,12 +347,18 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
-      "pluginVersion": "8.0.0",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Pump Status",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -369,24 +405,32 @@
       "type": "stat"
     },
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
+              "legend": false,
               "tooltip": false,
-              "viz": false,
-              "legend": false
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -394,6 +438,7 @@
               "type": "linear"
             },
             "showPoints": "never",
+            "showValues": false,
             "spanNulls": 3600000,
             "stacking": {
               "group": "A",
@@ -409,7 +454,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           },
@@ -432,14 +477,19 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "8.0.0",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Daily Runtime",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -483,6 +533,10 @@
         },
         {
           "alias": "Daily Runtime (Sensor)",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -529,24 +583,32 @@
       "type": "timeseries"
     },
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
+              "legend": false,
               "tooltip": false,
-              "viz": false,
-              "legend": false
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -554,6 +616,7 @@
               "type": "linear"
             },
             "showPoints": "never",
+            "showValues": false,
             "spanNulls": 3600000,
             "stacking": {
               "group": "A",
@@ -569,7 +632,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           },
@@ -592,14 +655,19 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "8.0.0",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Daily Cycles",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -646,24 +714,32 @@
       "type": "timeseries"
     },
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
+              "legend": false,
               "tooltip": false,
-              "viz": false,
-              "legend": false
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "stepAfter",
             "lineWidth": 2,
             "pointSize": 5,
@@ -671,6 +747,7 @@
               "type": "linear"
             },
             "showPoints": "never",
+            "showValues": false,
             "spanNulls": 3600000,
             "stacking": {
               "group": "A",
@@ -698,7 +775,7 @@
             "steps": [
               {
                 "color": "red",
-                "value": null
+                "value": 0
               },
               {
                 "color": "red",
@@ -729,14 +806,19 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "8.0.0",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Pump Status",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -783,16 +865,23 @@
       "type": "timeseries"
     },
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "Temperature (°F)",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
@@ -801,6 +890,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -808,6 +898,7 @@
               "type": "linear"
             },
             "showPoints": "never",
+            "showValues": false,
             "spanNulls": 3600000,
             "stacking": {
               "group": "A",
@@ -823,7 +914,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           },
@@ -846,13 +937,19 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Upper Tank",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -896,6 +993,10 @@
         },
         {
           "alias": "Lower Tank",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -939,6 +1040,10 @@
         },
         {
           "alias": "Ambient",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -982,6 +1087,10 @@
         },
         {
           "alias": "Evaporator",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -1025,6 +1134,10 @@
         },
         {
           "alias": "Suction",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -1068,6 +1181,10 @@
         },
         {
           "alias": "Discharge",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -1114,21 +1231,62 @@
       "type": "timeseries"
     },
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "Power (W)",
             "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "never",
-            "spanNulls": 3600000
+            "showValues": false,
+            "spanNulls": 3600000,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
           },
           "unit": "watt"
         },
@@ -1143,18 +1301,25 @@
       "id": 11,
       "options": {
         "legend": {
+          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Power Usage",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -1201,18 +1366,22 @@
       "type": "timeseries"
     },
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           },
@@ -1232,6 +1401,7 @@
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -1239,11 +1409,18 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Total Energy",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -1290,18 +1467,22 @@
       "type": "stat"
     },
     {
-      "datasource": "Home Assistant",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           },
@@ -1321,6 +1502,7 @@
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "horizontal",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -1328,11 +1510,18 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "alias": "Hot Water %",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -1376,6 +1565,10 @@
         },
         {
           "alias": "Compressor",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -1419,6 +1612,10 @@
         },
         {
           "alias": "Mode",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -1462,6 +1659,10 @@
         },
         {
           "alias": "Heating Element",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
           "groupBy": [
             {
               "params": [
@@ -1508,9 +1709,9 @@
       "type": "stat"
     }
   ],
+  "preload": false,
   "refresh": "30s",
-  "schemaVersion": 30,
-  "style": "dark",
+  "schemaVersion": 42,
   "tags": [],
   "templating": {
     "list": []
@@ -1523,5 +1724,5 @@
   "timezone": "",
   "title": "Water Heater Pump",
   "uid": "water_heater_pump",
-  "version": 2
+  "version": 14
 }
