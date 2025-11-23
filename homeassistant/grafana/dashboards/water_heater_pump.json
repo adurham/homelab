@@ -397,7 +397,7 @@
               }
             ]
           },
-          "unit": "hrs"
+          "unit": "mins"
         },
         "overrides": []
       },
@@ -461,6 +461,12 @@
                 "type": "field"
               },
               {
+                "params": [
+                  " * 60"
+                ],
+                "type": "math"
+              },
+              {
                 "params": [],
                 "type": "last"
               }
@@ -470,7 +476,7 @@
             {
               "key": "entity_id",
               "operator": "=",
-              "value": "sensor.water_heater_pump_daily_runtime_hours"
+              "value": "input_number.water_heater_pump_daily_runtime_hours"
             }
           ]
         }
@@ -492,7 +498,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "Temperature (°F)",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "barWidthFactor": 0.6,
@@ -532,17 +538,58 @@
               }
             ]
           },
-          "unit": "hrs"
+          "unit": "fahrenheit"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pump Status"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 30
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.stepAfter",
+                "value": true
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 8
       },
-      "id": 4,
+      "id": 20,
       "options": {
         "legend": {
           "calcs": [],
@@ -559,7 +606,7 @@
       "pluginVersion": "12.3.0",
       "targets": [
         {
-          "alias": "Daily Runtime",
+          "alias": "Lower Tank",
           "datasource": {
             "type": "influxdb",
             "uid": "bf1c7tenf4lc0e"
@@ -601,12 +648,12 @@
             {
               "key": "entity_id",
               "operator": "=",
-              "value": "input_number.water_heater_pump_daily_runtime_hours"
+              "value": "econet_hpwh_lower_tank_temperature"
             }
           ]
         },
         {
-          "alias": "Daily Runtime (Sensor)",
+          "alias": "Pump Status",
           "datasource": {
             "type": "influxdb",
             "uid": "bf1c7tenf4lc0e"
@@ -614,7 +661,7 @@
           "groupBy": [
             {
               "params": [
-                "$__interval"
+                "1m"
               ],
               "type": "time"
             },
@@ -640,7 +687,7 @@
               },
               {
                 "params": [],
-                "type": "mean"
+                "type": "last"
               }
             ]
           ],
@@ -648,12 +695,149 @@
             {
               "key": "entity_id",
               "operator": "=",
-              "value": "sensor.water_heater_pump_daily_runtime_hours"
+              "value": "sensor.water_heater_pump_status_recording"
             }
           ]
         }
       ],
-      "title": "Daily Runtime Over Time",
+      "title": "Pump Cycle Correlation",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "bf1c7tenf4lc0e"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "bars",
+            "fillOpacity": 100,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": 3600000,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "mins"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "alias": "Daily Runtime",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
+          "groupBy": [
+            {
+              "params": [
+                "1d"
+              ],
+              "type": "time"
+            },
+            {
+              "params": [
+                "null"
+              ],
+              "type": "fill"
+            }
+          ],
+          "measurement": "state",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [
+                  " * 60"
+                ],
+                "type": "math"
+              },
+              {
+                "params": [],
+                "type": "max"
+              }
+            ]
+          ],
+          "tags": [
+            {
+              "key": "entity_id",
+              "operator": "=",
+              "value": "input_number.water_heater_pump_daily_runtime_hours"
+            }
+          ]
+        }
+      ],
+      "title": "Runtime History (Daily)",
       "type": "timeseries"
     },
     {
@@ -718,7 +902,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 8
+        "y": 16
       },
       "id": 5,
       "options": {
@@ -779,7 +963,7 @@
             {
               "key": "entity_id",
               "operator": "=",
-              "value": "counter.water_heater_pump_daily_cycles"
+              "value": "water_heater_pump_daily_cycles_recording"
             }
           ]
         }
@@ -930,7 +1114,7 @@
             {
               "key": "entity_id",
               "operator": "=",
-              "value": "water_heater_pump_status_recording"
+              "value": "sensor.water_heater_pump_status_recording"
             }
           ]
         },
@@ -977,7 +1161,7 @@
             {
               "key": "entity_id",
               "operator": "=",
-              "value": "econet_hpwh_compressor"
+              "value": "econet_hpwh_compressor_recording"
             }
           ]
         },
@@ -1024,7 +1208,7 @@
             {
               "key": "entity_id",
               "operator": "=",
-              "value": "econet_hpwh_heating_element_state"
+              "value": "econet_hpwh_heating_element_recording"
             }
           ]
         }
@@ -1051,7 +1235,7 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 10,
+            "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -1088,7 +1272,44 @@
           },
           "unit": "fahrenheit"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pump Status"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 30
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -1155,7 +1376,7 @@
             {
               "key": "entity_id",
               "operator": "=",
-              "value": "econet_hpwh_upper_tank_temperature"
+              "value": "sensor.econet_hpwh_upper_tank_temperature"
             }
           ]
         },
@@ -1203,6 +1424,53 @@
               "key": "entity_id",
               "operator": "=",
               "value": "econet_hpwh_lower_tank_temperature"
+            }
+          ]
+        },
+        {
+          "alias": "Pump Status",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "bf1c7tenf4lc0e"
+          },
+          "groupBy": [
+            {
+              "params": [
+                "1m"
+              ],
+              "type": "time"
+            },
+            {
+              "params": [
+                "null"
+              ],
+              "type": "fill"
+            }
+          ],
+          "measurement": "state",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "refId": "P",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [],
+                "type": "last"
+              }
+            ]
+          ],
+          "tags": [
+            {
+              "key": "entity_id",
+              "operator": "=",
+              "value": "sensor.water_heater_pump_status_recording"
             }
           ]
         },
@@ -1648,7 +1916,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Water Heater Pump",
-  "uid": "water_heater_pump",
+  "title": "Water Heater Pump V2",
+  "uid": "water_heater_pump_v2",
   "version": 14
 }
