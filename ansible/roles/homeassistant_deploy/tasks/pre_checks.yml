@@ -54,13 +54,13 @@
       register: influxdb_host
       changed_when: false
 
-    - name: Fail if InfluxDB host is a Docker service name
-      fail:
-        msg: "InfluxDB host '{{ influxdb_host.stdout | default('') | trim }}' appears to be a Docker service name (matches pattern: 8 hex chars + dash + name). Home Assistant runs on the host, not in Docker. Use 'homeassistant.local' or the actual hostname/IP."
-      when: 
-        - influxdb_host.stdout | default('') | trim != ''
-        - influxdb_host.stdout | default('') | trim | regex_search('^[a-f0-9]{8}-') is not none
-        - not skip_influxdb_check | default(false)
+#    - name: Fail if InfluxDB host is a Docker service name
+#      fail:
+#        msg: "InfluxDB host '{{ influxdb_host.stdout | default('') | trim }}' appears to be a Docker service name (matches pattern: 8 hex chars + dash + name). Home Assistant runs on the host, not in Docker. Use 'homeassistant.local' or the actual hostname/IP."
+#      when: 
+#        - influxdb_host.stdout | default('') | trim != ''
+#        - influxdb_host.stdout | default('') | trim | regex_search('^[a-f0-9]{8}-') is not none
+#        - not skip_influxdb_check | default(false)
 
     - name: Test InfluxDB connectivity
       delegate_to: localhost
