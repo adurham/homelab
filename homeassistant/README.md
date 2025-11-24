@@ -111,7 +111,7 @@ homeassistant/
 4. Edit `secrets.yaml` with your InfluxDB credentials and other secrets
 5. Run `./setup_venv.sh` to install dependencies
 
-**Note**: For Grafana datasource provisioning, ensure `INFLUXDB_USERNAME` and `INFLUXDB_PASSWORD` environment variables are set in your Grafana container, or update the default values in `grafana/provisioning/datasources/influxdb.yaml`.
+
 
 ### Adding New Systems
 1. Create new directories in `automations/` and `scripts/`
