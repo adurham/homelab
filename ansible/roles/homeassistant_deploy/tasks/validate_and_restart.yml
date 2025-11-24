@@ -24,6 +24,8 @@
       command: "ssh -p {{ ansible_port }} -o StrictHostKeyChecking=no {{ ansible_user }}@{{ ansible_host }} \"ha core restart\""
       when: not skip_ha_validation | default(false)
 
+
+
     - name: Wait for Home Assistant to come back up
       delegate_to: localhost
       wait_for:
