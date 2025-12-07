@@ -1,12 +1,17 @@
 ---
-- name: Deploy configuration files
+- name: Sync configuration files (Copy or Delete)
   delegate_to: localhost
-  command: >
-    bash -c "if [ -f '{{ playbook_dir }}/../homeassistant/{{ item }}' ]; then
-    scp -P {{ ansible_port }} -o StrictHostKeyChecking=no
-    '{{ playbook_dir }}/../homeassistant/{{ item }}'
-    {{ ansible_user }}@{{ ansible_host }}:/config/;
-    fi"
+  shell: |
+    FILE="{{ item }}"
+    LOCAL_PATH="{{ playbook_dir }}/../homeassistant/$FILE"
+    
+    if [ -f "$LOCAL_PATH" ]; then
+      # Copy file if it exists locally
+      scp -P {{ ansible_port }} -o StrictHostKeyChecking=no "$LOCAL_PATH" {{ ansible_user }}@{{ ansible_host }}:/config/
+    else
+      # Delete file remotely if it does not exist locally
+      ssh -p {{ ansible_port }} -o StrictHostKeyChecking=no {{ ansible_user }}@{{ ansible_host }} "rm -f /config/$FILE"
+    fi
   with_items:
     - automations.yaml
     - scripts.yaml
@@ -36,6 +41,8 @@
     - scenes
     - helpers
     - docs
+    - www
+    - custom_components
   ignore_errors: yes
 
 
