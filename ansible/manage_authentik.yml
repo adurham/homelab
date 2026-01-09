@@ -897,6 +897,17 @@
       ansible.builtin.set_fact:
         whoami_provider_id: "{{ (create_whoami_provider.json.pk if (create_whoami_provider is defined and create_whoami_provider.json is defined and create_whoami_provider.json.pk is defined) else get_whoami_provider.json.results[0].pk) }}"
 
+    - name: Update WhoAmI Provider (Ensure DNS hostname)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/providers/proxy/{{ whoami_provider_id }}/"
+        method: PATCH
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          external_host: "https://whoami.chi.lab.amd-e.com"
+          internal_host: "http://127.0.0.1:8080"
+        status_code: [200]
+
     # 3. Create Application
     - name: Create WhoAmI Application
       ansible.builtin.uri:
@@ -925,6 +936,17 @@
     - name: Capture WhoAmI App ID
       ansible.builtin.set_fact:
         whoami_app_id: "{{ (create_whoami_app.json.pk if (create_whoami_app is defined and create_whoami_app.json is defined and create_whoami_app.json.pk is defined) else get_whoami_app.json.results[0].pk) }}"
+
+    - name: Update WhoAmI Application (Ensure Launch URL)
+      ansible.builtin.uri:
+        # Use slug 'whoami' directly to avoid stale ID issues
+        url: "{{ authentik_url }}/api/v3/core/applications/whoami/" 
+        method: PATCH
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          meta_launch_url: "https://whoami.chi.lab.amd-e.com"
+        status_code: [200]
 
     # 4. Bind Provider to Embedded Outpost (Critical for Forward Auth)
     - name: Get Embedded Outpost

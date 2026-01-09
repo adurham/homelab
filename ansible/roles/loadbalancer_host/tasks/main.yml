@@ -21,8 +21,8 @@
     --cores {{ lxc_cores }}
     --memory {{ lxc_memory }}
     --swap {{ lxc_swap }}
-    --storage nvme-data
     --net0 name=eth0,bridge=private,ip={{ lxc_net_ip }},gw={{ lxc_net_gw }},firewall=1
+    --net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1
     --password {{ lxc_password }}
     --features nesting=1
     --ostype debian
@@ -36,6 +36,18 @@
   ansible.builtin.shell: "pct start {{ lxc_id }}"
   when: lxc_create.changed or (lxc_check.rc == 0 and "running" not in lxc_check.stdout)
   ignore_errors: true 
+
+- name: Check if Net1 exists
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.shell: "pct config {{ lxc_id }} | grep net1"
+  register: net1_check
+  failed_when: false
+  changed_when: false
+
+- name: Add Net1 Interface (LAN - DHCP)
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.shell: "pct set {{ lxc_id }} -net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1"
+  when: lxc_check.rc == 0 and net1_check.rc != 0 
 
 - name: Ensure SSH Service is Running
   delegate_to: "{{ target_node }}"

@@ -1,3 +1,13 @@
+# ACL: Define Internal Networks
+geo $is_internal {
+    default 0;
+    192.168.86.0/24 1;  # LAN
+    172.16.0.0/24   1;  # Private VLAN
+    100.64.0.0/10   1;  # Tailscale
+    127.0.0.0/8     1;  # Localhost
+    ::1             1;
+}
+
 upstream proxmox_cluster {
     ip_hash; # Sticky sessions based on IP (Simple) or use 'sticky cookie' if nginx-plus/module available.
     # Standard Nginx Free supports ip_hash.
@@ -23,6 +33,11 @@ server {
 server {
     listen 443 ssl;
     server_name proxmox.chi.lab.amd-e.com;
+
+    # ACL: Block external access
+    if ($is_internal = 0) {
+        return 403;
+    }
 
     ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
     ssl_certificate_key /etc/nginx/ssl/wildcard.key;
@@ -83,5 +98,26 @@ server {
         internal;
         add_header Set-Cookie $auth_cookie;
         return 302 /outpost.goauthentik.io/start?rd=$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name auth.chi.lab.amd-e.com;
+
+    ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/wildcard.key;
+
+    location / {
+        proxy_pass https://172.16.0.20;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Authentik (internal) uses self-signed/internal certs
+        proxy_ssl_verify off;
     }
 }

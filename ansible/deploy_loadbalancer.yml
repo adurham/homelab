@@ -5,10 +5,27 @@
   roles:
     - loadbalancer_host
 
+  roles:
+    - loadbalancer_host
+
 - name: Configure Load Balancer Service (Nginx)
   hosts: loadbalancer
   gather_facts: false
+  pre_tasks:
+    - name: Read No-IP Credentials
+      delegate_to: localhost
+      ansible.builtin.slurp:
+        src: credentials/noip_creds
+      register: noip_creds_file
+    
+    - name: Set No-IP Facts
+      set_fact:
+        noip_creds: "{{ noip_creds_file.content | b64decode | from_yaml }}"
+
   vars:
     acme_dedyn_token_proxmox: "{{ lookup('file', 'credentials/desec_token_proxmox') | trim }}"
+    noip_username: "{{ noip_creds.username }}"
+    noip_password: "{{ noip_creds.password }}"
+    noip_hostname: "chiamd-e.no-ip.biz"
   roles:
     - loadbalancer_service
