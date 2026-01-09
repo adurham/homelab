@@ -8,5 +8,14 @@
 - name: Configure Mail Forwarding
   hosts: mail_server
   gather_facts: no
+  vars:
+    # ACME Configuration
+    acme_primary_domain: "mail.chi.lab.amd-e.com"
+    acme_token: "{{ lookup('file', 'credentials/desec_token_proxmox') | trim }}"
+    cert_install_dir: "/etc/postfix/ssl"
+    cert_install_key: "/etc/postfix/ssl/key.pem"
+    cert_install_fullchain: "/etc/postfix/ssl/fullchain.pem"
+    acme_reload_cmd: "systemctl reload postfix"
   roles:
+    - acme_sh
     - mail_forwarder
