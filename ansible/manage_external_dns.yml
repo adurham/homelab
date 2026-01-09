@@ -1,0 +1,59 @@
+---
+- name: Manage External DNS (DeSEC)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    desec_token: "{{ lookup('file', 'credentials/desec_token_proxmox') | trim }}"
+    desec_domain: "amd-e.com"
+    target_cname: "chiamd-e.no-ip.biz." # Trailing dot for CNAME
+    subdomains:
+      - "auth.chi.lab"
+      - "whoami.chi.lab"
+
+  tasks:
+    - name: Check if CNAME exists
+      uri:
+        url: "https://desec.io/api/v1/domains/{{ desec_domain }}/rrsets/{{ item }}/CNAME/"
+        method: GET
+        headers:
+          Authorization: "Token {{ desec_token }}"
+        status_code: [200, 404]
+      loop: "{{ subdomains }}"
+      register: cname_check
+
+    - name: Create CNAME (POST)
+      uri:
+        url: "https://desec.io/api/v1/domains/{{ desec_domain }}/rrsets/"
+        method: POST
+        headers:
+          Authorization: "Token {{ desec_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          subname: "{{ item.item }}"
+          type: "CNAME"
+          ttl: 3600
+          records:
+            - "{{ target_cname }}"
+        status_code: [201]
+      loop: "{{ cname_check.results }}"
+      when: item.status == 404
+
+    - name: Update CNAME (PUT)
+      uri:
+        url: "https://desec.io/api/v1/domains/{{ desec_domain }}/rrsets/{{ item.item }}/CNAME/"
+        method: PUT
+        headers:
+          Authorization: "Token {{ desec_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          subname: "{{ item.item }}"
+          type: "CNAME"
+          records:
+            - "{{ target_cname }}"
+          ttl: 3600
+        status_code: [200]
+      loop: "{{ cname_check.results }}"
+      when: item.status == 200

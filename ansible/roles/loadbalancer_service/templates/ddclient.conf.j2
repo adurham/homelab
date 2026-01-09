@@ -1,0 +1,21 @@
+######################################################################
+##
+## ddclient.conf configuration for No-IP
+##
+######################################################################
+daemon=300              # check every 5 minutes
+syslog=yes              # log update msgs to syslog
+mail=root               # mail all msgs to root
+mail-failure=root       # mail failed update msgs to root
+pid=/var/run/ddclient.pid # record PID in file.
+ssl=yes                 # use ssl-support.
+
+##
+## No-IP (www.no-ip.com)
+##
+protocol=noip
+use=web, web=checkip.dyndns.com/, web-skip='IP Address'
+server=dynupdate.no-ip.com
+login={{ noip_username }}
+password={{ noip_password }}
+{{ noip_hostname }}

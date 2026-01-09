@@ -37,6 +37,8 @@
     -d chi.lab.amd-e.com
   environment:
     DEDYN_TOKEN: "{{ acme_dedyn_token_proxmox }}"
+    noip_username: "{{ noip_username }}"
+    noip_password: "{{ noip_password }}"
   register: acme_issue
   changed_when: "'Cert success' in acme_issue.stdout"
   failed_when: acme_issue.rc != 0 and "Domains not changed" not in acme_issue.stdout
@@ -106,4 +108,8 @@
     src: redirect_oidc.html.j2
     dest: /var/www/html/proxmox/redirect_oidc.html
     mode: '0644'
+    mode: '0644'
   notify: Restart Nginx
+
+- name: Configure DDNS (No-IP)
+  ansible.builtin.include_tasks: ddns.yml
