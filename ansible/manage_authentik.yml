@@ -70,15 +70,16 @@
       register: update_provider
 
     - name: Capture Provider ID
-      set_fact:
+      ansible.builtin.set_fact:
         provider_id: "{{ (new_provider.json.pk if new_provider is defined and new_provider.changed else providers_list.json.results[0].pk) }}"
 
-    - name: Get Existing Applications
+    - name: Get Proxmox Application (Direct)
       ansible.builtin.uri:
-        url: "{{ authentik_url }}/api/v3/core/applications/?search={{ app_name | urlencode }}"
+        url: "{{ authentik_url }}/api/v3/core/applications/{{ app_slug }}/"
         method: GET
         headers: "{{ headers }}"
-      register: apps_list
+        status_code: [200, 404]
+      register: get_app_direct
 
     - name: Create Proxmox Application
       ansible.builtin.uri:
@@ -91,22 +92,27 @@
           slug: "{{ app_slug }}"
           provider: "{{ provider_id }}"
         status_code: [200, 201]
-      when: apps_list.json.results | length == 0
+      when: get_app_direct.status == 404
+      ignore_errors: true
+      register: create_app
 
     - name: Update Proxmox Application (Ensure URL)
       ansible.builtin.uri:
-        url: "{{ authentik_url }}/api/v3/core/applications/{{ apps_list.json.results[0].slug }}/"
+        url: "{{ authentik_url }}/api/v3/core/applications/{{ app_slug }}/"
         method: PATCH
         headers: "{{ headers }}"
         body_format: json
         body:
-          meta_launch_url: "https://proxmox.chi.lab.amd-e.com/redirect_oidc.html"
+          launch_url: "https://proxmox.chi.lab.amd-e.com/redirect_oidc.html"
+          open_in_new_tab: true
         status_code: [200]
-      when: apps_list.json.results | length > 0
+      when: get_app_direct.status == 200 or (create_app is defined and not create_app.failed)
 
     - name: Capture Proxmox App ID
       ansible.builtin.set_fact:
-        proxmox_app_id: "{{ apps_list.json.results[0].pk }}"
+        proxmox_app_id: "{{ (get_app_direct.json.pk if get_app_direct.status == 200 else create_app.json.pk) }}"
+
+
 
     - name: Get Existing Admin Group
       ansible.builtin.uri:
@@ -538,6 +544,31 @@
       ansible.builtin.set_fact:
         stage_webauthn_id: "{{ (create_webauthn_setup.json.pk if (create_webauthn_setup is defined and create_webauthn_setup.json is defined and create_webauthn_setup.json.pk is defined) else get_webauthn_setup.json.results[0].pk) }}"
 
+    - name: Create Static Authenticator Stage (Backup Codes)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/authenticator/static/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "MFA-Static-Setup"
+          token_count: 6
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_static_setup
+
+    - name: Get Static Setup Stage (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/authenticator/static/?name=MFA-Static-Setup"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_static_setup
+      when: create_static_setup.failed
+
+    - name: Capture Static Stage ID
+      ansible.builtin.set_fact:
+        stage_static_id: "{{ (create_static_setup.json.pk if (create_static_setup is defined and create_static_setup.json is defined and create_static_setup.json.pk is defined) else get_static_setup.json.results[0].pk) }}"
+
     # 2. MFA Setup Flow
     - name: Create MFA Setup Flow
       ansible.builtin.uri:
@@ -593,7 +624,61 @@
         status_code: [200, 201]
       ignore_errors: true
 
-    # 4. MFA Validation Stage (Login)
+    - name: Bind Static (Backup Codes) to Setup Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_mfa_setup_id }}"
+          stage: "{{ stage_static_id }}"
+          order: 30
+        status_code: [200, 201]
+      ignore_errors: true
+
+    # 4. Dedicated Backup Codes Flow (For "Enroll" Dropdown)
+    - name: Create Backup Codes Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Enroll Backup Codes"
+          slug: "enroll-backup-codes"
+          title: "Generate Backup Codes"
+          designation: "stage_configuration"
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_backup_flow
+
+    - name: Get Backup Codes Flow (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/?slug=enroll-backup-codes"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_backup_flow
+      when: create_backup_flow.failed
+
+    - name: Capture Backup Flow ID
+      ansible.builtin.set_fact:
+        flow_backup_id: "{{ (create_backup_flow.json.pk if (create_backup_flow is defined and create_backup_flow.json is defined and create_backup_flow.json.pk is defined) else get_backup_flow.json.results[0].pk) }}"
+
+    - name: Bind Static Stage to Backup Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_backup_id }}"
+          stage: "{{ stage_static_id }}"
+          order: 10
+        status_code: [200, 201]
+      ignore_errors: true
+
+    # 5. MFA Validation Stage (Login)
     - name: Create MFA Validation Stage
       ansible.builtin.uri:
         url: "{{ authentik_url }}/api/v3/stages/authenticator/validate/"
