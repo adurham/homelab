@@ -108,6 +108,7 @@ homeassistant/clean_automations.json
 
 # Ansible
 *.retry
+ansible/credentials/
 
 # Backup directories
 backup/

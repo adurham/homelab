@@ -1,0 +1,4 @@
+---
+zfs_pool_name: nvme-pool
+zfs_disk_device: /dev/nvme0n1  # User should override if different
+zfs_storage_id: nvme-data

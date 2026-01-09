@@ -1,0 +1,55 @@
+---
+- name: Configure High Availability & Replication
+  hosts: proxmox_nodes
+  become: true
+  run_once: true
+  vars:
+    # Target Services
+    ha_containers:
+      - id: 100
+        name: "authentik"
+      - id: 101
+        name: "tailscale-gw"
+      - id: 102
+        name: "dns-01"
+      - id: 103
+        name: "lb-01"
+    
+    # Replication Config
+    replication_targets:
+      - node: "pve02" # Internal cluster name (no hyphen)
+        job_suffix: "0"
+      - node: "pve03"
+        job_suffix: "1"
+
+  tasks:
+    - name: Ensure Replication Jobs Exist (Iterate Targets)
+      ansible.builtin.shell: >
+        pvesr create-local-job {{ item.0.id }}-{{ item.1.job_suffix }} \
+        {{ item.1.node }} \
+        --schedule "*/15" \
+        --rate 15
+      loop: "{{ ha_containers | product(replication_targets) | list }}"
+      register: pvesr_create
+      failed_when: pvesr_create.rc != 0 and "already exists" not in pvesr_create.stderr
+      changed_when: pvesr_create.rc == 0
+
+    - name: Enable Replication Jobs
+      ansible.builtin.shell: >
+        pvesr enable {{ item.0.id }}-{{ item.1.job_suffix }}
+      loop: "{{ ha_containers | product(replication_targets) | list }}"
+      changed_when: false
+
+    - name: Add Containers to HA Manager
+      ansible.builtin.shell: >
+        ha-manager add ct:{{ item.id }} \
+        --max_restart 1 \
+        --max_relocate 1 \
+        --state started
+      loop: "{{ ha_containers }}"
+      register: ha_add
+      failed_when: 
+        - ha_add.rc != 0 
+        - "'already exists' not in ha_add.stderr"
+        - "'already defined' not in ha_add.stderr"
+      changed_when: ha_add.rc == 0

@@ -1,0 +1,35 @@
+---
+- name: Enable IPv4 Forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    sysctl_set: true
+    state: present
+    reload: true
+
+- name: Install Dependencies
+  ansible.builtin.apt:
+    name:
+      - curl
+      - iptables-persistent
+    state: present
+    update_cache: true
+
+- name: Install Tailscale
+  ansible.builtin.shell: |
+    curl -fsSL https://tailscale.com/install.sh | sh
+  args:
+    creates: /usr/bin/tailscale
+
+- name: Configure NAT (Masquerade for Private Network)
+  ansible.builtin.iptables:
+    table: nat
+    chain: POSTROUTING
+    source: 172.16.0.0/24
+    out_interface: eth0
+    jump: MASQUERADE
+    action: append
+
+- name: Save IPTables
+  ansible.builtin.shell: netfilter-persistent save
+  changed_when: false

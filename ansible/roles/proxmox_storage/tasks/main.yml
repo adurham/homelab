@@ -1,0 +1,32 @@
+---
+- name: Install ZFS utilities
+  ansible.builtin.apt:
+    name: zfsutils-linux
+    state: present
+
+- name: Check if ZFS pool exists
+  ansible.builtin.command: "zpool list {{ zfs_pool_name }}"
+  register: zpool_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Create ZFS pool
+  ansible.builtin.command: "zpool create -f {{ zfs_pool_name }} {{ zfs_disk_device }}"
+  when: zpool_check.rc != 0
+
+- name: Check if storage is already added to Proxmox
+  ansible.builtin.command: "pvesm status -storage {{ zfs_storage_id }}"
+  register: pvesm_check
+  ignore_errors: true
+  changed_when: false
+  when: inventory_hostname == groups['proxmox_nodes'][0]
+
+- name: Add ZFS pool to Proxmox storage
+  ansible.builtin.command: >
+    pvesm add zfspool {{ zfs_storage_id }}
+    -pool {{ zfs_pool_name }}
+    -content images,rootdir
+    -sparse 1
+  when:
+    - inventory_hostname == groups['proxmox_nodes'][0]
+    - pvesm_check.rc != 0

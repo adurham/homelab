@@ -1,0 +1,56 @@
+---
+- name: Check if Authentik CT exists
+  ansible.builtin.shell: pct list | grep 100
+  register: ct_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  changed_when: false
+  when: ct_check.rc != 0
+
+- name: Download Ubuntu 22.04 Template
+  ansible.builtin.command: pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+  args:
+    creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+  register: template_download
+
+- name: Get Tailscale Gateway IP (Bastion)
+  ansible.builtin.shell: pct exec 101 -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+  register: gw_ip
+  changed_when: false
+
+- name: Create Authentik Container (Private Net)
+  ansible.builtin.command: >
+    pct create 100 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+    --hostname authentik
+    --cores 2 --memory 2048 --swap 512
+    --net0 name=eth0,bridge=private,ip=172.16.0.20/24,gw=172.16.0.1
+    --storage nvme-data
+    --features nesting=1
+    --password "password"
+    --ssh-public-keys /root/.ssh/authorized_keys
+  when: ct_check.rc != 0
+
+- name: Start Authentik Container
+  ansible.builtin.command: pct start 100
+  when: ct_check.rc != 0
+  ignore_errors: true
+
+- name: Wait for Container Network (via Gateway)
+  ansible.builtin.shell: pct exec 101 -- timeout 1 bash -c "cat < /dev/null > /dev/tcp/172.16.0.20/22"
+  register: wait_net
+  until: wait_net.rc == 0
+  retries: 30
+  delay: 5
+  changed_when: false
+  when: ct_check.rc != 0
+
+- name: Add Authentik Host to Inventory
+  ansible.builtin.add_host:
+    name: "authentik"
+    ansible_host: "172.16.0.20"
+    ansible_user: "root"
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p -q root@{{ gw_ip.stdout }}"'
+    groups: "authentik_containers"

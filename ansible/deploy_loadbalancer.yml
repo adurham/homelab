@@ -1,0 +1,14 @@
+---
+- name: Deploy Load Balancer Host (LXC)
+  hosts: loadbalancer
+  gather_facts: false
+  roles:
+    - loadbalancer_host
+
+- name: Configure Load Balancer Service (Nginx)
+  hosts: loadbalancer
+  gather_facts: false
+  vars:
+    acme_dedyn_token_proxmox: "{{ lookup('file', 'credentials/desec_token_proxmox') | trim }}"
+  roles:
+    - loadbalancer_service

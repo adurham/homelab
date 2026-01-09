@@ -1,0 +1,26 @@
+all:
+  children:
+    proxmox_nodes:
+      hosts:
+        pve-01:
+          ansible_host: 192.168.86.11
+        pve-02:
+          ansible_host: 192.168.86.12
+        pve-03:
+          ansible_host: 192.168.86.13
+      vars:
+        ansible_user: root
+        # Usage: ansible-playbook -i ansible/inventory/proxmox.yml ... --ask-pass
+        # Or ensure SSH keys are deployed.
+
+    # Containers
+    loadbalancer:
+      hosts:
+        lb-01:
+          ansible_host: 172.16.0.30
+      vars:
+        ansible_user: root
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+        # Requires ProxyCommand via Tailscale Gateway (ssh -J root@192.168.86.62)
+        # OR run from a machine on the private network.
+        # Ansible Config (`ansible.cfg`) should handle the jump host logic if configured.

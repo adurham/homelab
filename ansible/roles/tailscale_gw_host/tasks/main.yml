@@ -1,0 +1,57 @@
+---
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  changed_when: false
+
+- name: Check if Tailscale GW exists
+  ansible.builtin.shell: pct list | grep 101
+  register: gw_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Create Tailscale Gateway Container
+  ansible.builtin.command: >
+    pct create 101 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+    --hostname tailscale-gw
+    --cores 1 --memory 512 --swap 512
+    --net0 name=eth0,bridge=vmbr0,ip=dhcp
+    --net1 name=eth1,bridge=private,ip=172.16.0.1/24
+    --storage nvme-data
+    --unprivileged 0
+    --features nesting=1
+    --password "password"
+- name: Check LXC Config for Tun Access
+  ansible.builtin.shell: grep -q "lxc.mount.entry: /dev/net/tun" /etc/pve/lxc/101.conf
+  register: tun_check
+  failed_when: false
+  changed_when: false
+  when: gw_check.rc != 0 # Only check if container exists or was just created
+
+- name: Enable Tun Access in LXC Config
+  ansible.builtin.shell: |
+    echo 'lxc.cgroup2.devices.allow: c 10:200 rwm' >> /etc/pve/lxc/101.conf
+    echo 'lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file' >> /etc/pve/lxc/101.conf
+  when: (gw_check.rc != 0) and (tun_check.rc != 0)
+  notify: Restart Gateway
+
+- name: Ensure Gateway is Running
+  ansible.builtin.command: pct start 101
+  when: gw_check.rc != 0
+  ignore_errors: true
+
+# Since it uses DHCP on eth0, we must query it.
+- name: Get Gateway IP
+  ansible.builtin.shell: pct exec 101 -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+  register: gw_ip
+  changed_when: false
+  until: gw_ip.stdout != ""
+  retries: 20
+  delay: 5
+
+- name: Add Gateway to Inventory
+  ansible.builtin.add_host:
+    name: "tailscale_gw"
+    ansible_host: "{{ gw_ip.stdout }}"
+    ansible_user: "root"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+    groups: "tailscale_gateways"

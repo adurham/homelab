@@ -1,0 +1,16 @@
+auto lo
+iface lo inet loopback
+
+auto {{ physical_interface }}
+iface {{ physical_interface }} inet manual
+
+auto vmbr0
+iface vmbr0 inet static
+	address {{ hostvars[inventory_hostname].ansible_host }}/24
+	gateway 192.168.86.1
+	bridge-ports {{ physical_interface }}
+	bridge-stp off
+	bridge-fd 0
+	bridge-vlan-aware yes
+
+source /etc/network/interfaces.d/*

@@ -1,0 +1,68 @@
+---
+- name: Install dependencies
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - git
+      - socat
+      - curl
+    state: present
+    update_cache: true
+
+- name: Create SSL Directory
+  ansible.builtin.file:
+    path: /etc/nginx/ssl
+    state: directory
+    mode: '0755'
+
+- name: Install acme.sh
+  ansible.builtin.shell: >
+    curl https://get.acme.sh | sh -s email=admin@lab.amd-e.com
+  args:
+    creates: /root/.acme.sh/acme.sh
+
+- name: Register ACME Account (Let's Encrypt)
+  ansible.builtin.shell: >
+    /root/.acme.sh/acme.sh --register-account -m admin@lab.amd-e.com --server letsencrypt
+  register: acme_reg
+  changed_when: "'Account created' in acme_reg.stdout"
+  failed_when: acme_reg.rc != 0 and "already registered" not in acme_reg.stdout and "Account already exists" not in acme_reg.stderr
+
+- name: Issue Certificate (DNS-01)
+  ansible.builtin.shell: >
+    /root/.acme.sh/acme.sh --issue 
+    --server letsencrypt
+    --dns dns_desec 
+    -d proxmox.chi.lab.amd-e.com
+  environment:
+    DEDYN_TOKEN: "{{ acme_dedyn_token_proxmox }}"
+  register: acme_issue
+  changed_when: "'Cert success' in acme_issue.stdout"
+  failed_when: acme_issue.rc != 0 and "Domains not changed" not in acme_issue.stdout
+
+- name: Install Certificate to Nginx
+  ansible.builtin.shell: >
+    /root/.acme.sh/acme.sh --install-cert -d proxmox.chi.lab.amd-e.com 
+    --key-file       /etc/nginx/ssl/proxmox.chi.lab.amd-e.com.key  
+    --fullchain-file /etc/nginx/ssl/fullchain.cer 
+    --reloadcmd     "systemctl reload nginx"
+  when: acme_issue.changed
+
+- name: Deploy Nginx Configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/sites-available/proxmox
+  notify: Restart Nginx
+
+- name: Enable Nginx Site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/proxmox
+    dest: /etc/nginx/sites-enabled/proxmox
+    state: link
+  notify: Restart Nginx
+
+- name: Remove Default Site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Restart Nginx

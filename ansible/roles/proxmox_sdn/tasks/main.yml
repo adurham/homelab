@@ -1,0 +1,41 @@
+---
+- name: Install libpve-network-perl
+  ansible.builtin.apt:
+    name: libpve-network-perl
+    state: present
+
+- name: Check if SDN Zone exists
+  ansible.builtin.command: pvesh get /cluster/sdn/zones/homelab
+  register: zone_check
+  failed_when: false
+  changed_when: false
+  run_once: true
+
+- name: Create SDN Zone (VXLAN)
+  ansible.builtin.command: >
+    pvesh create /cluster/sdn/zones --type vxlan --zone homelab
+    --peers 192.168.86.11,192.168.86.12,192.168.86.13
+    --ipam pve
+    --mtu 1450
+  when: zone_check.rc != 0
+  run_once: true
+  notify: Apply SDN
+
+- name: Check if VNet exists
+  ansible.builtin.command: pvesh get /cluster/sdn/vnets/private
+  register: vnet_check
+  failed_when: false
+  changed_when: false
+  run_once: true
+
+- name: Create VNet
+  ansible.builtin.command: >
+    pvesh create /cluster/sdn/vnets --vnet private --zone homelab --tag 100 --alias "Private Network"
+  when: vnet_check.rc != 0
+  run_once: true
+  notify: Apply SDN
+
+- name: Force Apply SDN (If needed)
+  ansible.builtin.command: pvesh set /cluster/sdn
+  when: zone_check.rc != 0 or vnet_check.rc != 0
+  run_once: true

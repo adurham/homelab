@@ -1,0 +1,46 @@
+upstream proxmox_cluster {
+    ip_hash; # Sticky sessions based on IP (Simple) or use 'sticky cookie' if nginx-plus/module available.
+    # Standard Nginx Free supports ip_hash.
+    # To support better stickiness for console:
+    # We will use 'ip_hash' for now as it maps client IP to backend.
+    # Since clients come via Tailscale Gateway (SNAT), all traffic might look like 172.16.0.1?
+    # YES. If using Tailscale Gateway NAT, ip_hash will send ALL traffic to ONE node. This is bad for balancing but GOOD for stickiness.
+    # However, if node goes down, all users lose access.
+    # Better approach if behind NAT: 'hash $http_cookie_pveauthcookie consistent;'?
+    # Or just simple Round Robin if we trust VNC to reconnect? No, VNC breaks.
+    
+    server 192.168.86.11:8006;
+    server 192.168.86.12:8006;
+    server 192.168.86.13:8006;
+}
+
+server {
+    listen 80;
+    server_name proxmox.chi.lab.amd-e.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name proxmox.chi.lab.amd-e.com;
+
+    ssl_certificate /etc/nginx/ssl/fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/proxmox.chi.lab.amd-e.com.key;
+
+    # Proxy Configuration
+    location / {
+        proxy_pass https://proxmox_cluster;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Websocket Support (Critical for VNC)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Proxmox uses self-signed (or other) certs on backends
+        proxy_ssl_verify off;
+    }
+}

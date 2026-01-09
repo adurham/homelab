@@ -1,0 +1,12 @@
+---
+- name: Deploy Tailscale Gateway Host
+  hosts: proxmox_nodes[0]
+  gather_facts: false
+  roles:
+    - tailscale_gw_host
+
+- name: Configure Tailscale Gateway Service
+  hosts: tailscale_gw
+  gather_facts: true
+  roles:
+    - tailscale_gw_service
