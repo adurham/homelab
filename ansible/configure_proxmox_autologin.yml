@@ -1,0 +1,39 @@
+---
+- name: Configure Proxmox Auto-Login
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Set Default Realm to OIDC
+      ansible.builtin.command:
+        cmd: pveum realm modify lab.amd-e.com --default 1
+      register: set_realm
+      changed_when: "'Update realm' in set_realm.stdout or set_realm.rc == 0"
+      failed_when: set_realm.rc != 0 and "does not exist" in set_realm.stderr
+      ignore_errors: true
+
+    - name: Ensure Authentik DNS Resolution (Localhost Fix)
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "172.16.0.20 auth.chi.lab.amd-e.com"
+        state: present
+
+    - name: Revert Proxmox Login Window Patch
+      ansible.builtin.replace:
+        path: /usr/share/pve-manager/js/pvemanagerlib.js
+        regexp: 'init: async function \(\) \{ if\(window\.location\.hash === "#autologin"\).*'
+        replace: 'init: async function () {'
+      notify: Restart PVE Proxy
+
+    - name: Cleanup Custom Redirect Pages
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/share/pve-manager/redirect_oidc.html
+        - /usr/share/pve-docs/redirect_oidc.html
+
+  handlers:
+    - name: Restart PVE Proxy
+      ansible.builtin.service:
+        name: pveproxy
+        state: restarted
