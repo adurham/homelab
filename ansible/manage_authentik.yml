@@ -4,10 +4,10 @@
   gather_facts: false
   module_defaults:
     ansible.builtin.uri:
-      validate_certs: false
+      validate_certs: true
   vars:
-    authentik_url: "https://172.16.0.20"
-    api_token: "{{ lookup('file', 'credentials/authentik_api_token') }}"
+    authentik_url: "https://auth.chi.lab.amd-e.com"
+    api_token: "{{ lookup('file', 'credentials/authentik_api_token') | trim }}"
     headers:
       Authorization: "Bearer {{ api_token }}"
       Content-Type: "application/json"
@@ -100,7 +100,7 @@
         headers: "{{ headers }}"
         body_format: json
         body:
-          meta_launch_url: "https://proxmox.chi.lab.amd-e.com"
+          meta_launch_url: "https://proxmox.chi.lab.amd-e.com/redirect_oidc.html"
         status_code: [200]
       when: apps_list.json.results | length > 0
 

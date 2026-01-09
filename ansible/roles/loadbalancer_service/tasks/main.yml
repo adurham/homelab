@@ -66,3 +66,16 @@
     path: /etc/nginx/sites-enabled/default
     state: absent
   notify: Restart Nginx
+
+- name: Create Proxmox Web Directory
+  ansible.builtin.file:
+    path: /var/www/html/proxmox
+    state: directory
+    mode: '0755'
+
+- name: Deploy OIDC Redirect Page
+  ansible.builtin.template:
+    src: redirect_oidc.html.j2
+    dest: /var/www/html/proxmox/redirect_oidc.html
+    mode: '0644'
+  notify: Restart Nginx
