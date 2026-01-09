@@ -37,6 +37,8 @@ services:
     image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2023.10.0}
     restart: unless-stopped
     command: server
+    extra_hosts:
+      - "mail.chi.lab.amd-e.com:172.16.0.40"
     environment:
       AUTHENTIK_REDIS__HOST: redis
       AUTHENTIK_POSTGRESQL__HOST: postgresql
@@ -59,6 +61,8 @@ services:
     image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2023.10.0}
     restart: unless-stopped
     command: worker
+    extra_hosts:
+      - "mail.chi.lab.amd-e.com:172.16.0.40"
     environment:
       AUTHENTIK_REDIS__HOST: redis
       AUTHENTIK_POSTGRESQL__HOST: postgresql

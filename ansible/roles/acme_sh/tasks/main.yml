@@ -45,4 +45,4 @@
     --key-file       {{ cert_install_key }}
     --fullchain-file {{ cert_install_fullchain }}
     --reloadcmd     "{{ acme_reload_cmd }}"
-  when: acme_issue.changed or force_install | default(false)
+  when: acme_issue.changed or (force_install | default(false) | bool)
