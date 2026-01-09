@@ -8,6 +8,15 @@
     state: present
     update_cache: true
 
+- name: Fix SSL Directory Permissions
+  ansible.builtin.file:
+    path: /etc/bind/ssl
+    state: directory
+    owner: root
+    group: bind
+    mode: '0750'
+    recurse: yes
+
 - name: Configure Named Options
   ansible.builtin.template:
     src: named.conf.options.j2

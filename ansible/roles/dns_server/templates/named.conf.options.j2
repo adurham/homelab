@@ -5,17 +5,32 @@ acl "trusted" {
         100.64.0.0/10;    # Tailscale (just in case)
 };
 
+tls local-tls {
+    key-file "/etc/bind/ssl/key.pem";
+    cert-file "/etc/bind/ssl/fullchain.pem";
+};
+
+tls upstream-tls {
+    ca-file "/etc/ssl/certs/ca-certificates.crt";
+    remote-hostname "cloudflare-dns.com";
+};
+
 options {
         directory "/var/cache/bind";
 
         recursion yes;
         allow-query { trusted; };
 
+        # Upstream (Cloudflare via standard DNS - DoT upstream requires complex config in Bind 9.18)
         forwarders {
                 1.1.1.1;
-                8.8.8.8;
+                1.0.0.1;
         };
 
         dnssec-validation auto;
         listen-on-v6 { any; };
+        
+        # DoT Listener
+        listen-on port 853 tls local-tls { any; };
+        listen-on-v6 port 853 tls local-tls { any; };
 };
