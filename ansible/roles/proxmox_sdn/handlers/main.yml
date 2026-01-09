@@ -1,0 +1,4 @@
+---
+- name: Apply SDN
+  ansible.builtin.command: pvesh set /cluster/sdn
+  run_once: true

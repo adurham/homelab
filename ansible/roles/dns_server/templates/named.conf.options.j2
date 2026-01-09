@@ -1,0 +1,21 @@
+acl "trusted" {
+        127.0.0.0/8;
+        192.168.86.0/24;  # LAN
+        172.16.0.0/24;    # Private SDN
+        100.64.0.0/10;    # Tailscale (just in case)
+};
+
+options {
+        directory "/var/cache/bind";
+
+        recursion yes;
+        allow-query { trusted; };
+
+        forwarders {
+                1.1.1.1;
+                8.8.8.8;
+        };
+
+        dnssec-validation auto;
+        listen-on-v6 { any; };
+};

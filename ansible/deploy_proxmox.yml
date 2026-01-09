@@ -1,0 +1,23 @@
+---
+- name: Configure Proxmox Cluster
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: true
+
+  vars:
+    # Set these via extra vars or inventory if needed
+    # zfs_disk_device: /dev/nvme0n1
+
+  roles:
+    - role: proxmox_common
+    - role: proxmox_network
+    - role: proxmox_cluster
+      # Ensure cluster is set up before adding storage that depends on cluster-wide config?
+      # Actually pvesm requires /etc/pve which is writable only if cluster is quorate or local mode.
+      # If cluster is forming, we want to ensure it's done.
+
+    - role: proxmox_storage
+      # Storage addition only happens on node 1, but zpool create happens on all.
+
+    - role: proxmox_acme
+      # Setup Let's Encrypt Account (and plugin/cert if configured)

@@ -1,0 +1,61 @@
+---
+- name: Check if DNS Container Exists
+  ansible.builtin.shell: pct list | grep -w 102
+  register: pct_check
+  failed_when: false
+  changed_when: false
+
+- name: Create DNS Container
+  ansible.builtin.command: >
+    pct create 102 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+    --hostname dns-01
+    --cores 1 --memory 512 --swap 512
+    --net0 name=eth0,bridge=private,ip=172.16.0.10/24,gw=172.16.0.1
+    --storage nvme-data
+    --unprivileged 1
+    --features nesting=1
+    --password "password"
+    --start 1
+    --onboot 1
+  when: pct_check.rc != 0
+
+- name: Wait for DNS Container IP
+  ansible.builtin.shell: pct exec 102 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  register: ip_check
+  until: ip_check.rc == 0
+  retries: 20
+  delay: 3
+  changed_when: false
+
+- name: Update Apt Cache in DNS Container
+  ansible.builtin.command: pct exec 102 -- apt-get update
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Install Python3 in DNS Container
+  ansible.builtin.command: pct exec 102 -- apt-get install -y python3
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Add DNS Host to Inventory
+  ansible.builtin.add_host:
+    name: "dns-01"
+    ansible_host: "172.16.0.10"
+    ansible_user: "root"
+    # We need to set up SSH key if we want direct SSH?
+    # Or we can use connection: lxc?
+    # Usually we use SSH. But unprivileged LXC might block direct root SSH unless configured.
+    # For now, I'll assume we can use `proxmox_lxc` connection plugin or just `ssh` if we inject keys.
+    # But wait, `pct create` sets password.
+    # I'll rely on `ansible_connection: community.general.proxmox` or similar?
+    # No, I usually use `ssh`. I'll inject my key.
+    groups: "dns_servers"
+
+- name: Inject SSH Key into DNS Container (via pipe)
+  ansible.builtin.shell: |
+    pct exec 102 -- mkdir -p /root/.ssh
+    cat /root/.ssh/authorized_keys | pct exec 102 -- sh -c "cat > /root/.ssh/authorized_keys"
+    pct exec 102 -- chmod 700 /root/.ssh
+    pct exec 102 -- chmod 600 /root/.ssh/authorized_keys
+  delegate_to: pve-01
+  when: pct_check.rc != 0

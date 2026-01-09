@@ -1,0 +1,47 @@
+---
+- name: Check for existing ACME accounts
+  ansible.builtin.shell: pvenode acme account list
+  register: acme_accounts
+  changed_when: false
+  ignore_errors: true
+
+- name: Register ACME Account
+  ansible.builtin.shell: >
+     echo "y" | pvenode acme account register default {{ acme_email }}
+     --directory {{ acme_directory }}
+  when: "'default' not in acme_accounts.stdout"
+  register: acme_register
+  changed_when: "'Account already registered' not in acme_register.stderr"
+  failed_when: 
+    - acme_register.rc != 0
+    - "'Account already registered' not in acme_register.stderr"
+  # This registers the account 'default'.
+
+- name: Configure ACME Plugin (Optional)
+  ansible.builtin.command: >
+    pvenode acme plugin add {{ acme_plugin_name }}
+    --type {{ acme_plugin_type }}
+    --data {{ acme_plugin_data | default('') }}
+  when: 
+    - acme_plugin_type is defined
+    - acme_plugin_data is defined
+  # Only runs if user provides the data (API key etc) via vars
+  
+- name: Check current certificate issuer
+  ansible.builtin.shell: "openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -issuer"
+  register: cert_issuer
+  changed_when: false
+  ignore_errors: true
+
+- name: Set Node ACME Domain (and Plugin)
+  ansible.builtin.command: >
+    pvenode config set --acmedomain0 domain="{{ ansible_hostname }}.{{ proxmox_domain_base }},plugin={{ acme_plugin_name }}"
+  when:
+    - not cert_issuer.stdout | regex_search('Let.s Encrypt')
+    - acme_plugin_name is defined
+
+- name: Order Certificate (If self-signed/invalid)
+  ansible.builtin.command: pvenode acme cert order
+  when:
+    - not cert_issuer.stdout | regex_search('Let.s Encrypt')
+    - acme_plugin_name is defined

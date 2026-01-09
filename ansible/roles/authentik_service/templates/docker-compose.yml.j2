@@ -1,0 +1,88 @@
+---
+version: "3.4"
+
+services:
+  postgresql:
+    image: docker.io/library/postgres:12-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 5s
+    volumes:
+      - database:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: {{ authentik_pg_password }}
+      POSTGRES_USER: {{ authentik_pg_user | default('authentik') }}
+      POSTGRES_DB: {{ authentik_pg_db | default('authentik') }}
+    env_file:
+      - .env
+
+  redis:
+    image: docker.io/library/redis:alpine
+    command: --save 60 1 --loglevel warning
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    volumes:
+      - redis:/data
+
+  server:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2023.10.0}
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: {{ authentik_pg_user | default('authentik') }}
+      AUTHENTIK_POSTGRESQL__NAME: {{ authentik_pg_db | default('authentik') }}
+      AUTHENTIK_POSTGRESQL__PASSWORD: {{ authentik_pg_password }}
+    volumes:
+      - media:/media
+      - custom-templates:/templates
+    env_file:
+      - .env
+    ports:
+      - "${COMPOSE_PORT_HTTP:-9000}:9000"
+      - "${COMPOSE_PORT_HTTPS:-9443}:9443"
+    depends_on:
+      - postgresql
+      - redis
+
+  worker:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2023.10.0}
+    restart: unless-stopped
+    command: worker
+    environment:
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: {{ authentik_pg_user | default('authentik') }}
+      AUTHENTIK_POSTGRESQL__NAME: {{ authentik_pg_db | default('authentik') }}
+      AUTHENTIK_POSTGRESQL__PASSWORD: {{ authentik_pg_password }}
+    # `user: root` is often needed for Docker in LXC due to permission mapping issues with mounted volumes? 
+    # Usually strictly confined LXC needs this, but unprivileged with nesting might be fine.
+    # We'll try without root first.
+    volumes:
+      - media:/media
+      - certs:/certs
+      - custom-templates:/templates
+    env_file:
+      - .env
+    depends_on:
+      - postgresql
+      - redis
+
+volumes:
+  database:
+    driver: local
+  redis:
+    driver: local
+  media:
+  certs:
+  custom-templates:

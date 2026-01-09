@@ -1,0 +1,25 @@
+$TTL    604800
+@       IN      SOA     dns.chi.lab.amd-e.com. admin.chi.lab.amd-e.com. (
+                              2         ; Serial
+                         604800         ; Refresh
+                          86400         ; Retry
+                        2419200         ; Expire
+                         604800 )       ; Negative Cache TTL
+;
+@       IN      NS      dns.chi.lab.amd-e.com.
+@       IN      A       172.16.0.10  ; Private IP
+
+; Name Servers
+dns     IN      A       172.16.0.10
+
+; Proxmox Nodes (LAN IPs)
+pve01   IN      A       192.168.86.11
+pve02   IN      A       192.168.86.12
+pve03   IN      A       192.168.86.13
+
+; Authentik (Private IP - requires route/Tailscale)
+auth    IN      A       172.16.0.20
+proxmox IN      A       172.16.0.30
+
+; Wildcard (Optional - helps with subdomains)
+*.chi.lab.amd-e.com. IN A 192.168.86.11 ; Point to PVE01 or Traefik ingress if we had one

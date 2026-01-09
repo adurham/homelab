@@ -1,0 +1,12 @@
+---
+acme_email: "admin@lab.amd-e.com" # Use a valid public email
+acme_directory: "https://acme-v02.api.letsencrypt.org/directory" 
+proxmox_domain_base: "chi.lab.amd-e.com"
+# Use staging for testing: "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+# Uncomment and set these in inventory/group_vars to enable full automation
+# Uncomment and set these in inventory/group_vars/all.yml to enable full automation
+acme_plugin_name: "desec"
+# acme_plugin_type: "dns"
+# acme_plugin_data: "DEDYN_TOKEN=YOUR_TOKEN_HERE"
+# acme_auto_order: true

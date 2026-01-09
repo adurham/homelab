@@ -1,0 +1,157 @@
+---
+- name: Manage Authentik Resources
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    authentik_url: "https://auth.chi.lab.amd-e.com"
+    api_token: "{{ lookup('file', 'credentials/authentik_api_token') }}"
+    headers:
+      Authorization: "Bearer {{ api_token }}"
+      Content-Type: "application/json"
+    
+    # Configuration
+    provider_name: "Proxmox"
+    app_name: "Proxmox"
+    app_slug: "proxmox"
+    group_admin_name: "Proxmox_Admins"
+    group_user_name: "Proxmox_Users"
+    user_email: "admin@lab.amd-e.com"
+    user_username: "admin"
+    user_name: "Proxmox Admin"
+    proxmox_redirect_uris: |
+      https://pve01.chi.lab.amd-e.com:8006
+      https://pve02.chi.lab.amd-e.com:8006
+      https://pve03.chi.lab.amd-e.com:8006
+      https://192.168.86.11:8006
+      https://192.168.86.12:8006
+      https://192.168.86.13:8006
+      https://proxmox.chi.lab.amd-e.com
+      https://172.16.0.30
+
+  tasks:
+    - name: Get Existing Providers
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/providers/oauth2/?search={{ provider_name | urlencode }}"
+        method: GET
+        headers: "{{ headers }}"
+        return_content: true
+      register: providers_list
+
+    - name: Create Proxmox Provider
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/providers/oauth2/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "{{ provider_name }}"
+          authorization_flow: "default-provider-authorization-implicit-consent"
+          authentication_flow: "default-authentication-flow"
+          redirect_uris: "{{ proxmox_redirect_uris }}"
+          client_type: "confidential"
+          # signing_key defaults
+        status_code: [200, 201]
+      when: providers_list.json.results | length == 0
+      register: new_provider
+
+    - name: Update Proxmox Provider (Ensure Redirect URIs)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/providers/oauth2/{{ providers_list.json.results[0].pk }}/"
+        method: PATCH
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          redirect_uris: "{{ proxmox_redirect_uris }}"
+        status_code: [200]
+      when: providers_list.json.results | length > 0
+      register: update_provider
+
+    - name: Capture Provider ID
+      set_fact:
+        provider_id: "{{ (new_provider.json.pk if new_provider is defined and new_provider.changed else providers_list.json.results[0].pk) }}"
+
+    - name: Get Existing Applications
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/applications/?search={{ app_name | urlencode }}"
+        method: GET
+        headers: "{{ headers }}"
+      register: apps_list
+
+    - name: Create Proxmox Application
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/applications/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "{{ app_name }}"
+          slug: "{{ app_slug }}"
+          provider: "{{ provider_id }}"
+        status_code: [200, 201]
+      when: apps_list.json.results | length == 0
+
+    - name: Get Existing Admin Group
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/groups/?search={{ group_admin_name | urlencode }}"
+        method: GET
+        headers: "{{ headers }}"
+      register: group_admin_list
+
+    - name: Create Proxmox_Admins Group
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/groups/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "{{ group_admin_name }}"
+          is_superuser: true
+        status_code: [200, 201]
+      when: group_admin_list.json.results | length == 0
+      register: new_group_admin
+
+    - name: Capture Admin Group ID
+      set_fact:
+        group_admin_id: "{{ (new_group_admin.json.pk if new_group_admin.changed else group_admin_list.json.results[0].pk) }}"
+
+    - name: Get Existing Users Group
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/groups/?search={{ group_user_name | urlencode }}"
+        method: GET
+        headers: "{{ headers }}"
+      register: group_user_list
+
+    - name: Create Proxmox_Users Group
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/groups/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "{{ group_user_name }}"
+          is_superuser: false
+        status_code: [200, 201]
+      when: group_user_list.json.results | length == 0
+      register: new_group_user
+
+    - name: Get Existing Users
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/users/?search={{ user_username | urlencode }}"
+        method: GET
+        headers: "{{ headers }}"
+      register: users_list
+
+    - name: Create Admin User
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/users/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          username: "{{ user_username }}"
+          name: "{{ user_name }}"
+          email: "{{ user_email }}"
+          groups: ["{{ group_admin_id }}"]
+        status_code: [200, 201]
+      when: users_list.json.results | length == 0

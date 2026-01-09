@@ -1,108 +1,81 @@
 # Homelab Infrastructure Repository - GEMINI.md
 
-This document provides an overview of the "homelab" repository, detailing its purpose, structure, and key operational procedures, intended for AI agents to quickly understand and interact with the codebase.
+This document provides a comprehensive overview of the "homelab" repository, detailing its architecture, key components, and operational procedures. It is the primary "map" for AI agents to understand the current state of the infrastructure.
 
 ## 🚀 Project Overview
 
-This repository hosts a comprehensive homelab setup, integrating infrastructure automation, smart home automation, system management, and various development tools. It is designed to manage a personal IT environment efficiently and reliably, leveraging Infrastructure as Code (Terraform), Configuration Management (Ansible), and Smart Home Automation (Home Assistant).
+This repository manages a **Hyper-Converged Private Cloud** built on **Proxmox VE**. It treats the entire lab as a software-defined datacenter, using Ansible for end-to-end automation of infrastructure, networking, and services.
 
-**Key Components:**
--   **Infrastructure as Code (`terraform/`):** Manages VMware vSphere infrastructure, including Active Directory, Tanium, Consul, Vault, Keycloak, NSX, and vCenter.
--   **Configuration Management (`ansible/`):** Automates system configurations, particularly for Tanium client deployments across various operating systems and VMware Tools management.
--   **Smart Home Automation (`homeassistant/`):** Controls intelligent home features, such as a water heater circulator pump system based on occupancy and various lighting automations.
--   **Utility Scripts (`misc scripts/`):** Contains a collection of scripts for system bootstrapping, AI development assistance (using `continue.dev`), system management, and Tanium platform management.
+**Core Architecture:**
+1.  **Orchestrator**: Ansible (Roles & Playbooks).
+2.  **Hypervisor**: Proxmox VE (3-Node Cluster: `pve01`, `pve02`, `pve03`).
+3.  **Networking**:
+    *   **Physical**: LAN (`vmbr0` - `192.168.86.0/24`).
+    *   **SDN**: VXLAN-based Private Network (`private` - `172.16.0.0/24`) for isolated service communication.
+    *   **Ingress**: Tailscale Gateway (`172.16.0.101`) for secure remote access and NAT.
+4.  **Identity**: Authentik (`auth.chi.lab.amd-e.com`) with OIDC integration for Proxmox SSO.
+5.  **Storage**: ZFS (NVMe) with automated Replication for High Availability.
 
-## 🛠️ Building and Running
+## 📂 Directory Structure
 
-This project involves various components, each with its own setup and execution procedures.
+### `ansible/` (Automated Provisioning)
+The heart of the operation. Manages the lifecycle of LXC containers, VMs, and cluster configurations.
 
-### System Bootstrap
+*   **Inventory**: `ansible/inventory/proxmox.yml` - Defines nodes and static IPs for core services.
+*   **Playbooks**:
+    *   `deploy_dns.yml`: Provisions Bind9 DNS (`dns-01`).
+    *   `deploy_authentik.yml`: Provisions Authentik IDP (`authentik`).
+    *   `deploy_loadbalancer.yml`: Provisions Nginx LB (`lb-01`).
+    *   `deploy_tailscale_gw.yml`: Provisions Tailscale Gateway (`tailscale-gw`).
+    *   `configure_sso.yml`: Configures Proxmox OIDC Realm & Permissions.
+    *   `manage_ha.yml`: Configures ZFS Replication & HA Resources.
+    *   `manage_authentik.yml`: Declarative config for Authentik (Providers, Apps, Groups).
 
-To set up a fresh terminal/shell environment, use the comprehensive bootstrap script:
+### `terraform/` (Legacy/Reference)
+Contains configuration for older VMware vSphere infrastructure. *Status: Deprecated/Maintenance.*
 
-```bash
-./misc\ scripts/bootstrap.sh
-```
+## 🏗️ Core Services & Addressing
 
-This script handles OS detection, package manager installation (Homebrew on macOS, apt/dnf/pacman on Linux), essential tools (zsh, git, curl, etc.), Oh My Zsh, Starship prompt, and custom `.zshrc` and `.zprofile` configurations.
+| Service | Hostname | IP (Private) | Public/LAN | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Gateway** | `proxmox` (VNet) | `172.16.0.1` | - | SDN Gateway for Private Network |
+| **DNS** | `dns-01` | `172.16.0.10` | - | Internal Bind9 Authority (`chi.lab.amd-e.com`) |
+| **Identity** | `authentik` | `172.16.0.20` | `100.x.y.z` (TS) | SSO Provider. Access via LB. |
+| **Load Balancer** | `lb-01` | `172.16.0.30` | - | Nginx Layer 7 Proxy for Cluster & Services |
+| **Tailscale GW** | `tailscale-gw` | `172.16.0.101` | `100.x.y.z` | Ingress/NAT Gateway for Mac/PCs |
 
-### Infrastructure Deployment (Terraform)
+**External Access URL**: `https://proxmox.chi.lab.amd-e.com` (Points to `lb-01`)
 
-The `terraform/` directory contains configurations for deploying and managing the homelab infrastructure on VMware vSphere.
+## 🛡️ High Availability (HA)
 
-**Key Files:**
--   `terraform/providers.tf`: Defines the required Terraform providers (e.g., `vmware/vsphere`, `vmware/nsxt`, `hashicorp/null`) and their base configurations.
--   `terraform/variables.tf`: Declares input variables for the Terraform configurations, including sensitive information like passwords and various service endpoints.
--   Other `.tf` files (e.g., `active-directory.tf`, `tanium.tf`, `vcenter.tf`): Define the specific infrastructure resources.
+The core infrastructure is designed to survive a single node failure (`N-1` redundancy).
 
-**Deployment Steps:**
+*   **Mechanism**: Proxmox HA Manager (Watchdog) + ZFS Replication.
+*   **Replication Rate**: Every 15 minutes.
+*   **Target Nodes**: All peers (`pve02`, `pve03`).
+*   **Protected Resources**:
+    *   `ct:100` (Authentik)
+    *   `ct:101` (Tailscale GW)
+    *   `ct:102` (DNS)
+    *   `ct:103` (Load Balancer)
 
-1.  Navigate to the `terraform` directory:
+## 🔐 Credentials & Secrets
+
+*   **Ansible Vault**: Used for tokens/passwords (if active).
+*   **Local Credentials**: `ansible/credentials/` (Git-ignored).
+    *   `desec_token_proxmox`: API Token for deSEC DNS (used for Let's Encrypt DNS-01 challenges).
+    *   `authentik_api_token`: API Token for Authentik Configuration.
+
+## 📝 Operational Procedures
+
+### Deploying Changes
+1.  **Update Code**: Modify Roles or Playbooks.
+2.  **Run Playbook**:
     ```bash
-    cd terraform
+    ansible-playbook -i ansible/inventory/proxmox.yml ansible/<playbook_name>.yml
     ```
-2.  Initialize Terraform:
-    ```bash
-    terraform init
-    ```
-3.  Review the planned changes:
-    ```bash
-    terraform plan
-    ```
-4.  Apply the changes to deploy the infrastructure:
-    ```bash
-    terraform apply
-    ```
-    (Note: Ensure `terraform.tfvars` is configured with your environment details.)
+3.  **Verify**: Check services via `https://proxmox.chi.lab.amd-e.com` or SSH.
 
-### Configuration Management (Ansible)
-
-The `ansible/` directory holds playbooks and roles for configuring systems, primarily for Tanium client deployments and VMware Tools.
-
-**Key Files:**
--   `ansible/ansible.cfg`: Main Ansible configuration file, defining the inventory source (`./inventory/vsphere_inventory.vmware.yml`) and execution strategy.
--   `ansible/inventory/vsphere_inventory.vmware.yml`: The vSphere dynamic inventory script/configuration.
--   `ansible/roles/`: Contains various Ansible roles (e.g., `tanium_client_314`, `homeassistant_deploy`) for specific configuration tasks.
-
-**General Execution:**
-To run an Ansible playbook, navigate to the `ansible` directory and execute the desired playbook:
-
-```bash
-cd ansible
-ansible-playbook <playbook_name>.yml
-```
-
-### Smart Home Automation (Home Assistant)
-
-The `homeassistant/` directory contains configurations and scripts for the Home Assistant instance.
-
-**Virtual Environment Setup:**
-Before deploying or working with Home Assistant configurations, set up its Python virtual environment:
-
-```bash
-cd homeassistant
-./setup_venv.sh
-```
-This script creates a `venv` directory, activates it, upgrades `pip`, and installs dependencies from `requirements.txt`.
-
-**Deployment:**
-The `README.md` indicates a deployment script:
-```bash
-./homeassistant/deploy_homeassistant.sh # (Further investigation needed for exact script location and content)
-```
-*Self-correction: The `README.md` mentions `deploy_homeassistant.sh` in the "Maintenance" section but doesn't show its path. It is likely within the `homeassistant` directory or a script that is executed from there. For now, we assume it's in `homeassistant/`.*
-
-### Utility Scripts
-
-The `misc scripts/` directory contains various standalone scripts. Refer to the `README.md` in the root and in `misc scripts/continue-dev/README.md` and `misc scripts/tanium/` for specific usage instructions for these scripts.
-
-## 📝 Development Conventions
-
-Based on the examined files, the following conventions are observed:
-
--   **Shell Scripting Best Practices:** Bash scripts (e.g., `bootstrap.sh`, `setup_venv.sh`) often use `set -euo pipefail` for robust error handling.
--   **Python Virtual Environments:** Python projects (like Home Assistant) utilize virtual environments (`venv`) for dependency isolation.
--   **Configuration as Code:** Heavy reliance on declarative configuration files for infrastructure (Terraform `.tf` files), configuration management (Ansible YAML), and home automation (Home Assistant YAML).
--   **Cross-Platform Compatibility:** The bootstrap script explicitly supports macOS and various Linux distributions.
--   **Secrets Management:** Terraform variables indicate the use of sensitive variables, implying a secure method for handling credentials (e.g., environment variables, `terraform.tfvars`, or a secrets manager like Vault).
--   **Documentation:** `README.md` files are used extensively to document different sections of the homelab.
+### Handling Failover
+If a node fails, Proxmox HA will automatically restart protected containers on a healthy node. No manual intervention required for recovery.
+*   **To check status**: `ha-manager status` on any node.

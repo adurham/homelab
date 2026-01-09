@@ -1,0 +1,94 @@
+---
+- name: Install dependencies (Nginx, Certs)
+  ansible.builtin.apt:
+    name:
+      - curl
+      - git
+      - ca-certificates
+      - gnupg
+      - nginx
+      - socat
+    state: present
+    update_cache: true
+
+- name: Check if Docker is installed
+  ansible.builtin.command: docker --version
+  register: docker_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Install Docker via script
+  ansible.builtin.shell: |
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh
+  when: docker_check.rc != 0
+
+- name: Install acme.sh
+  ansible.builtin.shell: |
+    curl https://get.acme.sh | sh -s email=admin@lab.amd-e.com
+  args:
+    creates: /root/.acme.sh/acme.sh
+
+- name: Create SSL Directory
+  ansible.builtin.file:
+    path: /etc/nginx/ssl
+    state: directory
+
+- name: Issue Certificate (DNS-01)
+  ansible.builtin.shell: |
+    export DEDYN_TOKEN="{{ acme_dedyn_token }}"
+    /root/.acme.sh/acme.sh --issue \
+      --dns dns_desec \
+      -d auth.chi.lab.amd-e.com
+  args:
+    creates: /root/.acme.sh/auth.chi.lab.amd-e.com_ecc/auth.chi.lab.amd-e.com.key
+  environment:
+    DEDYN_TOKEN: "{{ acme_dedyn_token }}"
+
+- name: Install Certificate to Nginx
+  ansible.builtin.shell: |
+    /root/.acme.sh/acme.sh --install-cert -d auth.chi.lab.amd-e.com \
+      --key-file       /etc/nginx/ssl/auth.key  \
+      --fullchain-file /etc/nginx/ssl/fullchain.cer \
+      --reloadcmd     "systemctl force-reload nginx"
+  args:
+    creates: /etc/nginx/ssl/auth.key
+
+- name: Deploy Nginx Configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/sites-available/authentik
+  notify: Restart Nginx
+
+- name: Enable Nginx Site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/authentik
+    dest: /etc/nginx/sites-enabled/authentik
+    state: link
+  notify: Restart Nginx
+
+- name: Remove Default Nginx Site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Restart Nginx
+
+- name: Create Authentik Directory
+  ansible.builtin.file:
+    path: /opt/authentik
+    state: directory
+
+- name: Deploy Docker Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/authentik/docker-compose.yml
+
+- name: Deploy .env file
+  ansible.builtin.template:
+    src: .env.j2
+    dest: /opt/authentik/.env
+
+- name: Start Authentik Configuration
+  ansible.builtin.shell: docker compose up -d
+  args:
+    chdir: /opt/authentik

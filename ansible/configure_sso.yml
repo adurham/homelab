@@ -1,0 +1,86 @@
+---
+- name: Configure Proxmox SSO
+  hosts: proxmox_nodes
+  become: true
+  run_once: true
+  vars:
+    # Secrets provided by user
+    authentik_client_id: "D2YzWfFOmQgUJBpRjHzyOQeD6ODWhh0QUVEFgOHZ"
+    authentik_client_key: "{{ lookup('file', 'credentials/authentik_client_key') | trim }}"
+    authentik_url: "https://auth.chi.lab.amd-e.com/application/o/proxmox/"
+    # User config
+    admin_email: "admin@lab.amd-e.com"
+    realm_name: "lab.amd-e.com"
+
+  tasks:
+    - name: Check if Authentik Realm Exists
+      ansible.builtin.shell: pveum realm list | grep -q "{{ realm_name }}"
+      register: realm_check
+      failed_when: false
+      changed_when: false
+
+    - name: Add Authentik Realm (if missing)
+      ansible.builtin.shell: >
+        pveum realm add {{ realm_name }} 
+        --type openid 
+        --issuer-url {{ authentik_url }} 
+        --client-id '{{ authentik_client_id }}' 
+        --client-key '{{ authentik_client_key }}' 
+        --username-claim preferred_username 
+        --autocreate 1 
+        --groups-claim groups
+      when: realm_check.rc != 0
+
+    - name: Update Authentik Realm Config (if exists)
+      ansible.builtin.shell: >
+        pveum realm modify {{ realm_name }} 
+        --issuer-url {{ authentik_url }}
+        --groups-claim groups 
+        --scopes "openid profile email groups"
+        --autocreate 1
+      when: realm_check.rc == 0
+      changed_when: true
+
+    - name: Ensure Admin User Exists (Pre-provisioning)
+      ansible.builtin.shell: >
+        pveum user add {{ admin_email.split('@')[0] }}@{{ realm_name }} 
+        --email {{ admin_email }} 
+        --enable 1
+      register: user_add
+      changed_when: user_add.rc == 0
+      failed_when: user_add.rc != 0 and "already exists" not in user_add.stderr
+      ignore_errors: true
+
+    - name: Ensure Proxmox_Admins Group Exists (Synced)
+      ansible.builtin.shell: pveum group add Proxmox_Admins -comment "Synced from Authentik"
+      register: group_add_admin
+      changed_when: group_add_admin.rc == 0
+      failed_when: group_add_admin.rc != 0 and "already exists" not in group_add_admin.stderr
+
+    - name: Assign Administrator Role to Proxmox_Admins-Authentik
+      ansible.builtin.shell: >
+        pveum acl modify / 
+        -group Proxmox_Admins 
+        -role Administrator
+      register: acl_admin
+      changed_when: acl_admin.rc == 0
+
+    - name: Ensure Proxmox_Users Group Exists (Synced)
+      ansible.builtin.shell: pveum group add Proxmox_Users -comment "Synced from Authentik"
+      register: group_add_user
+      changed_when: group_add_user.rc == 0
+      failed_when: group_add_user.rc != 0 and "already exists" not in group_add_user.stderr
+
+    - name: Assign PVEAuditor Role to Proxmox_Users-Authentik
+      ansible.builtin.shell: >
+        pveum acl modify / 
+        -group Proxmox_Users 
+        -role PVEAuditor
+      register: acl_user
+      changed_when: acl_user.rc == 0
+
+    - name: Add Admin User to Proxmox_Admins
+      ansible.builtin.shell: >
+        pveum user modify {{ admin_email.split('@')[0] }}@{{ realm_name }} 
+        -groups Proxmox_Admins
+      ignore_errors: true # In case user missing

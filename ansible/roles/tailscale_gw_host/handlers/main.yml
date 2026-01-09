@@ -1,0 +1,3 @@
+---
+- name: Restart Gateway
+  ansible.builtin.shell: pct stop 101 && pct start 101

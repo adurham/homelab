@@ -1,0 +1,38 @@
+---
+- name: Configure /etc/hosts for cluster members
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ hostvars[item].ansible_host }} {{ item }} {{ item }}.homelab.local"
+    state: present
+  loop: "{{ groups['proxmox_nodes'] }}"
+
+- name: Remove Enterprise Repository Source
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-enterprise.sources
+    state: absent
+
+- name: Remove Ceph Enterprise Repository Source
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/ceph.sources
+    state: absent
+
+- name: Enable No-Subscription Repository
+  ansible.builtin.apt_repository:
+    repo: "deb http://download.proxmox.com/debian/pve {{ ansible_distribution_release }} pve-no-subscription"
+    state: present
+    filename: pve-no-subscription
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install common packages
+  ansible.builtin.apt:
+    name:
+      - vim
+      - htop
+      - git
+      - curl
+      - zsh
+    state: present

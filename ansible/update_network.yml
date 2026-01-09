@@ -1,0 +1,6 @@
+---
+- name: Update Proxmox Networking
+  hosts: proxmox_nodes
+  become: true
+  roles:
+    - proxmox_network

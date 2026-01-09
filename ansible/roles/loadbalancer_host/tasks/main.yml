@@ -1,0 +1,49 @@
+---
+- name: Check if Load Balancer LXC exists
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.shell: "pct list | grep {{ lxc_id }}"
+  register: lxc_check
+  failed_when: false
+  changed_when: false
+
+- name: Download Template
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.command: "pveam download {{ lxc_template_storage }} {{ lxc_template_file }}"
+  register: template_dl
+  args:
+    creates: "/var/lib/vz/template/cache/{{ lxc_template_file }}"
+
+- name: Create Load Balancer LXC
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.shell: >
+    pct create {{ lxc_id }} {{ lxc_template_storage }}:vztmpl/{{ lxc_template_file }}
+    --hostname {{ lxc_hostname }}
+    --cores {{ lxc_cores }}
+    --memory {{ lxc_memory }}
+    --swap {{ lxc_swap }}
+    --storage nvme-data
+    --net0 name=eth0,bridge=private,ip={{ lxc_net_ip }},gw={{ lxc_net_gw }},firewall=1
+    --password {{ lxc_password }}
+    --features nesting=1
+    --ostype debian
+    --unprivileged 1
+    --ssh-public-keys /root/.ssh/authorized_keys
+  when: lxc_check.rc != 0
+  register: lxc_create
+
+- name: Start Load Balancer LXC
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.shell: "pct start {{ lxc_id }}"
+  when: lxc_create.changed or (lxc_check.rc == 0 and "running" not in lxc_check.stdout)
+  ignore_errors: true 
+
+- name: Ensure SSH Service is Running
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.shell: "pct exec {{ lxc_id }} -- systemctl enable --now ssh"
+  changed_when: false
+  ignore_errors: true
+
+- name: Wait for Load Balancer to be ready
+  ansible.builtin.wait_for_connection:
+    delay: 10
+    timeout: 300

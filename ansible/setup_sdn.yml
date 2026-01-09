@@ -1,0 +1,6 @@
+---
+- name: Setup Proxmox SDN
+  hosts: proxmox_nodes
+  gather_facts: false
+  roles:
+    - proxmox_sdn

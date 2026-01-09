@@ -1,0 +1,13 @@
+---
+lxc_id: 103
+lxc_hostname: "lb-01"
+lxc_cores: 1 # Nginx is efficient
+lxc_memory: 512 # 512MB is plenty
+lxc_swap: 512
+lxc_disk_size: "4G"
+lxc_net_ip: "172.16.0.30/24"
+lxc_net_gw: "172.16.0.1"
+lxc_password: "ChangeMe!" # Should be overridden or using SSH keys
+target_node: "pve-01"
+lxc_template_storage: "local"
+lxc_template_file: "ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
