@@ -1,0 +1,12 @@
+---
+- name: Provision Mail Container
+  hosts: pve-01
+  gather_facts: false
+  roles:
+    - mail_host
+
+- name: Configure Mail Forwarding
+  hosts: mail_server
+  gather_facts: no
+  roles:
+    - mail_forwarder

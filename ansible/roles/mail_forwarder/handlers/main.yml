@@ -1,0 +1,25 @@
+---
+- name: Restart Postfix
+  ansible.builtin.service:
+    name: postfix
+    state: restarted
+
+- name: Update Virtual Map
+  ansible.builtin.command: postmap /etc/postfix/virtual
+  notify: Restart Postfix
+
+- name: Update SASL Map
+  ansible.builtin.command: postmap hash:/etc/postfix/sasl_passwd
+  notify: Restart Postfix
+
+- name: Update Canonical Map
+  ansible.builtin.command: postmap /etc/postfix/sender_canonical
+  notify: Restart Postfix
+
+- name: Update Header Checks
+  ansible.builtin.command: postmap /etc/postfix/header_checks
+  notify: Restart Postfix
+
+- name: Update SMTP Header Checks
+  ansible.builtin.command: postmap /etc/postfix/smtp_header_checks
+  notify: Restart Postfix
