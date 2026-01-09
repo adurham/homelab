@@ -19,7 +19,7 @@
     --storage nvme-data
     --unprivileged 0
     --features nesting=1
-    --password "password"
+    --password "{{ lookup('password', 'credentials/tailscale_gw_root_pass chars=ascii_letters,digits length=20') }}"
 - name: Check LXC Config for Tun Access
   ansible.builtin.shell: grep -q "lxc.mount.entry: /dev/net/tun" /etc/pve/lxc/101.conf
   register: tun_check

@@ -14,7 +14,7 @@
     --storage nvme-data
     --unprivileged 1
     --features nesting=1
-    --password "password"
+    --password "{{ lookup('password', 'credentials/dns_01_root_pass chars=ascii_letters,digits length=20') }}"
     --start 1
     --onboot 1
   when: pct_check.rc != 0
