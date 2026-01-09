@@ -23,10 +23,11 @@
 
 - name: Issue Certificate (DNS-01)
   ansible.builtin.shell: >
-    /root/.acme.sh/acme.sh --issue 
+    /root/.acme.sh/acme.sh --issue
     --server letsencrypt
-    --dns dns_desec 
+    --dns dns_desec
     -d {{ acme_primary_domain }}
+    --dnssleep {{ acme_dns_sleep | default(120) }}
   environment:
     DEDYN_TOKEN: "{{ acme_token }}"
   register: acme_issue
