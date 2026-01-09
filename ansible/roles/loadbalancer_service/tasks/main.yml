@@ -28,25 +28,53 @@
   changed_when: "'Account created' in acme_reg.stdout"
   failed_when: acme_reg.rc != 0 and "already registered" not in acme_reg.stdout and "Account already exists" not in acme_reg.stderr
 
-- name: Issue Certificate (DNS-01)
+- name: Issue Certificate (DNS-01 Wildcard)
   ansible.builtin.shell: >
     /root/.acme.sh/acme.sh --issue 
     --server letsencrypt
     --dns dns_desec 
-    -d proxmox.chi.lab.amd-e.com
+    -d "*.chi.lab.amd-e.com"
+    -d chi.lab.amd-e.com
   environment:
     DEDYN_TOKEN: "{{ acme_dedyn_token_proxmox }}"
   register: acme_issue
   changed_when: "'Cert success' in acme_issue.stdout"
   failed_when: acme_issue.rc != 0 and "Domains not changed" not in acme_issue.stdout
 
-- name: Install Certificate to Nginx
+- name: Install Certificate to Nginx (Wildcard)
   ansible.builtin.shell: >
-    /root/.acme.sh/acme.sh --install-cert -d proxmox.chi.lab.amd-e.com 
-    --key-file       /etc/nginx/ssl/proxmox.chi.lab.amd-e.com.key  
-    --fullchain-file /etc/nginx/ssl/fullchain.cer 
+    /root/.acme.sh/acme.sh --install-cert -d "*.chi.lab.amd-e.com"
+    --key-file       /etc/nginx/ssl/wildcard.key  
+    --fullchain-file /etc/nginx/ssl/wildcard.fullchain.cer 
     --reloadcmd     "systemctl reload nginx"
   when: acme_issue.changed
+
+- name: Deploy WhoAmI Script
+  ansible.builtin.template:
+    src: whoami.py.j2
+    dest: /usr/local/bin/whoami.py
+    mode: '0755'
+  notify: Restart WhoAmI
+
+- name: Deploy WhoAmI Service
+  ansible.builtin.template:
+    src: whoami.service.j2
+    dest: /etc/systemd/system/whoami.service
+    mode: '0644'
+  notify: Restart WhoAmI
+
+- name: Start WhoAmI Service
+  ansible.builtin.systemd:
+    name: whoami
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Add Authentik to Hosts File
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "172.16.0.20 auth.chi.lab.amd-e.com"
+    state: present
 
 - name: Deploy Nginx Configuration
   ansible.builtin.template:

@@ -24,8 +24,8 @@ server {
     listen 443 ssl;
     server_name proxmox.chi.lab.amd-e.com;
 
-    ssl_certificate /etc/nginx/ssl/fullchain.cer;
-    ssl_certificate_key /etc/nginx/ssl/proxmox.chi.lab.amd-e.com.key;
+    ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/wildcard.key;
 
     # Proxy Configuration
     location = /redirect_oidc.html {
@@ -46,5 +46,42 @@ server {
 
         # Proxmox uses self-signed (or other) certs on backends
         proxy_ssl_verify off;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name whoami.chi.lab.amd-e.com;
+
+    ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/wildcard.key;
+
+    # Authentik Forward Auth
+    location / {
+        auth_request /outpost.goauthentik.io/auth/nginx;
+        error_page 401 = @goauthentik_proxy_signin;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
+
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /outpost.goauthentik.io {
+        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
+        proxy_set_header Host $host;
+        proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location @goauthentik_proxy_signin {
+        internal;
+        add_header Set-Cookie $auth_cookie;
+        return 302 /outpost.goauthentik.io/start?rd=$request_uri;
     }
 }

@@ -3,3 +3,8 @@
   ansible.builtin.service:
     name: nginx
     state: restarted
+
+- name: Restart WhoAmI
+  ansible.builtin.service:
+    name: whoami
+    state: restarted
