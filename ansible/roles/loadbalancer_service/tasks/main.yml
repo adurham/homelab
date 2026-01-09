@@ -108,7 +108,7 @@
     src: redirect_oidc.html.j2
     dest: /var/www/html/proxmox/redirect_oidc.html
     mode: '0644'
-    mode: '0644'
+
   notify: Restart Nginx
 
 - name: Configure DDNS (No-IP)

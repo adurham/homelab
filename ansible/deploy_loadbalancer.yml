@@ -5,8 +5,7 @@
   roles:
     - loadbalancer_host
 
-  roles:
-    - loadbalancer_host
+
 
 - name: Configure Load Balancer Service (Nginx)
   hosts: loadbalancer
