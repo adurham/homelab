@@ -1,10 +1,12 @@
 ---
 - name: Manage Authentik Resources
-  hosts: localhost
-  connection: local
+  hosts: pve-01
   gather_facts: false
+  module_defaults:
+    ansible.builtin.uri:
+      validate_certs: false
   vars:
-    authentik_url: "https://auth.chi.lab.amd-e.com"
+    authentik_url: "https://172.16.0.20"
     api_token: "{{ lookup('file', 'credentials/authentik_api_token') }}"
     headers:
       Authorization: "Bearer {{ api_token }}"
@@ -20,13 +22,13 @@
     user_username: "admin"
     user_name: "Proxmox Admin"
     proxmox_redirect_uris: |
+      https://proxmox.chi.lab.amd-e.com
       https://pve01.chi.lab.amd-e.com:8006
       https://pve02.chi.lab.amd-e.com:8006
       https://pve03.chi.lab.amd-e.com:8006
       https://192.168.86.11:8006
       https://192.168.86.12:8006
       https://192.168.86.13:8006
-      https://proxmox.chi.lab.amd-e.com
       https://172.16.0.30
 
   tasks:
@@ -90,6 +92,17 @@
           provider: "{{ provider_id }}"
         status_code: [200, 201]
       when: apps_list.json.results | length == 0
+
+    - name: Update Proxmox Application (Ensure URL)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/applications/{{ apps_list.json.results[0].slug }}/"
+        method: PATCH
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          meta_launch_url: "https://proxmox.chi.lab.amd-e.com"
+        status_code: [200]
+      when: apps_list.json.results | length > 0
 
     - name: Get Existing Admin Group
       ansible.builtin.uri:
@@ -155,3 +168,291 @@
           groups: ["{{ group_admin_id }}"]
         status_code: [200, 201]
       when: users_list.json.results | length == 0
+
+    # -------------------------------------------------------------------------
+    # Recovery Flow Implementation
+    # -------------------------------------------------------------------------
+
+    - name: Get Identification Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/identification/?search=Recovery-Identification-Stage"
+        method: GET
+        headers: "{{ headers }}"
+      register: stage_ident_list
+
+    - name: Create Identification Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/identification/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Recovery-Identification-Stage"
+          user_fields: ["username", "email"]
+        status_code: [200, 201]
+      when: stage_ident_list.json.results | length == 0
+      register: new_stage_ident
+
+    - name: Capture Identification Stage ID
+      set_fact:
+        stage_ident_id: "{{ (new_stage_ident.json.pk if (new_stage_ident is defined and new_stage_ident.json is defined) else stage_ident_list.json.results[0].pk) }}"
+
+    - name: Get Email Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/email/?search=Recovery-Email-Stage"
+        method: GET
+        headers: "{{ headers }}"
+      register: stage_email_list
+
+    - name: Create Email Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/email/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Recovery-Email-Stage"
+          use_global_settings: true
+          # Subject/Template defaults are usually fine, relies on global SMTP
+        status_code: [200, 201]
+      when: stage_email_list.json.results | length == 0
+      register: new_stage_email
+
+    - name: Capture Email Stage ID
+      set_fact:
+        stage_email_id: "{{ (new_stage_email.json.pk if (new_stage_email is defined and new_stage_email.json is defined) else stage_email_list.json.results[0].pk) }}"
+
+    # Prompts -----------------------------------------------------------------
+
+    - name: Get Password Prompt
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/prompt/prompts/?search=Recovery-Password-Prompt"
+        method: GET
+        headers: "{{ headers }}"
+      register: prompt_password_list
+
+    - name: Create Password Prompt
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/prompt/prompts/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Recovery-Password-Prompt"
+          field_key: "password"
+          label: "Password"
+          type: "password"
+          required: true
+          placeholder: "New Password"
+          order: 0
+        status_code: [200, 201]
+      when: prompt_password_list.json.results | length == 0
+      register: new_prompt_password
+
+    - name: Capture Password Prompt ID
+      set_fact:
+        prompt_password_id: "{{ (new_prompt_password.json.pk if (new_prompt_password is defined and new_prompt_password.json is defined) else prompt_password_list.json.results[0].pk) }}"
+
+    - name: Get Password Repeat Prompt
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/prompt/prompts/?search=Recovery-Password-Repeat-Prompt"
+        method: GET
+        headers: "{{ headers }}"
+      register: prompt_repeat_list
+
+    - name: Create Password Repeat Prompt
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/prompt/prompts/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Recovery-Password-Repeat-Prompt"
+          field_key: "password_repeat"
+          label: "Password (repeat)"
+          type: "password"
+          required: true
+          placeholder: "Repeat Password"
+          order: 1
+        status_code: [200, 201]
+      when: prompt_repeat_list.json.results | length == 0
+      register: new_prompt_repeat
+
+    - name: Capture Password Repeat Prompt ID
+      set_fact:
+        prompt_repeat_id: "{{ (new_prompt_repeat.json.pk if (new_prompt_repeat is defined and new_prompt_repeat.json is defined) else prompt_repeat_list.json.results[0].pk) }}"
+
+
+    # Stages (Prompt & Write) -------------------------------------------------
+
+    - name: Get Prompt Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/prompt/stages/?search=Recovery-Prompt-Stage"
+        method: GET
+        headers: "{{ headers }}"
+      register: stage_prompt_list
+
+    - name: Create Prompt Stage (Recovery)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/prompt/stages/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Recovery-Prompt-Stage"
+          fields:
+            - "{{ prompt_password_id }}"
+            - "{{ prompt_repeat_id }}"
+          validation_policies: []
+        status_code: [200, 201]
+      when: stage_prompt_list.json.results | length == 0
+      register: new_stage_prompt
+
+    - name: Capture Prompt Stage ID
+      set_fact:
+        stage_prompt_id: "{{ (new_stage_prompt.json.pk if (new_stage_prompt is defined and new_stage_prompt.json is defined) else stage_prompt_list.json.results[0].pk) }}"
+
+    - name: Get User Write Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/user_write/?search=Recovery-Write-Stage"
+        method: GET
+        headers: "{{ headers }}"
+      register: stage_write_list
+
+    - name: Create User Write Stage (Recovery)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/user_write/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Recovery-Write-Stage"
+          user_creation_mode: "never_create"
+        status_code: [200, 201]
+      when: stage_write_list.json.results | length == 0
+      register: new_stage_write
+
+    - name: Capture Write Stage ID
+      set_fact:
+        stage_write_id: "{{ (new_stage_write.json.pk if (new_stage_write is defined and new_stage_write.json is defined) else stage_write_list.json.results[0].pk) }}"
+
+    - name: Get Recovery Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/?slug=recovery-flow"
+        method: GET
+        headers: "{{ headers }}"
+      register: flow_recovery_list
+
+    - name: Create Recovery Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Recovery Flow"
+          slug: "recovery-flow"
+          title: "Reset your password"
+          designation: "recovery"
+          authentication: "none"
+        status_code: [200, 201]
+      when: flow_recovery_list.json.results | length == 0
+      register: new_flow_recovery
+
+    - name: Capture Recovery Flow ID
+      set_fact:
+        flow_recovery_id: "{{ (new_flow_recovery.json.pk if (new_flow_recovery is defined and new_flow_recovery.json is defined) else flow_recovery_list.json.results[0].pk) }}"
+
+    - name: Get Legacy Password Stage (Cleanup)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/password/?search=Recovery-Password-Stage"
+        method: GET
+        headers: "{{ headers }}"
+      register: legacy_password_stage
+
+    - name: Delete Legacy Password Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/password/{{ legacy_password_stage.json.results[0].pk }}/"
+        method: DELETE
+        headers: "{{ headers }}"
+        status_code: [204]
+      when: legacy_password_stage.json.results | length > 0
+      ignore_errors: true
+
+    # Bindings ----------------------------------------------------------------
+
+    - name: Bind Identification Stage to Flow (Order 0)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_recovery_id }}"
+          stage: "{{ stage_ident_id }}"
+          order: 0
+        status_code: [200, 201]
+      ignore_errors: true # In case it already exists, simpler than checking for bindings which is noisy
+
+    - name: Bind Email Stage to Flow (Order 10)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_recovery_id }}"
+          stage: "{{ stage_email_id }}"
+          order: 10
+        status_code: [200, 201]
+      ignore_errors: true
+
+    - name: Bind Prompt Stage to Flow (Order 20)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_recovery_id }}"
+          stage: "{{ stage_prompt_id }}"
+          order: 20
+        status_code: [200, 201]
+      register: bind_prompt_result
+      changed_when: bind_prompt_result.status == 201
+      ignore_errors: true
+
+    - name: Bind User Write Stage to Flow (Order 30)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_recovery_id }}"
+          stage: "{{ stage_write_id }}"
+          order: 30
+        status_code: [200, 201]
+      register: bind_write_result
+      changed_when: bind_write_result.status == 201
+      ignore_errors: true
+
+    # Brand Update -----------------------------------------------------------
+
+    - name: Get Default Brand
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/brands/"
+        method: GET
+        headers: "{{ headers }}"
+      register: brand_list
+
+    - name: Update Default Brand with Recovery Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/brands/{{ brand_list.json.results[0].brand_uuid }}/"
+        method: PATCH
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          flow_recovery: "{{ flow_recovery_id }}"
+        status_code: [200]
+      when: brand_list.json.results | length > 0
