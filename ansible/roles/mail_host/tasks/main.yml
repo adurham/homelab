@@ -1,0 +1,47 @@
+---
+- name: Check if Mail Container Exists
+  ansible.builtin.shell: pct list | grep -w 104
+  register: pct_check
+  failed_when: false
+  changed_when: false
+
+- name: Create Mail Container
+  ansible.builtin.command: >
+    pct create 104 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+    --hostname mail-01
+    --cores 1 --memory 512 --swap 512
+    --net0 name=eth0,bridge=private,ip=172.16.0.40/24,gw=172.16.0.1
+    --storage nvme-data
+    --unprivileged 1
+    --features nesting=1
+    --password "password"
+    --start 1
+    --onboot 1
+  when: pct_check.rc != 0
+
+- name: Wait for Mail Container IP
+  ansible.builtin.shell: pct exec 104 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  register: ip_check
+  until: ip_check.rc == 0
+  retries: 20
+  delay: 3
+  changed_when: false
+
+- name: Update Apt Cache in Mail Container
+  ansible.builtin.command: pct exec 104 -- apt-get update
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Install Python3 in Mail Container
+  ansible.builtin.command: pct exec 104 -- apt-get install -y python3
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Inject SSH Key into Mail Container
+  ansible.builtin.shell: |
+    pct exec 104 -- mkdir -p /root/.ssh
+    cat /root/.ssh/authorized_keys | pct exec 104 -- sh -c "cat > /root/.ssh/authorized_keys"
+    pct exec 104 -- chmod 700 /root/.ssh
+    pct exec 104 -- chmod 600 /root/.ssh/authorized_keys
+  delegate_to: pve-01
+  when: pct_check.rc != 0

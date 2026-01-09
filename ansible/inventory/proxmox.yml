@@ -21,6 +21,19 @@ all:
       vars:
         ansible_user: root
         ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
-        # Requires ProxyCommand via Tailscale Gateway (ssh -J root@192.168.86.62)
-        # OR run from a machine on the private network.
-        # Ansible Config (`ansible.cfg`) should handle the jump host logic if configured.
+        
+    authentik_server:
+      hosts:
+        authentik:
+          ansible_host: 172.16.0.20
+      vars:
+        ansible_user: root
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+
+    mail_server:
+      hosts:
+        mail-01:
+          ansible_host: 172.16.0.40
+      vars:
+        ansible_user: root
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'

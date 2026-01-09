@@ -1,0 +1,60 @@
+---
+- name: Install Postfix
+  ansible.builtin.apt:
+    name:
+      - postfix
+      - libsasl2-modules
+    state: present
+    update_cache: yes
+
+- name: Configure Mailname
+  ansible.builtin.copy:
+    content: "lab.amd-e.com\n"
+    dest: /etc/mailname
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Read SASL Password
+  ansible.builtin.set_fact:
+    sasl_password: "{{ lookup('file', 'credentials/icloud_sasl_password') | trim }}"
+
+- name: Configure SASL Password Map
+  ansible.builtin.copy:
+    content: "[smtp.mail.me.com]:587 amdnative@icloud.com:{{ sasl_password }}"
+    dest: /etc/postfix/sasl_passwd
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Update SASL Map
+
+- name: Configure Receiver Canonical Map
+  ansible.builtin.template:
+    src: sender_canonical.j2
+    dest: /etc/postfix/sender_canonical
+  notify: Update Canonical Map
+
+- name: Configure Header Checks
+  ansible.builtin.template:
+    src: header_checks.j2
+    dest: /etc/postfix/header_checks
+  notify: Update Header Checks
+
+- name: Configure SMTP Header Checks
+  ansible.builtin.template:
+    src: smtp_header_checks.j2
+    dest: /etc/postfix/smtp_header_checks
+  notify: Update SMTP Header Checks
+
+- name: Configure Postfix Main Configuration
+  ansible.builtin.template:
+    src: main.cf.j2
+    dest: /etc/postfix/main.cf
+  notify: Restart Postfix
+
+- name: Configure Virtual Aliases
+  ansible.builtin.template:
+    src: virtual.j2
+    dest: /etc/postfix/virtual
+  notify: Update Virtual Map
+

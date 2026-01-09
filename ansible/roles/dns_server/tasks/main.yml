@@ -35,6 +35,15 @@
     mode: '0644'
   notify: Restart Bind9
 
+- name: Deploy Zone File for lab.amd-e.com
+  ansible.builtin.template:
+    src: db.lab.amd-e.com.j2
+    dest: /etc/bind/db.lab.amd-e.com
+    owner: root
+    group: bind
+    mode: '0644'
+  notify: Restart Bind9
+
 - name: Ensure Bind9 Service is Running
   ansible.builtin.service:
     name: named
