@@ -87,11 +87,13 @@ server {
 
     location /outpost.goauthentik.io {
         proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
-        proxy_set_header Host $host;
+        proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
     }
 
     location @goauthentik_proxy_signin {
@@ -116,6 +118,8 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
         
         # Authentik (internal) uses self-signed/internal certs
         proxy_ssl_verify off;
