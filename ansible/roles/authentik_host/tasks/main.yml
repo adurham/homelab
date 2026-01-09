@@ -29,7 +29,7 @@
     --net0 name=eth0,bridge=private,ip=172.16.0.20/24,gw=172.16.0.1
     --storage nvme-data
     --features nesting=1
-    --password "password"
+    --password "{{ lxc_password }}"
     --ssh-public-keys /root/.ssh/authorized_keys
   when: ct_check.rc != 0
 

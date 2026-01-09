@@ -104,6 +104,10 @@
         status_code: [200]
       when: apps_list.json.results | length > 0
 
+    - name: Capture Proxmox App ID
+      ansible.builtin.set_fact:
+        proxmox_app_id: "{{ apps_list.json.results[0].pk }}"
+
     - name: Get Existing Admin Group
       ansible.builtin.uri:
         url: "{{ authentik_url }}/api/v3/core/groups/?search={{ group_admin_name | urlencode }}"
@@ -446,13 +450,493 @@
         headers: "{{ headers }}"
       register: brand_list
 
-    - name: Update Default Brand with Recovery Flow
+    - name: Configure Brand (AMD-Enterprises)
       ansible.builtin.uri:
         url: "{{ authentik_url }}/api/v3/core/brands/{{ brand_list.json.results[0].brand_uuid }}/"
         method: PATCH
         headers: "{{ headers }}"
         body_format: json
         body:
+          branding_title: "AMD-Enterprises"
+          default_theme: "dark"
           flow_recovery: "{{ flow_recovery_id }}"
         status_code: [200]
       when: brand_list.json.results | length > 0
+
+    # Flow Branding Updates (Title & Background) -----------------------------
+
+    - name: Get Default Authentication Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-authentication-flow"
+        method: GET
+        headers: "{{ headers }}"
+      register: auth_flow_list
+
+    - name: Update Default Authentication Flow Branding
+      ansible.builtin.uri:
+        # Use slug for referencing
+        url: "{{ authentik_url }}/api/v3/flows/instances/{{ auth_flow_list.json.results[0].slug }}/"
+        method: PATCH
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          title: "Welcome to AMD-Enterprises"
+          # User rejected black background. Keeping default (Mountain) or previous setting for now.
+        status_code: [200]
+      when: auth_flow_list.json.results | length > 0
+
+    # MFA Implementation -----------------------------------------------------
+
+    # 1. MFA Setup Stages
+    - name: Create TOTP Setup Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/authenticator/totp/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "MFA-TOTP-Setup"
+          digits: 6
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_totp_setup
+
+    - name: Get TOTP Setup Stage (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/authenticator/totp/?name=MFA-TOTP-Setup"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_totp_setup
+      when: create_totp_setup.failed
+
+    - name: Capture TOTP Stage ID
+      ansible.builtin.set_fact:
+        stage_totp_id: "{{ (create_totp_setup.json.pk if (create_totp_setup is defined and create_totp_setup.json is defined and create_totp_setup.json.pk is defined) else get_totp_setup.json.results[0].pk) }}"
+
+    - name: Create WebAuthn Setup Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/authenticator/webauthn/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "MFA-WebAuthn-Setup"
+          user_verification: "preferred"
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_webauthn_setup
+
+    - name: Get WebAuthn Setup Stage (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/authenticator/webauthn/?name=MFA-WebAuthn-Setup"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_webauthn_setup
+      when: create_webauthn_setup.failed
+
+    - name: Capture WebAuthn Stage ID
+      ansible.builtin.set_fact:
+        stage_webauthn_id: "{{ (create_webauthn_setup.json.pk if (create_webauthn_setup is defined and create_webauthn_setup.json is defined and create_webauthn_setup.json.pk is defined) else get_webauthn_setup.json.results[0].pk) }}"
+
+    # 2. MFA Setup Flow
+    - name: Create MFA Setup Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "MFA Setup Flow"
+          slug: "mfa-setup-flow"
+          title: "Set up Multi-Factor Authentication"
+          designation: "stage_configuration"
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_mfa_flow
+
+    - name: Get MFA Setup Flow (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/?slug=mfa-setup-flow"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_mfa_flow
+      when: create_mfa_flow.failed
+
+    - name: Capture MFA Setup Flow ID
+      ansible.builtin.set_fact:
+        flow_mfa_setup_id: "{{ (create_mfa_flow.json.pk if (create_mfa_flow is defined and create_mfa_flow.json is defined and create_mfa_flow.json.pk is defined) else get_mfa_flow.json.results[0].pk) }}"
+
+    # 3. Bind Stages to Setup Flow
+    - name: Bind TOTP to Setup Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_mfa_setup_id }}"
+          stage: "{{ stage_totp_id }}"
+          order: 10
+        status_code: [200, 201]
+      ignore_errors: true
+
+    - name: Bind WebAuthn to Setup Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_mfa_setup_id }}"
+          stage: "{{ stage_webauthn_id }}"
+          order: 20
+        status_code: [200, 201]
+      ignore_errors: true
+
+    # 4. MFA Validation Stage (Login)
+    - name: Create MFA Validation Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/authenticator/validate/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "MFA-Validation"
+          not_configured_action: "skip" # CRITICAL: Skips for Admins who haven't setup MFA
+          device_classes:
+            - static
+            - totp
+            - webauthn
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_mfa_validate
+
+    - name: Get MFA Validation Stage (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/authenticator/validate/?name=MFA-Validation"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_mfa_validate
+      when: create_mfa_validate.failed
+
+    - name: Capture MFA Validate Stage ID
+      ansible.builtin.set_fact:
+        stage_mfa_validate_id: "{{ (create_mfa_validate.json.pk if (create_mfa_validate is defined and create_mfa_validate.json is defined and create_mfa_validate.json.pk is defined) else get_mfa_validate.json.results[0].pk) }}"
+
+    # 5. Bind MFA Validation to Default Authentication Flow
+    - name: Bind MFA Validation to Login Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ auth_flow_list.json.results[0].pk }}"
+          stage: "{{ stage_mfa_validate_id }}"
+          order: 30 # Execute AFTER password
+        status_code: [200, 201]
+      ignore_errors: true
+
+    # Invitation Flow Implementation ------------------------------------------
+
+    # 1. Create Invitation Stage
+    - name: Create Invitation Stage
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/invitation/stages/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Enrollment-Invitation-Stage"
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_invitation
+
+    - name: Get Invitation Stage (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/stages/invitation/stages/?name=Enrollment-Invitation-Stage"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_invitation
+      when: create_invitation.failed
+
+    - name: Capture Invitation Stage ID
+      ansible.builtin.set_fact:
+        stage_invitation_id: "{{ (create_invitation.json.pk if (create_invitation is defined and create_invitation.json is defined and create_invitation.json.pk is defined) else get_invitation.json.results[0].pk) }}"
+
+    # 2. Get Default Enrollment Stages (Reuse)
+    - name: Get Default Enrollment Prompt Stage
+      ansible.builtin.uri:
+        # Prompt stages endpoint requires /stages/ suffix
+        url: "{{ authentik_url }}/api/v3/stages/prompt/stages/?slug=default-source-enrollment-prompt"
+        method: GET
+        headers: "{{ headers }}"
+      register: default_prompt_list
+
+    - name: Get Default Enrollment Write Stage
+      ansible.builtin.uri:
+        # user_write endpoint does NOT require /stages/ suffix like prompt
+        url: "{{ authentik_url }}/api/v3/stages/user_write/?slug=default-source-enrollment-write"
+        method: GET
+        headers: "{{ headers }}"
+      register: default_write_list
+
+    - name: Get Default Enrollment Login Stage
+      ansible.builtin.uri:
+        # user_login endpoint does NOT require /stages/ suffix
+        url: "{{ authentik_url }}/api/v3/stages/user_login/?slug=default-source-enrollment-login"
+        method: GET
+        headers: "{{ headers }}"
+      register: default_login_list
+
+    # 3. Create Invitation Flow
+    - name: Create Invitation Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Invitation Flow"
+          slug: "enrollment-invitation"
+          title: "Redeem Invitation"
+          designation: "enrollment"
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_invitation_flow
+
+    - name: Get Invitation Flow (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/?slug=enrollment-invitation"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_invitation_flow
+      when: create_invitation_flow.failed
+
+    - name: Capture Invitation Flow ID
+      ansible.builtin.set_fact:
+        flow_invitation_id: "{{ (create_invitation_flow.json.pk if (create_invitation_flow is defined and create_invitation_flow.json is defined and create_invitation_flow.json.pk is defined) else get_invitation_flow.json.results[0].pk) }}"
+
+    # 4. Bind Stages
+    - name: Bind Invitation Stage (Order 0)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_invitation_id }}"
+          stage: "{{ stage_invitation_id }}"
+          order: 0
+        status_code: [200, 201]
+      ignore_errors: true
+
+    - name: Bind Default Prompt (Order 10)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_invitation_id }}"
+          stage: "{{ default_prompt_list.json.results[0].pk }}"
+          order: 10
+        status_code: [200, 201]
+      ignore_errors: true
+      when: default_prompt_list.json.results | length > 0
+
+    - name: Bind Default Write (Order 20)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_invitation_id }}"
+          stage: "{{ default_write_list.json.results[0].pk }}"
+          order: 20
+        status_code: [200, 201]
+      ignore_errors: true
+      when: default_write_list.json.results | length > 0
+
+    - name: Bind Default Login (Order 30)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ flow_invitation_id }}"
+          stage: "{{ default_login_list.json.results[0].pk }}"
+          order: 30
+        status_code: [200, 201]
+      ignore_errors: true
+      when: default_login_list.json.results | length > 0
+
+    # Proxy Protection Implementation (Demo App) -----------------------------
+
+    # 1. Get Authorization Flow (Implicit Consent)
+    - name: Get Implicit Consent Flow
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-provider-authorization-implicit-consent"
+        method: GET
+        headers: "{{ headers }}"
+      register: flow_implicit_consent
+
+    # 2. Create Proxy Provider
+    - name: Create WhoAmI Proxy Provider
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/providers/proxy/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "WhoAmI Provider"
+          authorization_flow: "{{ flow_implicit_consent.json.results[0].pk }}"
+          mode: "forward_single" # Forward Auth (Single Application)
+          external_host: "https://whoami.chi.lab.amd-e.com"
+          internal_host: "http://127.0.0.1:8080" # Not strict for forward_auth single, but good practice
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_whoami_provider
+
+    - name: Get WhoAmI Provider (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/providers/proxy/?search=WhoAmI%20Provider"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_whoami_provider
+      when: create_whoami_provider.failed
+
+    - name: Capture WhoAmI Provider ID
+      ansible.builtin.set_fact:
+        whoami_provider_id: "{{ (create_whoami_provider.json.pk if (create_whoami_provider is defined and create_whoami_provider.json is defined and create_whoami_provider.json.pk is defined) else get_whoami_provider.json.results[0].pk) }}"
+
+    # 3. Create Application
+    - name: Create WhoAmI Application
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/applications/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "WhoAmI Demo"
+          slug: "whoami"
+          provider: "{{ whoami_provider_id }}"
+          meta_launch_url: "https://whoami.chi.lab.amd-e.com"
+          group: "" # No specific group, allow all authenticated? Or explicit binding?
+        status_code: [200, 201]
+      ignore_errors: true
+      register: create_whoami_app
+
+    - name: Get WhoAmI Application (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/applications/?slug=whoami"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_whoami_app
+      when: create_whoami_app.failed
+
+    - name: Capture WhoAmI App ID
+      ansible.builtin.set_fact:
+        whoami_app_id: "{{ (create_whoami_app.json.pk if (create_whoami_app is defined and create_whoami_app.json is defined and create_whoami_app.json.pk is defined) else get_whoami_app.json.results[0].pk) }}"
+
+    # 4. Bind Provider to Embedded Outpost (Critical for Forward Auth)
+    - name: Get Embedded Outpost
+      ansible.builtin.uri:
+        # Search for "authentik Embedded Outpost" needs encoding or simply search by generic list and filtering?
+        # Search param often handles spaces but uri module might need encoding.
+        url: "{{ authentik_url }}/api/v3/outposts/instances/?search=authentik%20Embedded%20Outpost"
+        method: GET
+        headers: "{{ headers }}"
+      register: embedded_outpost
+
+    - name: Update Embedded Outpost (Add Provider)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/outposts/instances/{{ embedded_outpost.json.results[0].pk }}/"
+        method: PATCH
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          # Append new provider ID to existing list. Uses 'providers' (list of IDs).
+          # Convert existing list of IDs (which might be integers) to list, add new ID.
+          providers: "{{ embedded_outpost.json.results[0].providers + [whoami_provider_id] | unique }}"
+        status_code: [200]
+      when: whoami_provider_id not in embedded_outpost.json.results[0].providers
+
+    # 5. MFA Enforcement Policy (Restrict App Access)
+    - name: Get Require MFA Policy (Idempotency)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/policies/expression/?search=Require%20MFA"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_mfa_policy
+
+    - name: Create Require MFA Policy
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/policies/expression/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Require MFA"
+          expression: |
+            # Debugging MFA counts
+            totp = len(request.user.totp_devices.all())
+            webauthn = len(request.user.webauthn_devices.all())
+            static = len(request.user.static_devices.all())
+            ak_logger.warning(f"MFA Policy Debug: User={request.user.username}, TOTP={totp}, WebAuthn={webauthn}, Static={static}")
+            return totp > 0 or webauthn > 0 or static > 0
+        status_code: [200, 201]
+      when: get_mfa_policy.json.results | length == 0
+      register: create_mfa_policy
+      changed_when: true
+
+    - name: Update Require MFA Policy (Ensure Debug Expression)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/policies/expression/{{ get_mfa_policy.json.results[0].pk }}/"
+        method: PATCH
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          expression: |
+            # Direct DB Query using Authentik stages (Verified Imports)
+            # This avoids 'ModuleNotFoundError: No module named django_otp'
+            from authentik.stages.authenticator_totp.models import TOTPDevice
+            from authentik.stages.authenticator_static.models import StaticDevice
+            from authentik.stages.authenticator_webauthn.models import WebAuthnDevice
+            
+            # WebAuthn doesn't have a 'confirmed' field usually, but we check existence
+            has_totp = TOTPDevice.objects.filter(user=request.user, confirmed=True).exists()
+            has_static = StaticDevice.objects.filter(user=request.user, confirmed=True).exists()
+            has_webauthn = WebAuthnDevice.objects.filter(user=request.user).exists()
+            
+            return has_totp or has_static or has_webauthn
+        status_code: [200]
+      when: get_mfa_policy.json.results | length > 0       
+
+    - name: Capture MFA Policy ID
+      ansible.builtin.set_fact:
+        mfa_policy_id: "{{ (create_mfa_policy.json.pk if (create_mfa_policy is defined and create_mfa_policy.json is defined and create_mfa_policy.json.pk is defined) else get_mfa_policy.json.results[0].pk) }}"
+
+    - name: Check MFA Policy Binding (Proxmox)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/policies/bindings/?target={{ proxmox_app_id }}&policy={{ mfa_policy_id }}"
+        method: GET
+        headers: "{{ headers }}"
+      register: get_mfa_binding
+
+    - name: Bind MFA Policy to Proxmox App
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/policies/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ proxmox_app_id }}"
+          policy: "{{ mfa_policy_id }}"
+          order: 0
+          enabled: true
+          negate: false 
+        status_code: [200, 201]
+      when: get_mfa_binding.json.results | length == 0

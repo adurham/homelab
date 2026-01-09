@@ -1,0 +1,2 @@
+---
+lxc_password: "{{ lookup('password', 'credentials/authentik_root_pass chars=ascii_letters,digits length=20') }}"

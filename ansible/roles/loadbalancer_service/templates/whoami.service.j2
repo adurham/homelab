@@ -1,0 +1,13 @@
+[Unit]
+Description=WhoAmI Demo Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/whoami.py
+Restart=always
+User=www-data
+Group=www-data
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

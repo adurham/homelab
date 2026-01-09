@@ -20,6 +20,7 @@ pve03   IN      A       192.168.86.13
 ; Authentik (Private IP - requires route/Tailscale)
 auth    IN      A       172.16.0.20
 proxmox IN      A       172.16.0.30
+whoami  IN      A       172.16.0.30
 
 ; Wildcard (Optional - helps with subdomains)
 *.chi.lab.amd-e.com. IN A 192.168.86.11 ; Point to PVE01 or Traefik ingress if we had one
