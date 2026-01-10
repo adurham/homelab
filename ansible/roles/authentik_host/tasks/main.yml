@@ -1,24 +1,26 @@
 ---
 - name: Check if Authentik CT exists
   ansible.builtin.shell: pct list | grep 100
-  register: ct_check
+  register: authentik_host_ct_check
   ignore_errors: true
   changed_when: false
 
 - name: Update Template Database
   ansible.builtin.command: pveam update
   changed_when: false
-  when: ct_check.rc != 0
+  when: authentik_host_ct_check.rc != 0
 
 - name: Download Ubuntu 22.04 Template
   ansible.builtin.command: pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
   args:
     creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
-  register: template_download
+  register: authentik_host_template_download
 
 - name: Get Tailscale Gateway IP (Bastion)
-  ansible.builtin.shell: pct exec 101 -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
-  register: gw_ip
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 101 -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+  register: authentik_host_gw_ip
   changed_when: false
 
 - name: Create Authentik Container (Private Net)
@@ -29,28 +31,27 @@
     --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_authentik }}/24,gw={{ net_private_gw }}
     --storage nvme-data
     --features nesting=1
-    --password "{{ lxc_password }}"
+    --password "{{ authentik_host_lxc_password }}"
     --ssh-public-keys /root/.ssh/authorized_keys
-  when: ct_check.rc != 0
+  when: authentik_host_ct_check.rc != 0
 
 - name: Start Authentik Container
   ansible.builtin.command: pct start 100
-  when: ct_check.rc != 0
-  ignore_errors: true
+  when: authentik_host_ct_check.rc != 0
 
 - name: Wait for Container Network (via Gateway)
   ansible.builtin.shell: pct exec 101 -- timeout 1 bash -c "cat < /dev/null > /dev/tcp/{{ ip_authentik }}/22"
-  register: wait_net
-  until: wait_net.rc == 0
+  register: authentik_host_wait_net
+  until: authentik_host_wait_net.rc == 0
   retries: 30
   delay: 5
   changed_when: false
-  when: ct_check.rc != 0
+  when: authentik_host_ct_check.rc != 0
 
 - name: Add Authentik Host to Inventory
   ansible.builtin.add_host:
     name: "authentik"
     ansible_host: "{{ ip_authentik }}"
     ansible_user: "root"
-    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p -q root@{{ gw_ip.stdout }}"'
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p -q root@{{ authentik_host_gw_ip.stdout }}"'
     groups: "authentik_containers"

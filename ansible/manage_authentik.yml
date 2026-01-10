@@ -7,7 +7,7 @@
       validate_certs: true
   vars:
     authentik_url: "https://auth.chi.lab.amd-e.com"
-    api_token: "{{ lookup('file', 'credentials/authentik_api_token') | trim }}"
+    api_token: "{{ authentik_api_token }}"
     headers:
       Authorization: "Bearer {{ api_token }}"
       Content-Type: "application/json"
