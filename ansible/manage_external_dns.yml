@@ -4,7 +4,7 @@
   connection: local
   gather_facts: false
   vars:
-    desec_token: "{{ lookup('file', 'credentials/desec_token_proxmox') | trim }}"
+    # desec_token provided via Vault (vault_desec_token_proxmox)
     desec_domain: "amd-e.com"
     target_cname: "chiamd-e.no-ip.biz." # Trailing dot for CNAME
     subdomains:
@@ -13,21 +13,23 @@
 
   tasks:
     - name: Check if CNAME exists
-      uri:
+      ansible.builtin.uri:
         url: "https://desec.io/api/v1/domains/{{ desec_domain }}/rrsets/{{ item }}/CNAME/"
         method: GET
         headers:
-          Authorization: "Token {{ desec_token }}"
+          Authorization: "Token {{ vault_desec_token_proxmox }}"
         status_code: [200, 404]
       loop: "{{ subdomains }}"
       register: cname_check
+      no_log: true
+      check_mode: false
 
     - name: Create CNAME (POST)
-      uri:
+      ansible.builtin.uri:
         url: "https://desec.io/api/v1/domains/{{ desec_domain }}/rrsets/"
         method: POST
         headers:
-          Authorization: "Token {{ desec_token }}"
+          Authorization: "Token {{ vault_desec_token_proxmox }}"
           Content-Type: "application/json"
         body_format: json
         body:
@@ -38,14 +40,15 @@
             - "{{ target_cname }}"
         status_code: [201]
       loop: "{{ cname_check.results }}"
+      no_log: true
       when: item.status == 404
 
     - name: Update CNAME (PUT)
-      uri:
+      ansible.builtin.uri:
         url: "https://desec.io/api/v1/domains/{{ desec_domain }}/rrsets/{{ item.item }}/CNAME/"
         method: PUT
         headers:
-          Authorization: "Token {{ desec_token }}"
+          Authorization: "Token {{ vault_desec_token_proxmox }}"
           Content-Type: "application/json"
         body_format: json
         body:
@@ -56,4 +59,5 @@
           ttl: 3600
         status_code: [200]
       loop: "{{ cname_check.results }}"
+      no_log: true
       when: item.status == 200
