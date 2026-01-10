@@ -1,0 +1,81 @@
+---
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  delegate_to: pve-01
+  changed_when: false
+
+- name: Download Ubuntu 22.04 Template
+  ansible.builtin.command: pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+  delegate_to: pve-01
+  args:
+    creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+
+- name: Check if NTP Container Exists
+  ansible.builtin.command: pct config 105
+  delegate_to: pve-01
+  register: pct_check
+  failed_when: false
+  changed_when: false
+
+- name: Create NTP Container (105)
+  ansible.builtin.command: >
+    pct create 105 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+    --hostname ntp-01
+    --cores 1 --memory 512 --swap 512
+    --net0 name=eth0,bridge=private,ip={{ ip_ntp_server }}/24,gw={{ net_private_gw }}
+    --storage nvme-data
+    --unprivileged 1
+    --features nesting=1
+    --password "{{ lookup('password', 'credentials/ntp_01_root_pass chars=ascii_letters,digits length=20') }}"
+    --start 1
+    --onboot 1
+  delegate_to: pve-01
+  when: pct_check.rc != 0
+
+- name: Ensure NTP Container is Running
+  ansible.builtin.command: pct start 105
+  delegate_to: pve-01
+  register: ntp_start
+  failed_when: ntp_start.rc != 0 and ("already running" not in ntp_start.stderr and "already running" not in ntp_start.stdout)
+  changed_when: ntp_start.rc == 0
+
+- name: Wait for NTP Container IP
+  ansible.builtin.shell: pct exec 105 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  delegate_to: pve-01
+  register: ip_check
+  until: ip_check.rc == 0
+  retries: 20
+  delay: 3
+  changed_when: false
+
+- name: Update Apt Cache
+  ansible.builtin.command: pct exec 105 -- apt-get update
+  delegate_to: pve-01
+  when: pct_check.rc != 0
+
+- name: Install Python3 & Chrony
+  ansible.builtin.command: pct exec 105 -- apt-get install -y python3 chrony
+  delegate_to: pve-01
+
+- name: Configure Chrony (Allow Private Network & NIST Sync)
+  ansible.builtin.shell: |
+    pct exec 105 -- sh -c "grep -q 'time.nist.gov' /etc/chrony/chrony.conf || echo 'server time.nist.gov iburst' >> /etc/chrony/chrony.conf"
+    pct exec 105 -- sh -c "grep -q 'allow 172.16.0.0/24' /etc/chrony/chrony.conf || echo 'allow 172.16.0.0/24' >> /etc/chrony/chrony.conf"
+    pct exec 105 -- systemctl restart chrony
+  delegate_to: pve-01
+
+- name: Add NTP Host to Inventory
+  ansible.builtin.add_host:
+    name: "ntp-01"
+    ansible_host: "{{ ip_ntp_server }}"
+    ansible_user: "root"
+    groups: "ntp_server"
+
+- name: Inject SSH Key
+  ansible.builtin.shell: |
+    pct exec 105 -- mkdir -p /root/.ssh
+    cat /root/.ssh/authorized_keys | pct exec 105 -- sh -c "cat > /root/.ssh/authorized_keys"
+    pct exec 105 -- chmod 700 /root/.ssh
+    pct exec 105 -- chmod 600 /root/.ssh/authorized_keys
+  delegate_to: pve-01
+  when: pct_check.rc != 0

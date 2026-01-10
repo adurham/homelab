@@ -1,0 +1,28 @@
+---
+# .ansible-lint
+# Standards: https://ansible.readthedocs.io/projects/lint/
+
+# Profile: production vs. safety
+# We select 'production' as we are deploying to a live lab environment.
+profile: production
+
+# Exclusions
+# We exclude galaxy roles and some legacy files if needed.
+exclude_paths:
+  - .ansible/
+  - terraform/
+
+# Rules to skip
+# command-instead-of-module: We still have some shell usage (acme.sh, pct) that is intentional.
+# no-changed-when: We are careful, but some ad-hoc commands might trip this.
+skip_list:
+  - command-instead-of-module
+  - no-changed-when
+  - meta-no-info
+  - name[play] # Don't enforce names on playbooks for now
+
+# Mocks for verification
+mock_modules:
+  - community.general.proxmox_kvm
+  - community.general.proxmox
+  - community.general.proxmox_search

@@ -1,7 +1,0 @@
-# playbook_install_tanium_client.yml
----
-- name: Install Tanium Client 7.2 on tagged VMs
-  hosts: vmware_tag_tanium_client_314
-  gather_facts: yes
-  roles:
-    - tanium_client_314

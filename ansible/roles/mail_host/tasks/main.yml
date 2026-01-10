@@ -10,7 +10,7 @@
     pct create 104 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
     --hostname mail-01
     --cores 1 --memory 512 --swap 512
-    --net0 name=eth0,bridge=private,ip=172.16.0.40/24,gw=172.16.0.1
+    --net0 name=eth0,bridge=private,ip={{ ip_mail_server }}/24,gw={{ net_private_gw }}
     --storage nvme-data
     --unprivileged 1
     --features nesting=1

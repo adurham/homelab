@@ -14,7 +14,7 @@
 - name: Create SDN Zone (VXLAN)
   ansible.builtin.command: >
     pvesh create /cluster/sdn/zones --type vxlan --zone homelab
-    --peers 192.168.86.11,192.168.86.12,192.168.86.13
+    --peers {{ proxmox_cluster_peers }}
     --ipam pve
     --mtu 1450
   when: zone_check.rc != 0

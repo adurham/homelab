@@ -5,6 +5,7 @@ A comprehensive homelab setup featuring infrastructure automation, smart home au
 ## 🚀 Quick Start
 
 ### System Bootstrap Script
+
 Restore your entire terminal/shell setup from scratch after a system wipe:
 
 ```bash
@@ -13,6 +14,7 @@ Restore your entire terminal/shell setup from scratch after a system wipe:
 ```
 
 The bootstrap script supports:
+
 - ✅ **macOS** (Intel and Apple Silicon)
 - ✅ **Ubuntu/Debian-based** (Ubuntu, Debian, Pop!_OS, Elementary, Linux Mint)
 - ✅ **CentOS/RHEL-based** (CentOS, RHEL, Rocky Linux, AlmaLinux, Fedora)
@@ -23,7 +25,9 @@ The bootstrap script supports:
 This repository contains a complete homelab infrastructure setup with the following major components:
 
 ### 🏗️ Infrastructure as Code (`terraform/`)
+
 **VMware vSphere Infrastructure Management**
+
 - **Active Directory**: Domain controller and authentication services
 - **Tanium**: Endpoint security and management platform
   - Airgap environments for secure deployments
@@ -36,7 +40,9 @@ This repository contains a complete homelab infrastructure setup with the follow
 - **vCenter**: VMware vCenter Server management
 
 ### 🤖 Configuration Management (`ansible/`)
+
 **Automated System Configuration**
+
 - **Tanium Client Deployment**: Automated installation across multiple OS types
   - Windows guests
   - Linux distributions (Ubuntu, RHEL, Oracle Linux, CentOS)
@@ -45,10 +51,20 @@ This repository contains a complete homelab infrastructure setup with the follow
 - **OS-Specific Configurations**: Tailored settings for different operating systems
 - **Inventory Management**: vSphere inventory integration
 
+#### 🏃 Runner Setup
+
+To prepare a new machine (CI/CD runner or workstation) with all dependencies:
+
+```bash
+./ansible/setup_runner.sh
+```
+
 ### 🏠 Smart Home Automation (`homeassistant/`)
+
 **Intelligent Home Control System**
 
 #### 🌡️ Water Heater Circulator Pump System
+
 - **Smart Pump Control**: Automatic water heater circulator pump based on occupancy detection
 - **Occupancy Detection**: Monitors kitchen and bathroom occupancy sensors
 - **Safety Features**: Daily runtime limits (8 hours max), cooldown periods (45 minutes)
@@ -56,12 +72,14 @@ This repository contains a complete homelab infrastructure setup with the follow
 - **Automation Logic**: 15-minute pump cycles with intelligent scheduling
 
 #### 💡 Lighting Automation
+
 - **Cat Room Lighting**: Automated main lights control
 - **Front Porch Sconces**: Motion-activated lighting
 - **Garage Lighting**: Door motion control integration
 - **Stair Lighting**: Automated on/off control
 
 #### 🔧 Advanced Features
+
 - **Deployment Safety**: Change detection, automatic backups, validation layers
 - **Error Recovery**: Auto-restore from backups if deployment fails
 - **Virtual Environment**: Isolated Python dependencies
@@ -70,14 +88,18 @@ This repository contains a complete homelab infrastructure setup with the follow
 ### 🛠️ Utility Scripts (`misc scripts/`)
 
 #### 🚀 System Bootstrap (`bootstrap.sh`)
+
 **Complete Terminal Environment Restoration**
+
 - **Package Management**: Homebrew (macOS), apt (Ubuntu/Debian), dnf/yum (CentOS/RHEL), pacman (Arch)
 - **Shell Setup**: zsh, Oh My Zsh, Starship prompt with custom configuration
 - **Development Tools**: direnv, htop, jq, fzf, tree, vim, git, curl, wget
 - **Cross-Platform**: Automatically detects OS and configures appropriately
 
 #### 🤖 AI Development Assistant (`continue-dev/`)
+
 **Cursor-like AI Functionality with Continue.dev**
+
 - **Autonomous AI Agent**: Analyze codebases, generate code, debug issues, execute commands
 - **Multiple AI Models**: Local (Ollama) and cloud (OpenAI, Anthropic, Google) support
 - **Smart Commands**: 12 specialized commands for different development tasks
@@ -85,13 +107,16 @@ This repository contains a complete homelab infrastructure setup with the follow
 - **Model Recommendations**: AI analyzes tasks and suggests optimal models
 
 #### 🔧 System Management Scripts
+
 - **VM Management**: `reimport_vms.sh` - VMware VM reimport utilities
 - **Binary Patching**: `patch_binary.sh` - Binary modification tools
 - **VPN Connectivity**: `yubikey_vpn_connect.sh` - YubiKey VPN connection automation
 - **System Shutdown**: `shutdown-amd-vmcl01.ps1` - PowerShell shutdown scripts
 
 #### 🔒 Tanium Management (`tanium/`)
+
 **Enterprise Security Platform Tools**
+
 - **Client Management**: API interactions, client configuration
 - **Security Operations**: TLS testing, alert management, sensor toggling
 - **Data Management**: SQL operations, MD5 checksums, metric pushing
@@ -101,23 +126,27 @@ This repository contains a complete homelab infrastructure setup with the follow
 ## 🎯 Key Features
 
 ### 🔐 Security & Compliance
+
 - **Tanium Integration**: Enterprise-grade endpoint security
 - **Airgap Environments**: Secure deployments for sensitive workloads
 - **Vault Integration**: Centralized secrets management
 - **Network Security**: NSX-based network virtualization
 
 ### 🏠 Smart Home Intelligence
+
 - **Occupancy-Based Automation**: Intelligent pump control based on room usage
 - **Safety Mechanisms**: Runtime limits, cooldown periods, manual overrides
 - **Comprehensive Monitoring**: Daily statistics, cycle tracking, usage analytics
 
 ### 🚀 Development Productivity
+
 - **AI-Powered Development**: Local and cloud AI models for coding assistance
 - **Cross-Platform Compatibility**: Works on macOS, Linux, and Windows
 - **Automated Setup**: One-command environment restoration
 - **Quality Assurance**: Automated testing and validation
 
 ### 📊 Monitoring & Observability
+
 - **Grafana Integration**: Comprehensive monitoring dashboards
 - **Consul Service Discovery**: Dynamic service registration and health checking
 - **Home Assistant Logging**: Detailed automation logging and debugging
@@ -125,6 +154,7 @@ This repository contains a complete homelab infrastructure setup with the follow
 ## 🛠️ Technology Stack
 
 ### Infrastructure
+
 - **VMware vSphere**: Virtualization platform
 - **Terraform**: Infrastructure as Code
 - **Ansible**: Configuration management
@@ -132,17 +162,20 @@ This repository contains a complete homelab infrastructure setup with the follow
 - **Vault**: Secrets management
 
 ### Smart Home
+
 - **Home Assistant**: Open-source home automation platform
 - **Python**: Automation scripting and deployment tools
 - **YAML**: Configuration management
 
 ### Development
+
 - **Continue.dev**: AI-powered development assistant
 - **Ollama**: Local AI model hosting
 - **VS Code**: Integrated development environment
 - **Git**: Version control
 
 ### System Management
+
 - **Bash/Shell Scripting**: Automation and system management
 - **PowerShell**: Windows system management
 - **Python**: Cross-platform scripting and APIs
@@ -150,6 +183,7 @@ This repository contains a complete homelab infrastructure setup with the follow
 ## 🚀 Getting Started
 
 ### Prerequisites
+
 - VMware vSphere environment
 - Home Assistant instance
 - Python 3.x
@@ -158,22 +192,26 @@ This repository contains a complete homelab infrastructure setup with the follow
 ### Initial Setup
 
 1. **Clone the Repository**
+
    ```bash
    git clone <repository-url>
    cd homelab
    ```
 
 2. **Restore Terminal Environment** (Optional)
+
    ```bash
    ./misc\ scripts/bootstrap.sh
    ```
 
 3. **Setup AI Development Assistant** (Optional)
+
    ```bash
    ./misc\ scripts/continue-dev/setup-continue-dev.sh
    ```
 
 4. **Configure Home Assistant**
+
    ```bash
    cd homeassistant
    cp ha_config.env.example ha_config.env
@@ -182,6 +220,7 @@ This repository contains a complete homelab infrastructure setup with the follow
    ```
 
 5. **Deploy Infrastructure** (Production)
+
    ```bash
    cd terraform
    # Configure terraform.tfvars with your environment details
@@ -200,12 +239,14 @@ This repository contains a complete homelab infrastructure setup with the follow
 ## 🔧 Maintenance
 
 ### Regular Tasks
+
 - **Home Assistant**: Deploy configuration changes with `./homeassistant/deploy_homeassistant.sh`
 - **Infrastructure**: Update Terraform configurations as needed
 - **Ansible**: Run playbooks for system configuration updates
 - **Monitoring**: Check Grafana dashboards and Consul health status
 
 ### Backup & Recovery
+
 - **Home Assistant**: Automatic backups created during deployments
 - **Infrastructure**: Terraform state files backed up
 - **Configuration**: Git repository provides version control

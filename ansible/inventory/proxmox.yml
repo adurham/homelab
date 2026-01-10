@@ -20,7 +20,6 @@ all:
           ansible_host: 172.16.0.30
       vars:
         ansible_user: root
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
         
     authentik_server:
       hosts:
@@ -28,7 +27,6 @@ all:
           ansible_host: 172.16.0.20
       vars:
         ansible_user: root
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
 
     mail_server:
       hosts:
@@ -36,4 +34,61 @@ all:
           ansible_host: 172.16.0.40
       vars:
         ansible_user: root
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+
+    ntp_server:
+      hosts:
+        ntp-01:
+          ansible_host: 172.16.0.11
+      vars:
+        ansible_user: root
+
+    # Tanium Cluster
+    tanium_cluster:
+      children:
+        tanium_servers:
+          hosts:
+            ts-01:
+              vmid: 200
+              vm_cores: 4
+              vm_memory: 32768
+              vm_disk: 500
+              ansible_host: 172.16.0.51 # Placeholder IP
+            ts-02:
+              vmid: 201
+              vm_cores: 4
+              vm_memory: 32768
+              vm_disk: 500
+              ansible_host: 172.16.0.52 # Placeholder IP
+        tanium_modules:
+          hosts:
+            tms-01:
+              vmid: 202
+              vm_cores: 8
+              vm_memory: 32768
+              vm_disk: 1000
+              ansible_host: 172.16.0.53 # Placeholder IP
+            tms-02:
+              vmid: 203
+              vm_cores: 8
+              vm_memory: 32768
+              vm_disk: 1000
+              ansible_host: 172.16.0.54 # Placeholder IP
+        tanium_zones:
+          hosts:
+            tzs-01:
+              vmid: 204
+              vm_cores: 4
+              vm_memory: 16384
+              vm_disk: 500
+              ansible_host: 172.16.0.55 # Placeholder IP
+            tzs-02:
+              vmid: 205
+              vm_cores: 4
+              vm_memory: 16384
+              vm_disk: 500
+              ansible_host: 172.16.0.56 # Placeholder IP
+      vars:
+        ansible_user: root
+        vm_storage: nvme-data
+        vm_bridge: private
+        vm_iso: "local:iso/TanOS.1.8.6.0134-DEV.iso"

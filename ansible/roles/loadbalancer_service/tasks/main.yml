@@ -8,6 +8,7 @@
       - curl
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
 - name: Create SSL Directory
   ansible.builtin.file:
@@ -16,46 +17,58 @@
     mode: '0755'
 
 - name: Install acme.sh
-  ansible.builtin.shell: >
+  ansible.builtin.shell: |
+    set -o pipefail
     curl https://get.acme.sh | sh -s email=admin@lab.amd-e.com
   args:
     creates: /root/.acme.sh/acme.sh
 
 - name: Register ACME Account (Let's Encrypt)
-  ansible.builtin.shell: >
+  ansible.builtin.shell: |
+    set -o pipefail
     /root/.acme.sh/acme.sh --register-account -m admin@lab.amd-e.com --server letsencrypt
-  register: acme_reg
-  changed_when: "'Account created' in acme_reg.stdout"
-  failed_when: acme_reg.rc != 0 and "already registered" not in acme_reg.stdout and "Account already exists" not in acme_reg.stderr
+  register: loadbalancer_service_acme_reg
+  changed_when: "'Account created' in loadbalancer_service_acme_reg.stdout"
+  failed_when: >
+    loadbalancer_service_acme_reg.rc != 0 and
+    "already registered" not in loadbalancer_service_acme_reg.stdout and
+    "Account already exists" not in loadbalancer_service_acme_reg.stderr
 
 - name: Issue Certificate (DNS-01 Wildcard)
-  ansible.builtin.shell: >
-    /root/.acme.sh/acme.sh --issue 
-    --server letsencrypt
-    --dns dns_desec 
-    -d "*.chi.lab.amd-e.com"
+  ansible.builtin.shell: |
+    set -o pipefail
+    /root/.acme.sh/acme.sh --issue \
+    --server letsencrypt \
+    --dns dns_desec \
+    -d "*.chi.lab.amd-e.com" \
     -d chi.lab.amd-e.com
   environment:
     DEDYN_TOKEN: "{{ acme_dedyn_token_proxmox }}"
     noip_username: "{{ noip_username }}"
     noip_password: "{{ noip_password }}"
-  register: acme_issue
-  changed_when: "'Cert success' in acme_issue.stdout"
-  failed_when: acme_issue.rc != 0 and "Domains not changed" not in acme_issue.stdout
+  no_log: true
+  register: loadbalancer_service_acme_issue
+  changed_when: "'Cert success' in loadbalancer_service_acme_issue.stdout"
+  failed_when: >
+    loadbalancer_service_acme_issue.rc != 0 and
+    "Domains not changed" not in loadbalancer_service_acme_issue.stdout
 
-- name: Install Certificate to Nginx (Wildcard)
-  ansible.builtin.shell: >
-    /root/.acme.sh/acme.sh --install-cert -d "*.chi.lab.amd-e.com"
-    --key-file       /etc/nginx/ssl/wildcard.key  
-    --fullchain-file /etc/nginx/ssl/wildcard.fullchain.cer 
+- name: Install Certificate to Nginx (Wildcard) # noqa: no-handler
+  ansible.builtin.shell: |
+    set -o pipefail
+    /root/.acme.sh/acme.sh --install-cert -d "*.chi.lab.amd-e.com" \
+    --key-file       /etc/nginx/ssl/wildcard.key \
+    --fullchain-file /etc/nginx/ssl/wildcard.fullchain.cer \
     --reloadcmd     "systemctl reload nginx"
-  when: acme_issue.changed
+  when: loadbalancer_service_acme_issue.changed
 
 - name: Deploy WhoAmI Script
   ansible.builtin.template:
     src: whoami.py.j2
     dest: /usr/local/bin/whoami.py
     mode: '0755'
+    owner: root
+    group: root
   notify: Restart WhoAmI
 
 - name: Deploy WhoAmI Service
@@ -63,6 +76,8 @@
     src: whoami.service.j2
     dest: /etc/systemd/system/whoami.service
     mode: '0644'
+    owner: root
+    group: root
   notify: Restart WhoAmI
 
 - name: Start WhoAmI Service
@@ -75,13 +90,16 @@
 - name: Add Authentik to Hosts File
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    line: "172.16.0.20 auth.chi.lab.amd-e.com"
+    line: "{{ ip_authentik }} auth.chi.lab.amd-e.com"
     state: present
 
 - name: Deploy Nginx Configuration
   ansible.builtin.template:
     src: nginx.conf.j2
     dest: /etc/nginx/sites-available/proxmox
+    mode: '0644'
+    owner: root
+    group: root
   notify: Restart Nginx
 
 - name: Enable Nginx Site
@@ -102,12 +120,16 @@
     path: /var/www/html/proxmox
     state: directory
     mode: '0755'
+    owner: root
+    group: root
 
 - name: Deploy OIDC Redirect Page
   ansible.builtin.template:
     src: redirect_oidc.html.j2
     dest: /var/www/html/proxmox/redirect_oidc.html
     mode: '0644'
+    owner: root
+    group: root
 
   notify: Restart Nginx
 

@@ -4,9 +4,9 @@
   changed_when: false
 
 - name: Check if Tailscale GW exists
-  ansible.builtin.shell: pct list | grep 101
+  ansible.builtin.command: pct config 101
   register: gw_check
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Create Tailscale Gateway Container
@@ -15,13 +15,14 @@
     --hostname tailscale-gw
     --cores 1 --memory 512 --swap 512
     --net0 name=eth0,bridge=vmbr0,ip=dhcp
-    --net1 name=eth1,bridge=private,ip=172.16.0.1/24
+    --net1 name=eth1,bridge=private,ip={{ net_private_gw }}/24
     --storage nvme-data
     --unprivileged 0
     --features nesting=1
     --password "{{ lookup('password', 'credentials/tailscale_gw_root_pass chars=ascii_letters,digits length=20') }}"
+  when: gw_check.rc != 0
 - name: Check LXC Config for Tun Access
-  ansible.builtin.shell: grep -q "lxc.mount.entry: /dev/net/tun" /etc/pve/lxc/101.conf
+  ansible.builtin.shell: 'grep -q "lxc.mount.entry: /dev/net/tun" /etc/pve/lxc/101.conf'
   register: tun_check
   failed_when: false
   changed_when: false
@@ -36,8 +37,9 @@
 
 - name: Ensure Gateway is Running
   ansible.builtin.command: pct start 101
-  when: gw_check.rc != 0
-  ignore_errors: true
+  register: gw_start
+  failed_when: gw_start.rc != 0 and ("already running" not in gw_start.stderr and "already running" not in gw_start.stdout)
+  changed_when: gw_start.rc == 0
 
 # Since it uses DHCP on eth0, we must query it.
 - name: Get Gateway IP
@@ -53,5 +55,4 @@
     name: "tailscale_gw"
     ansible_host: "{{ gw_ip.stdout }}"
     ansible_user: "root"
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
     groups: "tailscale_gateways"

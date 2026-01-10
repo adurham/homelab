@@ -1,4 +1,9 @@
 ---
+- name: Remove legacy Docker source list
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/docker.list
+    state: absent
+
 - name: Install dependencies (Nginx, Certs)
   ansible.builtin.apt:
     name:
@@ -10,21 +15,33 @@
       - socat
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
-- name: Check if Docker is installed
-  ansible.builtin.command: docker --version
-  register: docker_check
-  ignore_errors: true
-  changed_when: false
+- name: Add Docker GPG apt Key
+  ansible.builtin.apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
 
-- name: Install Docker via script
-  ansible.builtin.shell: |
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-  when: docker_check.rc != 0
+- name: Add Docker Repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+
+- name: Install Docker
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
 
 - name: Install acme.sh
   ansible.builtin.shell: |
+    set -o pipefail
     curl https://get.acme.sh | sh -s email=admin@lab.amd-e.com
   args:
     creates: /root/.acme.sh/acme.sh
@@ -33,6 +50,9 @@
   ansible.builtin.file:
     path: /etc/nginx/ssl
     state: directory
+    mode: '0755'
+    owner: root
+    group: root
 
 - name: Issue Certificate (DNS-01)
   ansible.builtin.shell: |
@@ -58,6 +78,9 @@
   ansible.builtin.template:
     src: nginx.conf.j2
     dest: /etc/nginx/sites-available/authentik
+    mode: '0644'
+    owner: root
+    group: root
   notify: Restart Nginx
 
 - name: Enable Nginx Site
@@ -77,18 +100,28 @@
   ansible.builtin.file:
     path: /opt/authentik
     state: directory
+    mode: '0755'
+    owner: root
+    group: root
 
 - name: Deploy Docker Compose file
   ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: /opt/authentik/docker-compose.yml
+    mode: '0640'
+    owner: root
+    group: root
 
 - name: Deploy .env file
   ansible.builtin.template:
     src: .env.j2
     dest: /opt/authentik/.env
+    mode: '0600'
+    owner: root
+    group: root
 
 - name: Start Authentik Configuration
-  ansible.builtin.shell: docker compose up -d
-  args:
-    chdir: /opt/authentik
+  community.docker.docker_compose_v2:
+    project_src: /opt/authentik
+    state: present
+  register: authentik_service_compose_result

@@ -1,0 +1,6 @@
+---
+- name: Deploy NTP Server
+  hosts: pve-01
+  gather_facts: false
+  roles:
+    - ntp_host
