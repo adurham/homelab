@@ -8,15 +8,12 @@
 - name: Configure Authentik Service
   hosts: authentik
   gather_facts: true
-  vars:
-    authentik_pg_password: "{{ lookup('password', 'credentials/authentik_pg_pass chars=ascii_letters,digits length=20') }}"
-    authentik_secret_key: "{{ lookup('password', 'credentials/authentik_secret_key chars=ascii_letters,digits length=50') }}"
-    acme_dedyn_token: "{{ lookup('file', 'credentials/desec_token') | trim }}"
   pre_tasks:
     - name: Ensure credentials directory exists (delegate to localhost)
       ansible.builtin.file:
         path: credentials
         state: directory
+        mode: '0700'
       delegate_to: localhost
       run_once: true
 

@@ -39,10 +39,17 @@
     update_cache: true
     cache_valid_time: 3600
 
-- name: Install acme.sh
-  ansible.builtin.shell: |
-    set -o pipefail
-    curl https://get.acme.sh | sh -s email=admin@lab.amd-e.com
+- name: Install acme.sh (Clone Repo)
+  ansible.builtin.git:
+    repo: https://github.com/acmesh-official/acme.sh.git
+    dest: /opt/acme.sh
+    version: master
+    depth: 1
+
+- name: Install acme.sh (Run Installer)
+  ansible.builtin.command:
+    cmd: ./acme.sh --install -m admin@lab.amd-e.com
+    chdir: /opt/acme.sh
   args:
     creates: /root/.acme.sh/acme.sh
 
@@ -64,6 +71,7 @@
     creates: /root/.acme.sh/auth.chi.lab.amd-e.com_ecc/auth.chi.lab.amd-e.com.key
   environment:
     DEDYN_TOKEN: "{{ acme_dedyn_token }}"
+  no_log: true
 
 - name: Install Certificate to Nginx
   ansible.builtin.shell: |
