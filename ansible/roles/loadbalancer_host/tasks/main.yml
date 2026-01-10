@@ -28,6 +28,8 @@
     --ostype debian
     --unprivileged 1
     --ssh-public-keys /root/.ssh/authorized_keys
+    --unprivileged 1
+    --ssh-public-keys /root/.ssh/authorized_keys
   when: lxc_check.rc != 0
   register: lxc_create
 

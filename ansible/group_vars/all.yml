@@ -1,0 +1,20 @@
+---
+# Global Network Configuration
+# Centralized here to avoid hardcoded IPs in roles
+
+# Private Network (VXLAN)
+net_private_range: "172.16.0.0/24"
+net_private_gw: "172.16.0.1"
+net_private_bridge: "private"
+
+# Service IP Addresses (Static)
+ip_dns_primary: "172.16.0.10"
+ip_authentik: "172.16.0.20"
+ip_loadbalancer: "172.16.0.30"
+ip_mail_server: "172.16.0.40"
+ip_tailscale_gw: "172.16.0.101"
+ip_ntp_server: "172.16.0.11"
+
+# Cluster Nodes (Physical LAN)
+# Used for SDN Peering and Corosync
+proxmox_cluster_peers: "192.168.86.11,192.168.86.12,192.168.86.13"

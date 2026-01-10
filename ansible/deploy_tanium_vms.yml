@@ -1,0 +1,7 @@
+---
+- name: Deploy Tanium Cluster VMs
+  hosts: tanium_cluster
+  gather_facts: false
+
+  roles:
+    - tanium_host

@@ -1,9 +1,0 @@
-# roles/tanium_client_314/tasks/setup.yml
----
-# Don't think this is needed still
-# - name: Set shell type and OS facts for Windows guests
-#   set_fact:
-#     ansible_shell_type: powershell
-#     ansible_shell_executable: powershell.exe
-#     target_os: windows
-#   when: hostvars[inventory_hostname]['guest.guestFamily'] == 'windowsGuest'

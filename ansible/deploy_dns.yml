@@ -28,7 +28,6 @@
   # So Controller -> PVE works. Controller -> DNS-01 should work.
   # I'll add `ansible_ssh_common_args` to disable host key checking.
   vars:
-    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
     # ACME Configuration
     acme_primary_domain: "dns.chi.lab.amd-e.com"
     acme_token: "{{ lookup('file', 'credentials/desec_token_proxmox') | trim }}"

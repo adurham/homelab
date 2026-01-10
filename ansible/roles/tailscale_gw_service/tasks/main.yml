@@ -14,9 +14,11 @@
       - iptables-persistent
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
 - name: Install Tailscale
   ansible.builtin.shell: |
+    set -o pipefail
     curl -fsSL https://tailscale.com/install.sh | sh
   args:
     creates: /usr/bin/tailscale
@@ -25,11 +27,11 @@
   ansible.builtin.iptables:
     table: nat
     chain: POSTROUTING
-    source: 172.16.0.0/24
+    source: "{{ net_private_range }}"
     out_interface: eth0
     jump: MASQUERADE
     action: append
 
 - name: Save IPTables
-  ansible.builtin.shell: netfilter-persistent save
+  ansible.builtin.command: netfilter-persistent save
   changed_when: false

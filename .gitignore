@@ -121,3 +121,6 @@ backup/
 .continue/index/
 .continue/sessions/
 misc scripts/grafana_token.txt
+.ansible/
+*.retry
+lint_report.txt

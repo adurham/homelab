@@ -17,10 +17,24 @@ pve01   IN      A       192.168.86.11
 pve02   IN      A       192.168.86.12
 pve03   IN      A       192.168.86.13
 
+; Configure Tanium Cluster
+ts-01   IN      A       172.16.0.51
+ts-02   IN      A       172.16.0.52
+tms-01  IN      A       172.16.0.53
+tms-02  IN      A       172.16.0.54
+tzs-01  IN      A       172.16.0.55
+tzs-02  IN      A       172.16.0.56
+ntp-01  IN      A       172.16.0.11
+
+; Tanium VIP (Load Balancer)
+tanium  IN      A       172.16.0.30
+
 ; Authentik (Private IP - requires route/Tailscale)
-auth    IN      A       172.16.0.20
+auth    IN      A       172.16.0.30 ; Load Balancer VIP
+authentik IN    A       172.16.0.20 ; Container Direct IP
 proxmox IN      A       172.16.0.30
 whoami  IN      A       172.16.0.30
 
 ; Wildcard (Optional - helps with subdomains)
-*.chi.lab.amd-e.com. IN A 192.168.86.11 ; Point to PVE01 or Traefik ingress if we had one
+; Wildcard (Optional - helps with subdomains)
+; *.chi.lab.amd-e.com. IN A 192.168.86.11 ; DISABLED: Causes collision with Tanium TDL search domain appending
