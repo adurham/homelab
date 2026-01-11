@@ -8,14 +8,7 @@
 - name: Configure Authentik Service
   hosts: authentik
   gather_facts: true
-  pre_tasks:
-    - name: Ensure credentials directory exists (delegate to localhost)
-      ansible.builtin.file:
-        path: credentials
-        state: directory
-        mode: '0700'
-      delegate_to: localhost
-      run_once: true
+  pre_tasks: []
 
   roles:
     - authentik_service

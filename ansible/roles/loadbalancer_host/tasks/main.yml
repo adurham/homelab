@@ -23,13 +23,14 @@
     --swap {{ lxc_swap }}
     --net0 name=eth0,bridge=private,ip={{ lxc_net_ip }},gw={{ lxc_net_gw }},firewall=1
     --net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1
-    --password {{ lxc_password }}
+    --password {{ lb_01_root_pass }}
     --features nesting=1
     --ostype debian
     --unprivileged 1
     --ssh-public-keys /root/.ssh/authorized_keys
     --unprivileged 1
     --ssh-public-keys /root/.ssh/authorized_keys
+  no_log: true
   when: lxc_check.rc != 0
   register: lxc_create
 
@@ -49,7 +50,7 @@
 - name: Add Net1 Interface (LAN - DHCP)
   delegate_to: "{{ target_node }}"
   ansible.builtin.shell: "pct set {{ lxc_id }} -net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1"
-  when: lxc_check.rc == 0 and net1_check.rc != 0 
+  when: lxc_check.rc == 0 and net1_check.rc != 0
 
 - name: Ensure SSH Service is Running
   delegate_to: "{{ target_node }}"

@@ -6,7 +6,7 @@
   vars:
     # Secrets provided by user
     authentik_client_id: "D2YzWfFOmQgUJBpRjHzyOQeD6ODWhh0QUVEFgOHZ"
-    authentik_client_key: "{{ lookup('file', 'credentials/authentik_client_key') | trim }}"
+    authentik_client_key: "{{ authentik_client_key }}"
     authentik_url: "https://auth.chi.lab.amd-e.com/application/o/proxmox/"
     # User config
     admin_email: "admin@lab.amd-e.com"
