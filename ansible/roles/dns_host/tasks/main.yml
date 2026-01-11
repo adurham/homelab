@@ -23,9 +23,10 @@
     --storage nvme-data
     --unprivileged 1
     --features nesting=1
-    --password "{{ lookup('password', 'credentials/dns_01_root_pass chars=ascii_letters,digits length=20') }}"
+    --password "{{ dns_01_root_pass }}"
     --start 1
     --onboot 1
+  no_log: true
   when: pct_check.rc != 0
 
 - name: Ensure DNS Container is Running
