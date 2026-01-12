@@ -370,8 +370,8 @@
           exclude_users_service_account: true
           # Disable SSL verification to avoid internal cert trust issues
           verify_certificates: false
-          # Update Token if we have a new one (omit if not defined)
-          token: "{{ tanium_scim_token | default(omit) }}"
+          # Update Token if we have a new one, or enforce Vault token
+          token: "{{ tanium_scim_token | default(vault_tanium_scim_token) | default(omit) }}"
         status_code: [200]
       when: 
         - scim_user_mapping.json.results | length > 0 
