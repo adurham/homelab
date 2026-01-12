@@ -166,7 +166,6 @@
           issuer: "{{ tanium_issuer }}"
           audience: "{{ tanium_issuer }}"
           sp_binding: "post"
-          sp_binding: "post"
           sign_assertion: true
           sign_response: true
           signing_kp: "{{ signing_cert.json.results[0].pk }}"
@@ -237,6 +236,104 @@
           meta_launch_url: "{{ tanium_url }}"
         status_code: [200]
       when: get_tanium_app.status == 200 or (create_tanium_app is defined and not create_tanium_app.failed)
+
+    # -------------------------------------------------------------------------
+    # Tanium Integration (SCIM)
+    # -------------------------------------------------------------------------
+
+    - name: Get Existing Authentik SCIM Provider
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/providers/scim/?search=Tanium"
+        method: GET
+        headers: "{{ headers }}"
+      register: authentik_scim_provider_list
+
+    - name: Check for Existing Tanium SCIM Server
+      ansible.builtin.uri:
+        url: "{{ tanium_url }}/api/v2/scim_servers"
+        method: GET
+        headers:
+          session: "{{ vault_tanium_api_token }}"
+      register: tanium_scim_servers
+      # Only need to check Tanium if we might need to create a new Provider
+      when: authentik_scim_provider_list.json.results | length == 0
+
+    - name: Delete Existing Tanium SCIM Server (Token Rotation/Recovery)
+      ansible.builtin.uri:
+        url: "{{ tanium_url }}/api/v2/scim_servers/{{ item.id }}"
+        method: DELETE
+        headers:
+          session: "{{ vault_tanium_api_token }}"
+        status_code: [200, 204]
+      loop: "{{ tanium_scim_servers.json.data | default([]) }}"
+      when:
+        - authentik_scim_provider_list.json.results | length == 0
+        - item.name == 'Authentik'
+
+    - name: Create Tanium SCIM Token
+      ansible.builtin.uri:
+        url: "{{ tanium_url }}/api/v2/scim_servers"
+        method: POST
+        headers:
+          session: "{{ vault_tanium_api_token }}"
+        body_format: json
+        body:
+          expire_in_days: "365"
+          name: "Authentik"
+          trusted_ip_addresses: "172.16.0.20" # Authentik IP
+        status_code: [200, 201]
+      register: create_scim_token
+      when: authentik_scim_provider_list.json.results | length == 0
+
+    - name: Create Tanium SCIM Provider
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/providers/scim/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Tanium SCIM"
+          url: "{{ tanium_url }}/api/v2/scim/v2"
+          token: "{{ create_scim_token.json.data.api_token.token_string }}"
+        status_code: [200, 201]
+      when: authentik_scim_provider_list.json.results | length == 0
+      register: new_scim_provider
+
+    - name: Debug SCIM Creation
+      ansible.builtin.debug:
+        var: new_scim_provider
+
+    - name: Capture SCIM Provider ID (Created)
+      ansible.builtin.set_fact:
+        scim_provider_id: "{{ new_scim_provider.json.pk }}"
+      when: new_scim_provider is defined and new_scim_provider.changed
+
+    - name: Capture SCIM Provider ID (Existing)
+      ansible.builtin.set_fact:
+        scim_provider_id: "{{ authentik_scim_provider_list.json.results[0].pk }}"
+      when: scim_provider_id is not defined
+
+    - name: Get Tanium SCIM Application
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/applications/tanium-provisioning/"
+        method: GET
+        headers: "{{ headers }}"
+        status_code: [200, 404]
+      register: get_scim_app
+
+    - name: Create Tanium SCIM Application
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/applications/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Tanium Provisioning"
+          slug: "tanium-provisioning"
+          provider: "{{ scim_provider_id }}"
+          meta_launch_url: "{{ tanium_url }}" # Not really used but good for reference
+        status_code: [200, 201]
+      when: get_scim_app.status == 404
 
 
 
