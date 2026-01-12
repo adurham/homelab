@@ -1,0 +1,13 @@
+- name: Provision Tanium Client Containers
+  hosts: pve01
+  gather_facts: false
+  roles:
+    - tanium_client_host
+
+- name: Configure Tanium Clients
+  hosts: tanium_clients
+  gather_facts: true
+  vars_files:
+    - group_vars/all/tanium_secrets.yml
+  roles:
+    - tanium_client

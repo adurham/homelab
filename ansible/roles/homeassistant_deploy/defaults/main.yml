@@ -1,8 +1,0 @@
----
-skip_backup: false
-skip_ha_backup: false
-skip_config_check: false
-max_backups: 10
-backup_dir: /config/backups
-ha_url: "http://homeassistant.local:8123"
-# ha_token: "" # Should be passed via environment or vault

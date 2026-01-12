@@ -38,7 +38,7 @@
   delegate_to: "{{ target_node }}"
   ansible.builtin.shell: "pct start {{ lxc_id }}"
   when: lxc_create.changed or (lxc_check.rc == 0 and "running" not in lxc_check.stdout)
-  ignore_errors: true 
+  ignore_errors: true
 
 - name: Check if Net1 exists
   delegate_to: "{{ target_node }}"

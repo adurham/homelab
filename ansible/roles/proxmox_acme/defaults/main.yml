@@ -1,6 +1,6 @@
 ---
 acme_email: "admin@lab.amd-e.com" # Use a valid public email
-acme_directory: "https://acme-v02.api.letsencrypt.org/directory" 
+acme_directory: "https://acme-v02.api.letsencrypt.org/directory"
 proxmox_domain_base: "chi.lab.amd-e.com"
 # Use staging for testing: "https://acme-staging-v02.api.letsencrypt.org/directory"
 

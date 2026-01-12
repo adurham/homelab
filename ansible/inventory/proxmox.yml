@@ -2,11 +2,11 @@ all:
   children:
     proxmox_nodes:
       hosts:
-        pve-01:
+        pve01:
           ansible_host: 192.168.86.11
-        pve-02:
+        pve02:
           ansible_host: 192.168.86.12
-        pve-03:
+        pve03:
           ansible_host: 192.168.86.13
       vars:
         ansible_user: root
@@ -18,13 +18,35 @@ all:
       hosts:
         lb-01:
           ansible_host: 172.16.0.30
+          vmid: 103
+          target_node: pve02
       vars:
         ansible_user: root
-        
+
     authentik_server:
       hosts:
         authentik:
           ansible_host: 172.16.0.20
+          vmid: 100
+          target_node: pve01
+      vars:
+        ansible_user: root
+
+    dns_server:
+      hosts:
+        dns-01:
+          ansible_host: 172.16.0.10
+          vmid: 102
+          target_node: pve02
+      vars:
+        ansible_user: root
+
+    tailscale:
+      hosts:
+        tailscale-gw:
+          ansible_host: 172.16.0.101
+          vmid: 101
+          target_node: pve01
       vars:
         ansible_user: root
 
@@ -32,6 +54,8 @@ all:
       hosts:
         mail-01:
           ansible_host: 172.16.0.40
+          vmid: 104
+          target_node: pve03
       vars:
         ansible_user: root
 
@@ -39,6 +63,8 @@ all:
       hosts:
         ntp-01:
           ansible_host: 172.16.0.11
+          vmid: 105
+          target_node: pve03
       vars:
         ansible_user: root
 
@@ -92,3 +118,98 @@ all:
         vm_storage: nvme-data
         vm_bridge: private
         vm_iso: "local:iso/TanOS.1.8.6.0134-DEV.iso"
+    # Tanium Clients
+    tanium_clients:
+      hosts:
+        tc-ubuntu22:
+          ansible_host: 172.16.0.61
+          vmid: 301
+          template: ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+          target_node: pve01
+        tc-ubuntu24:
+          ansible_host: 172.16.0.62
+          vmid: 302
+          template: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+          target_node: pve01
+        tc-rocky8:
+          ansible_host: 172.16.0.63
+          vmid: 303
+          template: rockylinux-8-default_20260112_amd64.tar.xz
+          template_url: "https://images.linuxcontainers.org/images/rockylinux/8/amd64/default/20260112_06:33/rootfs.tar.xz"
+          target_node: pve01
+        tc-rocky9:
+          ansible_host: 172.16.0.64
+          vmid: 304
+          template: rockylinux-9-default_20240912_amd64.tar.xz
+          target_node: pve01
+        tc-debian12:
+          ansible_host: 172.16.0.65
+          vmid: 305
+          template: debian-12-standard_12.12-1_amd64.tar.zst
+          target_node: pve01
+        tc-debian11:
+          ansible_host: 172.16.0.66
+          vmid: 306
+          template: debian-11-default_20260111_amd64.tar.xz
+          template_url: "https://images.linuxcontainers.org/images/debian/bullseye/amd64/default/20260111_05:24/rootfs.tar.xz"
+          target_node: pve02
+        tc-oracle9:
+          ansible_host: 172.16.0.67
+          vmid: 307
+          template: oracle-9-default_20260112_amd64.tar.xz
+          template_url: "https://images.linuxcontainers.org/images/oracle/9/amd64/default/20260112_07:46/rootfs.tar.xz"
+          target_node: pve02
+        tc-oracle8:
+          ansible_host: 172.16.0.68
+          vmid: 308
+          template: oracle-8-default_20260112_amd64.tar.xz
+          template_url: "https://images.linuxcontainers.org/images/oracle/8/amd64/default/20260112_07:46/rootfs.tar.xz"
+          os_family: RedHat
+          os_distro_major: "8"
+          os_distro: OracleLinux
+          ansible_python_interpreter: /usr/bin/python3.9
+          target_node: pve02
+        tc-alma9:
+          ansible_host: 172.16.0.69
+          vmid: 309
+          template: almalinux-9-default_20240911_amd64.tar.xz
+          target_node: pve02
+        tc-alma8:
+          ansible_host: 172.16.0.70
+          vmid: 310
+          template: alma-8-default_20260112_amd64.tar.xz
+          template_url: "https://images.linuxcontainers.org/images/almalinux/8/amd64/default/20260112_06:09/rootfs.tar.xz"
+          target_node: pve03
+
+        tc-rhel8:
+          ansible_host: 172.16.0.74
+          vmid: 314
+          template: alma-8-default_20260112_amd64.tar.xz
+          template_url: "https://images.linuxcontainers.org/images/almalinux/8/amd64/default/20260112_06:09/rootfs.tar.xz"
+          target_node: pve03
+          ansible_python_interpreter: /usr/bin/python3.9
+
+        tc-rhel9:
+          ansible_host: 172.16.0.72
+          vmid: 312
+          template: centos-9-stream-default_20240828_amd64.tar.xz
+          target_node: pve03
+        tc-suse15:
+          ansible_host: 172.16.0.73
+          vmid: 313
+          template: opensuse-15.6-default_20240910_amd64.tar.xz
+          os_family: Suse
+          os_distro_major: "15"
+          os_distro: openSUSE
+          ansible_python_interpreter: /usr/bin/python3.11
+          target_node: pve03
+      vars:
+        ansible_user: root
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+        vm_cores: 1
+        vm_memory: 1024
+        vm_swap: 512
+        vm_disk: 8
+        vm_bridge: private
+        vm_storage: nvme-data
+        vm_gw: 172.16.0.1

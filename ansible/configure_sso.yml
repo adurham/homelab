@@ -21,21 +21,21 @@
 
     - name: Add Authentik Realm (if missing)
       ansible.builtin.shell: >
-        pveum realm add {{ realm_name }} 
-        --type openid 
-        --issuer-url {{ authentik_url }} 
-        --client-id '{{ authentik_client_id }}' 
-        --client-key '{{ authentik_client_key }}' 
-        --username-claim preferred_username 
-        --autocreate 1 
+        pveum realm add {{ realm_name }}
+        --type openid
+        --issuer-url {{ authentik_url }}
+        --client-id '{{ authentik_client_id }}'
+        --client-key '{{ authentik_client_key }}'
+        --username-claim preferred_username
+        --autocreate 1
         --groups-claim groups
       when: realm_check.rc != 0
 
     - name: Update Authentik Realm Config (if exists)
       ansible.builtin.shell: >
-        pveum realm modify {{ realm_name }} 
+        pveum realm modify {{ realm_name }}
         --issuer-url {{ authentik_url }}
-        --groups-claim groups 
+        --groups-claim groups
         --scopes "openid profile email groups"
         --autocreate 1
       when: realm_check.rc == 0
@@ -43,8 +43,8 @@
 
     - name: Ensure Admin User Exists (Pre-provisioning)
       ansible.builtin.shell: >
-        pveum user add {{ admin_email.split('@')[0] }}@{{ realm_name }} 
-        --email {{ admin_email }} 
+        pveum user add {{ admin_email.split('@')[0] }}@{{ realm_name }}
+        --email {{ admin_email }}
         --enable 1
       register: user_add
       changed_when: user_add.rc == 0
@@ -59,8 +59,8 @@
 
     - name: Assign Administrator Role to Proxmox_Admins-Authentik
       ansible.builtin.shell: >
-        pveum acl modify / 
-        -group Proxmox_Admins 
+        pveum acl modify /
+        -group Proxmox_Admins
         -role Administrator
       register: acl_admin
       changed_when: acl_admin.rc == 0
@@ -73,14 +73,14 @@
 
     - name: Assign PVEAuditor Role to Proxmox_Users-Authentik
       ansible.builtin.shell: >
-        pveum acl modify / 
-        -group Proxmox_Users 
+        pveum acl modify /
+        -group Proxmox_Users
         -role PVEAuditor
       register: acl_user
       changed_when: acl_user.rc == 0
 
     - name: Add Admin User to Proxmox_Admins
       ansible.builtin.shell: >
-        pveum user modify {{ admin_email.split('@')[0] }}@{{ realm_name }} 
+        pveum user modify {{ admin_email.split('@')[0] }}@{{ realm_name }}
         -groups Proxmox_Admins
       ignore_errors: true # In case user missing

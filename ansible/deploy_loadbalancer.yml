@@ -16,7 +16,7 @@
       ansible.builtin.slurp:
         src: credentials/noip_creds
       register: noip_creds_file
-    
+
     - name: Set No-IP Facts
       set_fact:
         noip_creds: "{{ noip_creds_file.content | b64decode | from_yaml }}"
