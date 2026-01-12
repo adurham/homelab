@@ -1,0 +1,119 @@
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  changed_when: false
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['proxmox_nodes'] }}"
+  run_once: true
+
+- name: Create Tanium Client Containers
+  block:
+    - name: Download Template (PVEAM)
+      ansible.builtin.command: "pveam download local {{ hostvars[item].template }}"
+      args:
+        creates: "/var/lib/vz/template/cache/{{ hostvars[item].template }}"
+      loop: "{{ groups['tanium_clients'] }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      when: hostvars[item].template_url is not defined
+
+    - name: Download Template (Manual URL)
+      ansible.builtin.get_url:
+        url: "{{ hostvars[item].template_url }}"
+        dest: "/var/lib/vz/template/cache/{{ hostvars[item].template }}"
+        mode: '0644'
+      loop: "{{ groups['tanium_clients'] }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      when: hostvars[item].template_url is defined
+
+    - name: Check if Container Exists
+      ansible.builtin.command: "pct config {{ hostvars[item].vmid }}"
+      register: pct_check
+      failed_when: false
+      changed_when: false
+      loop: "{{ groups['tanium_clients'] }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+
+    - name: Create Container
+      ansible.builtin.command: >
+        pct create {{ hostvars[item].vmid }} /var/lib/vz/template/cache/{{ hostvars[item].template }}
+        --hostname {{ item }}
+        --cores {{ hostvars[item].vm_cores }}
+        --memory {{ hostvars[item].vm_memory }}
+        --swap {{ hostvars[item].vm_swap }}
+        --net0 name=eth0,bridge={{ hostvars[item].vm_bridge }},ip={{ hostvars[item].ansible_host }}/24,gw={{ hostvars[item].vm_gw }}
+        --storage {{ hostvars[item].vm_storage }}
+        --rootfs {{ hostvars[item].vm_storage }}:{{ hostvars[item].vm_disk }}
+        --nameserver 172.16.0.10
+        --searchdomain chi.lab.amd-e.com
+        --unprivileged 1
+        --features nesting=1
+        --start 1
+        --onboot 1
+        --ssh-public-keys /root/.ssh/authorized_keys
+      loop: "{{ groups['tanium_clients'] }}"
+      loop_control:
+        index_var: idx
+      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      when: pct_check.results[idx].rc != 0
+
+    - name: Wait for Container IP
+      ansible.builtin.shell: "pct exec {{ hostvars[item].vmid }} -- ip a show eth0 | grep 'inet ' | grep -v '127.0.0.1'"
+      register: ip_check
+      until: ip_check.rc == 0
+      retries: 20
+      delay: 3
+      changed_when: false
+      failed_when: false
+      loop: "{{ groups['tanium_clients'] }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+
+    - name: Enforce DNS Settings
+      ansible.builtin.shell: |
+        pct set {{ hostvars[item].vmid }} --nameserver 172.16.0.10 --searchdomain chi.lab.amd-e.com
+        if pct status {{ hostvars[item].vmid }} | grep -q running; then
+           pct exec {{ hostvars[item].vmid }} -- sh -c "echo 'nameserver 172.16.0.10' > /etc/resolv.conf && echo 'search chi.lab.amd-e.com' >> /etc/resolv.conf"
+        fi
+      loop: "{{ groups['tanium_clients'] }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      changed_when: false
+
+    - name: Update Apt/Dnf Cache and Install Python and SSH
+      ansible.builtin.shell: |
+        if pct exec {{ hostvars[item].vmid }} -- test -x /usr/bin/apt-get; then
+          pct exec {{ hostvars[item].vmid }} -- apt-get update
+          pct exec {{ hostvars[item].vmid }} -- apt-get install -y python3 openssh-server curl unzip
+          # Ensure PermitRootLogin is allowed (Ubuntu default is usually prohibit-password which is fine for keys)
+          pct exec {{ hostvars[item].vmid }} -- sh -c "grep -q 'PermitRootLogin' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"
+          pct exec {{ hostvars[item].vmid }} -- systemctl enable ssh
+          pct exec {{ hostvars[item].vmid }} -- systemctl restart ssh
+          pct exec {{ hostvars[item].vmid }} -- systemctl restart ssh
+          pct exec {{ hostvars[item].vmid }} -- systemctl restart ssh
+        elif pct exec {{ hostvars[item].vmid }} -- test -x /usr/bin/dnf; then
+          # Fix for RHEL 10 / Alma 10 DNS issues? Ensure resolv.conf is valid BEFORE dnf
+          # Use Internal DNS (dns-01) 172.16.0.10 to resolve both internal and external
+          pct exec {{ hostvars[item].vmid }} -- sh -c "echo 'nameserver 172.16.0.10' > /etc/resolv.conf"
+
+          # Install Python 3.9 on Rocky 8 (EL8) explicitly
+          if pct exec {{ hostvars[item].vmid }} -- grep -q "Rocky Linux" /etc/os-release && pct exec {{ hostvars[item].vmid }} -- grep -q "release 8" /etc/redhat-release; then
+             pct exec {{ hostvars[item].vmid }} -- dnf install -y python39 openssh-server openssh-clients curl unzip
+             pct exec {{ hostvars[item].vmid }} -- alternatives --set python3 /usr/bin/python3.9
+          else
+             # Generic DNF (RHEL 9/10, Oracle 8/9, Alma). Try python3, fallback to python39 via EPEL (Oracle 8)
+             pct exec {{ hostvars[item].vmid }} -- sh -c "dnf install -y python3 openssh-server openssh-clients curl unzip || (dnf install -y oracle-epel-release-el8 && dnf install -y python39 openssh-server openssh-clients curl unzip)"
+          fi
+          pct exec {{ hostvars[item].vmid }} -- ssh-keygen -A
+          pct exec {{ hostvars[item].vmid }} -- sh -c "echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"
+          pct exec {{ hostvars[item].vmid }} -- systemctl disable --now firewalld || true
+          pct exec {{ hostvars[item].vmid }} -- systemctl enable sshd
+          pct exec {{ hostvars[item].vmid }} -- systemctl restart sshd
+        elif pct exec {{ hostvars[item].vmid }} -- test -x /usr/bin/zypper; then
+          pct exec {{ hostvars[item].vmid }} -- zypper install -y python311 openssh curl unzip
+          pct exec {{ hostvars[item].vmid }} -- ssh-keygen -A
+          pct exec {{ hostvars[item].vmid }} -- sh -c "grep -q 'PermitRootLogin' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"
+          pct exec {{ hostvars[item].vmid }} -- systemctl enable sshd
+          pct exec {{ hostvars[item].vmid }} -- systemctl restart sshd
+        else
+          echo "Unknown package manager for {{ item }}"
+          exit 1
+        fi
+      loop: "{{ groups['tanium_clients'] }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"

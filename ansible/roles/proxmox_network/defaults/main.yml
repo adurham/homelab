@@ -1,4 +1,4 @@
 ---
-physical_interface: "nic0" 
-# Default to nic0 for Dell Optiplex Micro. 
+physical_interface: "nic0"
+# Default to nic0 for Dell Optiplex Micro.
 # If different nodes have different names, override in inventory/host_vars.

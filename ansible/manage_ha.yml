@@ -16,7 +16,7 @@
         name: "lb-01"
       - id: 104
         name: "mail-01"
-    
+
     # Replication Config
     replication_targets:
       - node: "pve02" # Internal cluster name (no hyphen)
@@ -50,8 +50,8 @@
         --state started
       loop: "{{ ha_containers }}"
       register: ha_add
-      failed_when: 
-        - ha_add.rc != 0 
+      failed_when:
+        - ha_add.rc != 0
         - "'already exists' not in ha_add.stderr"
         - "'already defined' not in ha_add.stderr"
       changed_when: ha_add.rc == 0

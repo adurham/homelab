@@ -12,7 +12,7 @@
   when: "'default' not in acme_accounts.stdout"
   register: acme_register
   changed_when: "'Account already registered' not in acme_register.stderr"
-  failed_when: 
+  failed_when:
     - acme_register.rc != 0
     - "'Account already registered' not in acme_register.stderr"
   # This registers the account 'default'.
@@ -22,11 +22,11 @@
     pvenode acme plugin add {{ acme_plugin_name }}
     --type {{ acme_plugin_type }}
     --data {{ acme_plugin_data | default('') }}
-  when: 
+  when:
     - acme_plugin_type is defined
     - acme_plugin_data is defined
   # Only runs if user provides the data (API key etc) via vars
-  
+
 - name: Check current certificate issuer
   ansible.builtin.shell: "openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -issuer"
   register: cert_issuer

@@ -1,0 +1,21 @@
+---
+- name: Migrate Tanium Client Containers
+  hosts: pve01
+  gather_facts: false
+  tasks:
+    - name: Get Container Status
+      ansible.builtin.shell: "pvesh get /cluster/resources --output-format json | jq -r '.[] | select(.vmid == {{ hostvars[item].vmid }}) | .node'"
+      loop: "{{ groups['all'] }}"
+      when: hostvars[item].target_node is defined
+      register: current_node_output
+      changed_when: false
+
+    - name: Migrate Containers
+      ansible.builtin.command: "pct migrate {{ hostvars[item.item].vmid }} {{ hostvars[item.item].target_node }} --restart"
+      loop: "{{ current_node_output.results }}"
+      when:
+        - item.skipped is not defined
+        - item.stdout != hostvars[item.item].target_node
+        - item.stdout | length > 0
+      register: migration_result
+      changed_when: migration_result.rc == 0

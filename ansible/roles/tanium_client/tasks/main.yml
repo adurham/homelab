@@ -1,0 +1,98 @@
+---
+- name: Download Tanium Init Dat
+  ansible.builtin.shell: |
+    curl -k -X POST "https://tanium.chi.lab.amd-e.com/api/v2/keys/315" \
+    -H "session: {{ vault_tanium_api_token }}" \
+    -H "Content-Type: application/json" \
+    -d '{ "settings": [ { "name": "ServerNameList", "value": "tzs-01.chi.lab.amd-e.com,tzs-02.chi.lab.amd-e.com" } ] }' \
+    -o /tmp/tanium-init.dat
+  args:
+    creates: /tmp/tanium-init.dat
+
+- name: Download Tanium Client Bundle Direct (Curl)
+  ansible.builtin.shell: |
+    curl -k -L "https://tanium.chi.lab.amd-e.com/plugin/products/client-management/v2/downloads/download-bundle/linux" \
+    -H "session: {{ vault_tanium_api_token }}" \
+    -o /tmp/tanium-client-bundle.zip
+  args:
+    creates: /tmp/tanium-client-bundle.zip
+
+- name: Unzip Client Bundle
+  ansible.builtin.shell: unzip -o /tmp/tanium-client-bundle.zip -d /tmp/
+  args:
+    creates: /tmp/TaniumClient-linux.bin
+
+# --- Package Discovery ---
+
+- name: Find Tanium Package (Debian/Ubuntu)
+  ansible.builtin.find:
+    paths: "/tmp"
+    patterns:
+      - "taniumclient_*-{{ (ansible_distribution | default(os_distro)) | lower }}{{ ansible_distribution_major_version | default(os_distro_major) }}_amd64.deb"
+      - "taniumclient_*-universal_amd64.deb"
+  register: deb_pkg
+  when: (ansible_os_family | default(os_family)) == 'Debian'
+
+- name: Find Tanium Package (RedHat Family)
+  ansible.builtin.find:
+    paths: "/tmp"
+    patterns: "TaniumClient-*-1.rhe{{ ansible_distribution_major_version | default(os_distro_major) }}.x86_64.rpm"
+  register: rpm_pkg
+  when: (ansible_os_family | default(os_family)) == 'RedHat'
+
+- name: Find Tanium Package (SUSE)
+  ansible.builtin.find:
+    paths: "/tmp"
+    patterns: "TaniumClient-*-1.sle15*x86_64.rpm"
+  register: suse_pkg
+  when: (ansible_os_family | default(os_family)) == 'Suse'
+
+# --- Installation ---
+
+- name: Install Tanium Client (Debian/Ubuntu)
+  ansible.builtin.apt:
+    deb: "{{ deb_pkg.files[0].path }}"
+  when:
+    - (ansible_os_family | default(os_family)) == 'Debian'
+    - deb_pkg.matched is defined
+    - deb_pkg.matched > 0
+
+- name: Install Tanium Client (RedHat Generic)
+  ansible.builtin.dnf:
+    name: "{{ rpm_pkg.files[0].path }}"
+    state: present
+    disable_gpg_check: true
+  when:
+    - (ansible_os_family | default(os_family)) == 'RedHat'
+    - (ansible_distribution_major_version | default(os_distro_major)) != '8'
+    - rpm_pkg.matched is defined
+    - rpm_pkg.matched > 0
+
+- name: Install Tanium Client (EL8 Shell Override)
+  ansible.builtin.shell: "dnf install -y {{ rpm_pkg.files[0].path }} --nogpgcheck"
+  when:
+    - (ansible_os_family | default(os_family)) == 'RedHat'
+    - (ansible_distribution_major_version | default(os_distro_major)) == '8'
+    - rpm_pkg.matched is defined
+    - rpm_pkg.matched > 0
+
+- name: Install Tanium Client (SUSE)
+  ansible.builtin.shell: "zypper --no-gpg-checks install -y --allow-unsigned-rpm {{ suse_pkg.files[0].path }}"
+  when:
+    - (ansible_os_family | default(os_family)) == 'Suse'
+    - suse_pkg.matched is defined
+    - suse_pkg.matched > 0
+
+- name: Deploy Tanium Init Dat
+  ansible.builtin.copy:
+    src: "/tmp/tanium-init.dat"
+    dest: "/opt/Tanium/TaniumClient/tanium-init.dat"
+    remote_src: true
+    mode: '0600'
+  notify: Restart Tanium Client
+
+- name: Enable and Start Tanium Client
+  ansible.builtin.service:
+    name: taniumclient
+    state: started
+    enabled: true

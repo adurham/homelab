@@ -11,7 +11,7 @@
     headers:
       Authorization: "Bearer {{ api_token }}"
       Content-Type: "application/json"
-    
+
     # Configuration
     provider_name: "Proxmox"
     app_name: "Proxmox"
@@ -940,7 +940,7 @@
     - name: Update WhoAmI Application (Ensure Launch URL)
       ansible.builtin.uri:
         # Use slug 'whoami' directly to avoid stale ID issues
-        url: "{{ authentik_url }}/api/v3/core/applications/whoami/" 
+        url: "{{ authentik_url }}/api/v3/core/applications/whoami/"
         method: PATCH
         headers: "{{ headers }}"
         body_format: json
@@ -1012,15 +1012,15 @@
             from authentik.stages.authenticator_totp.models import TOTPDevice
             from authentik.stages.authenticator_static.models import StaticDevice
             from authentik.stages.authenticator_webauthn.models import WebAuthnDevice
-            
+
             # WebAuthn doesn't have a 'confirmed' field usually, but we check existence
             has_totp = TOTPDevice.objects.filter(user=request.user, confirmed=True).exists()
             has_static = StaticDevice.objects.filter(user=request.user, confirmed=True).exists()
             has_webauthn = WebAuthnDevice.objects.filter(user=request.user).exists()
-            
+
             return has_totp or has_static or has_webauthn
         status_code: [200]
-      when: get_mfa_policy.json.results | length > 0       
+      when: get_mfa_policy.json.results | length > 0
 
     - name: Capture MFA Policy ID
       ansible.builtin.set_fact:
@@ -1044,6 +1044,6 @@
           policy: "{{ mfa_policy_id }}"
           order: 0
           enabled: true
-          negate: false 
+          negate: false
         status_code: [200, 201]
       when: get_mfa_binding.json.results | length == 0
