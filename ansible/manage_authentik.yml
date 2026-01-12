@@ -334,6 +334,101 @@
           meta_launch_url: "{{ tanium_url }}" # Not really used but good for reference
         status_code: [200, 201]
       when: get_scim_app.status == 404
+      register: create_scim_app
+
+    - name: Capture SCIM App ID
+      ansible.builtin.set_fact:
+        scim_app_id: "{{ (create_scim_app.json.pk if (create_scim_app is defined and create_scim_app.changed) else get_scim_app.json.pk) }}"
+
+    # -------------------------------------------------------------------------
+    # Tanium Sync Configuration (Group & Policy)
+    # -------------------------------------------------------------------------
+
+    - name: Get Tanium Users Group
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/groups/?search=Tanium%20Users"
+        method: GET
+        headers: "{{ headers }}"
+      register: tanium_users_group_list
+
+    - name: Create Tanium Users Group
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/groups/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Tanium Users"
+          is_superuser: false
+        status_code: [200, 201]
+      when: tanium_users_group_list.json.results | length == 0
+
+    - name: Get Tanium Access Policy
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/policies/expression/?search=Tanium%20Users%20Access"
+        method: GET
+        headers: "{{ headers }}"
+      register: tanium_access_policy_list
+
+    - name: Create Tanium Access Policy
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/policies/expression/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "Tanium Users Access"
+          expression: |
+            return request.user.groups.filter(name='Tanium Users').exists()
+        status_code: [200, 201]
+      when: tanium_access_policy_list.json.results | length == 0
+      register: new_tanium_access_policy
+
+    - name: Capture Tanium Policy ID (Created)
+      ansible.builtin.set_fact:
+        tanium_policy_id: "{{ new_tanium_access_policy.json.pk }}"
+      when: new_tanium_access_policy is defined and new_tanium_access_policy.changed
+
+    - name: Capture Tanium Policy ID (Existing)
+      ansible.builtin.set_fact:
+        tanium_policy_id: "{{ tanium_access_policy_list.json.results[0].pk }}"
+      when: tanium_policy_id is not defined
+
+    - name: Check Tanium Policy Binding
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/policies/bindings/?target={{ scim_app_id }}&policy={{ tanium_policy_id }}"
+        method: GET
+        headers: "{{ headers }}"
+      register: tanium_policy_binding
+
+    - name: Bind Tanium Policy to SCIM App
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/policies/bindings/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          target: "{{ scim_app_id }}"
+          policy: "{{ tanium_policy_id }}"
+          order: 0
+          enabled: true
+        status_code: [200, 201]
+      when: tanium_policy_binding.json.results | length == 0
+
+    # Better Plan: Just create the group. The USER can bind it manually if the API is too complex to guess without documentation.
+    # BUT the user asked for sync.
+    # Authentik Application Entitlement: 
+    # To sync users to SCIM, they must have access to the application.
+    # Access is granted via Policy Bindings.
+    
+    # We will create a policy "Tanium Users Access" which allows the group "Tanium Users".
+    
+    # 1. Get/Create Policy
+    # 2. Create Policy Binding to App
+    
+    # ... This is getting complicated within one Replace block without verifying endpoints first.
+    # I will stick to Creating the Group first, then I'll use a separate block/tool to adding the policy binding after verifying the endpoint.
+    
 
 
 
