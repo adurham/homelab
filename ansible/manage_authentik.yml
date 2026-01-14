@@ -99,6 +99,7 @@
           name: "{{ app_name }}"
           slug: "{{ app_slug }}"
           provider: "{{ provider_id }}"
+          meta_icon: "https://avatars.githubusercontent.com/u/4362756?s=200&v=4"
         status_code: [200, 201]
       when: get_app_direct.status == 404
       ignore_errors: true
@@ -113,6 +114,7 @@
         body:
           launch_url: "https://proxmox.chi.lab.amd-e.com/redirect_oidc.html"
           open_in_new_tab: true
+          meta_icon: "https://avatars.githubusercontent.com/u/4362756?s=200&v=4"
         status_code: [200]
       when: get_app_direct.status == 200 or (create_app is defined and not create_app.failed)
 
@@ -152,6 +154,20 @@
         headers: "{{ headers }}"
       register: tanium_author_flow
 
+    - name: Get SAML Username Mapping
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/propertymappings/saml/?search=authentik%20default%20SAML%20Mapping:%20Username"
+        method: GET
+        headers: "{{ headers }}"
+      register: saml_username_mapping
+
+    - name: Get SAML Email Mapping
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/propertymappings/saml/?search=authentik%20default%20SAML%20Mapping:%20Email"
+        method: GET
+        headers: "{{ headers }}"
+      register: saml_email_mapping
+
     - name: Create Tanium SAML Provider
       ansible.builtin.uri:
         url: "{{ authentik_url }}/api/v3/providers/saml/"
@@ -169,6 +185,7 @@
           sign_assertion: true
           sign_response: true
           signing_kp: "{{ signing_cert.json.results[0].pk }}"
+          name_id_mapping: "{{ saml_email_mapping.json.results[0].pk }}"
         status_code: [200, 201]
       when: tanium_provider_list.json.results | length == 0
       register: new_tanium_provider
@@ -186,6 +203,7 @@
           sign_assertion: true
           sign_response: true
           signing_kp: "{{ signing_cert.json.results[0].pk }}"
+          name_id_mapping: "{{ saml_email_mapping.json.results[0].pk }}"
         status_code: [200]
       when: tanium_provider_list.json.results | length > 0
 
@@ -222,6 +240,7 @@
           slug: "{{ tanium_app_slug }}"
           provider: "{{ tanium_provider_id }}"
           meta_launch_url: "{{ tanium_url }}"
+          meta_icon: "https://avatars.githubusercontent.com/u/12571663?s=200&v=4"
         status_code: [200, 201]
       when: get_tanium_app.status == 404
       register: create_tanium_app
@@ -234,6 +253,7 @@
         body_format: json
         body:
           meta_launch_url: "{{ tanium_url }}"
+          meta_icon: "https://avatars.githubusercontent.com/u/12571663?s=200&v=4"
         status_code: [200]
       when: get_tanium_app.status == 200 or (create_tanium_app is defined and not create_tanium_app.failed)
 
@@ -323,6 +343,48 @@
         headers: "{{ headers }}"
       register: scim_group_mapping
 
+    - name: Get Custom SCIM User Mapping (Email)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/propertymappings/scim/?search={{ 'SCIM Mapping: Tanium User Email' | urlencode }}"
+        method: GET
+        headers: "{{ headers }}"
+      register: scim_email_user_mapping_list
+
+    - name: Create Custom SCIM User Mapping (Email)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/propertymappings/scim/"
+        method: POST
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          name: "SCIM Mapping: Tanium User Email"
+          expression: |
+            return {
+                "userName": user.email,
+                "displayName": user.name,
+                "externalId": str(user.uid),
+                "active": user.is_active,
+                "emails": [
+                    {
+                        "value": user.email,
+                        "primary": True
+                    }
+                ]
+            }
+        status_code: [200, 201]
+      when: scim_email_user_mapping_list.json.results | length == 0
+      register: create_scim_email_user_mapping
+
+    - name: Capture Custom User Mapping ID (Created)
+      ansible.builtin.set_fact:
+        scim_email_user_id: "{{ create_scim_email_user_mapping.json.pk }}"
+      when: create_scim_email_user_mapping is defined and create_scim_email_user_mapping.changed
+
+    - name: Capture Custom User Mapping ID (Existing)
+      ansible.builtin.set_fact:
+        scim_email_user_id: "{{ scim_email_user_mapping_list.json.results[0].pk }}"
+      when: scim_email_user_mapping_list.json.results | length > 0
+
     - name: Get Custom SCIM Group Mapping (Filter)
       ansible.builtin.uri:
         url: "{{ authentik_url }}/api/v3/propertymappings/scim/?search=SCIM%20Mapping:%20Tanium%20Users%20Only"
@@ -365,7 +427,7 @@
         headers: "{{ headers }}"
         body_format: json
         body:
-          property_mappings: ["{{ scim_user_mapping.json.results[0].pk }}"]
+          property_mappings: ["{{ scim_email_user_id }}"]
           property_mappings_group: ["{{ scim_filtered_group_id }}"]
           exclude_users_service_account: true
           # Disable SSL verification to avoid internal cert trust issues
@@ -374,7 +436,7 @@
           token: "{{ tanium_scim_token | default(vault_tanium_scim_token) | default(omit) }}"
         status_code: [200]
       when: 
-        - scim_user_mapping.json.results | length > 0 
+        - scim_email_user_id is defined
         - scim_filtered_group_id is defined
 
     - name: Get Tanium SCIM Application
@@ -395,7 +457,7 @@
           name: "Tanium Provisioning"
           slug: "tanium-provisioning"
           provider: "{{ scim_provider_id }}"
-          meta_launch_url: "{{ tanium_url }}" # Not really used but good for reference
+          meta_launch_url: "" # Empty URL hides app from dashboard
         status_code: [200, 201]
       when: get_scim_app.status == 404
       register: create_scim_app
@@ -403,6 +465,18 @@
     - name: Capture SCIM App ID
       ansible.builtin.set_fact:
         scim_app_id: "{{ (create_scim_app.json.pk if (create_scim_app is defined and create_scim_app.changed) else get_scim_app.json.pk) }}"
+
+    - name: Update Tanium SCIM Application (Hide from Dashboard)
+      ansible.builtin.uri:
+        url: "{{ authentik_url }}/api/v3/core/applications/tanium-provisioning/"
+        method: PATCH
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          meta_launch_url: ""
+        status_code: [200]
+      when: get_scim_app.status == 200
+
 
     # -------------------------------------------------------------------------
     # Tanium Sync Configuration (Group & Policy)
