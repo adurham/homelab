@@ -107,7 +107,7 @@ def load_config() -> Dict[str, Any]:
         "tls_verify": os.getenv("TANIUM_TLS_VERIFY", "0") != "0",
         "tls_ca_bundle": os.getenv("TANIUM_TLS_CA_BUNDLE")
     }
-    
+
     return config
 
 # --------------------------------------------------------------------------- #
@@ -168,10 +168,10 @@ class TaniumClient:
         """Perform a GET request to the Tanium API."""
         # Rate limiting: small delay between API calls
         time.sleep(0.1)
-        
+
         # Audit logging
         audit_log("API_GET", {"path": path, "base_url": self.base})
-        
+
         req = Request(self._full(path), headers={
             "Accept": "application/json",
             "Session": self.auth_token
@@ -215,10 +215,10 @@ class TaniumClient:
         """Perform a POST request to the Tanium API."""
         # Rate limiting: small delay between API calls
         time.sleep(0.1)
-        
+
         # Audit logging
         audit_log("API_POST", {"path": path, "base_url": self.base, "prefer_async": prefer_async})
-        
+
         headers = {
             "Content-Type": "application/xml",
             "Session": self.auth_token
@@ -280,18 +280,18 @@ class TaniumClient:
         """Perform a PATCH request to the Tanium API."""
         # Rate limiting: small delay between API calls
         time.sleep(0.1)
-        
+
         # Audit logging
         audit_log("API_PATCH", {"path": path, "base_url": self.base})
-        
+
         headers = {
             "Content-Type": "application/json",
             "Session": self.auth_token
         }
-        
+
         req = Request(self._full(path), data=data, headers=headers, method='PATCH')
         logging.debug(f"PATCH request to: {self._full(path)}")
-        
+
         attempt = 0
         backoff = 1.0
         while True:
@@ -331,7 +331,7 @@ def fetch_api_solutions(client: TaniumClient) -> dict:
         logging.info(f"Fetching solutions from: {client.base}")
         raw = client.get("/api/v2/solutions")
         data = json.loads(raw.decode("utf-8"))
-        
+
         sol_map = {}
         for s in data.get("data", []):
             sid = s.get("solution_id") or s.get("id")
@@ -482,52 +482,52 @@ def fetch_manifest_data(client: TaniumClient, url: str) -> dict:
         logging.info(f"Fetching manifest from URL: {url}")
         # Create request with appropriate headers
         req = Request(url, headers={"Accept": "application/xml"})
-        
+
         # Fetch the data
         with urlopen(req, timeout=client.timeout, context=client.context) as resp:
             if resp.getcode() != 200:
                 logging.error(f"HTTP {resp.getcode()} fetching manifest from {url}")
                 raise ConnectionError(f"HTTP {resp.getcode()}")
-            
+
             # Read and decode the response
             raw_data = resp.read().decode("utf-8")
-            
+
             # Check if response is empty
             if not raw_data.strip():
                 logging.error(f"Manifest URL returned empty response: {url}")
                 logging.error("This may indicate that the manifest URL is not accessible or returns empty data.")
                 logging.error("Please verify that the URL is correct and accessible.")
                 raise ValueError("Empty manifest response")
-            
+
             # Try to parse as XML first (since you mentioned it's an XML manifest)
             try:
                 root = ET.fromstring(raw_data)
                 manifest_data = {}
-                
+
                 # Parse the XML manifest
                 for solution in root.findall("./solution"):
                     sid = solution.findtext("id")
                     ver = solution.findtext("version")
                     url_ = solution.findtext("content_url") or solution.findtext("contenturl")
                     name_alt = solution.findtext("name_alternate")
-                    
+
                     if sid and ver:
                         manifest_data[sid] = {
-                            "version": ver, 
+                            "version": ver,
                             "content_url": url_,
                             "name": name_alt or f"Unknown Solution ({sid})"
                         }
-                
+
                 logging.info(f"Successfully parsed XML manifest from {url}")
                 return manifest_data
-                
+
             except ET.ParseError as xml_exc:
                 logging.error(f"Failed to parse manifest as XML: {xml_exc}")
                 logging.error(f"Raw response: {raw_data[:500]}...")  # Show first 500 chars
                 logging.error("The manifest might not be in XML format, or the server returned unexpected content.")
                 logging.error("Please verify that the URL is correct and returns a valid XML manifest.")
                 raise ValueError(f"XML parsing failed: {xml_exc}")
-                
+
     except Exception as exc:
         logging.error(f"Failed to fetch manifest data from {url}: {exc}")
         raise
@@ -545,7 +545,7 @@ def get_server_hosts(client: TaniumClient) -> list[dict]:
         logging.info("Fetching server hosts")
         raw = client.get("/api/v2/server_host")  # Uses base URL
         data = json.loads(raw.decode("utf-8"))
-        
+
         servers = []
         for server in data.get("data", {}).get("servers", []):
             name = server.get("name")
@@ -557,11 +557,11 @@ def get_server_hosts(client: TaniumClient) -> list[dict]:
                 address = f"https://{host_only}"
                 logging.debug(f"Server list entry: name='{name}', original_address='{server.get('address')}' -> resolved to '{address}'")
                 servers.append({"name": name, "address": address})
-        
+
         if not servers:
             logging.error("No servers found in server_host response")
             raise ValueError("No servers found")
-            
+
         return servers
     except Exception as exc:
         logging.error(f"Failed to fetch server hosts: {exc}")
@@ -573,22 +573,22 @@ def get_server_hosts(client: TaniumClient) -> list[dict]:
 
 class GlobalLock:
     """Global lock using Tanium system settings to prevent concurrent imports across servers."""
-    
+
     LOCK_SETTING_NAME = "tanium_compare_import_lock"
     LOCK_SETTING_DESCRIPTION = "Tanium Compare Import Lock - prevents concurrent solution imports"
-    
+
     def __init__(self, client: TaniumClient):
         self.client = client
         self.setting_id = None
         self.server_name = os.uname().nodename if hasattr(os, 'uname') else "unknown"
-    
+
     def acquire(self, timeout: int = 300, stale_lock_timeout: int = 1800) -> bool:
         """Acquire the global lock.
-        
+
         Args:
             timeout: Maximum time to wait for lock (seconds)
             stale_lock_timeout: Time after which a lock is considered stale (seconds, default: 30 minutes)
-            
+
         Returns:
             True if lock acquired, False if timeout or error
         """
@@ -608,25 +608,25 @@ class GlobalLock:
                     if not self.setting_id:
                         logging.error("Failed to create or find lock setting")
                         return False
-            
+
             # Try to acquire the lock
             start_time = time.time()
-            
+
             # Add small random delay at start to reduce collision probability
             import random
             initial_delay = random.uniform(0, 0.5)  # 0-500ms random delay
             logging.debug(f"Initial random delay: {initial_delay:.3f}s")
             time.sleep(initial_delay)
-            
+
             while time.time() - start_time < timeout:
                 logging.debug(f"Lock acquisition attempt (elapsed: {time.time() - start_time:.1f}s)")
-                
+
                 # Try to acquire the lock normally first
                 if self._try_acquire_lock():
                     logging.info(f"Acquired global import lock (server: {self.server_name})")
                     audit_log("LOCK_ACQUIRED", {"server": self.server_name, "setting_id": self.setting_id})
                     return True
-                
+
                 # If we failed to acquire, check if it might be stale
                 # First check if the lock is actually held (value = "1")
                 try:
@@ -644,23 +644,23 @@ class GlobalLock:
                             logging.debug("Failed to break stale lock and acquire atomically")
                 except Exception as exc:
                     logging.debug(f"Could not check lock status: {exc}")
-                
+
                 logging.debug("Lock is held by another server, waiting...")
                 # Add small random delay to reduce collision probability
                 import random
                 delay = 5 + random.uniform(0, 2)  # 5-7 seconds with some randomness
                 time.sleep(delay)
-            
+
             logging.warning(f"Failed to acquire lock within {timeout} seconds")
             return False
-            
+
         except Exception as exc:
             logging.error(f"Failed to acquire global lock: {exc}")
             return False
-    
+
     def _get_setting_id(self) -> Optional[str]:
         """Get existing setting ID only.
-        
+
         Returns:
             Setting ID if found, None if not found
         """
@@ -668,29 +668,29 @@ class GlobalLock:
             # Get all system settings
             raw = self.client.get("/api/v2/system_settings")
             data = json.loads(raw.decode("utf-8"))
-            
+
             # Look for existing setting
             for setting in data.get("data", []):
                 if setting.get("name") == self.LOCK_SETTING_NAME:
                     logging.debug(f"Found existing lock setting with ID: {setting.get('id')}")
                     return str(setting.get("id"))
-            
+
             logging.debug("Lock setting not found")
             return None
-                
+
         except Exception as exc:
             logging.error(f"Failed to get lock setting: {exc}")
             return None
-    
+
     def _create_setting(self) -> Optional[str]:
         """Create the lock setting.
-        
+
         Returns:
             Setting ID if successful, None if failed
         """
         try:
             logging.info("Creating global lock setting...")
-            
+
             setting_data = json.dumps({
                 "name": self.LOCK_SETTING_NAME,
                 "description": self.LOCK_SETTING_DESCRIPTION,
@@ -698,27 +698,27 @@ class GlobalLock:
                 "value": "0",
                 "value_type": "Numeric"
             }).encode('utf-8')
-            
+
             response = self.client.post("/api/v2/system_settings", setting_data)
             setting_id = response.get("data", {}).get("id")
-            
+
             if setting_id:
                 logging.info(f"Successfully created lock setting with ID: {setting_id}")
                 return str(setting_id)
             else:
                 logging.error("Failed to create lock setting - no ID returned")
                 return None
-                
+
         except Exception as exc:
             logging.error(f"Failed to create lock setting: {exc}")
             return None
-    
+
     def _is_lock_stale(self, stale_timeout: int) -> bool:
         """Check if the current lock is stale (held too long).
-        
+
         Args:
             stale_timeout: Time in seconds after which lock is considered stale
-            
+
         Returns:
             True if lock appears stale, False otherwise
         """
@@ -728,45 +728,45 @@ class GlobalLock:
             current_value = str(data.get("data", {}).get("value", "0"))
 
             logging.debug(f"Lock status check: value={current_value}")
-            
+
             if current_value != "1":
                 logging.debug("Lock is not held (value is not 1)")
                 return False  # Lock is not held
-            
+
             # Check when the setting was last modified
             modified_time = data.get("data", {}).get("modified_time")
             if not modified_time:
                 # If we can't determine when it was modified, assume it's not stale
                 logging.debug("No modified_time available, assuming lock is not stale")
                 return False
-            
+
             # Parse the timestamp (assuming ISO format)
             from datetime import datetime, timezone
             try:
                 modified_dt = datetime.fromisoformat(modified_time.replace('Z', '+00:00'))
                 now_dt = datetime.now(timezone.utc)
                 age_seconds = (now_dt - modified_dt).total_seconds()
-                
+
                 logging.debug(f"Lock age: {age_seconds:.0f}s, threshold: {stale_timeout}s")
-                
+
                 if age_seconds > stale_timeout:
                     logging.warning(f"Lock appears stale (age: {age_seconds:.0f}s, threshold: {stale_timeout}s)")
                     return True
                 else:
                     logging.debug(f"Lock is not stale (age: {age_seconds:.0f}s < {stale_timeout}s)")
                     return False
-                    
+
             except Exception as parse_exc:
                 logging.debug(f"Could not parse lock timestamp: {parse_exc}")
                 return False
-                
+
         except Exception as exc:
             logging.debug(f"Could not check lock staleness: {exc}")
             return False
-    
+
     def _break_stale_lock(self) -> bool:
         """Attempt to break a stale lock by setting it to 0.
-        
+
         Returns:
             True if lock was broken, False otherwise
         """
@@ -776,9 +776,9 @@ class GlobalLock:
                 "value": "0",
                 "value_type": "Numeric"
             }).encode('utf-8')
-            
+
             self.client.patch(f"/api/v2/system_settings/{self.setting_id}", patch_data)
-            
+
             # Verify the lock was broken
             raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
             data = json.loads(raw.decode("utf-8"))
@@ -790,17 +790,17 @@ class GlobalLock:
             else:
                 logging.warning("Failed to break stale lock")
                 return False
-                
+
         except Exception as exc:
             logging.error(f"Failed to break stale lock: {exc}")
             return False
-    
+
     def _break_stale_lock_and_acquire(self) -> bool:
         """Atomically break a stale lock and acquire it.
-        
+
         This method attempts to break a stale lock and immediately acquire it
         to prevent race conditions.
-        
+
         Returns:
             True if lock was broken and acquired, False otherwise
         """
@@ -809,72 +809,72 @@ class GlobalLock:
             if not self._is_lock_stale(1800):  # Use 30 minutes as default
                 logging.debug("Lock is no longer stale, skipping break and acquire")
                 return False
-            
+
             logging.warning("Atomically breaking stale lock and acquiring it")
-            
+
             # Step 1: Break the stale lock
             patch_data = json.dumps({
                 "value": "0",
                 "value_type": "Numeric"
             }).encode('utf-8')
-            
+
             self.client.patch(f"/api/v2/system_settings/{self.setting_id}", patch_data)
-            
+
             # Step 2: Immediately try to acquire it (with minimal delay)
             time.sleep(0.1)  # Very small delay to ensure the patch is processed
-            
+
             # Use the same simple approach as _try_acquire_lock
             acquire_data = json.dumps({
                 "value": "1",
                 "value_type": "Numeric"
             }).encode('utf-8')
-            
+
             self.client.patch(f"/api/v2/system_settings/{self.setting_id}", acquire_data)
-            
+
             # If we got here without an exception, we successfully acquired the lock
             logging.info("Successfully broke stale lock and acquired it atomically")
             return True
-                
+
         except Exception as exc:
             logging.error(f"Failed to break stale lock and acquire atomically: {exc}")
             return False
-    
+
     def release(self) -> None:
         """Release the global lock."""
         if not self.setting_id:
             return
-            
+
         try:
             # Set lock value to 0 (unlocked)
             patch_data = json.dumps({
                 "value": "0",
                 "value_type": "Numeric"
             }).encode('utf-8')
-            
+
             self.client.patch(f"/api/v2/system_settings/{self.setting_id}", patch_data)
             logging.info(f"Released global import lock (server: {self.server_name})")
             audit_log("LOCK_RELEASED", {"server": self.server_name, "setting_id": self.setting_id})
-            
+
         except Exception as exc:
             logging.error(f"Failed to release global lock: {exc}")
-    
-    
+
+
     def _try_acquire_lock(self) -> bool:
         """Try to acquire the lock using a more robust approach.
-        
+
         Since the Tanium API doesn't support true compare-and-swap, we'll use
         a combination of immediate retry and exponential backoff to handle race conditions.
-        
+
         Returns:
             True if lock acquired, False if already held
         """
         import time
         import random
-        
+
         # Try multiple times with exponential backoff to handle race conditions
         max_attempts = 3
         base_delay = 0.1  # Start with 100ms
-        
+
         for attempt in range(max_attempts):
             try:
                 # Get current value
@@ -883,23 +883,23 @@ class GlobalLock:
                 current_value = str(data.get("data", {}).get("value", "0"))
 
                 logging.debug(f"Attempting to acquire lock (attempt {attempt + 1}/{max_attempts}): current_value={current_value}")
-                
+
                 if current_value == "1":
                     # Lock is already held - stop trying
                     logging.debug(f"Lock is already held by another server (value: {current_value})")
                     return False
-                
+
                 # Try to set lock to 1
                 patch_data = json.dumps({
                     "value": "1",
                     "value_type": "Numeric"
                 }).encode('utf-8')
-                
+
                 logging.debug(f"Setting lock to 1 (server: {self.server_name}, attempt {attempt + 1})")
-                
+
                 try:
                     self.client.patch(f"/api/v2/system_settings/{self.setting_id}", patch_data)
-                    
+
                     # Verify we actually got the lock by checking the value again
                     time.sleep(0.05)  # Small delay to ensure the patch is processed
                     raw = self.client.get(f"/api/v2/system_settings/{self.setting_id}")
@@ -919,7 +919,7 @@ class GlobalLock:
                             continue
                         else:
                             return False
-                    
+
                 except Exception as patch_exc:
                     # If the patch failed, it likely means another server modified the setting
                     logging.debug(f"Lock acquisition failed due to race condition: {patch_exc}")
@@ -930,7 +930,7 @@ class GlobalLock:
                         continue
                     else:
                         return False
-                
+
             except Exception as exc:
                 logging.debug(f"Failed to acquire lock (attempt {attempt + 1}): {exc}")
                 if attempt < max_attempts - 1:
@@ -940,7 +940,7 @@ class GlobalLock:
                     continue
                 else:
                     return False
-        
+
         return False
 
 # --------------------------------------------------------------------------- #
@@ -1024,14 +1024,14 @@ def import_solution(client: TaniumClient, solution_id: str, content_url: str, co
                 response_data = resp.read().decode("utf-8")
                 logging.debug(f"First POST response: {response_data[:500]}")
                 first_response = json.loads(response_data)
-                
+
                 # Extract conflict details
                 import_conflict_details = []
                 if "data" in first_response and "object_list" in first_response["data"]:
                     object_list = first_response["data"]["object_list"]
                     if "import_conflict_details" in object_list:
                         import_conflict_details = object_list["import_conflict_details"]
-                
+
                 # Build conflict resolution options
                 # Strategy:
                 # - For each conflict, set action to 1 (replace) unless permission_denied
@@ -1081,9 +1081,9 @@ def import_solution(client: TaniumClient, solution_id: str, content_url: str, co
                 else:
                     # If no conflicts, apply requested default
                     final_conflict_header = {"default_import_conflict_option": CONFLICT_OPTION_REPLACE if conflict_default == "replace" else CONFLICT_OPTION_SKIP}
-                
+
                 logging.debug(f"Final conflict resolution options: {final_conflict_header}")
-                
+
                 # Second request - actually perform the import asynchronously
                 headers["tanium-options"] = json.dumps(final_conflict_header)
                 headers["Prefer"] = "respond-async"
@@ -1148,29 +1148,29 @@ def import_solution(client: TaniumClient, solution_id: str, content_url: str, co
 
 def import_out_of_date_solutions(client: TaniumClient, manifest: dict, out_of_date_solutions: list) -> dict:
     """Import all out-of-date solutions.
-    
+
     Args:
         client: Tanium client instance
         manifest: Dictionary containing manifest data
         out_of_date_solutions: List of out-of-date solution dictionaries
-        
+
     Returns:
         Dictionary with import results
     """
     import_results = {}
-    
+
     for solution in out_of_date_solutions:
         sid = solution["sid"]
         name = solution["name"]
         manifest_ver = solution["manifest_ver"]
-        
+
         # Get the content URL from manifest
         if sid in manifest:
             content_url = manifest[sid]["content_url"]
             if not content_url:
                 logging.warning(f"No content URL found for solution {sid}")
                 continue
-                
+
             try:
                 logging.info(f"Importing solution {sid} ({name}) - Manifest version: {manifest_ver}")
                 result = import_solution(client, sid, content_url)
@@ -1186,7 +1186,7 @@ def import_out_of_date_solutions(client: TaniumClient, manifest: dict, out_of_da
                 }
         else:
             logging.warning(f"Solution {sid} not found in manifest")
-            
+
     return import_results
 
 # --------------------------------------------------------------------------- #
@@ -1241,15 +1241,15 @@ def compare_servers(server_results: dict) -> dict:
         Dictionary with comparison results between servers
     """
     server_versions = {}
-    
+
     for server_name, results in server_results.items():
         server_versions[server_name] = {}
-        
+
         # Process each category of results
         for item in results["out_of_date"] + results["missing"] + results["up_to_date"]:
             sid = item["sid"]
             name = item["name"]
-            
+
             # Extract version based on the source list
             if "api_version" in item:
                 ver = item["api_version"]
@@ -1257,31 +1257,31 @@ def compare_servers(server_results: dict) -> dict:
                 ver = item["version"]
             else:
                 continue  # Skip items without version info
-            
+
             server_versions[server_name][sid] = {"name": name, "ver": ver}
-    
+
     # Compare versions across servers
     inconsistencies = {}
-    
+
     # Find all unique solution IDs across all servers
     all_sids = set()
     for versions in server_versions.values():
         all_sids.update(versions.keys())
-    
+
     # Compare each solution across servers
     for sid in all_sids:
         server_versions_list = []
         for server_name, versions in server_versions.items():
             if sid in versions:
                 server_versions_list.append((server_name, versions[sid]))
-        
+
         # If solution exists on multiple servers, check if versions match
         if len(server_versions_list) > 1:
             # Get all versions for this solution across servers
             versions = [ver["ver"] for _, ver in server_versions_list]
             names = [ver["name"] for _, ver in server_versions_list]
             unique_versions = set(versions)
-            
+
             if len(unique_versions) > 1:
                 # Version mismatch found
                 inconsistencies[sid] = {
@@ -1291,7 +1291,7 @@ def compare_servers(server_results: dict) -> dict:
                     "status": "inconsistent"
                 }
                 logging.warning(f"[INCONSISTENCY] Solution {sid} ({list(set(names))[0]}) has different versions across servers: {dict(server_versions_list)}")
-    
+
     return inconsistencies
 
 # --------------------------------------------------------------------------- #
@@ -1300,30 +1300,30 @@ def compare_servers(server_results: dict) -> dict:
 
 def validate_file_path(file_path: str, allowed_dirs: Optional[List[str]] = None) -> bool:
     """Validate file path to prevent path traversal attacks.
-    
+
     Args:
         file_path: Path to validate
         allowed_dirs: List of allowed parent directories (optional)
-        
+
     Returns:
         True if path is safe, False otherwise
     """
     if not file_path:
         return False
-    
+
     # Check for path traversal attempts
     if ".." in file_path:
         logging.warning(f"Path traversal attempt detected: {file_path}")
         return False
-    
+
     # Normalize the path
     normalized_path = os.path.normpath(file_path)
-    
+
     # Check if normalized path contains any parent directory references
     if ".." in normalized_path:
         logging.warning(f"Path traversal in normalized path: {normalized_path}")
         return False
-    
+
     # If allowed_dirs specified, check if path is within allowed directories
     if allowed_dirs:
         for allowed_dir in allowed_dirs:
@@ -1331,12 +1331,12 @@ def validate_file_path(file_path: str, allowed_dirs: Optional[List[str]] = None)
                 return True
         logging.warning(f"Path not in allowed directories: {normalized_path}")
         return False
-    
+
     return True
 
 def secure_file_permissions(file_path: str) -> None:
     """Set secure file permissions on a file.
-    
+
     Args:
         file_path: Path to the file to secure
     """
@@ -1350,7 +1350,7 @@ def secure_file_permissions(file_path: str) -> None:
 
 def audit_log(operation: str, details: Optional[Dict[str, Any]] = None) -> None:
     """Log security-relevant operations for audit purposes.
-    
+
     Args:
         operation: Type of operation being performed
         details: Additional details to log
@@ -1358,7 +1358,7 @@ def audit_log(operation: str, details: Optional[Dict[str, Any]] = None) -> None:
     user = os.getenv('USER', 'unknown')
     hostname = os.uname().nodename if hasattr(os, 'uname') else 'unknown'
     timestamp = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())
-    
+
     audit_msg = f"AUDIT: {operation} by {user}@{hostname} at {timestamp}"
     if details:
         # Redact sensitive information
@@ -1369,7 +1369,7 @@ def audit_log(operation: str, details: Optional[Dict[str, Any]] = None) -> None:
             else:
                 safe_details[key] = value
         audit_msg += f" - {safe_details}"
-    
+
     logging.info(audit_msg)
 
 # --------------------------------------------------------------------------- #
@@ -1387,29 +1387,29 @@ def print_tanium_logo() -> None:
 +++++++++++  ++++++      ++++     +++++++++++   ++++ +++++++++  ++++  ++++     ++++  +++++++++++++++++
 +++++++++++  +++++       ++++   ++++++++++++++  ++++   +++++++  ++++  +++++++++++++  ++++  ++++++ ++++
  ++++++++++  +++         ++++  +++++       ++++ ++++    ++++++  ++++   +++++++++++   ++++   +++   ++++
-    +++++++                                                                                                                                                                                                                                                                                                                                           
+    +++++++
     """)
 
 def validate_manifest(manifest: dict, strict: bool = False) -> None:
     """Validate manifest data and raise errors if invalid.
-    
+
     Args:
         manifest: Dictionary containing manifest data
         strict: If True, fail on missing required fields
-        
+
     Raises:
         SystemExit: If validation fails and strict=True
     """
     if not strict:
         return
-        
+
     errors = []
     for sid, entry in manifest.items():
         if not entry.get("version"):
             errors.append(f"Manifest entry {sid} missing version")
         if "content_url" not in entry:
             errors.append(f"Manifest entry {sid} missing content_url")
-    
+
     if errors:
         for e in errors:
             logging.error(e)
@@ -1418,34 +1418,34 @@ def validate_manifest(manifest: dict, strict: bool = False) -> None:
 def print_comparison_summary(server_results: Dict[str, Dict[str, Any]],
                            inconsistencies: Dict[str, Any]) -> None:
     """Print a formatted summary of comparison results.
-    
+
     Args:
         server_results: Results from each server comparison
         inconsistencies: Inconsistencies found between servers
     """
     print("\n=== SERVER COMPARISON RESULTS ===")
-    
+
     total_missing = 0
     total_out_of_date = 0
     total_up_to_date = 0
-    
+
     for server_name, results in server_results.items():
         print(f"\n{server_name}:")
         print(f"  Missing: {len(results['missing'])}")
         print(f"  Out of date: {len(results['out_of_date'])}")
         print(f"  Up to date: {len(results['up_to_date'])}")
-        
+
         total_missing += len(results['missing'])
         total_out_of_date += len(results['out_of_date'])
         total_up_to_date += len(results['up_to_date'])
-    
+
     if inconsistencies:
         print("\n=== INCONSISTENCIES FOUND ===")
         for sid, info in inconsistencies.items():
             print(f"  Solution {sid} ({info['names'][0]}): versions {info['versions']}")
     else:
         print("\n=== NO INCONSISTENCIES FOUND ===")
-    
+
     # Show summary
     print("\n=== FINAL SUMMARY ===")
     print(f"Total missing solutions: {total_missing}")
@@ -1467,10 +1467,10 @@ def main():
     # Only print logo if running interactively (not in cron)
     if sys.stdout.isatty():
         print_tanium_logo()
-    
+
     # Global lock will be acquired later when we have a client
     global_lock = None
-    
+
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Compare Tanium solutions against manifest")
     parser.add_argument("--manifest-url", help="URL to the manifest file (optional)")
@@ -1494,9 +1494,9 @@ def main():
     parser.add_argument("--skip-global-lock", action="store_true", help="Skip global lock acquisition (for testing)")
     parser.add_argument("--create-lock-setting", action="store_true", help="Create the global lock setting and exit (utility function)")
     parser.add_argument("--check-lock-status", action="store_true", help="Check the current lock status and exit")
-    
+
     args = parser.parse_args()
-    
+
     # Set up logging - use different formats for interactive vs cron
     if sys.stdout.isatty():
         # Interactive mode - more detailed format
@@ -1504,17 +1504,17 @@ def main():
     else:
         # Cron mode - simpler format, include process info
         log_format = '%(asctime)s - %(process)d - %(levelname)s - %(message)s'
-    
+
     # Set up handlers - console always, file only if specified
     handlers = [logging.StreamHandler(sys.stdout)]
-    
+
     # Add file handler if log file is specified
     if hasattr(args, 'log_file') and args.log_file:
         # Validate log file path for security
         if not validate_file_path(args.log_file, allowed_dirs=['/var/log', '/tmp']):
             logging.error(f"Invalid log file path: {args.log_file}")
             sys.exit(1)
-        
+
         try:
             # Ensure directory exists
             log_dir = os.path.dirname(args.log_file)
@@ -1526,13 +1526,13 @@ def main():
         except (PermissionError, OSError) as e:
             logging.warning(f"Could not create log file {args.log_file}: {e}")
             logging.warning("Continuing with console output only")
-    
+
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
         format=log_format,
         handlers=handlers
     )
-    
+
     # Load configuration
     config = load_config()
     if args.timeout:
@@ -1548,7 +1548,7 @@ def main():
         logging.error("Please set the TANIUM_BASE_URL environment variable to your Tanium server URL.")
         logging.error("Example: export TANIUM_BASE_URL=https://your-tanium-server.com")
         sys.exit(1)
-    
+
     if config["auth_token"] == "token-":
         logging.error("ERROR: TANIUM_AUTH_TOKEN not configured!")
         logging.error("Please set the TANIUM_AUTH_TOKEN environment variable to your Tanium API token.")
@@ -1563,19 +1563,19 @@ def main():
     except Exception as exc:
         logging.error(f"Failed to get server list: {exc}")
         sys.exit(1)
-    
+
     # Handle create lock setting option
     if args.create_lock_setting:
         try:
             global_lock = GlobalLock(primary_client)
-            
+
             # First check if it already exists
             existing_id = global_lock._get_setting_id()
             if existing_id:
                 logging.info(f"Lock setting already exists with ID: {existing_id}")
                 print(f"Lock setting already exists with ID: {existing_id}")
                 sys.exit(0)
-            
+
             # Create it if it doesn't exist
             setting_id = global_lock._create_setting()
             if setting_id:
@@ -1588,7 +1588,7 @@ def main():
         except Exception as exc:
             logging.error(f"Failed to create lock setting: {exc}")
             sys.exit(1)
-    
+
     # Handle check lock status option
     if args.check_lock_status:
         try:
@@ -1598,7 +1598,7 @@ def main():
                 logging.info("Lock setting not found")
                 print("Lock setting not found")
                 sys.exit(1)
-            
+
             # Get current lock value
             raw = primary_client.get(f"/api/v2/system_settings/{setting_id}")
             data = json.loads(raw.decode("utf-8"))
@@ -1610,12 +1610,12 @@ def main():
             else:
                 logging.info("Lock is currently FREE (value: 0)")
                 print("Lock is currently FREE (value: 0)")
-            
+
             sys.exit(0)
         except Exception as exc:
             logging.error(f"Failed to check lock status: {exc}")
             sys.exit(1)
-    
+
     # Ensure global lock setting exists (create if needed)
     if not args.skip_global_lock:
         try:
@@ -1636,7 +1636,7 @@ def main():
             sys.exit(1)
     else:
         logging.warning("Skipping global lock setup (--skip-global-lock specified)")
-    
+
     # If no manifest URL provided, fetch it from the primary server
     if not args.manifest_url:
         try:
@@ -1648,7 +1648,7 @@ def main():
     else:
         manifest_url = args.manifest_url
         logging.info(f"Using provided manifest URL: {manifest_url}")
-    
+
     # Fetch the manifest
     try:
         manifest = fetch_manifest_data(primary_client, manifest_url)
@@ -1657,11 +1657,11 @@ def main():
     except Exception as exc:
         logging.error(f"Failed to fetch manifest: {exc}")
         sys.exit(1)
-    
+
     # Phase 1: Compare each server against the manifest
     server_results = {}
     server_clients = {}  # Keep track of server clients for imports
-    
+
     # Optional name-map for matching tweaks
     name_map = {}
     if args.name_map and os.path.isfile(args.name_map):
@@ -1733,10 +1733,10 @@ def main():
             server_results[name] = results
 
     # Remove legacy sequential comparison loop (now handled above)
-    
+
     # Phase 2: Compare servers against each other
     inconsistencies = compare_servers(server_results)
-    
+
     # Display results
     print_comparison_summary(server_results, inconsistencies)
 
@@ -1761,7 +1761,7 @@ def main():
     # If --import-out-of-date flag is set, import the out-of-date solutions
     if args.import_out_of_date:
         print("\n=== IMPORTING OUT-OF-DATE SOLUTIONS ===")
-        
+
         # Import each out-of-date solution on each server where it is out-of-date
         total_targets = sum(len(results["out_of_date"]) for results in server_results.values())
         print(f"Queued {total_targets} server-specific imports based on manifest deltas")
@@ -1773,7 +1773,7 @@ def main():
             if client is None or not client.base:
                 logging.error(f"Server client not available for {server_name}")
                 continue
-            
+
             # Test client connectivity once per server (use server_info)
             try:
                 test_url = client._full("/api/v2/server_info")
@@ -1801,7 +1801,7 @@ def main():
                         logging.error(f"Could not acquire global import lock for {server_name} within {args.global_lock_timeout} seconds.")
                         logging.error("Another server may be running imports. Skipping imports for this server.")
                         continue
-                    
+
                     # Register cleanup function for this server
                     def cleanup_outofdate_lock():
                         if server_global_lock:
@@ -1813,7 +1813,7 @@ def main():
 
                     atexit.register(cleanup_outofdate_lock)
                     logging.info(f"Successfully acquired global import lock for {server_name}")
-                    
+
                 except Exception as lock_exc:
                     logging.error(f"Failed to set up global lock for {server_name}: {lock_exc}")
                     logging.error("Skipping imports for this server due to lock setup failure")
@@ -1831,7 +1831,7 @@ def main():
                 if stop_flag["stop"]:
                     logging.warning(f"Stop signal received, skipping remaining imports for {server_name}")
                     break
-                
+
                 sid = solution["sid"]
                 name = solution["name"]
                 manifest_version = solution["manifest_version"]
@@ -1844,7 +1844,7 @@ def main():
                     server_imports_attempted += 1
                     server_imports_successful += 1  # Count dry run as successful
                     continue
-                
+
                 server_imports_attempted += 1
                 import_stats["total_attempted"] += 1
 
@@ -1869,7 +1869,7 @@ def main():
                     print(f"  Import failed for {sid} on server {server_name}: {exc}")
                     server_imports_failed += 1
                     import_stats["total_failed"] += 1
-            
+
             # Track server completion
             import_stats["servers_processed"] += 1
             print(f"\n📊 Server {server_name} import summary:")
@@ -1877,12 +1877,12 @@ def main():
             print(f"  Successful: {server_imports_successful}")
             print(f"  Skipped: {server_imports_skipped} (already up-to-date)")
             print(f"  Failed: {server_imports_failed}")
-            
+
             # Release global lock for this server after all imports are complete
             if server_global_lock:
                 server_global_lock.release()
                 logging.info(f"Released global import lock for {server_name}")
-        
+
         # Print final import statistics
         if import_stats["total_attempted"] > 0:
             print("\n🎯 FINAL IMPORT STATISTICS:")
@@ -1900,7 +1900,7 @@ def main():
     # If --import-missing flag is set, import the missing solutions
     if args.import_missing:
         print("\n=== IMPORTING MISSING SOLUTIONS ===")
-        
+
         # Import each missing solution on each server where it is missing
         total_targets = sum(len(results["missing"]) for results in server_results.values())
         print(f"Queued {total_targets} server-specific imports for missing solutions")
@@ -1912,7 +1912,7 @@ def main():
             if client is None or not client.base:
                 logging.error(f"Server client not available for {server_name}")
                 continue
-            
+
             # Test client connectivity once per server (use server_info)
             try:
                 test_url = client._full("/api/v2/server_info")
@@ -1940,7 +1940,7 @@ def main():
                         logging.error(f"Could not acquire global import lock for {server_name} within {args.global_lock_timeout} seconds.")
                         logging.error("Another server may be running imports. Skipping imports for this server.")
                         continue
-                    
+
                     # Register cleanup function for this server
                     def cleanup_missing_lock():
                         if server_global_lock:
@@ -1955,7 +1955,7 @@ def main():
                 except Exception as exc:
                     logging.error(f"Failed to acquire global import lock for {server_name}: {exc}")
                     continue
-            
+
             # Track server-specific import statistics
             server_imports_attempted = 0
             server_imports_successful = 0
@@ -1966,13 +1966,13 @@ def main():
             for solution in results["missing"]:
                 if stop_flag["stop"]:
                     break
-                    
+
                 solution_id = solution["sid"]
                 solution_name = solution["name"]
                 solution_version = solution["version"]
-                
+
                 logging.info(f"Importing missing solution {solution_id} ({solution_name}) on {server_name} - Version: {solution_version}")
-                
+
                 if args.dry_run:
                     logging.info(f"[DRY RUN] Would import missing solution {solution_id} ({solution_name}) version {solution_version} on {server_name}")
                     server_imports_attempted += 1
@@ -1980,22 +1980,22 @@ def main():
                     missing_import_stats["total_attempted"] += 1
                     missing_import_stats["total_successful"] += 1
                     continue
-                
+
                 try:
                     server_imports_attempted += 1
                     missing_import_stats["total_attempted"] += 1
-                    
+
                     # Import the missing solution using the same logic as out-of-date imports
                     import_solution(client, solution_id, manifest[solution_id]["content_url"], conflict_policy_path=args.conflict_policy, conflict_default=args.conflict_default)
                     logging.info(f"✅ Successfully imported missing solution {solution_id} ({solution_name}) on {server_name}")
                     server_imports_successful += 1
                     missing_import_stats["total_successful"] += 1
-                        
+
                 except Exception as exc:
                     logging.error(f"❌ Failed to import missing solution {solution_id} ({solution_name}) on {server_name}: {exc}")
                     server_imports_failed += 1
                     missing_import_stats["total_failed"] += 1
-            
+
             # Track server completion
             missing_import_stats["servers_processed"] += 1
             print(f"\n📊 Server {server_name} missing solutions import summary:")
@@ -2003,7 +2003,7 @@ def main():
             print(f"  Successful: {server_imports_successful}")
             print(f"  Skipped: {server_imports_skipped} (already up-to-date)")
             print(f"  Failed: {server_imports_failed}")
-            
+
             # Release global lock for this server after all imports are complete
             if server_global_lock:
                 try:
@@ -2011,7 +2011,7 @@ def main():
                     logging.info(f"Released global import lock for {server_name}")
                 except Exception as exc:
                     logging.error(f"Failed to release global import lock for {server_name}: {exc}")
-        
+
         # Print final missing solutions import statistics
         if missing_import_stats["total_attempted"] > 0:
             print("\n🎯 FINAL MISSING SOLUTIONS IMPORT STATISTICS:")
@@ -2060,13 +2060,13 @@ def main():
         if not validate_file_path(args.summary_out, allowed_dirs=['/var/log', '/tmp', '/opt']):
             logging.error(f"Invalid summary file path: {args.summary_out}")
             sys.exit(1)
-        
+
         try:
             # Calculate totals
             total_missing = sum(len(results['missing']) for results in server_results.values())
             total_out_of_date = sum(len(results['out_of_date']) for results in server_results.values())
             total_up_to_date = sum(len(results['up_to_date']) for results in server_results.values())
-            
+
             summary = {
                 "servers": server_results,
                 "inconsistencies": inconsistencies,
@@ -2083,7 +2083,7 @@ def main():
             logging.info(f"Wrote summary to {args.summary_out}")
         except Exception as e:
             logging.error(f"Failed to write summary file {args.summary_out}: {e}")
-    
+
     # Exit with error code if inconsistencies or missing solutions found
     exit_code = 0
     for results in server_results.values():
@@ -2091,9 +2091,8 @@ def main():
             exit_code = 1
     if inconsistencies:
         exit_code = 1
-    
+
     sys.exit(exit_code)
 
 if __name__ == "__main__":
     main()
-

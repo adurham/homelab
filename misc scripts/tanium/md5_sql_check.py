@@ -16,15 +16,15 @@ def get_all_databases(conn):
 
 def check_md5_indexes(conn):
     query = """
-    SELECT 
+    SELECT
         t.relname AS table_name,
         i.relname AS index_name,
         pg_get_indexdef(i.oid) AS index_definition
-    FROM 
+    FROM
         pg_class t,
         pg_class i,
         pg_index ix
-    WHERE 
+    WHERE
         t.oid = ix.indrelid
         AND i.oid = ix.indexrelid
         AND pg_get_indexdef(i.oid) LIKE '%md5%';

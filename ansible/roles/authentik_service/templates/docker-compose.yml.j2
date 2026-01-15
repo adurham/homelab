@@ -69,7 +69,7 @@ services:
       AUTHENTIK_POSTGRESQL__USER: {{ authentik_pg_user | default('authentik') }}
       AUTHENTIK_POSTGRESQL__NAME: {{ authentik_pg_db | default('authentik') }}
       AUTHENTIK_POSTGRESQL__PASSWORD: {{ authentik_pg_password }}
-    # `user: root` is often needed for Docker in LXC due to permission mapping issues with mounted volumes? 
+    # `user: root` is often needed for Docker in LXC due to permission mapping issues with mounted volumes?
     # Usually strictly confined LXC needs this, but unprivileged with nesting might be fine.
     # We'll try without root first.
     volumes:

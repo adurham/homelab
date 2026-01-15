@@ -26,7 +26,7 @@ echo -e "${GREEN}✅ Docker is running${NC}"
 # Function to start MCP gateway
 start_mcp_gateway() {
     echo -e "${YELLOW}🚀 Starting MCP Gateway...${NC}"
-    
+
     # Start MCP Docker gateway (this runs continuously)
     docker run -d \
         --name mcp-gateway \
@@ -40,7 +40,7 @@ start_mcp_gateway() {
 # Function to start individual MCP servers
 start_mcp_servers() {
     echo -e "${YELLOW}🔧 Starting individual MCP servers...${NC}"
-    
+
     # These commands assume the MCP servers are available via Docker
     # Brave Search
     echo -e "${YELLOW}📡 Starting Brave Search MCP...${NC}"
@@ -48,20 +48,20 @@ start_mcp_servers() {
         -e BRAVE_API_KEY="${BRAVE_API_KEY:-}" \
         mcp/brave-search:latest \
         || echo -e "${YELLOW}⚠️  Brave Search not available${NC}"
-    
+
     # Context7
     echo -e "${YELLOW}📚 Starting Context7 MCP...${NC}"
     docker run -d --name mcp-context7 --rm \
         mcp/context7:latest \
         || echo -e "${YELLOW}⚠️  Context7 not available${NC}"
-    
+
     # Memory
     echo -e "${YELLOW}🧠 Starting Memory MCP...${NC}"
     docker run -d --name mcp-memory --rm \
         -v "$(pwd)/.mcp-memory:/data" \
         mcp/memory:latest \
         || echo -e "${YELLOW}⚠️  Memory not available${NC}"
-    
+
     # Sequential Thinking
     echo -e "${YELLOW}🧩 Starting Sequential Thinking MCP...${NC}"
     docker run -d --name mcp-sequential-thinking --rm \
@@ -72,7 +72,7 @@ start_mcp_servers() {
 # Function to check MCP server status
 check_status() {
     echo -e "${YELLOW}🔍 Checking MCP server status...${NC}"
-    
+
     # Check if Continue.dev can reach MCP servers
     if curl -s http://localhost:3000/health >/dev/null 2>&1; then
         echo -e "${GREEN}✅ MCP Gateway is running on port 3000${NC}"
@@ -80,7 +80,7 @@ check_status() {
         echo -e "${YELLOW}⚠️  MCP Gateway not responding on port 3000${NC}"
         echo -e "${YELLOW}💡 MCP servers may be integrated directly through Continue.dev${NC}"
     fi
-    
+
     # Check individual containers
     echo -e "${YELLOW}🐳 Checking Docker containers...${NC}"
     docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}" | grep mcp || echo "No MCP containers running"

@@ -23,7 +23,7 @@
   no_log: true
   when: gw_check.rc != 0
 - name: Check LXC Config for Tun Access
-  ansible.builtin.shell: 'grep -q "lxc.mount.entry: /dev/net/tun" /etc/pve/lxc/101.conf'
+  ansible.builtin.command: 'grep -q "lxc.mount.entry: /dev/net/tun" /etc/pve/lxc/101.conf'
   register: tun_check
   failed_when: false
   changed_when: false

@@ -54,13 +54,13 @@ resource "vsphere_compute_cluster" "cl02" {
   drs_automation_level         = "fullyAutomated"
   drs_migration_threshold      = 3
   drs_scale_descendants_shares = "disabled"
-  
+
   # HA Settings
   ha_enabled                   = true
   ha_datastore_apd_response    = "restartConservative"
   ha_datastore_pdl_response    = "restartAggressive"
   ha_heartbeat_datastore_policy = "allFeasibleDsWithUserPreference"
-  
+
   # DPM Settings
   dpm_enabled                  = false
   dpm_automation_level         = "automated"

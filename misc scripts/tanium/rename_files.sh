@@ -4,7 +4,7 @@
 directory="/Users/adam.durham/Downloads/tmp/metrics"
 
 # Loop through all matching files
-for file in "$directory"/metrics_*.txt; 
+for file in "$directory"/metrics_*.txt;
 do
   # Extract the date and time from the filename
   if [[ $file =~ metrics_([0-9]{4}-[0-9]{2}-[0-9]{2})\ ([0-9]{6})\ \+0000\.txt ]]; then

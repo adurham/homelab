@@ -1,0 +1,241 @@
+---
+- name: Get Self-signed Certificate
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/crypto/certificatekeypairs/?search=authentik%20Self-signed%20Certificate"
+    method: GET
+    headers: "{{ headers }}"
+  register: signing_cert
+
+# -------------------------------------------------------------------------
+# Proxmox Provider & Application
+# -------------------------------------------------------------------------
+
+- name: Get Existing Providers (Proxmox)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/?search={{ provider_name | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+    return_content: true
+  register: providers_list
+
+- name: Create Proxmox Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "{{ provider_name }}"
+      authorization_flow: "default-provider-authorization-implicit-consent"
+      authentication_flow: "default-authentication-flow"
+      redirect_uris: >-
+        {{ proxmox_redirect_uris.split() | map('regex_replace', '^(.*)$', '{"url": "\1", "matching_mode": "strict"}') | map('from_json') | list }}
+      client_type: "confidential"
+      signing_key: "{{ signing_cert.json.results[0].pk }}"
+    status_code: [200, 201]
+  when: providers_list.json.results | length == 0
+  register: new_provider
+
+- name: Update Proxmox Provider (Ensure Redirect URIs)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/{{ providers_list.json.results[0].pk }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      redirect_uris: >-
+        {{ proxmox_redirect_uris.split() | map('regex_replace', '^(.*)$', '{"url": "\1", "matching_mode": "strict"}') | map('from_json') | list }}
+      signing_key: "{{ signing_cert.json.results[0].pk }}"
+    status_code: [200]
+  when: providers_list.json.results | length > 0
+  register: update_provider
+
+- name: Capture Provider ID
+  ansible.builtin.set_fact:
+    provider_id: "{{ (new_provider.json.pk if new_provider is defined and new_provider.changed else providers_list.json.results[0].pk) }}"
+
+- name: Get Proxmox Application (Direct)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/{{ app_slug }}/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: get_app_direct
+
+- name: Create Proxmox Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "{{ app_name }}"
+      slug: "{{ app_slug }}"
+      provider: "{{ provider_id }}"
+      meta_icon: "https://avatars.githubusercontent.com/u/4362756?s=200&v=4"
+    status_code: [200, 201]
+  when: get_app_direct.status == 404
+  ignore_errors: true
+  register: create_app
+
+- name: Update Proxmox Application (Ensure URL)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/{{ app_slug }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      launch_url: "https://proxmox.chi.lab.amd-e.com/redirect_oidc.html"
+      open_in_new_tab: true
+      meta_icon: "https://avatars.githubusercontent.com/u/4362756?s=200&v=4"
+    status_code: [200]
+  when: get_app_direct.status == 200 or (create_app is defined and not create_app.failed)
+
+- name: Capture Proxmox App ID
+  ansible.builtin.set_fact:
+    proxmox_app_id: "{{ (get_app_direct.json.pk if get_app_direct.status == 200 else create_app.json.pk) }}"
+
+# -------------------------------------------------------------------------
+# Tanium Integration (SAML)
+# -------------------------------------------------------------------------
+
+- name: Get Existing Tanium Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/saml/?search=Tanium"
+    method: GET
+    headers: "{{ headers }}"
+  register: tanium_provider_list
+
+- name: Get Default Authentication Flow (Tanium)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-authentication-flow"
+    method: GET
+    headers: "{{ headers }}"
+  register: tanium_auth_flow
+
+- name: Get Authorization Flow (Implict Consent)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-provider-authorization-implicit-consent"
+    method: GET
+    headers: "{{ headers }}"
+  register: tanium_author_flow
+
+# - name: Get SAML Username Mapping (Disabled)
+#   ...
+
+# WhoAmI tasks disabled
+
+
+# -------------------------------------------------------------------------
+# Grafana Provider & Application
+# -------------------------------------------------------------------------
+
+- name: Get Existing Providers (Grafana)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/?search=Grafana"
+    method: GET
+    headers: "{{ headers }}"
+    return_content: true
+  register: grafana_providers_found
+
+- name: Debug Grafana Providers
+  ansible.builtin.debug:
+    var: grafana_providers_found
+
+- name: Get Grafana Auth Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-authentication-flow"
+    method: GET
+    headers: "{{ headers }}"
+  register: grafana_auth_flow
+
+- name: Get Grafana Authz Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-provider-authorization-implicit-consent"
+    method: GET
+    headers: "{{ headers }}"
+  register: grafana_authz_flow
+
+- name: Get Grafana Invalidation Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-provider-invalidation-flow"
+    method: GET
+    headers: "{{ headers }}"
+  ignore_errors: true
+  register: grafana_invalid_flow
+
+- name: Create Grafana Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Grafana"
+      client_id: "{{ grafana_client_id | default('grafana') }}"
+      client_secret: "{{ grafana_client_secret | default('grafana_secret_placeholder') }}"
+      authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
+      authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
+      invalidation_flow: "{{ (grafana_invalid_flow.json.results[0].pk if (not grafana_invalid_flow.failed and grafana_invalid_flow.json.results | length > 0) else grafana_auth_flow.json.results[0].pk) }}"
+      redirect_uris:
+        - url: "https://grafana.chi.lab.amd-e.com/login/generic_oauth"
+          matching_mode: "strict"
+      client_type: "confidential"
+      signing_key: "{{ signing_cert.json.results[0].pk }}"
+    status_code: [200, 201]
+  when: grafana_providers_found.json.results | length == 0
+  register: new_grafana_provider
+
+- name: Capture Grafana Provider ID (Original)
+  ansible.builtin.set_fact:
+    grafana_provider_id: "{{ (new_grafana_provider.json.pk if new_grafana_provider is defined and new_grafana_provider.changed else grafana_providers_found.json.results[0].pk) }}"
+
+- name: Get Email Scope Mapping
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/all/"
+    method: GET
+    headers: "{{ headers }}"
+  register: scope_mappings
+
+- name: Update Grafana Provider (Sync Secret & URIs & Mappings)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/{{ grafana_provider_id }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      client_secret: "{{ grafana_client_secret | default('grafana_secret_placeholder') }}"
+      redirect_uris:
+        - url: "https://grafana.chi.lab.amd-e.com/login/generic_oauth"
+          matching_mode: "strict"
+      client_id: "{{ grafana_client_id | default('grafana') }}"
+      property_mappings: "{{ scope_mappings.json.results | selectattr('managed', 'defined') | selectattr('name', 'search', 'email|profile|openid') | map(attribute='pk') | list }}"
+      authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
+      authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
+      invalidation_flow: "{{ (grafana_invalid_flow.json.results[0].pk if (not grafana_invalid_flow.failed and grafana_invalid_flow.json.results | length > 0) else grafana_auth_flow.json.results[0].pk) }}"
+    status_code: [200]
+  when: grafana_provider_id is defined
+
+
+
+- name: Get Grafana Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/grafana/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: get_grafana_app
+
+- name: Create Grafana Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Grafana"
+      slug: "grafana"
+      provider: "{{ grafana_provider_id }}"
+      meta_launch_url: "https://grafana.chi.lab.amd-e.com"
+    status_code: [200, 201]
+  when: get_grafana_app.status == 404

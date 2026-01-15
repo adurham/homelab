@@ -52,7 +52,7 @@ echo -e "${GREEN}[3/4] Assigning Roles...${NC}"
 # We used 'array assign roles apply' with input redirection in the plan.
 # Here we will try to build it dynamically or use the interactive mode if possible,
 # but CLI automation usually requires a file.
-# Since we can't easily upload a file via this script without SCP, 
+# Since we can't easily upload a file via this script without SCP,
 # we'll assume we can pipe it.
 
 ROLES_JSON_CONTENT='[

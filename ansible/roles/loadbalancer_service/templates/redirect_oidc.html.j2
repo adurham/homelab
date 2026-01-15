@@ -13,7 +13,7 @@
             const realm = 'lab.amd-e.com';
             const redirectUrl = window.location.origin;
             const statusEl = document.getElementById('status');
-            
+
             try {
                 statusEl.innerText = "Initiating authentication...";
                 // Call Proxmox API to get the OpenID Auth URL
@@ -23,12 +23,12 @@
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: `realm=${realm}&redirect-url=${encodeURIComponent(redirectUrl)}`
                 });
-                
+
                 const data = await response.json();
                 if (data.success === 0) {
                     throw new Error(data.message || "Unknown API error");
                 }
-                
+
                 if (data.data) {
                     statusEl.innerText = "Redirecting...";
                     window.location.href = data.data;

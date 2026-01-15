@@ -1,0 +1,363 @@
+---
+# -------------------------------------------------------------------------
+# SCIM Provider & Token Management
+# -------------------------------------------------------------------------
+
+- name: Get Existing Authentik SCIM Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/scim/?search=Tanium"
+    method: GET
+    headers: "{{ headers }}"
+  register: authentik_scim_provider_list
+
+- name: Check Tanium REGARDLESS of Authentik state
+  ansible.builtin.uri:
+    url: "{{ tanium_url }}/api/v2/scim_servers"
+    method: GET
+    headers:
+      session: "{{ vault_tanium_api_token }}"
+  register: tanium_scim_servers
+
+- name: Create Tanium SCIM Token
+  ansible.builtin.uri:
+    url: "{{ tanium_url }}/api/v2/scim_servers"
+    method: POST
+    headers:
+      session: "{{ vault_tanium_api_token }}"
+    body_format: json
+    body:
+      expire_in_days: "365"
+      name: "Authentik"
+      trusted_ip_addresses: "172.16.0.20" # Authentik IP
+    status_code: [200, 201]
+  register: create_scim_token
+  when: tanium_scim_servers.json.data | length == 0
+
+- name: Set Tanium SCIM Token Fact
+  ansible.builtin.set_fact:
+    tanium_scim_token: "{{ create_scim_token.json.data.api_token.token_string }}"
+  when: create_scim_token is defined and create_scim_token.changed
+
+- name: Create Tanium SCIM Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/scim/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Tanium SCIM"
+      url: "{{ tanium_url }}/scim/v2"
+      token: "{{ create_scim_token.json.data.api_token.token_string }}"
+    status_code: [200, 201]
+  when: authentik_scim_provider_list.json.results | length == 0
+  register: new_scim_provider
+
+- name: Capture SCIM Provider ID (Created)
+  ansible.builtin.set_fact:
+    scim_provider_id: "{{ new_scim_provider.json.pk }}"
+  when: new_scim_provider is defined and new_scim_provider.changed
+
+- name: Capture SCIM Provider ID (Existing)
+  ansible.builtin.set_fact:
+    scim_provider_id: "{{ authentik_scim_provider_list.json.results[0].pk }}"
+  when: scim_provider_id is not defined
+
+# -------------------------------------------------------------------------
+# SCIM Mappings
+# -------------------------------------------------------------------------
+
+- name: Get Custom SCIM User Mapping (Email)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/scim/?search={{ 'SCIM Mapping: Tanium User Email' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: scim_email_user_mapping_list
+
+- name: Create Custom SCIM User Mapping (Email)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/scim/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "SCIM Mapping: Tanium User Email"
+      expression: |
+        return {
+            "userName": user.email,
+            "displayName": user.name,
+            "externalId": str(user.uid),
+            "active": user.is_active,
+            "emails": [
+                {
+                    "value": user.email,
+                    "primary": True
+                }
+            ]
+        }
+    status_code: [200, 201]
+  when: scim_email_user_mapping_list.json.results | length == 0
+  register: create_scim_email_user_mapping
+
+- name: Capture Custom User Mapping ID (Created)
+  ansible.builtin.set_fact:
+    scim_email_user_id: "{{ create_scim_email_user_mapping.json.pk }}"
+  when: create_scim_email_user_mapping is defined and create_scim_email_user_mapping.changed
+
+- name: Capture Custom User Mapping ID (Existing)
+  ansible.builtin.set_fact:
+    scim_email_user_id: "{{ scim_email_user_mapping_list.json.results[0].pk }}"
+  when: scim_email_user_mapping_list.json.results | length > 0
+
+- name: Get Custom SCIM Group Mapping (Filter)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/scim/?search=SCIM%20Mapping:%20Tanium%20Users%20Only"
+    method: GET
+    headers: "{{ headers }}"
+  register: scim_filtered_group_mapping_list
+
+- name: Create Custom SCIM Group Mapping (Filter)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/scim/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "SCIM Mapping: Tanium Users Only"
+      expression: |
+        if group.name == "Tanium Users":
+            return {
+                "displayName": group.name,
+            }
+        return None
+    status_code: [200, 201]
+  when: scim_filtered_group_mapping_list.json.results | length == 0
+  register: create_scim_filtered_group_mapping
+
+- name: Capture Custom Group Mapping ID (Created)
+  ansible.builtin.set_fact:
+    scim_filtered_group_id: "{{ create_scim_filtered_group_mapping.json.pk }}"
+  when: create_scim_filtered_group_mapping is defined and create_scim_filtered_group_mapping.changed
+
+- name: Capture Custom Group Mapping ID (Existing)
+  ansible.builtin.set_fact:
+    scim_filtered_group_id: "{{ scim_filtered_group_mapping_list.json.results[0].pk }}"
+  when: scim_filtered_group_mapping_list.json.results | length > 0
+
+- name: Update Tanium SCIM Provider (Property Mappings)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/scim/{{ scim_provider_id }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      property_mappings: ["{{ scim_email_user_id }}"]
+      property_mappings_group: ["{{ scim_filtered_group_id }}"]
+      exclude_users_service_account: true
+      verify_certificates: false
+      token: "{{ tanium_scim_token | default(vault_tanium_scim_token) | default(omit) }}"
+    status_code: [200]
+  when:
+    - scim_email_user_id is defined
+    - scim_filtered_group_id is defined
+
+# -------------------------------------------------------------------------
+# SCIM Application & Group Binding
+# -------------------------------------------------------------------------
+
+- name: Get Tanium SCIM Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/tanium-provisioning/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: get_scim_app
+
+- name: Create Tanium SCIM Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Tanium Provisioning"
+      slug: "tanium-provisioning"
+      provider: "{{ scim_provider_id }}"
+      meta_launch_url: ""
+    status_code: [200, 201]
+  when: get_scim_app.status == 404
+  register: create_scim_app
+
+- name: Capture SCIM App ID
+  ansible.builtin.set_fact:
+    scim_app_id: "{{ (create_scim_app.json.pk if (create_scim_app is defined and create_scim_app.changed) else get_scim_app.json.pk) }}"
+
+- name: Update Tanium SCIM Application (Hide from Dashboard)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/tanium-provisioning/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      meta_launch_url: ""
+    status_code: [200]
+  when: get_scim_app.status == 200
+
+- name: Get Tanium Users Group
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/?search=Tanium%20Users"
+    method: GET
+    headers: "{{ headers }}"
+  register: tanium_users_group_list
+
+- name: Create Tanium Users Group
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Tanium Users"
+      is_superuser: false
+    status_code: [200, 201]
+  when: tanium_users_group_list.json.results | length == 0
+  register: new_tanium_users_group
+
+- name: Capture Tanium Users Group ID
+  ansible.builtin.set_fact:
+    tanium_users_group_id: >-
+      {{
+        (new_tanium_users_group.json.pk
+          if (new_tanium_users_group is defined and new_tanium_users_group.changed)
+          else tanium_users_group_list.json.results[0].pk)
+      }}
+
+- name: Check Tanium Users Group Binding
+  ansible.builtin.uri:
+    url: >-
+      {{ authentik_url }}/api/v3/policies/bindings/?target={{ scim_app_id }}&group={{ tanium_users_group_id }}
+    method: GET
+    headers: "{{ headers }}"
+  register: tanium_group_binding
+
+- name: Bind Tanium Users Group to SCIM App
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/policies/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ scim_app_id }}"
+      group: "{{ tanium_users_group_id }}"
+      order: 0
+      enabled: true
+    status_code: [200, 201]
+  when: tanium_group_binding.json.results | length == 0
+
+# -------------------------------------------------------------------------
+# Core User/Group Management
+# -------------------------------------------------------------------------
+
+- name: Get Existing Admin Group
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/?search={{ group_admin_name | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: group_admin_list
+
+- name: Create Proxmox_Admins Group
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "{{ group_admin_name }}"
+      is_superuser: true
+    status_code: [200, 201]
+  when: group_admin_list.json.results | length == 0
+  register: new_group_admin
+
+- name: Capture Admin Group ID
+  ansible.builtin.set_fact:
+    group_admin_id: >-
+      {{
+        (new_group_admin.json.pk
+          if (new_group_admin is defined and new_group_admin.changed)
+          else group_admin_list.json.results[0].pk)
+      }}
+
+- name: Ensure Proxmox Admin Group Name (Rename)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/{{ group_admin_id }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "{{ group_admin_name }}"
+    status_code: [200]
+  when:
+    - group_admin_list.json.results | length > 0
+    - group_admin_list.json.results[0].name != group_admin_name
+
+- name: Get Existing Users Group
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/?search={{ group_user_name | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: group_user_list
+
+- name: Create Proxmox_Users Group
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "{{ group_user_name }}"
+      is_superuser: false
+    status_code: [200, 201]
+  when: group_user_list.json.results | length == 0
+  register: new_group_user
+
+- name: Capture User Group ID
+  ansible.builtin.set_fact:
+    group_user_id: >-
+      {{
+        (new_group_user.json.pk
+          if (new_group_user is defined and new_group_user.changed)
+          else group_user_list.json.results[0].pk)
+      }}
+
+- name: Ensure Proxmox User Group Name (Rename)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/{{ group_user_id }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "{{ group_user_name }}"
+    status_code: [200]
+  when:
+    - group_user_list.json.results | length > 0
+    - group_user_list.json.results[0].name != group_user_name
+
+- name: Get Existing Users
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/users/?search={{ user_username | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: users_list
+
+- name: Create Admin User
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/users/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      username: "{{ user_username }}"
+      name: "{{ user_name }}"
+      email: "{{ user_email }}"
+      groups: ["{{ group_admin_id }}"]
+    status_code: [200, 201]
+  when: users_list.json.results | length == 0

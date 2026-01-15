@@ -1,0 +1,46 @@
+---
+- name: Provision Monitoring Containers
+  hosts: pve01
+  gather_facts: false
+  tasks:
+    - name: Create VictoriaMetrics Container
+      include_role:
+        name: monitoring_host
+      vars:
+        net_private_ip: "{{ hostvars['vm-01']['net_private_ip'] }}"
+        vmid: "{{ hostvars['vm-01']['vmid'] }}"
+        inventory_hostname: "vm-01"
+        template: "{{ hostvars['vm-01']['template'] }}"
+
+    - name: Create Grafana Container
+      include_role:
+        name: monitoring_host
+      vars:
+        net_private_ip: "{{ hostvars['graf-01']['net_private_ip'] }}"
+        vmid: "{{ hostvars['graf-01']['vmid'] }}"
+        inventory_hostname: "graf-01"
+        template: "{{ hostvars['graf-01']['template'] }}"
+
+- name: Install Node Exporter (Agents)
+  hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster
+  gather_facts: false
+  roles:
+    - common_monitoring
+
+- name: Configure VictoriaMetrics
+  hosts: victoriametrics
+  gather_facts: false
+  roles:
+    - common_monitoring
+    - role_victoriametrics
+
+- name: Configure Grafana
+  hosts: grafana
+  gather_facts: false
+  vars:
+    # Placeholder secrets - should be in vault!
+    grafana_client_id: "grafana_sso_id"
+    grafana_client_secret: "grafana_sso_secret"
+  roles:
+    - common_monitoring
+    - role_grafana

@@ -5,7 +5,7 @@
       - postfix
       - libsasl2-modules
     state: present
-    update_cache: yes
+    update_cache: true
     cache_valid_time: 3600
 
 - name: Configure Mailname
@@ -33,29 +33,43 @@
   ansible.builtin.template:
     src: sender_canonical.j2
     dest: /etc/postfix/sender_canonical
+    owner: root
+    group: root
+    mode: '0644'
   notify: Update Canonical Map
 
 - name: Configure Header Checks
   ansible.builtin.template:
     src: header_checks.j2
     dest: /etc/postfix/header_checks
+    owner: root
+    group: root
+    mode: '0644'
   notify: Update Header Checks
 
 - name: Configure SMTP Header Checks
   ansible.builtin.template:
     src: smtp_header_checks.j2
     dest: /etc/postfix/smtp_header_checks
+    owner: root
+    group: root
+    mode: '0644'
   notify: Update SMTP Header Checks
 
 - name: Configure Postfix Main Configuration
   ansible.builtin.template:
     src: main.cf.j2
     dest: /etc/postfix/main.cf
+    owner: root
+    group: root
+    mode: '0644'
   notify: Restart Postfix
 
 - name: Configure Virtual Aliases
   ansible.builtin.template:
     src: virtual.j2
     dest: /etc/postfix/virtual
+    owner: root
+    group: root
+    mode: '0644'
   notify: Update Virtual Map
-

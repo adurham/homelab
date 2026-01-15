@@ -1,0 +1,79 @@
+---
+- name: Install dependencies
+  ansible.builtin.apt:
+    name:
+      - curl
+    state: present
+    update_cache: true
+
+- name: Create VictoriaMetrics User
+  ansible.builtin.user:
+    name: victoriametrics
+    shell: /sbin/nologin
+    system: true
+
+- name: Download VictoriaMetrics
+  ansible.builtin.unarchive:
+    src: "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.97.1/victoria-metrics-linux-amd64-v1.97.1.tar.gz"
+    dest: /usr/local/bin/
+    remote_src: true
+    creates: /usr/local/bin/victoria-metrics-prod
+
+- name: Set permissions on binary
+  ansible.builtin.file:
+    path: /usr/local/bin/victoria-metrics-prod
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create Data Directory
+  ansible.builtin.file:
+    path: /var/lib/victoria-metrics
+    state: directory
+    owner: victoriametrics
+    group: victoriametrics
+    mode: '0755'
+
+- name: Configure VictoriaMetrics Service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/victoriametrics.service
+    content: |
+      [Unit]
+      Description=VictoriaMetrics
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=victoriametrics
+      ExecStart=/usr/local/bin/victoria-metrics-prod \
+        -storageDataPath=/var/lib/victoria-metrics \
+        -retentionPeriod=1y \
+        -promscrape.config=/etc/victoriametrics/prometheus.yml
+
+      [Install]
+      WantedBy=multi-user.target
+    notify: Restart VictoriaMetrics
+
+- name: Create Configuration Directory
+  ansible.builtin.file:
+    path: /etc/victoriametrics
+    state: directory
+    mode: '0755'
+
+- name: Configure Scrape Targets (prometheus.yml)
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /etc/victoriametrics/prometheus.yml
+  notify: Restart VictoriaMetrics
+
+- name: Start VictoriaMetrics
+  ansible.builtin.service:
+    name: victoriametrics
+    state: started
+    enabled: true
+
+  handlers:
+    - name: Restart VictoriaMetrics
+      ansible.builtin.service:
+        name: victoriametrics
+        state: restarted

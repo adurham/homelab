@@ -1,0 +1,49 @@
+---
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  changed_when: false
+
+- name: Check if Container exists
+  ansible.builtin.command: pct config {{ vmid }}
+  register: ct_check
+  failed_when: false
+  changed_when: false
+
+- name: Download Template
+  ansible.builtin.command: pveam download local {{ template }}
+  args:
+    creates: /var/lib/vz/template/cache/{{ template }}
+  when: ct_check.rc != 0
+
+- name: Create Container
+  ansible.builtin.command: >
+    pct create {{ vmid }} /var/lib/vz/template/cache/{{ template }}
+    --hostname {{ inventory_hostname }}
+    --cores {{ vm_cores | default(2) }} --memory {{ vm_memory | default(4096) }} --swap 512
+    --net0 name=eth0,bridge=vmbr0,ip=dhcp
+    --net1 name=eth1,bridge=private,ip={{ net_private_ip }}
+    --storage nvme-data
+    --unprivileged 1
+    --features nesting=1
+    --password "{{ lxc_root_pass | default('ChangeMe123!') }}"
+    --ssh-public-keys /root/.ssh/authorized_keys
+  when: ct_check.rc != 0
+
+- name: Ensure Container is Running
+  ansible.builtin.command: pct start {{ vmid }}
+  register: ct_start
+  failed_when: ct_start.rc != 0 and ("already running" not in ct_start.stderr)
+  changed_when: ct_start.rc == 0
+
+- name: Wait for Container Network
+  ansible.builtin.wait_for:
+    host: "{{ net_private_ip | ansible.utils.ipaddr('address') }}"
+    port: 22
+    delay: 5
+    timeout: 60
+
+- name: Add Host to Inventory
+  ansible.builtin.add_host:
+    name: "{{ inventory_hostname }}"
+    ansible_host: "{{ net_private_ip | ansible.utils.ipaddr('address') }}"
+    ansible_user: "root"

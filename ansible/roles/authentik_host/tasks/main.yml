@@ -33,10 +33,12 @@
     --features nesting=1
     --password "{{ authentik_host_lxc_password }}"
     --ssh-public-keys /root/.ssh/authorized_keys
+  changed_when: true
   when: authentik_host_ct_check.rc != 0
 
 - name: Start Authentik Container
   ansible.builtin.command: pct start 100
+  changed_when: true
   when: authentik_host_ct_check.rc != 0
 
 - name: Wait for Container Network (via Gateway)
@@ -53,5 +55,5 @@
     name: "authentik"
     ansible_host: "{{ ip_authentik }}"
     ansible_user: "root"
-    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p -q root@{{ authentik_host_gw_ip.stdout }}"'
+    ansible_ssh_common_args: '-o ProxyCommand="ssh -W %h:%p -q root@{{ authentik_host_gw_ip.stdout }}"'
     groups: "authentik_containers"

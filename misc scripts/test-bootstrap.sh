@@ -29,19 +29,19 @@ FAILED=0
 run_test() {
     local distro="$1"
     local image="$2"
-    
+
     echo -e "${YELLOW}Testing $distro ($image)...${NC}"
-    
+
     # Create a temporary directory for the test
     local test_dir=$(mktemp -d)
     cp bootstrap.sh "$test_dir/"
-    
+
     # Set platform for Arch Linux (use x86_64 emulation)
     PLATFORM_FLAG=""
     if [[ "$image" == "archlinux:latest" ]]; then
         PLATFORM_FLAG="--platform linux/amd64"
     fi
-    
+
     # Run the test in Docker
     if docker run --rm \
         $PLATFORM_FLAG \
@@ -53,7 +53,7 @@ run_test() {
             # Script now handles running as root properly
             timeout 600 bash bootstrap.sh 2>&1
         " > "$test_dir/test_output.log" 2>&1; then
-        
+
         # Check if bootstrap completed successfully
         if grep -q "System bootstrap complete" "$test_dir/test_output.log"; then
             echo -e "${GREEN}✅ $distro: PASSED${NC}"
@@ -72,7 +72,7 @@ run_test() {
         tail -15 "$test_dir/test_output.log" | sed 's/^/  /'
         echo ""
     fi
-    
+
     # Cleanup
     rm -rf "$test_dir"
     echo ""
@@ -96,13 +96,13 @@ for i in "${!DISTROS[@]}"; do
     distro="${DISTROS[$i]}"
     image="${IMAGES[$i]}"
     echo -e "${YELLOW}Pulling $image...${NC}"
-    
+
     # Set platform for Arch Linux (use x86_64 emulation)
     pull_cmd="docker pull $image"
     if [[ "$image" == "archlinux:latest" ]]; then
         pull_cmd="docker pull --platform linux/amd64 $image"
     fi
-    
+
     eval "$pull_cmd" >/dev/null 2>&1 || {
         echo -e "${RED}❌ Failed to pull $image${NC}"
         FAILED=$((FAILED + 1))

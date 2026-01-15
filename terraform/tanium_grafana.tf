@@ -27,19 +27,19 @@ resource "vsphere_folder" "tanium_grafana" {
 #   dc              = vsphere_datacenter.Homelab.name
 #   datastore       = "vsanDatastore"
 
-#   # provisioner "file" { 
-#   #   source      = "../ansible/applications/grafana/playbook.yml"  
-#   #   destination = "/tmp/grafana_playbook.yml"  
+#   # provisioner "file" {
+#   #   source      = "../ansible/applications/grafana/playbook.yml"
+#   #   destination = "/tmp/grafana_playbook.yml"
 #   # }
 
 #   # provisioner "remote-exec" {
 #   #   connection {
 #   #     type = "ssh"
-#   #     user = "root"  
+#   #     user = "root"
 #   #   }
 #   #   inline = [
 #   #     "sudo apt update && sudo apt install ansible -y",
-#   #     "ansible-playbook /tmp/grafana_playbook.yml" 
+#   #     "ansible-playbook /tmp/grafana_playbook.yml"
 #   #   ]
 #   # }
 
