@@ -28,7 +28,7 @@ do_reset() {
 
     echo "$(date): PKI reset command executing..." >> $LOG_FILE
     /opt/Tanium/TaniumClient/TaniumClient pki reset "$BACKUP_FILE" >> $LOG_FILE 2>&1
-    
+
     # Give a moment for the file system to update
     sleep 1
 
@@ -68,7 +68,7 @@ case "$1" in
 
         # Use systemd-run to launch the worker in a new, separate scope
         systemd-run --scope --nice=10 /bin/sh "${SCRIPT_PATH}" --worker
-        
+
         echo "$(date): Launcher has finished. Worker is now running independently." >> $LOG_FILE
         exit 0
         ;;

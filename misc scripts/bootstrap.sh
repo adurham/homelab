@@ -47,7 +47,7 @@ fi
 # Function to install tools idempotently (Formula OR Cask)
 install_tool() {
     local package="$1"
-    
+
     if [[ "$OS_TYPE" == "macos" ]]; then
         # Check if installed as a Formula OR a Cask to avoid "Warning: Not upgrading..."
         if brew list --formula "$package" >/dev/null 2>&1 || brew list --cask "$package" >/dev/null 2>&1; then
@@ -82,12 +82,12 @@ echo -e "${YELLOW}🔐 Configuring Security & Touch ID Sudo...${NC}"
 if [[ "$OS_TYPE" == "macos" ]]; then
     # A. Check/Install the PAM Module
     PAM_LIB="/opt/homebrew/lib/libpam_ssh_agent.so"
-    
+
     if [ ! -f "$PAM_LIB" ]; then
         echo -e "${YELLOW}Compiling PAM SSH Agent module...${NC}"
         BUILD_DIR=$(mktemp -d)
         git clone https://github.com/nresare/pam-ssh-agent.git "$BUILD_DIR"
-        
+
         pushd "$BUILD_DIR" > /dev/null
         cargo build --release
         sudo cp target/release/libpam_ssh_agent.dylib "$PAM_LIB"
@@ -101,7 +101,7 @@ if [[ "$OS_TYPE" == "macos" ]]; then
     # B. Configure /etc/pam.d/sudo (Only edits if missing)
     AUTH_LINE="auth       sufficient     $PAM_LIB file=~/.ssh/authorized_keys"
     PAM_FILE="/etc/pam.d/sudo"
-    
+
     # We use sudo grep to check the file content without needing a password if already auth'd
     if ! sudo grep -q "libpam_ssh_agent.so" "$PAM_FILE"; then
         echo -e "${YELLOW}Updating $PAM_FILE (Password required to fix sudo)...${NC}"
@@ -146,7 +146,7 @@ fi
 # =============================================================================
 if [[ "$OS_TYPE" == "macos" ]]; then
     echo -e "${YELLOW}🎨 Installing Fonts...${NC}"
-    
+
     if ! brew tap | grep -q "homebrew/cask-fonts"; then
         brew tap homebrew/cask-fonts 2>/dev/null || true
     fi

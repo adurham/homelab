@@ -5,7 +5,7 @@
 This repository contains a comprehensive homelab infrastructure setup that combines infrastructure automation, smart home automation, system management tools, and development assistance. It features:
 
 - **Infrastructure as Code** using Terraform for VMware vSphere environments
-- **Configuration Management** with Ansible for system automation  
+- **Configuration Management** with Ansible for system automation
 - **Smart Home Automation** using Home Assistant
 - **Development Tools** including AI-powered development assistance with Continue.dev
 
@@ -215,7 +215,7 @@ cp "misc scripts/continue-dev/continue-config.yaml" ~/.continue/config.yaml
 - Validate vSphere connectivity before applying changes
 - Review logs in `terraform.tfstate` for errors
 
-### Configuration Issues  
+### Configuration Issues
 - Ensure Ansible inventory is properly configured
 - Verify host connectivity before running playbooks
 - Check variable files in `ansible/group_vars/`

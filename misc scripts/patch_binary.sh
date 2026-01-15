@@ -4,7 +4,7 @@
 #
 # Safely patch a binary by replacing one sequence of hex bytes with another.
 # Using uppercase hex, removing newlines, and optionally padding if the new
-# string is shorter. 
+# string is shorter.
 #
 # Variables (edit as needed inside this script):
 #   BINARY_FILE

@@ -14,14 +14,14 @@ map $http_upgrade $connection_upgrade {
 }
 
 upstream proxmox_cluster {
-    ip_hash; 
+    ip_hash;
     # Sticky sessions based on IP.
     # Note: With Tailscale Gateway (SNAT), all traffic might appear as 172.16.0.1.
-    
+
     server 192.168.86.11:8006;
     server 192.168.86.12:8006;
     server 192.168.86.13:8006;
-    
+
     keepalive 32;
 }
 
@@ -60,7 +60,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        
+
         # Websocket Support
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -88,7 +88,7 @@ server {
 
     ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
     ssl_certificate_key /etc/nginx/ssl/wildcard.key;
-    
+
     # SSL Optimization
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
@@ -97,7 +97,7 @@ server {
     # Allow large uploads (ISOs)
     client_max_body_size 0;
     proxy_request_buffering off;
-    
+
     # Extended timeouts for large file operations
     proxy_connect_timeout 3600s;
     proxy_send_timeout 3600s;
@@ -114,7 +114,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        
+
         # Websocket Support (Critical for VNC)
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -176,7 +176,7 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
     ssl_buffer_size 4k;
-    
+
     # OCSP Stapling
     ssl_stapling on;
     ssl_stapling_verify on;
@@ -186,7 +186,7 @@ server {
 
     # HSTS (Strict-Transport-Security)
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    
+
     # Compression
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
@@ -201,10 +201,10 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Server $host;
-        
+
         # Authentik (internal) uses self-signed/internal certs
         proxy_ssl_verify off;
-        
+
         # Keepalive Support
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;

@@ -144,7 +144,7 @@ properties:
   - snapshot
 
 # Enable tagging and group by tags
-with_tags: True
+with_tags: true
 keyed_groups:
   - key: tags
     prefix: "vmware_tag_"

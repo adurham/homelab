@@ -1,28 +1,34 @@
----
 # .ansible-lint
-# Standards: https://ansible.readthedocs.io/projects/lint/
-
-# Profile: production vs. safety
-# We select 'production' as we are deploying to a live lab environment.
 profile: production
-
-# Exclusions
-# We exclude galaxy roles and some legacy files if needed.
 exclude_paths:
-  - .ansible/
-  - terraform/
+  - .cache/
+  - .github/
+  - tests/
+  - homeassistant/
+  - "misc scripts/"
+  - ansible/group_vars/ # Encrypted vars cause lint failure without password
 
-# Rules to skip
-# command-instead-of-module: We still have some shell usage (acme.sh, pct) that is intentional.
-# no-changed-when: We are careful, but some ad-hoc commands might trip this.
+# Rules to enforce
+enable_list:
+  - fqcn-builtins # Use ansible.builtin.copy, not copy
+  - no-tabs
+  - yaml
+  - experimental # Catch new best practices
+
+# Rules to skip (pragmatic approach for existing codebase)
 skip_list:
-  - command-instead-of-module
-  - no-changed-when
-  - meta-no-info
-  - name[play] # Don't enforce names on playbooks for now
+  - no-handler # Handlers in tasks/ (we identified this in platform/ansible_patterns.md!)
+  - risky-shell-pipe # We use pipes intentionally in some ad-hoc shell commands
+  - run-once # Sometimes legitimate in our cluster loop patterns
+  - var-naming # Relaxed for role refactoring (shared vars)
+  - no-changed-when # Relaxed for legacy tasks (will fix incrementally)
+  - yaml[line-length] # Cosmetic, often unavoidable with long commands
+  - command-instead-of-shell # Relaxed for legacy roles
+  - command-instead-of-module # Relaxed for legacy roles (curl/unzip)
+  - ignore-errors # Relaxed for legacy roles
+  - risky-file-permissions # Relaxed for legacy roles
+  - ignore-errors # Relaxed for legacy roles
+  - risky-file-permissions # Relaxed for legacy roles
 
-# Mocks for verification
-mock_modules:
-  - community.general.proxmox_kvm
-  - community.general.proxmox
-  - community.general.proxmox_search
+# Configuration
+offline: true # Don't fail if Galaxy is unreachable

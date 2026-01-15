@@ -203,9 +203,32 @@ all:
           os_distro: openSUSE
           ansible_python_interpreter: /usr/bin/python3.11
           target_node: pve03
+
+    # Monitoring Infrastructure
+    monitoring:
+      children:
+        victoriametrics:
+          hosts:
+            vm-01:
+              ansible_host: 172.16.0.40
+              vmid: 106
+              template: debian-12-standard_12.12-1_amd64.tar.zst
+              target_node: pve01
+              features: "nesting=1"
+              net_private_ip: 172.16.0.40/24
+        grafana:
+          hosts:
+            graf-01:
+              ansible_host: 172.16.0.41
+              vmid: 107
+              template: debian-12-standard_12.12-1_amd64.tar.zst
+              target_node: pve01
+              features: "nesting=1"
+              net_private_ip: 172.16.0.41/24
+
       vars:
         ansible_user: root
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
         vm_cores: 1
         vm_memory: 1024
         vm_swap: 512

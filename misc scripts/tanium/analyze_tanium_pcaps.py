@@ -1126,11 +1126,11 @@ class MultiPCAPAnalyzer:
 
         cdn_results = self.results.get('cdn', [])
         legacy_results = self.results.get('legacy', [])
-        
+
         if not cdn_results:
             print("[!] No CDN results to diagnose")
             return
-        
+
         if not legacy_results:
             print("[!] No Legacy baseline for comparison")
             return
@@ -1219,44 +1219,44 @@ class MultiPCAPAnalyzer:
         print("COMPLETE METRICS COMPARISON")
         print("="*70)
         print("\nShowing ALL measured metrics side-by-side:\n")
-        
+
         # Calculate all aggregate metrics
         cdn_avg_throughput = statistics.mean(cdn_throughputs) if cdn_throughputs else None
         legacy_avg_throughput = statistics.mean(legacy_throughputs) if legacy_throughputs else None
-        
+
         cdn_avg_rtt = statistics.mean(cdn_rtts) if cdn_rtts else None
         legacy_avg_rtt = statistics.mean(legacy_rtts) if legacy_rtts else None
-        
+
         cdn_avg_retrans = statistics.mean(cdn_retrans_rates) if cdn_retrans_rates else None
         legacy_avg_retrans = statistics.mean(legacy_retrans_rates) if legacy_retrans_rates else None
-        
+
         cdn_avg_response = statistics.mean(cdn_server_response_latencies) if cdn_server_response_latencies else None
         legacy_avg_response = statistics.mean(legacy_server_response_latencies) if legacy_server_response_latencies else None
-        
+
         cdn_avg_delay = statistics.mean(cdn_inter_packet_delays) if cdn_inter_packet_delays else None
         legacy_avg_delay = statistics.mean(legacy_inter_packet_delays) if legacy_inter_packet_delays else None
-        
+
         cdn_avg_bursts = statistics.mean(cdn_burst_counts) if cdn_burst_counts else None
         legacy_avg_bursts = statistics.mean(legacy_burst_counts) if legacy_burst_counts else None
-        
+
         cdn_avg_gap = statistics.mean(cdn_burst_gaps) if cdn_burst_gaps else None
         legacy_avg_gap = statistics.mean(legacy_burst_gaps) if legacy_burst_gaps else None
-        
+
         cdn_avg_cov = statistics.mean(cdn_pacing_covs) if cdn_pacing_covs else None
         legacy_avg_cov = statistics.mean(legacy_pacing_covs) if legacy_pacing_covs else None
-        
+
         cdn_avg_cluster = statistics.mean(cdn_pacing_clusters) if cdn_pacing_clusters else None
         legacy_avg_cluster = statistics.mean(legacy_pacing_clusters) if legacy_pacing_clusters else None
-        
+
         # Print comparison table
         def print_metric(name, legacy_val, cdn_val, unit="", ratio_format=""):
             """Print a metric comparison row"""
             if legacy_val is None or cdn_val is None:
                 return
-            
+
             ratio = cdn_val / legacy_val if legacy_val > 0 else 0
             ratio_str = f"{ratio:.1f}x" if ratio_format == "ratio" else f"{ratio:.1%}" if ratio_format == "percent" else ""
-            
+
             # Determine if this is better/worse/neutral
             indicator = ""
             if name in ["Throughput", "Server Response (lower better)"]:
@@ -1269,43 +1269,43 @@ class MultiPCAPAnalyzer:
                     indicator = " ⚠️"
                 if ratio > 3:
                     indicator = " 🔴"
-            
+
             print(f"  {name:30} Legacy: {legacy_val:>10.2f}{unit:>6}   CDN: {cdn_val:>10.2f}{unit:>6}   {ratio_str:>8}{indicator}")
-        
+
         print("Network Quality Metrics:")
         print_metric("Throughput", legacy_avg_throughput, cdn_avg_throughput, "Mbps", "ratio")
         print_metric("RTT", legacy_avg_rtt, cdn_avg_rtt, "ms", "ratio")
         print_metric("Retransmissions", legacy_avg_retrans, cdn_avg_retrans, "%", "ratio")
-        
+
         print("\nServer Behavior Metrics:")
         print_metric("Server Response Latency", legacy_avg_response, cdn_avg_response, "ms", "ratio")
         print_metric("Inter-Packet Delay", legacy_avg_delay, cdn_avg_delay, "ms", "ratio")
         print_metric("Burst Count", legacy_avg_bursts, cdn_avg_bursts, "bursts", "ratio")
         print_metric("Burst Gap", legacy_avg_gap, cdn_avg_gap, "ms", "ratio")
-        
+
         print("\nPacing Analysis Metrics:")
         print_metric("Pacing CoV (variation)", legacy_avg_cov, cdn_avg_cov, "%", "ratio")
         print_metric("Pacing Clustering", legacy_avg_cluster, cdn_avg_cluster, "%", "ratio")
-        
+
         print("\n" + "="*70)
         print("EVIDENCE INTERPRETATION")
         print("="*70)
         print()
-        
+
         # =================================================================
         # PART 2: EVIDENCE THAT SUPPORTS THROTTLING
         # =================================================================
         print("Evidence SUPPORTING Rate Limiting Hypothesis:")
         print("-" * 70)
-        
+
         supporting_evidence = []
-        
+
         if cdn_avg_throughput and legacy_avg_throughput and cdn_avg_throughput < legacy_avg_throughput * 0.5:
             throughput_ratio = (cdn_avg_throughput / legacy_avg_throughput) * 100
             supporting_evidence.append(
                 f"✓ Throughput reduced to {throughput_ratio:.0f}% of Legacy ({cdn_avg_throughput:.1f} vs {legacy_avg_throughput:.1f} Mbps)"
             )
-        
+
         if cdn_avg_bursts and legacy_avg_bursts and cdn_avg_bursts > 100:
             burst_ratio = cdn_avg_bursts / legacy_avg_bursts
             supporting_evidence.append(
@@ -1315,7 +1315,7 @@ class MultiPCAPAnalyzer:
                 supporting_evidence.append(
                     f"  → {cdn_avg_bursts:.0f} distinct bursts cannot occur naturally in TCP"
                 )
-        
+
         if cdn_avg_gap and cdn_avg_gap < 50:
             supporting_evidence.append(
                 f"✓ Consistent gap timing: {cdn_avg_gap:.1f}ms between bursts"
@@ -1323,13 +1323,13 @@ class MultiPCAPAnalyzer:
             supporting_evidence.append(
                 f"  → Suggests token bucket refill interval of ~{cdn_avg_gap:.0f}ms"
             )
-        
+
         if cdn_avg_delay and legacy_avg_delay and cdn_avg_delay > legacy_avg_delay * 3:
             delay_ratio = cdn_avg_delay / legacy_avg_delay
             supporting_evidence.append(
                 f"✓ Inter-packet delays are {delay_ratio:.1f}x slower ({cdn_avg_delay:.3f}ms vs {legacy_avg_delay:.3f}ms)"
             )
-        
+
         if cdn_avg_rtt and legacy_avg_rtt and cdn_avg_rtt < 10 and legacy_avg_rtt < 10:
             supporting_evidence.append(
                 f"✓ Network RTT is excellent for both ({cdn_avg_rtt:.2f}ms CDN, {legacy_avg_rtt:.2f}ms Legacy)"
@@ -1337,23 +1337,23 @@ class MultiPCAPAnalyzer:
             supporting_evidence.append(
                 f"  → Rules out network latency as the bottleneck"
             )
-        
+
         if supporting_evidence:
             for evidence in supporting_evidence:
                 print(evidence)
         else:
             print("  (None identified)")
-        
+
         print()
-        
+
         # =================================================================
         # PART 3: EVIDENCE THAT ARGUES AGAINST THROTTLING
         # =================================================================
         print("Evidence AGAINST or NOT FITTING Rate Limiting Hypothesis:")
         print("-" * 70)
-        
+
         against_evidence = []
-        
+
         if cdn_avg_response and legacy_avg_response and cdn_avg_response < legacy_avg_response:
             against_evidence.append(
                 f"✗ CDN responds FASTER initially ({cdn_avg_response:.2f}ms vs {legacy_avg_response:.2f}ms)"
@@ -1361,7 +1361,7 @@ class MultiPCAPAnalyzer:
             against_evidence.append(
                 f"  → Suggests CDN server is not resource-constrained"
             )
-        
+
         if cdn_avg_cov and cdn_avg_cov > 100:
             against_evidence.append(
                 f"✗ High pacing variation (CoV: {cdn_avg_cov:.1f}%)"
@@ -1372,7 +1372,7 @@ class MultiPCAPAnalyzer:
             against_evidence.append(
                 f"  → This suggests imprecise pacing or additional variability sources"
             )
-        
+
         if cdn_avg_cov and legacy_avg_cov and cdn_avg_cov > legacy_avg_cov:
             cov_ratio = cdn_avg_cov / legacy_avg_cov
             against_evidence.append(
@@ -1381,7 +1381,7 @@ class MultiPCAPAnalyzer:
             against_evidence.append(
                 f"  → Opposite of what precise algorithmic throttling would show"
             )
-        
+
         if cdn_avg_cluster and legacy_avg_cluster and cdn_avg_cluster < legacy_avg_cluster:
             against_evidence.append(
                 f"✗ CDN has LESS clustering than Legacy ({cdn_avg_cluster:.1f}% vs {legacy_avg_cluster:.1f}%)"
@@ -1389,7 +1389,7 @@ class MultiPCAPAnalyzer:
             against_evidence.append(
                 f"  → Algorithmic pacing should show high clustering (>80%)"
             )
-        
+
         if cdn_avg_retrans and cdn_avg_retrans < 1.0:
             against_evidence.append(
                 f"✗ Network is very clean (retransmissions: {cdn_avg_retrans:.3f}%)"
@@ -1397,30 +1397,30 @@ class MultiPCAPAnalyzer:
             against_evidence.append(
                 f"  → No evidence of packet loss or network congestion"
             )
-        
+
         if against_evidence:
             for evidence in against_evidence:
                 print(evidence)
         else:
             print("  (None identified)")
-        
+
         print()
-        
+
         # =================================================================
         # PART 4: NEUTRAL / AMBIGUOUS EVIDENCE
         # =================================================================
         print("Neutral or Ambiguous Evidence:")
         print("-" * 70)
-        
+
         neutral_evidence = []
-        
+
         if cdn_avg_rtt and legacy_avg_rtt and cdn_avg_rtt > legacy_avg_rtt * 2:
             rtt_ratio = cdn_avg_rtt / legacy_avg_rtt
             if cdn_avg_rtt < 10:
                 neutral_evidence.append(
                     f"• CDN RTT is {rtt_ratio:.1f}x higher, but absolute value too low to matter ({cdn_avg_rtt:.2f}ms)"
                 )
-        
+
         if cdn_avg_gap and cdn_burst_gaps:
             cdn_gap_stddev = statistics.stdev(cdn_burst_gaps) if len(cdn_burst_gaps) > 1 else 0
             gap_cov = (cdn_gap_stddev / cdn_avg_gap * 100) if cdn_avg_gap > 0 else 0
@@ -1431,22 +1431,22 @@ class MultiPCAPAnalyzer:
                 neutral_evidence.append(
                     f"  → Could be consistent pacing + network jitter, or less precise algorithm"
                 )
-        
+
         if neutral_evidence:
             for evidence in neutral_evidence:
                 print(evidence)
         else:
             print("  (None identified)")
-        
+
         print()
         print("="*70)
         print("OVERALL ASSESSMENT")
         print("="*70)
         print()
-        
+
         # Now continue with the confidence assessment and diagnosis
         issues_found = []
-        
+
         # Track evidence indicators for confidence scoring
         evidence_indicators = []
 
@@ -1473,11 +1473,11 @@ class MultiPCAPAnalyzer:
             if cdn_avg_bursts > 100 and burst_ratio > 3:
                 burst_pattern_detected = True
                 evidence_indicators.append("burst_pattern")
-                
+
                 # Very high burst counts are extremely strong evidence even without other indicators
                 if cdn_avg_bursts > 500 and burst_ratio > 50:
                     evidence_indicators.append("extreme_burst_count")
-                
+
                 # Check if gaps are consistent (additional evidence for algorithmic behavior)
                 gap_consistency_note = ""
                 gap_cov = None
@@ -1495,7 +1495,7 @@ class MultiPCAPAnalyzer:
                     "CDN server sends data in many small bursts with gaps between them",
                     "Legacy server sends continuously without significant burst behavior",
                 ]
-                
+
                 if gap_cov is not None and gap_cov > 50:
                     explanation_list.append(
                         f"Gap timing is variable (CoV: {gap_cov:.0f}%) - suggests rate limiting "
@@ -1506,12 +1506,12 @@ class MultiPCAPAnalyzer:
                         f"Gap timing is very consistent (CoV: {gap_cov:.0f}%) - characteristic of "
                         "precise algorithmic rate limiting"
                     )
-                
+
                 explanation_list.extend([
                     f"Burst count ({cdn_avg_bursts:.0f}) is extreme and cannot occur naturally",
                     "Natural TCP dynamics do not produce this many distinct bursts"
                 ])
-                
+
                 issues_found.append({
                     "issue": "🔴 LIKELY CAUSE: Server Burst Pacing/Rate Limiting",
                     "severity": "CRITICAL",
@@ -1546,7 +1546,7 @@ class MultiPCAPAnalyzer:
             if cdn_avg_cov < 20 and cdn_avg_cluster > 60:
                 algorithmic_pacing_detected = True
                 evidence_indicators.append("algorithmic_pacing")
-                
+
                 issues_found.append({
                     "issue": "🔴 STRONG EVIDENCE: Algorithmic Pacing Detected",
                     "severity": "CRITICAL",
@@ -1580,7 +1580,7 @@ class MultiPCAPAnalyzer:
             if delay_ratio > 3:
                 network_explains_delay = False
                 rtt_note = ""
-                
+
                 if rtt_ratio is not None:
                     # Only consider RTT as an explanation if BOTH ratio is high AND absolute values are significant
                     # Sub-10ms RTTs should not bottleneck throughput regardless of ratio
@@ -1596,12 +1596,12 @@ class MultiPCAPAnalyzer:
                         # RTT is similar, so delays are NOT due to network latency
                         rtt_note = f" (RTT similar: {cdn_avg_rtt:.1f}ms vs {legacy_avg_rtt:.1f}ms, so NOT network latency)"
                         evidence_indicators.append("slow_delivery_not_network")
-                
+
                 slow_delivery_detected = True
-                
+
                 severity = "CRITICAL" if not network_explains_delay else "HIGH"
                 issue_prefix = "🔴 LIKELY CAUSE:" if not network_explains_delay else "⚠️  OBSERVED:"
-                
+
                 issues_found.append({
                     "issue": f"{issue_prefix} CDN Server Slow at Sustained Data Delivery",
                     "severity": severity,
@@ -1695,11 +1695,11 @@ class MultiPCAPAnalyzer:
                     "slow_delivery_not_network": "✓ Slow delivery NOT explained by network RTT"
                 }.get(indicator, f"✓ {indicator}")
                 print(f"  {indicator_name}")
-            
+
             # Determine overall confidence
             # Give special weight to extreme burst count - it's very hard to explain naturally
             has_extreme_bursts = "extreme_burst_count" in evidence_indicators
-            
+
             if len(evidence_indicators) >= 3:
                 confidence = "VERY HIGH"
                 confidence_note = "Multiple independent indicators confirm rate limiting"
@@ -1720,7 +1720,7 @@ class MultiPCAPAnalyzer:
             else:
                 confidence = "LOW"
                 confidence_note = "No strong indicators of algorithmic throttling"
-            
+
             print(f"\nOverall Confidence: {confidence}")
             print(f"  {confidence_note}")
             print()
@@ -1731,7 +1731,7 @@ class MultiPCAPAnalyzer:
             print("DETAILED FINDINGS")
             print("="*70)
             print()
-            
+
             for i, issue in enumerate(issues_found, 1):
                 print(f"[Issue #{i}] {issue['issue']}")
                 print(f"  Severity: {issue['severity']}")

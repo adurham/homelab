@@ -1,0 +1,56 @@
+---
+- name: Install dependencies
+  ansible.builtin.apt:
+    name:
+      - curl
+      - gnupg2
+      - software-properties-common
+      - apt-transport-https
+    state: present
+    update_cache: true
+
+- name: Add Grafana GPG Key
+  ansible.builtin.get_url:
+    url: https://packages.grafana.com/gpg.key
+    dest: /usr/share/keyrings/grafana.key
+
+- name: Add Grafana Repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/grafana.key] https://packages.grafana.com/oss/deb stable main"
+    state: present
+    filename: grafana
+
+- name: Install Grafana
+  ansible.builtin.apt:
+    name: grafana
+    state: present
+    update_cache: true
+
+- name: Configure Grafana SSO (Authentik)
+  ansible.builtin.copy:
+    dest: /etc/grafana/grafana.ini
+    content: |
+      [server]
+      root_url = https://grafana.chi.lab.amd-e.com
+
+      [auth.generic_oauth]
+      enabled = true
+      name = Authentik
+      allow_sign_up = true
+      client_id = {{ grafana_client_id }}
+      client_secret = {{ grafana_client_secret }}
+      scopes = openid profile email
+      auth_url = https://auth.chi.lab.amd-e.com/application/o/authorize/
+      token_url = https://auth.chi.lab.amd-e.com/application/o/token/
+      api_url = https://auth.chi.lab.amd-e.com/application/o/userinfo/
+      role_attribute_path = contains(groups[*], 'Grafana Admins') && 'Admin' || contains(groups[*], 'Grafana Editors') && 'Editor' || 'Viewer'
+
+      [security]
+      admin_user = admin
+      admin_password = admin
+
+- name: Start Grafana
+  ansible.builtin.service:
+    name: grafana-server
+    state: started
+    enabled: true

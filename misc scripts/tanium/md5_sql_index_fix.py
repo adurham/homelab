@@ -16,15 +16,15 @@ def get_all_databases(conn):
 
 def check_md5_indexes(conn):
     query = """
-    SELECT 
+    SELECT
         t.relname AS table_name,
         i.relname AS index_name,
         pg_get_indexdef(i.oid) AS index_definition
-    FROM 
+    FROM
         pg_class t,
         pg_class i,
         pg_index ix
-    WHERE 
+    WHERE
         t.oid = ix.indrelid
         AND i.oid = ix.indexrelid
         AND pg_get_indexdef(i.oid) LIKE '%md5%';
@@ -47,11 +47,11 @@ def drop_and_recreate_index(conn, table_name, index_name, index_definition):
         # Create the new SHA-256 index
         new_index_name = index_name.replace("md5", "sha256")  # Rename the index
         create_query = f"""
-            CREATE INDEX {new_index_name} ON {table_name} 
+            CREATE INDEX {new_index_name} ON {table_name}
             USING hash ({columns} hashtext_ops);  -- Use hashtext_ops for SHA-256
         """
         cur.execute(create_query)
-        
+
 def check_md5_indexes_and_replace(conn):
     indexes = check_md5_indexes(conn)
     if indexes:

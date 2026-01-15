@@ -88,7 +88,7 @@ In VS Code with Continue.dev:
 ```
 /terraform
 ```
-*Best for Terraform configurations, VMware vSphere, infrastructure*  
+*Best for Terraform configurations, VMware vSphere, infrastructure*
 
 ```
 /homeassistant
@@ -138,7 +138,7 @@ Use the new context providers:
 
 **Model Switching Workflow:**
 1. Start with Qwen3 30B (local)
-2. If struggling → try Qwen2.5 32B (local)  
+2. If struggling → try Qwen2.5 32B (local)
 3. If need debugging → DeepSeek 33B 4bit (local)
 4. Only escalate to cloud for complex architecture
 
@@ -210,7 +210,7 @@ Use the new context providers:
 
 Your Continue.dev setup is now optimized for homelab development with:
 - ✅ 4 optimized local models
-- ✅ 17 enhanced context providers  
+- ✅ 17 enhanced context providers
 - ✅ 6 homelab-specific commands
 - ✅ Project-aware configuration
 - ✅ Performance caching

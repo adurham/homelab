@@ -163,7 +163,7 @@ class HomeAwayHoldUntil(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Determine whether entity is available. 
+        """Determine whether entity is available.
 
         Return true if home/away is set manually and structure
         has a default hold duration other than next event.
@@ -377,8 +377,8 @@ class PuckLight(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> float:
-        """Return current lux level. 
-        
+        """Return current lux level.
+
         Convert value to Volts then multiply by 200
         for 200 lux per Volt.
         """

@@ -108,10 +108,10 @@ build_knowledge() {
 # Function to check MCP server status
 check_mcp_status() {
     echo -e "${YELLOW}🔍 Checking MCP server status...${NC}"
-    
+
     if docker info >/dev/null 2>&1; then
         echo -e "${GREEN}✅ Docker is running${NC}"
-        
+
         # Check for MCP containers
         if docker ps | grep -q mcp; then
             echo -e "${GREEN}✅ MCP containers running:${NC}"

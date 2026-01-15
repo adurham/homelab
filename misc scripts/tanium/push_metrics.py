@@ -112,7 +112,7 @@ def inject_labels(metrics, labels):
 def push_metrics(metrics):
     headers = {'Content-Type': 'text/plain'}
     response = requests.post(VM_URL, headers=headers, data=metrics, verify=False)
-    
+
     if response.status_code != 200:
         log(f"Failed to push metrics to VictoriaMetrics. HTTP response code: {response.status_code}")
         raise Exception("Metrics push failed")
@@ -124,10 +124,10 @@ def main():
         # Read token information from the auth_token.json file
         with open('/home/tandev/auth_token.json', 'r') as f:
             auth_token_info = json.load(f)
-        
+
         session_token = auth_token_info.get('data', {}).get('token_string')
         token_id = auth_token_info.get('data', {}).get('id')
-        
+
         if not session_token or not token_id:
             log("Token information is missing in auth_token.json")
             raise Exception("Missing token information")

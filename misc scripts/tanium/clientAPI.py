@@ -284,7 +284,7 @@ def cancel_xml(opts):
     # Add the URLs
     _add_objects(base, opts)
     return base
-    
+
 def validate_command_line(opts):
     """
     Make sure the target directory is indeed a directory and that our running
@@ -408,4 +408,3 @@ if __name__ == "__main__":
     elif opts.command == "monitor": monitor_command(opts)
     elif opts.command == "cancel": cancel_command(opts)
     print("")
-

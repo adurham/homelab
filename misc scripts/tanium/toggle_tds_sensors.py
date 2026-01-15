@@ -29,12 +29,12 @@ post_endpoint = "/plugin/products/core-data/v1/harvest"
 # List of sensors to exclude
 exception_sensors = [
     # Required Sensors
-    "Computer Name", 
-    "Computer ID", 
+    "Computer Name",
+    "Computer ID",
     "Endpoint Fingerprint",
-    # DEC Sensors 
-    "Tanium Client IP Address", 
-    "OS Platform", 
+    # DEC Sensors
+    "Tanium Client IP Address",
+    "OS Platform",
     "Direct Connect - Connection Configuration",
     # Deploy Module Sensors
     "Deploy - Mean Time to Deploy",
@@ -93,7 +93,7 @@ def post_sensors(sensors, action):
     for sensor in sensors:
         parameters = sensor.get("parameters", {})
         sensor_list.append({"name": sensor["name"], "parameters": parameters})
-    
+
     post_body = {
         "action_source": "insomnia-api-test",
         "action": action,
@@ -116,7 +116,7 @@ def manage_sensors(re_enable):
     config_data = get_config()
     if config_data:
         sensors = [item for item in config_data.get('config', []) if item.get('type') == 'sensor']
-        
+
         if re_enable:
             # Re-enable sensors that were disabled by "insomnia-api-test"
             sensors_to_enable = [sensor for sensor in sensors if "insomnia-api-test" in sensor.get("disabled_by", [])]
@@ -134,7 +134,7 @@ def manage_sensors(re_enable):
         if new_config_data:
             remaining_sensors = [item for item in new_config_data.get('config', []) if item.get('type') == 'sensor']
             remaining_sensor_names = [sensor["name"] for sensor in remaining_sensors]
-            
+
             # Verify only the sensors in the exception list are left
             for sensor in exception_sensors:
                 if sensor in remaining_sensor_names:

@@ -1,0 +1,751 @@
+---
+# -------------------------------------------------------------------------
+# Recovery Flow
+# -------------------------------------------------------------------------
+
+- name: Get Identification Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/identification/?search=Recovery-Identification-Stage"
+    method: GET
+    headers: "{{ headers }}"
+  register: stage_ident_list
+
+- name: Create Identification Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/identification/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Recovery-Identification-Stage"
+      user_fields: ["username", "email"]
+    status_code: [200, 201]
+  when: stage_ident_list.json.results | length == 0
+  register: new_stage_ident
+
+- name: Capture Identification Stage ID
+  ansible.builtin.set_fact:
+    stage_ident_id: >-
+      {{
+        (new_stage_ident.json.pk
+          if (new_stage_ident is defined and new_stage_ident.json is defined)
+          else stage_ident_list.json.results[0].pk)
+      }}
+
+- name: Get Email Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/email/?search=Recovery-Email-Stage"
+    method: GET
+    headers: "{{ headers }}"
+  register: stage_email_list
+
+- name: Create Email Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/email/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Recovery-Email-Stage"
+      use_global_settings: true
+    status_code: [200, 201]
+  when: stage_email_list.json.results | length == 0
+  register: new_stage_email
+
+- name: Capture Email Stage ID
+  ansible.builtin.set_fact:
+    stage_email_id: >-
+      {{
+        (new_stage_email.json.pk
+          if (new_stage_email is defined and new_stage_email.json is defined)
+          else stage_email_list.json.results[0].pk)
+      }}
+
+- name: Get Password Prompt
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/prompt/prompts/?search=Recovery-Password-Prompt"
+    method: GET
+    headers: "{{ headers }}"
+  register: prompt_password_list
+
+- name: Create Password Prompt
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/prompt/prompts/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Recovery-Password-Prompt"
+      field_key: "password"
+      label: "Password"
+      type: "password"
+      required: true
+      placeholder: "New Password"
+      order: 0
+    status_code: [200, 201]
+  when: prompt_password_list.json.results | length == 0
+  register: new_prompt_password
+
+- name: Capture Password Prompt ID
+  ansible.builtin.set_fact:
+    prompt_password_id: >-
+      {{
+        (new_prompt_password.json.pk
+          if (new_prompt_password is defined and new_prompt_password.json is defined)
+          else prompt_password_list.json.results[0].pk)
+      }}
+
+- name: Get Password Repeat Prompt
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/prompt/prompts/?search=Recovery-Password-Repeat-Prompt"
+    method: GET
+    headers: "{{ headers }}"
+  register: prompt_repeat_list
+
+- name: Create Password Repeat Prompt
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/prompt/prompts/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Recovery-Password-Repeat-Prompt"
+      field_key: "password_repeat"
+      label: "Password (repeat)"
+      type: "password"
+      required: true
+      placeholder: "Repeat Password"
+      order: 1
+    status_code: [200, 201]
+  when: prompt_repeat_list.json.results | length == 0
+  register: new_prompt_repeat
+
+- name: Capture Password Repeat Prompt ID
+  ansible.builtin.set_fact:
+    prompt_repeat_id: >-
+      {{
+        (new_prompt_repeat.json.pk
+          if (new_prompt_repeat is defined and new_prompt_repeat.json is defined)
+          else prompt_repeat_list.json.results[0].pk)
+      }}
+
+- name: Get Prompt Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/prompt/stages/?search=Recovery-Prompt-Stage"
+    method: GET
+    headers: "{{ headers }}"
+  register: stage_prompt_list
+
+- name: Create Prompt Stage (Recovery)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/prompt/stages/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Recovery-Prompt-Stage"
+      fields:
+        - "{{ prompt_password_id }}"
+        - "{{ prompt_repeat_id }}"
+      validation_policies: []
+    status_code: [200, 201]
+  when: stage_prompt_list.json.results | length == 0
+  register: new_stage_prompt
+
+- name: Capture Prompt Stage ID
+  ansible.builtin.set_fact:
+    stage_prompt_id: >-
+      {{
+        (new_stage_prompt.json.pk
+          if (new_stage_prompt is defined and new_stage_prompt.json is defined)
+          else stage_prompt_list.json.results[0].pk)
+      }}
+
+- name: Get User Write Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/user_write/?search=Recovery-Write-Stage"
+    method: GET
+    headers: "{{ headers }}"
+  register: stage_write_list
+
+- name: Create User Write Stage (Recovery)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/user_write/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Recovery-Write-Stage"
+      user_creation_mode: "never_create"
+    status_code: [200, 201]
+  when: stage_write_list.json.results | length == 0
+  register: new_stage_write
+
+- name: Capture Write Stage ID
+  ansible.builtin.set_fact:
+    stage_write_id: >-
+      {{
+        (new_stage_write.json.pk
+          if (new_stage_write is defined and new_stage_write.json is defined)
+          else stage_write_list.json.results[0].pk)
+      }}
+
+- name: Get Recovery Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=recovery-flow"
+    method: GET
+    headers: "{{ headers }}"
+  register: flow_recovery_list
+
+- name: Create Recovery Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Recovery Flow"
+      slug: "recovery-flow"
+      title: "Reset your password"
+      designation: "recovery"
+      authentication: "none"
+    status_code: [200, 201]
+  when: flow_recovery_list.json.results | length == 0
+  register: new_flow_recovery
+
+- name: Capture Recovery Flow ID
+  ansible.builtin.set_fact:
+    flow_recovery_id: >-
+      {{
+        (new_flow_recovery.json.pk
+          if (new_flow_recovery is defined and new_flow_recovery.json is defined)
+          else flow_recovery_list.json.results[0].pk)
+      }}
+
+- name: Bind Identification Stage to Flow (Order 0)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_recovery_id }}"
+      stage: "{{ stage_ident_id }}"
+      order: 0
+    status_code: [200, 201]
+  failed_when: false
+
+- name: Bind Email Stage to Flow (Order 10)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_recovery_id }}"
+      stage: "{{ stage_email_id }}"
+      order: 10
+    status_code: [200, 201]
+  failed_when: false
+
+- name: Bind Prompt Stage to Flow (Order 20)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_recovery_id }}"
+      stage: "{{ stage_prompt_id }}"
+      order: 20
+    status_code: [200, 201]
+  register: bind_prompt_result
+  changed_when: bind_prompt_result.status == 201
+  failed_when: false
+
+- name: Bind User Write Stage to Flow (Order 30)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_recovery_id }}"
+      stage: "{{ stage_write_id }}"
+      order: 30
+    status_code: [200, 201]
+  register: bind_write_result
+  changed_when: bind_write_result.status == 201
+  ignore_errors: true
+
+# -------------------------------------------------------------------------
+# MFA Flow
+# -------------------------------------------------------------------------
+
+- name: Create TOTP Setup Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/totp/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "MFA-TOTP-Setup"
+      digits: 6
+    status_code: [200, 201]
+  ignore_errors: true
+  register: create_totp_setup
+
+- name: Get TOTP Setup Stage (Idempotency)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/totp/?name=MFA-TOTP-Setup"
+    method: GET
+    headers: "{{ headers }}"
+  register: get_totp_setup
+  when: create_totp_setup.failed
+
+- name: Capture TOTP Stage ID
+  ansible.builtin.set_fact:
+    stage_totp_id: >-
+      {{
+        (create_totp_setup.json.pk
+          if (create_totp_setup is defined and create_totp_setup.json is defined and create_totp_setup.json.pk is defined)
+          else get_totp_setup.json.results[0].pk)
+      }}
+
+- name: Create WebAuthn Setup Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/webauthn/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "MFA-WebAuthn-Setup"
+      user_verification: "preferred"
+    status_code: [200, 201]
+  ignore_errors: true
+  register: create_webauthn_setup
+
+- name: Get WebAuthn Setup Stage (Idempotency)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/webauthn/?name=MFA-WebAuthn-Setup"
+    method: GET
+    headers: "{{ headers }}"
+  register: get_webauthn_setup
+  when: create_webauthn_setup.failed
+
+- name: Capture WebAuthn Stage ID
+  ansible.builtin.set_fact:
+    stage_webauthn_id: >-
+      {{
+        (create_webauthn_setup.json.pk
+          if (create_webauthn_setup is defined and create_webauthn_setup.json is defined and create_webauthn_setup.json.pk is defined)
+          else get_webauthn_setup.json.results[0].pk)
+      }}
+
+- name: Create Static Authenticator Stage (Backup Codes)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/static/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "MFA-Static-Setup"
+      token_count: 6
+    status_code: [200, 201]
+  ignore_errors: true
+  register: create_static_setup
+
+- name: Get Static Setup Stage (Idempotency)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/static/?name=MFA-Static-Setup"
+    method: GET
+    headers: "{{ headers }}"
+  register: get_static_setup
+  when: create_static_setup.failed
+
+- name: Capture Static Stage ID
+  ansible.builtin.set_fact:
+    stage_static_id: >-
+      {{
+        (create_static_setup.json.pk
+          if (create_static_setup is defined and create_static_setup.json is defined and create_static_setup.json.pk is defined)
+          else get_static_setup.json.results[0].pk)
+      }}
+
+- name: Create MFA Setup Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "MFA Setup Flow"
+      slug: "mfa-setup-flow"
+      title: "Set up Multi-Factor Authentication"
+      designation: "stage_configuration"
+    status_code: [200, 201]
+  ignore_errors: true
+  register: create_mfa_flow
+
+- name: Get MFA Setup Flow (Idempotency)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=mfa-setup-flow"
+    method: GET
+    headers: "{{ headers }}"
+  register: get_mfa_flow
+  when: create_mfa_flow.failed
+
+- name: Capture MFA Setup Flow ID
+  ansible.builtin.set_fact:
+    flow_mfa_setup_id: >-
+      {{
+        (create_mfa_flow.json.pk
+          if (create_mfa_flow is defined and create_mfa_flow.json is defined and create_mfa_flow.json.pk is defined)
+          else get_mfa_flow.json.results[0].pk)
+      }}
+
+- name: Bind TOTP to Setup Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_mfa_setup_id }}"
+      stage: "{{ stage_totp_id }}"
+      order: 10
+    status_code: [200, 201]
+  failed_when: false
+
+- name: Bind WebAuthn to Setup Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_mfa_setup_id }}"
+      stage: "{{ stage_webauthn_id }}"
+      order: 20
+    status_code: [200, 201]
+  failed_when: false
+
+- name: Bind Static (Backup Codes) to Setup Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_mfa_setup_id }}"
+      stage: "{{ stage_static_id }}"
+      order: 30
+    status_code: [200, 201]
+  failed_when: false
+
+- name: Create Backup Codes Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Enroll Backup Codes"
+      slug: "enroll-backup-codes"
+      title: "Generate Backup Codes"
+      designation: "stage_configuration"
+    status_code: [200, 201]
+  ignore_errors: true
+  register: create_backup_flow
+
+- name: Get Backup Codes Flow (Idempotency)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=enroll-backup-codes"
+    method: GET
+    headers: "{{ headers }}"
+  register: get_backup_flow
+  when: create_backup_flow.failed
+
+- name: Capture Backup Flow ID
+  ansible.builtin.set_fact:
+    flow_backup_id: >-
+      {{
+        (create_backup_flow.json.pk
+          if (create_backup_flow is defined and not create_backup_flow.failed)
+          else get_backup_flow.json.results[0].pk)
+      }}
+
+- name: Bind Static Stage to Backup Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_backup_id }}"
+      stage: "{{ stage_static_id }}"
+      order: 10
+    status_code: [200, 201]
+  failed_when: false
+
+- name: Create MFA Validation Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/validate/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "MFA-Validation"
+      not_configured_action: "skip"
+      device_classes:
+        - static
+        - totp
+        - webauthn
+    status_code: [200, 201]
+  ignore_errors: true
+  register: create_mfa_validate
+
+- name: Get MFA Validation Stage (Idempotency)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/validate/?name=MFA-Validation"
+    method: GET
+    headers: "{{ headers }}"
+  register: get_mfa_validate
+  when: create_mfa_validate.failed
+
+- name: Capture MFA Validate Stage ID
+  ansible.builtin.set_fact:
+    stage_mfa_validate_id: >-
+      {{
+        (create_mfa_validate.json.pk
+          if (create_mfa_validate is defined and not create_mfa_validate.failed)
+          else get_mfa_validate.json.results[0].pk)
+      }}
+
+# -------------------------------------------------------------------------
+# Cleanup / Conflict Resolution
+# -------------------------------------------------------------------------
+
+- name: Get Default MFA Validation Stage (Conflict)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/validate/?slug=default-authentication-mfa-validation"
+    method: GET
+    headers: "{{ headers }}"
+  register: conflict_mfa_stage
+
+- name: Get Conflicting Binding (Default MFA)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/?target={{ auth_flow_list.json.results[0].pk }}&stage={{ conflict_mfa_stage.json.results[0].pk }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: conflict_binding
+  when: conflict_mfa_stage.json.results | length > 0 and auth_flow_list.json.results | length > 0
+
+- name: Remove Conflicting Binding
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/{{ conflict_binding.json.results[0].pk }}/"
+    method: DELETE
+    headers: "{{ headers }}"
+    status_code: [204]
+  when:
+    - conflict_binding.json.results is defined
+    - conflict_binding.json.results | length > 0
+  changed_when: true
+
+- name: Get Default Authentication Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-authentication-flow"
+    method: GET
+    headers: "{{ headers }}"
+  register: auth_flow_list
+
+- name: Bind MFA Validation to Login Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ auth_flow_list.json.results[0].pk }}"
+      stage: "{{ stage_mfa_validate_id }}"
+      order: 30
+    status_code: [200, 201]
+  failed_when: false
+
+# -------------------------------------------------------------------------
+# Invitation Flow
+# -------------------------------------------------------------------------
+
+- name: Create Invitation Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/invitation/stages/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Enrollment-Invitation-Stage"
+    status_code: [200, 201]
+  ignore_errors: true
+  register: create_invitation
+
+- name: Get Invitation Stage (Idempotency)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/invitation/stages/?name=Enrollment-Invitation-Stage"
+    method: GET
+    headers: "{{ headers }}"
+  register: get_invitation
+  when: create_invitation.failed
+
+- name: Capture Invitation Stage ID
+  ansible.builtin.set_fact:
+    stage_invitation_id: >-
+      {{
+        (create_invitation.json.pk
+          if (create_invitation is defined and not create_invitation.failed)
+          else get_invitation.json.results[0].pk)
+      }}
+
+- name: Get Default Enrollment Prompt Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/prompt/stages/?slug=default-source-enrollment-prompt"
+    method: GET
+    headers: "{{ headers }}"
+  register: default_prompt_list
+
+- name: Get Default Enrollment Write Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/user_write/?slug=default-source-enrollment-write"
+    method: GET
+    headers: "{{ headers }}"
+  register: default_write_list
+
+- name: Get Default Enrollment Login Stage
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/user_login/?slug=default-source-enrollment-login"
+    method: GET
+    headers: "{{ headers }}"
+  register: default_login_list
+
+- name: Create Invitation Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Invitation Flow"
+      slug: "enrollment-invitation"
+      title: "Redeem Invitation"
+      designation: "enrollment"
+    status_code: [200, 201]
+  ignore_errors: true
+  register: create_invitation_flow
+
+- name: Get Invitation Flow (Idempotency)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=enrollment-invitation"
+    method: GET
+    headers: "{{ headers }}"
+  register: get_invitation_flow
+  when: create_invitation_flow.failed
+
+- name: Capture Invitation Flow ID
+  ansible.builtin.set_fact:
+    flow_invitation_id: >-
+      {{
+        (create_invitation_flow.json.pk
+          if (create_invitation_flow is defined and create_invitation_flow.json is defined and create_invitation_flow.json.pk is defined)
+          else get_invitation_flow.json.results[0].pk)
+      }}
+
+- name: Bind Invitation Stage (Order 0)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_invitation_id }}"
+      stage: "{{ stage_invitation_id }}"
+      order: 0
+    status_code: [200, 201]
+  failed_when: false
+
+- name: Bind Default Prompt (Order 10)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_invitation_id }}"
+      stage: "{{ default_prompt_list.json.results[0].pk }}"
+      order: 10
+    status_code: [200, 201]
+  failed_when: false
+  when: default_prompt_list.json.results | length > 0
+
+- name: Bind Default Write (Order 20)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_invitation_id }}"
+      stage: "{{ default_write_list.json.results[0].pk }}"
+      order: 20
+    status_code: [200, 201]
+  failed_when: false
+  when: default_write_list.json.results | length > 0
+
+- name: Bind Default Login (Order 30)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ flow_invitation_id }}"
+      stage: "{{ default_login_list.json.results[0].pk }}"
+      order: 30
+    status_code: [200, 201]
+  failed_when: false
+  when: default_login_list.json.results | length > 0
+
+# -------------------------------------------------------------------------
+# Branding
+# -------------------------------------------------------------------------
+
+- name: Get Default Brand
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/brands/"
+    method: GET
+    headers: "{{ headers }}"
+  register: brand_list
+
+- name: Configure Brand (AMD-Enterprises)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/brands/{{ brand_list.json.results[0].brand_uuid }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      branding_title: "AMD-Enterprises"
+      default_theme: "dark"
+      domain: "auth.chi.lab.amd-e.com"
+      flow_recovery: "{{ flow_recovery_id }}"
+    status_code: [200]
+  when: brand_list.json.results | length > 0
+
+- name: Update Default Authentication Flow Branding
+  ansible.builtin.uri:
+    # Use slug for referencing
+    url: "{{ authentik_url }}/api/v3/flows/instances/{{ auth_flow_list.json.results[0].slug }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      title: "Welcome to AMD-Enterprises"
+    status_code: [200]
+  when: auth_flow_list.json.results | length > 0

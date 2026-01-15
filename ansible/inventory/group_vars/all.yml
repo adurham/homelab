@@ -1,0 +1,4 @@
+---
+# Global SSH Hardening
+# Trust on first use, but alert if the key changes. Safer than 'no'.
+ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
