@@ -1070,7 +1070,7 @@
           stage: "{{ stage_totp_id }}"
           order: 10
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
 
     - name: Bind WebAuthn to Setup Flow
       ansible.builtin.uri:
@@ -1083,7 +1083,7 @@
           stage: "{{ stage_webauthn_id }}"
           order: 20
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
 
     - name: Bind Static (Backup Codes) to Setup Flow
       ansible.builtin.uri:
@@ -1096,7 +1096,7 @@
           stage: "{{ stage_static_id }}"
           order: 30
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
 
     # 4. Dedicated Backup Codes Flow (For "Enroll" Dropdown)
     - name: Create Backup Codes Flow
@@ -1111,7 +1111,7 @@
           title: "Generate Backup Codes"
           designation: "stage_configuration"
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
       register: create_backup_flow
 
     - name: Get Backup Codes Flow (Idempotency)
@@ -1124,7 +1124,12 @@
 
     - name: Capture Backup Flow ID
       ansible.builtin.set_fact:
-        flow_backup_id: "{{ (create_backup_flow.json.pk if (create_backup_flow is defined and create_backup_flow.json is defined and create_backup_flow.json.pk is defined) else get_backup_flow.json.results[0].pk) }}"
+        flow_backup_id: >-
+          {{
+            (create_backup_flow.json.pk
+              if (create_backup_flow is defined and create_backup_flow.json is defined and create_backup_flow.json.pk is defined)
+              else get_backup_flow.json.results[0].pk)
+          }}
 
     - name: Bind Static Stage to Backup Flow
       ansible.builtin.uri:
@@ -1137,7 +1142,7 @@
           stage: "{{ stage_static_id }}"
           order: 10
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
 
     # 5. MFA Validation Stage (Login)
     - name: Create MFA Validation Stage
@@ -1154,7 +1159,7 @@
             - totp
             - webauthn
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
       register: create_mfa_validate
 
     - name: Get MFA Validation Stage (Idempotency)
@@ -1167,7 +1172,12 @@
 
     - name: Capture MFA Validate Stage ID
       ansible.builtin.set_fact:
-        stage_mfa_validate_id: "{{ (create_mfa_validate.json.pk if (create_mfa_validate is defined and create_mfa_validate.json is defined and create_mfa_validate.json.pk is defined) else get_mfa_validate.json.results[0].pk) }}"
+        stage_mfa_validate_id: >-
+          {{
+            (create_mfa_validate.json.pk
+              if (create_mfa_validate is defined and create_mfa_validate.json is defined and create_mfa_validate.json.pk is defined)
+              else get_mfa_validate.json.results[0].pk)
+          }}
 
     # 5. Bind MFA Validation to Default Authentication Flow
     - name: Bind MFA Validation to Login Flow
@@ -1181,7 +1191,7 @@
           stage: "{{ stage_mfa_validate_id }}"
           order: 30 # Execute AFTER password
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
 
     # Invitation Flow Implementation ------------------------------------------
 
@@ -1195,7 +1205,7 @@
         body:
           name: "Enrollment-Invitation-Stage"
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
       register: create_invitation
 
     - name: Get Invitation Stage (Idempotency)
@@ -1208,7 +1218,12 @@
 
     - name: Capture Invitation Stage ID
       ansible.builtin.set_fact:
-        stage_invitation_id: "{{ (create_invitation.json.pk if (create_invitation is defined and create_invitation.json is defined and create_invitation.json.pk is defined) else get_invitation.json.results[0].pk) }}"
+        stage_invitation_id: >-
+          {{
+            (create_invitation.json.pk
+              if (create_invitation is defined and create_invitation.json is defined and create_invitation.json.pk is defined)
+              else get_invitation.json.results[0].pk)
+          }}
 
     # 2. Get Default Enrollment Stages (Reuse)
     - name: Get Default Enrollment Prompt Stage
@@ -1261,7 +1276,12 @@
 
     - name: Capture Invitation Flow ID
       ansible.builtin.set_fact:
-        flow_invitation_id: "{{ (create_invitation_flow.json.pk if (create_invitation_flow is defined and create_invitation_flow.json is defined and create_invitation_flow.json.pk is defined) else get_invitation_flow.json.results[0].pk) }}"
+        flow_invitation_id: >-
+          {{
+            (create_invitation_flow.json.pk
+              if (create_invitation_flow is defined and create_invitation_flow.json is defined and create_invitation_flow.json.pk is defined)
+              else get_invitation_flow.json.results[0].pk)
+          }}
 
     # 4. Bind Stages
     - name: Bind Invitation Stage (Order 0)
@@ -1275,7 +1295,7 @@
           stage: "{{ stage_invitation_id }}"
           order: 0
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
 
     - name: Bind Default Prompt (Order 10)
       ansible.builtin.uri:
@@ -1288,7 +1308,7 @@
           stage: "{{ default_prompt_list.json.results[0].pk }}"
           order: 10
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
       when: default_prompt_list.json.results | length > 0
 
     - name: Bind Default Write (Order 20)
@@ -1302,7 +1322,7 @@
           stage: "{{ default_write_list.json.results[0].pk }}"
           order: 20
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
       when: default_write_list.json.results | length > 0
 
     - name: Bind Default Login (Order 30)
@@ -1356,7 +1376,12 @@
 
     - name: Capture WhoAmI Provider ID
       ansible.builtin.set_fact:
-        whoami_provider_id: "{{ (create_whoami_provider.json.pk if (create_whoami_provider is defined and create_whoami_provider.json is defined and create_whoami_provider.json.pk is defined) else get_whoami_provider.json.results[0].pk) }}"
+        whoami_provider_id: >-
+          {{
+            (create_whoami_provider.json.pk
+              if (create_whoami_provider is defined and create_whoami_provider.json is defined and create_whoami_provider.json.pk is defined)
+              else get_whoami_provider.json.results[0].pk)
+          }}
 
     - name: Update WhoAmI Provider (Ensure DNS hostname)
       ansible.builtin.uri:
@@ -1383,7 +1408,7 @@
           meta_launch_url: "https://whoami.chi.lab.amd-e.com"
           group: "" # No specific group, allow all authenticated? Or explicit binding?
         status_code: [200, 201]
-      ignore_errors: true
+      failed_when: false
       register: create_whoami_app
 
     - name: Get WhoAmI Application (Idempotency)
@@ -1396,7 +1421,12 @@
 
     - name: Capture WhoAmI App ID
       ansible.builtin.set_fact:
-        whoami_app_id: "{{ (create_whoami_app.json.pk if (create_whoami_app is defined and create_whoami_app.json is defined and create_whoami_app.json.pk is defined) else get_whoami_app.json.results[0].pk) }}"
+        whoami_app_id: >-
+          {{
+            (create_whoami_app.json.pk
+              if (create_whoami_app is defined and create_whoami_app.json is defined and create_whoami_app.json.pk is defined)
+              else get_whoami_app.json.results[0].pk)
+          }}
 
     - name: Update WhoAmI Application (Ensure Launch URL)
       ansible.builtin.uri:
@@ -1485,7 +1515,12 @@
 
     - name: Capture MFA Policy ID
       ansible.builtin.set_fact:
-        mfa_policy_id: "{{ (create_mfa_policy.json.pk if (create_mfa_policy is defined and create_mfa_policy.json is defined and create_mfa_policy.json.pk is defined) else get_mfa_policy.json.results[0].pk) }}"
+        mfa_policy_id: >-
+          {{
+            (create_mfa_policy.json.pk
+              if (create_mfa_policy is defined and create_mfa_policy.json is defined and create_mfa_policy.json.pk is defined)
+              else get_mfa_policy.json.results[0].pk)
+          }}
 
     - name: Check MFA Policy Binding (Proxmox)
       ansible.builtin.uri:
