@@ -140,7 +140,7 @@
         method: GET
         headers: "{{ headers }}"
       register: tanium_provider_list
-      
+
 
     - name: Get Default Authentication Flow (Tanium)
       ansible.builtin.uri:
@@ -437,7 +437,7 @@
           # Update Token if we have a new one, or enforce Vault token
           token: "{{ tanium_scim_token | default(vault_tanium_scim_token) | default(omit) }}"
         status_code: [200]
-      when: 
+      when:
         - scim_email_user_id is defined
         - scim_filtered_group_id is defined
 
@@ -506,12 +506,18 @@
 
     - name: Capture Tanium Users Group ID
       ansible.builtin.set_fact:
-        tanium_users_group_id: "{{ (new_tanium_users_group.json.pk if (new_tanium_users_group is defined and new_tanium_users_group.changed) else tanium_users_group_list.json.results[0].pk) }}"
+        tanium_users_group_id: >-
+          {{
+            (new_tanium_users_group.json.pk
+              if (new_tanium_users_group is defined and new_tanium_users_group.changed)
+              else tanium_users_group_list.json.results[0].pk)
+          }}
 
     # Direct Group Binding for SCIM Sync (Replaces Policy Binding)
     - name: Check Tanium Users Group Binding
       ansible.builtin.uri:
-        url: "{{ authentik_url }}/api/v3/policies/bindings/?target={{ scim_app_id }}&group={{ tanium_users_group_id }}"
+        url: >-
+          {{ authentik_url }}/api/v3/policies/bindings/?target={{ scim_app_id }}&group={{ tanium_users_group_id }}
         method: GET
         headers: "{{ headers }}"
       register: tanium_group_binding
@@ -537,13 +543,9 @@
         method: DELETE
         headers: "{{ headers }}"
         status_code: [204]
-      # Only delete if we captured an ID and we are sure we want to remove it. 
+      # Only delete if we captured an ID and we are sure we want to remove it.
       when: tanium_policy_id is defined
-      ignore_errors: true
-
-    
-
-
+      failed_when: false
 
     - name: Get Existing Admin Group
       ansible.builtin.uri:
@@ -584,7 +586,7 @@
         body:
           name: "{{ group_admin_name }}"
         status_code: [200]
-      when: 
+      when:
         - group_admin_list.json.results | length > 0
         - group_admin_list.json.results[0].name != group_admin_name
 
@@ -626,7 +628,7 @@
         body:
           name: "{{ group_user_name }}"
         status_code: [200]
-      when: 
+      when:
         - group_user_list.json.results | length > 0
         - group_user_list.json.results[0].name != group_user_name
 
