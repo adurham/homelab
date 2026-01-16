@@ -8,7 +8,14 @@ scrape_configs:
 {% if hostvars[host].ansible_host is defined and host != 'localhost' and host not in groups['tanium_cluster'] %}
       - targets: ['{{ hostvars[host].ansible_host }}:9100']
         labels:
+          hostname: '{{ host }}'
           instance: '{{ host }}'
           env: 'homelab'
 {% endif %}
 {% endfor %}
+
+    relabel_configs:
+      - source_labels: [hostname]
+        regex: '(.+)'
+        target_label: instance
+        replacement: '$1'
