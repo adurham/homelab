@@ -1,0 +1,29 @@
+---
+- name: Inject SSH Key into LXC Containers
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+  vars:
+    ssh_public_key_path: "/tmp/id_ansible.pub" # Temp location on PVE host
+    local_pub_key: "/Users/adam.durham/.ssh/id_ansible.pub" # On Controller
+
+  tasks:
+    - name: Copy Public Key to Proxmox Host
+      ansible.builtin.copy:
+        src: "{{ local_pub_key }}"
+        dest: "{{ ssh_public_key_path }}"
+        mode: '0644'
+
+    - name: Inject Key into Containers (Overwrite authorized_keys)
+      ansible.builtin.shell: |
+        pct push {{ hostvars[item].vmid }} {{ ssh_public_key_path }} /root/.ssh/authorized_keys
+        pct exec {{ hostvars[item].vmid }} -- chmod 600 /root/.ssh/authorized_keys
+        pct exec {{ hostvars[item].vmid }} -- chown root:root /root/.ssh/authorized_keys
+      loop: "{{ groups['all'] }}"
+      when:
+        - hostvars[item].vmid is defined
+        - hostvars[item].target_node is defined
+        - hostvars[item].target_node == inventory_hostname
+        - hostvars[item].inventory_hostname != 'localhost'
+      register: injection_result
+      changed_when: injection_result.rc == 0

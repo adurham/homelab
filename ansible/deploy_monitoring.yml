@@ -1,7 +1,7 @@
 ---
 - name: Provision Monitoring Containers
   hosts: pve01
-  gather_facts: false
+  gather_facts: true
   tasks:
     - name: Deploy VictoriaMetrics
       ansible.builtin.include_role:
@@ -23,20 +23,20 @@
 
 - name: Install Node Exporter (Agents)
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster
-  gather_facts: false
+  gather_facts: true
   roles:
     - common_monitoring
 
 - name: Configure VictoriaMetrics
   hosts: victoriametrics
-  gather_facts: false
+  gather_facts: true
   roles:
     - common_monitoring
     - role_victoriametrics
 
 - name: Configure Grafana
   hosts: grafana
-  gather_facts: false
+  gather_facts: true
   # Secrets loaded from group_vars/all.yml
   roles:
     - common_monitoring
