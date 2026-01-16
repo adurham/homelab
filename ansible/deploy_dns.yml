@@ -8,25 +8,7 @@
 - name: Deploy DNS Service (Bind9)
   hosts: dns_server
   gather_facts: false
-  # We need python3 first, creating container installs it.
-  # Connection should be SSH via private key injected?
-  # Or we need to use user/pass if key injection fails?
-  # The role injects key from `pve-01` /root/.ssh.
-  # Assuming Ansible controller can ssh to `pve-01` and then jump to `dns-01` via LAN?
-  # Actually `dns-01` is on LAN `192.168.86.10`.
-  # Ansible controller is User MacBook `192.168.86.X` (Tailscale or LAN).
-  # If User is on LAN, they can reach `192.168.86.10` directly.
-  # BUT `dns-01` root password is set to "password".
-  # SSH key injection copied from PVE node might not match Ansible controller's key.
-  # Better: Using `community.general.proxmox` connection? Or `ssh` with password?
-  # I'll rely on ssh + password if key fails, or assume user has key.
-  # For automation, I'll try to use `ansible_ssh_pass: password` as fallback or config.
-  # But better practice: inject key from Controller?
-  # `dns_host` role injects `/root/.ssh/authorized_keys` from PVE node.
-  # Does PVE node have the controller's key? Usually yes if we SSH to PVE.
-  # So `dns-01` will trust whoever PVE trusts.
-  # So Controller -> PVE works. Controller -> DNS-01 should work.
-  # I'll add `ansible_ssh_common_args` to disable host key checking.
+  # Connection via SSH, relying on key authorization or password fallback
   vars:
     # ACME Configuration
     acme_primary_domain: "dns.chi.lab.amd-e.com"
