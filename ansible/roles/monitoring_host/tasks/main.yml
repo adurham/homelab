@@ -35,15 +35,10 @@
   failed_when: ct_start.rc != 0 and ("already running" not in ct_start.stderr)
   changed_when: ct_start.rc == 0
 
-- name: Wait for Container Network
-  ansible.builtin.wait_for:
-    host: "{{ net_private_ip | ansible.utils.ipaddr('address') }}"
-    port: 22
-    delay: 5
-    timeout: 60
+
 
 - name: Add Host to Inventory
   ansible.builtin.add_host:
     name: "{{ inventory_hostname }}"
-    ansible_host: "{{ net_private_ip | ansible.utils.ipaddr('address') }}"
+    ansible_host: "{{ net_private_ip.split('/')[0] }}"
     ansible_user: "root"

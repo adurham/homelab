@@ -211,3 +211,57 @@ server {
         proxy_set_header Connection $connection_upgrade;
     }
 }
+
+server {
+    listen 80;
+    server_name grafana.chi.lab.amd-e.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name grafana.chi.lab.amd-e.com;
+
+    # ACL: Block external access
+    if ($is_internal = 0) {
+        return 403;
+    }
+
+    ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/wildcard.key;
+
+    location / {
+        proxy_pass http://172.16.0.41:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 80;
+    server_name victoriametrics.chi.lab.amd-e.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name victoriametrics.chi.lab.amd-e.com;
+
+    # ACL: Block external access
+    if ($is_internal = 0) {
+        return 403;
+    }
+
+    ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/wildcard.key;
+
+    location / {
+        proxy_pass http://172.16.0.40:8428;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
