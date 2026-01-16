@@ -60,7 +60,7 @@ The current Ansible infrastructure for the Proxmox Private Cloud is robust, feat
 
 ### Phase 2: Refactoring (Next Sprint)
 
-* [ ] Decompose `manage_authentik.yml` into roles.
+* [x] Decompose `manage_authentik.yml` into roles.
 
 * [ ] Implement `netaddr` filters for cleaner IP math in `proxmox_network`.
 
