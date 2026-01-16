@@ -2,7 +2,6 @@
   hosts: pve01
   gather_facts: false
   roles:
-  roles:
     - role: tanium_client_host
   tags: [provision]
 
@@ -11,7 +10,6 @@
   gather_facts: true
   vars_files:
     - group_vars/all/tanium_secrets.yml
-  roles:
   roles:
     - role: tanium_client
   tags: [install]

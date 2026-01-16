@@ -1,13 +1,70 @@
 ---
-- name: Install Prometheus Node Exporter
-  ansible.builtin.apt:
-    name: prometheus-node-exporter
+- name: Create node_exporter group
+  ansible.builtin.group:
+    name: node_exporter
     state: present
-    update_cache: true
-    cache_valid_time: 3600
+
+- name: Create node_exporter user
+  ansible.builtin.user:
+    name: node_exporter
+    group: node_exporter
+    shell: /sbin/nologin
+    create_home: false
+
+- name: Install dependencies (RedHat)
+  ansible.builtin.shell: dnf install -y tar gzip
+  when: ansible_os_family == 'RedHat'
+  changed_when: false
+
+- name: Install dependencies (Debian)
+  ansible.builtin.shell: apt-get update && apt-get install -y tar gzip
+  when: ansible_os_family == 'Debian'
+  changed_when: false
+
+- name: Install dependencies (Suse)
+  ansible.builtin.shell: zypper install -y tar gzip
+  when: ansible_os_family == 'Suse'
+  changed_when: false
+
+- name: Download Node Exporter (Universal Binary)
+  ansible.builtin.get_url:
+    url: https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
+    dest: /tmp/node_exporter-1.7.0.linux-amd64.tar.gz
+    mode: '0644'
+
+- name: Extract Node Exporter
+  ansible.builtin.shell: |
+    tar -xzf /tmp/node_exporter-1.7.0.linux-amd64.tar.gz -C /tmp/
+  args:
+    creates: /tmp/node_exporter-1.7.0.linux-amd64/node_exporter
+
+- name: Move binary to /usr/local/bin
+  ansible.builtin.copy:
+    src: /tmp/node_exporter-1.7.0.linux-amd64/node_exporter
+    dest: /usr/local/bin/node_exporter
+    remote_src: true
+    mode: '0755'
+    owner: node_exporter
+    group: node_exporter
+  notify: Restart Node Exporter
+
+- name: Deploy Node Exporter Service
+  ansible.builtin.template:
+    src: node_exporter.service.j2
+    dest: /etc/systemd/system/node_exporter.service
+    mode: '0644'
+  notify: Restart Node Exporter
 
 - name: Start and Enable Node Exporter
   ansible.builtin.service:
-    name: prometheus-node-exporter
+    name: node_exporter
     state: started
     enabled: true
+
+- name: Cleanup temporary files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/node_exporter-1.7.0.linux-amd64.tar.gz
+    - /tmp/node_exporter-1.7.0.linux-amd64
