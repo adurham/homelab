@@ -12,8 +12,8 @@
     create_home: false
 
 - name: Install dependencies (RedHat)
-  ansible.builtin.shell: dnf install -y tar gzip
-  when: ansible_os_family == 'RedHat'
+  ansible.builtin.shell: dnf install -y tar gzip nftables && nft flush ruleset
+  when: ansible_facts['os_family'] == 'RedHat'
   changed_when: false
 
 - name: Install dependencies (Debian)
