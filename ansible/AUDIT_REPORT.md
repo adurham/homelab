@@ -26,35 +26,44 @@ The current Ansible infrastructure for the Proxmox Private Cloud is robust, feat
 * **Observation**: Secrets are correctly externalized to `ansible/credentials/` and ignored via `.gitignore`.
 * **Recommendation**: Continue migration to Ansible Vault for stronger at-rest encryption of these files.
 
+### 2.4 Default Credentials (Critical)
+
+* **Observation**: `roles/role_grafana` sets `admin_password = admin` in plaintext.
+* **Risk**: Trivial exploitation of monitoring infrastructure.
+* **Remediation**: Vault this password or use an environment variable injection pattern.
+
 ## 3. Optimization & Architecture
 
-### 3.1 Monolithic Playbooks (High Impact)
+### 3.1 Monolithic Playbooks (Improved)
 
-* **Observation**: `manage_authentik.yml` exceeds 1,600 lines. It handles OAuth2 Providers, SAML Providers, SCIM mappings, User Groups, and Recovery flows in a single linear file.
-* **Optimization**:
-  * **Refactor to Roles**: Break this into `roles/authentik_provider`, `roles/authentik_user_group`, and `roles/authentik_flow`.
-  * **Benefit**: drastically improves readability, allows for independent testing of components, and enables better `tags` usage.
+* **Observation**: `manage_authentik.yml` has been refactored into modular roles (`authentik_flow`, `authentik_provider`, etc.).
+* **Status**: Significant progress. Authentik is now modular.
 
-### 3.2 Code Quality & Linting
+### 3.2 Code Quality & Linting (Pass)
 
-* **Observation**: No `.ansible-lint` configuration exists.
-* **Optimization**: Implement a configuration to enforce:
-  * Fully Qualified Collection Names (FQCN) (e.g., `ansible.builtin.uri` instead of `uri`).
-  * Idempotency checks.
-  * File mode, owner, and group specifications.
+* **Observation**: `.ansible-lint` configuration implemented and enforcing FQCN.
+* **Status**: Remediation Complete. CI/CD pipeline (local `pre-commit`) now enforces standards.
+
+## 4. Remediation Log (2026-01-15)
+
+* **Secret Management**: `grafana_client_secret` identified in plaintext and migrated to Ansible Vault.
+* **Cleanup**: Removed legacy `tanium_manual.txt` and verified file hygiene.
+* **Flows**: Resolved duplicate Authentik MFA bindings.
 
 ## 4. Roadmap
 
 ### Phase 1: Hardening (Immediate)
 
-- [ ] Implement `.ansible-lint` configuration.
+* [ ] Implement `.ansible-lint` configuration.
+
 * [ ] Centralize SSH configuration in `group_vars`.
 
 ### Phase 2: Refactoring (Next Sprint)
 
-- [ ] Decompose `manage_authentik.yml` into roles.
+* [ ] Decompose `manage_authentik.yml` into roles.
+
 * [ ] Implement `netaddr` filters for cleaner IP math in `proxmox_network`.
 
 ### Phase 3: CI/CD (Future)
 
-- [ ] Implement GitHub Actions workflow using `setup_runner.sh` to run linting on PRs.
+* [ ] Implement GitHub Actions workflow using `setup_runner.sh` to run linting on PRs.
