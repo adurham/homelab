@@ -1,0 +1,12 @@
+apiVersion: 1
+
+datasources:
+  - name: VictoriaMetrics
+    type: prometheus
+    access: proxy
+    url: http://{{ hostvars['vm-01']['ansible_host'] }}:8428
+    isDefault: true
+    version: 1
+    editable: true
+    jsonData:
+      httpMethod: POST
