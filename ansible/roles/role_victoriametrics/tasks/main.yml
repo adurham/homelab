@@ -52,7 +52,7 @@
 
       [Install]
       WantedBy=multi-user.target
-    notify: Restart VictoriaMetrics
+  notify: Restart VictoriaMetrics
 
 - name: Create Configuration Directory
   ansible.builtin.file:
@@ -71,9 +71,3 @@
     name: victoriametrics
     state: started
     enabled: true
-
-  handlers:
-    - name: Restart VictoriaMetrics
-      ansible.builtin.service:
-        name: victoriametrics
-        state: restarted

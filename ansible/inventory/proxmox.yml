@@ -228,6 +228,8 @@ all:
 
       vars:
         ansible_user: root
+        # Proxy through Tailscale Gateway (Access to Private Net)
+        ansible_ssh_common_args: '-o ProxyCommand="ssh -W %h:%p -q root@192.168.86.62"'
 
         vm_cores: 1
         vm_memory: 1024

@@ -1,12 +1,12 @@
 ---
 - name: Deploy DNS Container
-  hosts: pve-01
+  hosts: pve02
   gather_facts: false
   roles:
     - dns_host
 
 - name: Deploy DNS Service (Bind9)
-  hosts: dns_servers
+  hosts: dns_server
   gather_facts: false
   # We need python3 first, creating container installs it.
   # Connection should be SSH via private key injected?

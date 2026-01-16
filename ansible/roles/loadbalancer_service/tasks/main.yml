@@ -21,12 +21,15 @@
     set -o pipefail
     curl https://get.acme.sh | sh -s email=admin@lab.amd-e.com
   args:
+    executable: /bin/bash
     creates: /root/.acme.sh/acme.sh
 
 - name: Register ACME Account (Let's Encrypt)
   ansible.builtin.shell: |
     set -o pipefail
     /root/.acme.sh/acme.sh --register-account -m admin@lab.amd-e.com --server letsencrypt
+  args:
+    executable: /bin/bash
   register: loadbalancer_service_acme_reg
   changed_when: "'Account created' in loadbalancer_service_acme_reg.stdout"
   failed_when: >
@@ -47,6 +50,8 @@
     noip_username: "{{ noip_username }}"
     noip_password: "{{ noip_password }}"
   no_log: true
+  args:
+    executable: /bin/bash
   register: loadbalancer_service_acme_issue
   changed_when: "'Cert success' in loadbalancer_service_acme_issue.stdout"
   failed_when: >
@@ -60,6 +65,8 @@
     --key-file       /etc/nginx/ssl/wildcard.key \
     --fullchain-file /etc/nginx/ssl/wildcard.fullchain.cer \
     --reloadcmd     "systemctl reload nginx"
+  args:
+    executable: /bin/bash
   when: loadbalancer_service_acme_issue.changed
 
 - name: Deploy WhoAmI Script

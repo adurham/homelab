@@ -1,0 +1,5 @@
+---
+- name: Restart VictoriaMetrics
+  ansible.builtin.service:
+    name: victoriametrics
+    state: restarted

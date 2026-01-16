@@ -1,6 +1,6 @@
 $TTL    604800
 @       IN      SOA     dns.chi.lab.amd-e.com. admin.chi.lab.amd-e.com. (
-                              2         ; Serial
+                              3         ; Serial
                          604800         ; Refresh
                           86400         ; Retry
                         2419200         ; Expire
@@ -34,6 +34,10 @@ auth    IN      A       172.16.0.30 ; Load Balancer VIP
 authentik IN    A       172.16.0.20 ; Container Direct IP
 proxmox IN      A       172.16.0.30
 whoami  IN      A       172.16.0.30
+
+; Observability
+grafana         IN      A       172.16.0.30
+victoriametrics IN      A       172.16.0.30
 
 ; Wildcard (Optional - helps with subdomains)
 ; Wildcard (Optional - helps with subdomains)
