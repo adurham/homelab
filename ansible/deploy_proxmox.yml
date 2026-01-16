@@ -4,9 +4,6 @@
   become: true
   gather_facts: true
 
-  vars:
-    # Set these via extra vars or inventory if needed
-    # zfs_disk_device: /dev/nvme0n1
 
   roles:
     - role: proxmox_common

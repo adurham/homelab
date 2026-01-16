@@ -80,9 +80,9 @@
     dest: /etc/grafana/provisioning/dashboards/default.yml
   notify: Restart Grafana
 
-- name: Download Node Exporter Dashboard (ID 1860)
-  ansible.builtin.get_url:
-    url: https://grafana.com/api/dashboards/1860/revisions/28/download
+- name: Deploy Node Exporter Dashboard (Patched)
+  ansible.builtin.copy:
+    src: node_exporter_full.json
     dest: /var/lib/grafana/dashboards/node-exporter-full.json
     owner: grafana
     group: grafana

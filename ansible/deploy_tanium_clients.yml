@@ -2,7 +2,9 @@
   hosts: pve01
   gather_facts: false
   roles:
-    - tanium_client_host
+  roles:
+    - role: tanium_client_host
+  tags: [provision]
 
 - name: Configure Tanium Clients
   hosts: tanium_clients
@@ -10,4 +12,6 @@
   vars_files:
     - group_vars/all/tanium_secrets.yml
   roles:
-    - tanium_client
+  roles:
+    - role: tanium_client
+  tags: [install]
