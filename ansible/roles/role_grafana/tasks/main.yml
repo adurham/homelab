@@ -47,7 +47,7 @@
 
       [security]
       admin_user = admin
-      admin_password = admin
+      admin_password = {{ grafana_admin_password }}
 
 - name: Start Grafana
   ansible.builtin.service:
