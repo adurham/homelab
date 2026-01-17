@@ -1,0 +1,4 @@
+---
+flair_manager:
+  module: flair_manager
+  class: FlairManager
