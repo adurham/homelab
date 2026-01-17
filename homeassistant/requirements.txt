@@ -1,1 +1,3 @@
 yamllint>=1.37.0
+requests
+python-dotenv
