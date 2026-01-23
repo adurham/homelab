@@ -8,12 +8,11 @@
       minutes: "/5"
 
   condition:
-    # 1. Cooldown Period (Must be OFF for 30 mins)
-    - condition: state
-      entity_id: switch.shelly1minig3_28372f21c1dc
-      state: "off"
-      for:
-        minutes: 30
+    # 1. Cooldown Period (Must be > 30 mins since last stop)
+    - condition: template
+      value_template: >
+        {% set stop_time = state_attr('input_datetime.smart_circulation_last_stopped', 'timestamp') | default(0) %}
+        {{ (now().timestamp() - stop_time) > 1800 }}
 
     # 2. Check Temperatures (Start Condition)
     - condition: or
@@ -68,3 +67,10 @@
     - service: switch.turn_off
       target:
         entity_id: switch.shelly1minig3_28372f21c1dc
+
+    # Update Last Stopped Time
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.smart_circulation_last_stopped
+      data:
+        timestamp: "{{ now().timestamp() }}"
