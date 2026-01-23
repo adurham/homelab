@@ -1,0 +1,29 @@
+- alias: "Laundry Monitor Notification"
+  id: "laundry_monitor_notification"
+  description: "Notify when the washing machine or dryer finishes its cycle (Power < 5W for 5 mins)."
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.laundry_switch_plug_power
+      above: 20
+      for:
+        seconds: 30 # Debounce accidental spikes
+  action:
+    - wait_for_trigger:
+        - platform: numeric_state
+          entity_id: sensor.laundry_switch_plug_power
+          below: 5
+          for:
+            minutes: 5
+      continue_on_timeout: false
+
+    - service: tts.google_translate_say
+      target:
+        entity_id: media_player.kitchen_display
+      data:
+        message: "The laundry is done. Please move the clothes."
+
+    - service: notify.mobile_app_adams_iphone
+      data:
+        message: "Laundry is done."
+        title: "Home Assistant"
+      enabled: false # Enable if this service exists

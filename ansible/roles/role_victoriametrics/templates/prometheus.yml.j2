@@ -2,6 +2,13 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
+  - job_name: 'homeassistant'
+    metrics_path: /api/prometheus
+    scheme: http
+    static_configs:
+      - targets: ['192.168.86.2:8123']
+    bearer_token: "{{ homeassistant_token }}"
+
   - job_name: 'node_exporter'
     static_configs:
 {% for host in groups['all'] %}

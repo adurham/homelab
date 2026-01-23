@@ -1,26 +1,33 @@
 #!/bin/bash
-# Deploy AppDaemon App to Home Assistant
+# Deploy Core Configuration to Home Assistant
 # Usage: ./deploy_ha.sh
 
-HA_HOST="homeassistant.local"
+HA_HOST="192.168.86.2"
 HA_USER="root"
 HA_PORT="2222"
-APPS_DIR="/addon_configs/a0d7b954_appdaemon/apps" # Verified path via find command
+CONFIG_DIR="/config"
 
-echo "Deploying to $HA_HOST..."
+echo "Deploying Core Config to $HA_HOST..."
 
-# Check connectivity & Create Dir
-if ! ssh -q -p $HA_PORT -o BatchMode=yes -o StrictHostKeyChecking=no $HA_USER@$HA_HOST "mkdir -p $APPS_DIR"; then
-    echo "Error: Cannot connect to $HA_HOST or create directory."
+# Check connectivity
+if ! ssh -q -p $HA_PORT -o BatchMode=yes -o StrictHostKeyChecking=no $HA_USER@$HA_HOST "ls $CONFIG_DIR > /dev/null"; then
+    echo "Error: Cannot connect to $HA_HOST or find $CONFIG_DIR."
     echo "Make sure you have your SSH key added and the host is reachable."
     exit 1
 fi
 
-# Copy files
-echo "Copying apps/flair_manager.py..."
-scp -P $HA_PORT homeassistant/apps/flair_manager.py $HA_USER@$HA_HOST:$APPS_DIR/
+# Sync Automations Dir
+echo "Syncing automations directory..."
+scp -P $HA_PORT -r homeassistant/automations/ $HA_USER@$HA_HOST:$CONFIG_DIR/
 
-echo "Copying apps/apps.yaml..."
-scp -P $HA_PORT homeassistant/apps/apps.yaml $HA_USER@$HA_HOST:$APPS_DIR/flair_manager.yaml
+# Sync Core Files
+echo "Syncing configuration files..."
+# scp -P $HA_PORT homeassistant/automations.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
+scp -P $HA_PORT homeassistant/configuration.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
+scp -P $HA_PORT homeassistant/scripts.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
+# scp -P $HA_PORT homeassistant/scenes.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
 
-echo "Deployment complete! Check AppDaemon logs in Home Assistant for startup status."
+echo "Deployment complete!"
+echo "Restarting Home Assistant Core..."
+ssh -p $HA_PORT $HA_USER@$HA_HOST "ha core restart"
+echo "Done. Please wait for HA to come back online."
