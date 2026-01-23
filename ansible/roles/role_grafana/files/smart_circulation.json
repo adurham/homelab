@@ -1,0 +1,159 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": "-- Grafana --",
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "gnetId": null,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "panels": [
+        {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {}
+                },
+                "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+                "h": 12,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "hiddenSeries": false,
+            "id": 2,
+            "legend": {
+                "avg": false,
+                "current": false,
+                "max": false,
+                "min": false,
+                "show": true,
+                "total": false,
+                "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+                "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.5.7",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [
+                {
+                    "alias": "Pump State",
+                    "color": "#F2495C",
+                    "fill": 0,
+                    "linewidth": 2,
+                    "yaxis": 2
+                }
+            ],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.kitchen_water_temp_sensor\"} * 1.8) + 32",
+                    "interval": "",
+                    "legendFormat": "Kitchen",
+                    "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bathroom_temp_sensor\"} * 1.8) + 32",
+                    "interval": "",
+                    "legendFormat": "Main Bath",
+                    "refId": "B"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_water_temp_sensor\"} * 1.8) + 32",
+                    "interval": "",
+                    "legendFormat": "Guest Bath",
+                    "refId": "C"
+                },
+                {
+                    "expr": "homeassistant_switch_state{entity=\"switch.shelly1minig3_28372f21c1dc\"}",
+                    "interval": "",
+                    "legendFormat": "Pump State",
+                    "refId": "D"
+                }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Water Circulation Effectiveness",
+            "tooltip": {
+                "shared": true,
+                "sort": 0,
+                "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+                "buckets": null,
+                "mode": "time",
+                "name": null,
+                "show": true,
+                "values": []
+            },
+            "yaxes": [
+                {
+                    "format": "fahrenheit",
+                    "label": "Temperature",
+                    "logBase": 1,
+                    "max": "110",
+                    "min": "70",
+                    "show": true
+                },
+                {
+                    "expr": null,
+                    "format": "short",
+                    "label": "Pump (On/Off)",
+                    "logBase": 1,
+                    "max": "1.5",
+                    "min": "0",
+                    "show": true
+                }
+            ],
+            "yaxis": {
+                "align": false,
+                "alignLevel": null
+            }
+        }
+    ],
+    "schemaVersion": 27,
+    "style": "dark",
+    "tags": [],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-3h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "",
+    "title": "Smart Circulation",
+    "uid": "smart_circulation",
+    "version": 3
+}

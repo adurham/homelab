@@ -1,12 +1,28 @@
 # Loads default set of integrations. Do not remove.
 default_config:
 
+# Prometheus Metrics
+prometheus:
+
 # Load frontend themes from the themes folder
+logger:
+  default: warning
+  logs:
+    homeassistant.components.automation: debug
+    homeassistant.core: debug
+    homeassistant.helpers.script: debug
+
 frontend:
   themes: !include_dir_merge_named themes
 
+
+# Packages for manual configuration
+homeassistant:
+  packages:
+    manual_automations:
+      automation: !include_dir_merge_list automations/
+
 automation: !include automations.yaml
-automation custom: !include_dir_merge_list automations/
 script: !include scripts.yaml
 script custom: !include_dir_merge_list scripts/
 scene: !include scenes.yaml

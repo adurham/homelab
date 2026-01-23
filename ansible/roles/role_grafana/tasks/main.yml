@@ -89,6 +89,33 @@
     mode: '0644'
   notify: Restart Grafana
 
+- name: Deploy Smart Circulation Dashboard
+  ansible.builtin.copy:
+    src: smart_circulation.json
+    dest: /var/lib/grafana/dashboards/smart_circulation.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+- name: Deploy Energy Dashboard
+  ansible.builtin.copy:
+    src: energy.json
+    dest: /var/lib/grafana/dashboards/energy.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
+- name: Deploy Climate Dashboard
+  ansible.builtin.copy:
+    src: climate.json
+    dest: /var/lib/grafana/dashboards/climate.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
+
 - name: Start Grafana
   ansible.builtin.service:
     name: grafana-server

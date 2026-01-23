@@ -1,0 +1,2 @@
+---
+homeassistant_token: "{{ lookup('file', 'credentials/homeassistant_token') }}"
