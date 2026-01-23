@@ -1,0 +1,5 @@
+smart_circulation_last_stopped:
+  name: "Smart Circulation Last Stopped"
+  has_date: true
+  has_time: true
+  icon: mdi:clock-end

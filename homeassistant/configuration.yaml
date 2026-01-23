@@ -22,11 +22,13 @@ homeassistant:
     manual_automations:
       automation: !include_dir_merge_list automations/
 
+sensor: !include sensors.yaml
 automation: !include automations.yaml
 script: !include scripts.yaml
 script custom: !include_dir_merge_list scripts/
 scene: !include scenes.yaml
 scene custom: !include_dir_merge_list scenes/
+input_datetime: !include input_datetime.yaml
 
 timer:
   garage_lights_motion_timeout:
