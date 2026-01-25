@@ -3,27 +3,23 @@
   hosts: homeassistant
   gather_facts: false # No python on HA OS usually
   vars:
-    local_automations_dir: "../homeassistant/automations/"
-    remote_automations_dir: "/config/automations/"
+    # Use playbook_dir to ensure paths are correct regardless of where ansible-playbook is run
+    local_automations_dir: "{{ playbook_dir }}/../homeassistant/automations/"
 
   tasks:
     - name: Ensure target directory exists
-      raw: "mkdir -p {{ remote_automations_dir }}"
+      raw: "mkdir -p /config/automations"
       register: mkdir_result
       changed_when: mkdir_result.rc == 0
 
-    - name: Copy Automation Files
-      # Using synchronize (rsync) or copy. 
-      # Since HA likely lacks rsync, we use copy or template. 
-      # Because there are multiple files, we'll iterate or use a local shell to SCP if standard modules fail due to missing python.
-      # HOWEVER, the previous ping failure showed NO python. 
-      # Standard 'copy' module REQUIRES python on the remote.
-      # We must use 'raw' or 'script' module, or run local 'scp' via 'delegate_to: localhost'.
-      
-      # Strategy: Run SCP from localhost
+    - name: Copy Files (Automations, Templates, Sensors)
       ansible.builtin.shell: >
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ local_automations_dir }}/*.yaml ../homeassistant/templates.yaml {{ ansible_user }}@{{ ansible_host }}:{{ remote_automations_dir }}/ && \
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no ../homeassistant/templates.yaml {{ ansible_user }}@{{ ansible_host }}:/config/
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ local_automations_dir }}/*.yaml {{ ansible_user }}@{{ ansible_host }}:/config/automations/ && \
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ playbook_dir }}/../homeassistant/templates.yaml {{ ansible_user }}@{{ ansible_host }}:/config/ && \
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ playbook_dir }}/../homeassistant/sensors.yaml {{ ansible_user }}@{{ ansible_host }}:/config/
+      delegate_to: localhost
+      register: scp_result
+      changed_when: scp_result.rc == 0
 
     - name: Check Configuration
       raw: "ha core check"
