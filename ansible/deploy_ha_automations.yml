@@ -22,10 +22,8 @@
       
       # Strategy: Run SCP from localhost
       ansible.builtin.shell: >
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ local_automations_dir }}/*.yaml {{ ansible_user }}@{{ ansible_host }}:{{ remote_automations_dir }}/
-      delegate_to: localhost
-      register: scp_result
-      changed_when: scp_result.rc == 0
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ local_automations_dir }}/*.yaml ../homeassistant/templates.yaml {{ ansible_user }}@{{ ansible_host }}:{{ remote_automations_dir }}/ && \
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no ../homeassistant/templates.yaml {{ ansible_user }}@{{ ansible_host }}:/config/
 
     - name: Check Configuration
       raw: "ha core check"

@@ -65,3 +65,9 @@
       unit_of_measurement: "°F"
       device_class: temperature
       state: "{{ states('sensor.basement_heatpump_basement_office_ac_ambient_temp') | float(0) }}"
+
+    - name: "Heat Pump Water Heater"
+      unique_id: edgewater_road_power_minute_average_water_heater
+      unit_of_measurement: "W"
+      device_class: power
+      state: "{{ states('sensor.econet_hpwh_power') | float(0) }}"

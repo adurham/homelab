@@ -44,8 +44,9 @@
             - condition: trigger
               id: "recovery_complete"
             # Ensure Tank Temp is also back to target (e.g., 120F or setpoint)
-            - condition: temperature
+            - condition: numeric_state
               entity_id: climate.econet_hpwh
+              attribute: current_temperature
               above: 120
           sequence:
             - service: climate.set_hvac_mode
