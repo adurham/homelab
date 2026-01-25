@@ -29,6 +29,15 @@
           entity_id: sensor.guest_bathroom_water_temp_sensor
           below: 85
 
+    # 3. Safety Check (Tank Capacity)
+    - condition: numeric_state
+      entity_id: sensor.econet_hpwh_hot_water
+      above: 40
+    - condition: numeric_state
+      entity_id: climate.econet_hpwh
+      attribute: current_temperature
+      above: 100
+
   action:
     # Debug Notification
     # - service: persistent_notification.create
@@ -59,6 +68,15 @@
         - platform: numeric_state
           entity_id: sensor.guest_bathroom_water_temp_sensor
           above: 105
+
+        # Safety: Stop if Tank is low
+        - platform: numeric_state
+          entity_id: sensor.econet_hpwh_hot_water
+          below: 40
+        - platform: numeric_state
+          entity_id: climate.econet_hpwh
+          attribute: current_temperature
+          below: 100
 
       timeout: "00:15:00"
       continue_on_timeout: true

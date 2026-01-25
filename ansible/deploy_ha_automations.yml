@@ -1,0 +1,39 @@
+---
+- name: Deploy Home Assistant Automations
+  hosts: homeassistant
+  gather_facts: false # No python on HA OS usually
+  vars:
+    local_automations_dir: "../homeassistant/automations/"
+    remote_automations_dir: "/config/automations/"
+
+  tasks:
+    - name: Ensure target directory exists
+      raw: "mkdir -p {{ remote_automations_dir }}"
+      register: mkdir_result
+      changed_when: mkdir_result.rc == 0
+
+    - name: Copy Automation Files
+      # Using synchronize (rsync) or copy. 
+      # Since HA likely lacks rsync, we use copy or template. 
+      # Because there are multiple files, we'll iterate or use a local shell to SCP if standard modules fail due to missing python.
+      # HOWEVER, the previous ping failure showed NO python. 
+      # Standard 'copy' module REQUIRES python on the remote.
+      # We must use 'raw' or 'script' module, or run local 'scp' via 'delegate_to: localhost'.
+      
+      # Strategy: Run SCP from localhost
+      ansible.builtin.shell: >
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ local_automations_dir }}/*.yaml {{ ansible_user }}@{{ ansible_host }}:{{ remote_automations_dir }}/
+      delegate_to: localhost
+      register: scp_result
+      changed_when: scp_result.rc == 0
+
+    - name: Check Configuration
+      raw: "ha core check"
+      register: config_check
+      changed_when: false
+      failed_when: "'Command completed successfully' not in config_check.stdout and config_check.rc != 0"
+
+    - name: Restart Core
+      raw: "ha core restart"
+      register: restart_core
+      changed_when: restart_core.rc == 0
