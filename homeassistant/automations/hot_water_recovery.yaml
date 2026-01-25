@@ -1,0 +1,59 @@
+- alias: "Hot Water Recovery Manager"
+  id: "hot_water_recovery_manager"
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    # Trigger 1: Low Hot Water (Emergency Recovery)
+    - platform: numeric_state
+      entity_id: sensor.econet_hpwh_hot_water
+      below: 21
+      id: "low_hot_water"
+
+    # Trigger 2: Recovery Complete
+    - platform: numeric_state
+      entity_id: sensor.econet_hpwh_hot_water
+      above: 50
+      id: "recovery_complete"
+
+  condition: []
+
+  action:
+    - choose:
+        # Case A: Low Hot Water -> High Demand
+        - conditions:
+            - condition: trigger
+              id: "low_hot_water"
+            # Double check state to avoid flapping
+            - condition: numeric_state
+              entity_id: sensor.econet_hpwh_hot_water
+              below: 21
+          sequence:
+            - service: climate.set_hvac_mode
+              target:
+                entity_id: climate.econet_hpwh
+              data:
+                hvac_mode: "high_demand"
+            - service: persistent_notification.create
+              data:
+                title: "Hot Water Recovery"
+                message: "Hot water low (<20%). Switched to High Demand mode."
+
+        # Case B: Recovery Complete -> Heat Pump (Eco)
+        - conditions:
+            - condition: trigger
+              id: "recovery_complete"
+            # Ensure Tank Temp is also back to target (e.g., 120F or setpoint)
+            - condition: temperature
+              entity_id: climate.econet_hpwh
+              above: 120
+          sequence:
+            - service: climate.set_hvac_mode
+              target:
+                entity_id: climate.econet_hpwh
+              data:
+                hvac_mode: "heat_pump"
+            - service: persistent_notification.create
+              data:
+                title: "Hot Water Restored"
+                message: "Hot water recovered (>50%). Switched back to Heat Pump mode."
