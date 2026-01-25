@@ -1,0 +1,67 @@
+- sensor:
+    - name: "Living Room (Left) Vent Position"
+      unique_id: living_room_fc56_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.living_room_fc56_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Living Room (Right) Vent Position"
+      unique_id: living_room_5d8e_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.living_room_5d8e_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Main Bedroom (A) Vent Position"
+      unique_id: main_bedroom_a96d_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.main_bedroom_a96d_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Main Bedroom (B) Vent Position"
+      unique_id: main_bedroom_5c2b_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.main_bedroom_5c2b_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Main Bedroom (C) Vent Position"
+      unique_id: main_bedroom_883f_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.main_bedroom_883f_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Kitchen Vent Position"
+      unique_id: kitchen_d124_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.kitchen_d124_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Dining Room Vent Position"
+      unique_id: dining_room_7a28_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.dining_room_7a28_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Hallway Vent Position"
+      unique_id: hallway_907e_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.hallway_907e_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Guest Bedroom 2 Vent Position"
+      unique_id: guest_bedroom_2_1ec7_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.guest_bedroom_2_1ec7_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Hallway Temperature"
+      unique_id: hallway_temperature
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state: "{{ state_attr('climate.ecobee_thermostat', 'current_temperature') | float(0) }}"
+
+    - name: "Laundry Room Vent Position"
+      unique_id: laundry_room_d189_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.laundry_room_d189_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Main Bathroom Vent Position"
+      unique_id: main_bathroom_f586_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.main_bathroom_f586_vent_2', 'current_tilt_position') | float(0) }}"
+
+    - name: "Salon Temperature"
+      unique_id: salon_temperature
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state: "{{ states('sensor.basement_heatpump_basement_office_ac_ambient_temp') | float(0) }}"

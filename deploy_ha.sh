@@ -27,6 +27,7 @@ scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/configuration.yaml $HA_US
 scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/scripts.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
 scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/sensors.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
 scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/input_datetime.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
+scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/templates.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
 # scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/scenes.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
 
 echo "Deployment complete!"
