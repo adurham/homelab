@@ -12,7 +12,7 @@
     - condition: template
       value_template: >
         {% set stop_time = state_attr('input_datetime.smart_circulation_last_stopped', 'timestamp') | default(0) %}
-        {{ (now().timestamp() - stop_time) > 1800 }}
+        {{ (now().timestamp() - stop_time) > 600 }}
 
     # 2. Check Temperatures (Start Condition)
     - condition: or
@@ -20,21 +20,21 @@
         # Kitchen (Copper) < 88F
         - condition: numeric_state
           entity_id: sensor.kitchen_water_temp_sensor
-          below: 88
-        # Bathrooms (Braided) < 85F
+          below: 85
+        # Bathrooms (Calibrated) < 85F
         - condition: numeric_state
           entity_id: sensor.main_bathroom_temp_sensor
-          below: 85
+          below: 80
         - condition: numeric_state
           entity_id: sensor.guest_bathroom_water_temp_sensor
           below: 85
 
   action:
     # Debug Notification
-    - service: persistent_notification.create
-      data:
-        message: "Smart Water Circulation Triggered at {{ now() }}"
-        title: "Automation Debug"
+    # - service: persistent_notification.create
+    #   data:
+    #     message: "Smart Water Circulation Triggered at {{ now() }}"
+    #     title: "Automation Debug"
 
     # Start Pump
     - service: switch.turn_on
@@ -47,9 +47,9 @@
         - platform: template
           value_template: >
             {{
-              states('sensor.kitchen_water_temp_sensor')|float(0) > 92 and
-              states('sensor.main_bathroom_temp_sensor')|float(0) > 92 and
-              states('sensor.guest_bathroom_water_temp_sensor')|float(0) > 92
+              states('sensor.kitchen_water_temp_sensor')|float(0) > 90 and
+              states('sensor.main_bathroom_temp_sensor')|float(0) > 85 and
+              states('sensor.guest_bathroom_water_temp_sensor')|float(0) > 90
             }}
 
         # Safety: Stop if Bathrooms get too hot (Scald Protection)

@@ -1,0 +1,17 @@
+- alias: "Circulation Safety Watchdog"
+  id: "circulation_safety_watchdog"
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: homeassistant
+      event: start
+
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.shelly1minig3_28372f21c1dc
+    - service: persistent_notification.create
+      data:
+        title: "Safety Watchdog"
+        message: "Circulation pump forced OFF on startup to prevent orphaned state."

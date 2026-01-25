@@ -67,6 +67,13 @@
                     "fill": 0,
                     "linewidth": 2,
                     "yaxis": 2
+                },
+                {
+                    "alias": "Hot Water %",
+                    "yaxis": 1,
+                    "color": "#00d3ff",
+                    "fill": 1,
+                    "fillOpacity": 10
                 }
             ],
             "spaceLength": 10,
@@ -96,6 +103,18 @@
                     "interval": "",
                     "legendFormat": "Pump State",
                     "refId": "D"
+                },
+                {
+                    "expr": "(homeassistant_climate_current_temperature_celsius{entity=\"climate.econet_hpwh\"} * 1.8) + 32 or homeassistant_climate_current_temperature_fahrenheit{entity=\"climate.econet_hpwh\"}",
+                    "interval": "",
+                    "legendFormat": "Tank Temp",
+                    "refId": "E"
+                },
+                {
+                    "expr": "homeassistant_sensor_moisture_percent{entity=\"sensor.econet_hpwh_hot_water\"} or homeassistant_sensor_percent{entity=\"sensor.econet_hpwh_hot_water\"}",
+                    "interval": "",
+                    "legendFormat": "Hot Water %",
+                    "refId": "F"
                 }
             ],
             "thresholds": [],
@@ -118,11 +137,11 @@
             },
             "yaxes": [
                 {
-                    "format": "fahrenheit",
-                    "label": "Temperature",
+                    "format": "short",
+                    "label": "Temp / %",
                     "logBase": 1,
-                    "max": "110",
-                    "min": "70",
+                    "max": "145",
+                    "min": "0",
                     "show": true
                 },
                 {
