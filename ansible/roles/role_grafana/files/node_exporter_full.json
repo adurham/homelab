@@ -23862,7 +23862,7 @@
       }
     ]
   },
-  "refresh": "1m",
+  "refresh": "auto",
   "time": {
     "from": "now-1h",
     "to": "now"
