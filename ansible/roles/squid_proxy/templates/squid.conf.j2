@@ -21,8 +21,19 @@ acl CONNECT method CONNECT
 # Allow everything (Security handled by Proxmox Firewall)
 http_access allow all
 
-# Proxy Port
-http_port 0.0.0.0:3128
+# Proxy Port with SSL Bump
+http_port 0.0.0.0:3129 ssl-bump \
+  cert=/etc/squid/ssl/squid-ca.pem \
+  key=/etc/squid/ssl/squid-ca.key \
+  generate-host-certificates=on \
+  dynamic_cert_mem_cache_size=4MB
+
+# SSL Bump Configuration
+sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/spool/squid/ssl_db -M 4MB
+
+acl step1 at_step SslBump1
+ssl_bump peek step1
+ssl_bump bump all
 
 # Cache directory (default)
 coredump_dir /var/spool/squid

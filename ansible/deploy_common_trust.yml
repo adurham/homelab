@@ -1,0 +1,10 @@
+---
+- name: Distribute Root CA to All Hosts
+  hosts: all
+  gather_facts: true
+  become: true
+  vars:
+    ansible_user: root
+    ansible_ssh_retries: 3
+  roles:
+    - role: trust_root_ca

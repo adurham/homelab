@@ -61,3 +61,22 @@
     pct exec 108 -- chmod 600 /root/.ssh/authorized_keys
   delegate_to: "{{ target_node | default('pve03') }}"
   when: pct_check.rc != 0
+- name: Ensure Proxy Firewall Configuration
+  ansible.builtin.copy:
+    dest: "/etc/pve/firewall/108.fw"
+    content: |
+      [OPTIONS]
+      enable: 1
+
+      [RULES]
+      IN ACCEPT -p tcp -dport 3129
+      IN ACCEPT -p tcp -dport 22
+    owner: root
+    group: www-data
+    mode: '0640'
+  delegate_to: "{{ target_node | default('pve03') }}"
+
+- name: Enable Firewall on Net0
+  ansible.builtin.command: pct set 108 -net0 name=eth0,bridge=private,ip={{ ip_proxy }}/24,gw={{ net_private_gw }},firewall=1
+  when: pct_check.rc != 0 or (ip_check.rc == 0) # Apply if created or existing
+  changed_when: false # Don't report change every time for now (lazy)

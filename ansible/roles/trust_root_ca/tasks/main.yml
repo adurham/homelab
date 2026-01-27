@@ -1,0 +1,37 @@
+---
+- name: Determine OS Family
+  ansible.builtin.set_fact:
+    ca_dir_debian: /usr/local/share/ca-certificates
+    ca_dir_rhel: /etc/pki/ca-trust/source/anchors
+    update_cmd_debian: update-ca-certificates
+    update_cmd_rhel: update-ca-trust
+
+- name: Copy CA Certificate (Debian/Ubuntu)
+  ansible.builtin.copy:
+    src: artifacts/squid-ca.pem
+    dest: "{{ ca_dir_debian }}/homelab-proxy-ca.crt"
+    owner: root
+    group: root
+    mode: '0644'
+  when: ansible_os_family == 'Debian'
+  notify: Update CA Trust
+
+- name: Copy CA Certificate (RHEL/Rocky/Alma/Oracle)
+  ansible.builtin.copy:
+    src: artifacts/squid-ca.pem
+    dest: "{{ ca_dir_rhel }}/homelab-proxy-ca.crt"
+    owner: root
+    group: root
+    mode: '0644'
+  when: ansible_os_family == 'RedHat'
+  notify: Update CA Trust
+
+- name: Copy CA Certificate (Suse)
+  ansible.builtin.copy:
+    src: artifacts/squid-ca.pem
+    dest: "/etc/pki/trust/anchors/homelab-proxy-ca.crt"
+    owner: root
+    group: root
+    mode: '0644'
+  when: ansible_os_family == 'Suse'
+  notify: Update CA Trust
