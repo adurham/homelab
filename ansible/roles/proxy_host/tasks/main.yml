@@ -1,0 +1,63 @@
+---
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  changed_when: false
+
+- name: Download Ubuntu 22.04 Template
+  ansible.builtin.command: pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+  args:
+    creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+
+- name: Check if Proxy Container Exists
+  ansible.builtin.command: pct config 108
+  register: pct_check
+  failed_when: false
+  changed_when: false
+
+- name: Create Proxy Container
+  ansible.builtin.command: >
+    pct create 108 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+    --hostname proxy-01
+    --cores 1 --memory 512 --swap 512
+    --net0 name=eth0,bridge=private,ip={{ ip_proxy }}/24,gw={{ net_private_gw }}
+    --storage nvme-data
+    --unprivileged 1
+    --features nesting=1
+    --password "{{ proxy_01_root_pass | default('changeme') }}"
+    --start 1
+    --onboot 1
+  no_log: true
+  when: pct_check.rc != 0
+
+- name: Ensure Proxy Container is Running
+  ansible.builtin.command: pct start 108
+  register: proxy_start
+  failed_when: proxy_start.rc != 0 and ("already running" not in proxy_start.stderr and "already running" not in proxy_start.stdout)
+  changed_when: proxy_start.rc == 0
+
+- name: Wait for Proxy Container IP
+  ansible.builtin.shell: pct exec 108 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  register: ip_check
+  until: ip_check.rc == 0
+  retries: 20
+  delay: 3
+  changed_when: false
+
+- name: Update Apt Cache in Proxy Container
+  ansible.builtin.command: pct exec 108 -- apt-get update
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Install Python3 in Proxy Container
+  ansible.builtin.command: pct exec 108 -- apt-get install -y python3
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Inject SSH Key into Proxy Container (via pipe)
+  ansible.builtin.shell: |
+    pct exec 108 -- mkdir -p /root/.ssh
+    cat /root/.ssh/authorized_keys | pct exec 108 -- sh -c "cat > /root/.ssh/authorized_keys"
+    pct exec 108 -- chmod 700 /root/.ssh
+    pct exec 108 -- chmod 600 /root/.ssh/authorized_keys
+  delegate_to: "{{ target_node | default('pve03') }}"
+  when: pct_check.rc != 0

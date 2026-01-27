@@ -1,0 +1,39 @@
+---
+- name: Apply Firewall to Tanium Appliances
+  hosts: pve01
+  gather_facts: false
+  vars:
+    tanium_vmids: [200, 201, 202, 203, 204, 205]
+
+  tasks:
+    - name: Enable Datacenter Firewall (Cluster Level)
+      ansible.builtin.command: pvesh set /cluster/firewall/options -enable 1
+      changed_when: false
+
+    - name: Disable Host Firewall (Node Level) - Safety
+      delegate_to: "{{ item }}"
+      ansible.builtin.command: "pvesh set /nodes/{{ item }}/firewall/options -enable 0"
+      loop: "{{ groups['proxmox_nodes'] }}"
+      changed_when: false
+    - name: Deploy Firewall Rules (Cluster FS)
+      ansible.builtin.template:
+        src: templates/tanium_firewall.fw.j2
+        dest: "/tmp/{{ item }}.fw"
+        mode: '0640'
+      loop: "{{ tanium_vmids }}"
+
+    - name: Move Firewall Rules to Cluster FS
+      ansible.builtin.command: "cp /tmp/{{ item }}.fw /etc/pve/firewall/{{ item }}.fw"
+      loop: "{{ tanium_vmids }}"
+      changed_when: true
+
+    - name: Get Cluster Resources (Find VM Nodes)
+      ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+      register: cluster_resources
+      changed_when: false
+
+    - name: Configure VM Firewall Settings
+      ansible.builtin.include_tasks: tasks/configure_vm_firewall.yml
+      loop: "{{ tanium_vmids }}"
+      loop_control:
+        loop_var: vmid

@@ -4,3 +4,4 @@ collections:
   - name: community.general
   - name: ansible.windows
   - name: ansible.posix
+  - name: community.grafana

@@ -1,0 +1,22 @@
+---
+- name: Install Squid
+  ansible.builtin.apt:
+    name: squid
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Configure Squid
+  ansible.builtin.template:
+    src: squid.conf.j2
+    dest: /etc/squid/squid.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Squid
+
+- name: Ensure Squid Service is Running
+  ansible.builtin.service:
+    name: squid
+    state: started
+    enabled: true

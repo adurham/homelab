@@ -26,6 +26,111 @@
     state: present
     update_cache: true
 
+- name: Install Dependencies for Image Renderer
+  ansible.builtin.apt:
+    name:
+      - libasound2
+      - libatk-bridge2.0-0
+      - libcups2
+      - libdrm2
+      - libgbm1
+      - libnss3
+      - libxcomposite1
+      - libxdamage1
+      - libxrandr2
+      - libxshmfence1
+      - libx11-xcb1
+      - libxfixes3
+      - libxkbcommon0
+      - fontconfig
+      - fonts-dejavu-core
+    state: present
+
+- name: Install Build Dependencies
+  ansible.builtin.apt:
+    name:
+      - git
+      - sudo
+      - chromium
+      - curl
+    state: present
+    update_cache: true
+
+- name: Install Golang 1.25.6
+  ansible.builtin.unarchive:
+    src: https://go.dev/dl/go1.25.6.linux-amd64.tar.gz
+    dest: /usr/local
+    remote_src: true
+    creates: /usr/local/go/bin/go
+  become: true
+
+- name: Create Renderer Directory
+  ansible.builtin.file:
+    path: /usr/local/share/grafana-image-renderer
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: '0755'
+
+- name: Clone Grafana Image Renderer
+  ansible.builtin.git:
+    repo: https://github.com/grafana/grafana-image-renderer.git
+    dest: /usr/local/share/grafana-image-renderer
+    version: master
+    force: true
+  become: true
+  become_user: grafana
+  notify: Restart Image Renderer
+
+- name: Build Grafana Image Renderer (Go)
+  ansible.builtin.shell: |
+    /usr/local/go/bin/go build -buildvcs=false -o grafana-image-renderer .
+  args:
+    chdir: /usr/local/share/grafana-image-renderer
+  become: true
+  become_user: grafana
+  environment:
+    CGO_ENABLED: "0"
+    GOCACHE: "/usr/local/share/grafana-image-renderer/.cache/go-build"
+    GOMODCACHE: "/usr/local/share/grafana-image-renderer/.cache/go-mod"
+  changed_when: true
+  notify: Restart Image Renderer
+
+- name: Deploy Image Renderer Service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/grafana-image-renderer.service
+    content: |
+      [Unit]
+      Description=Grafana Image Renderer
+      After=network.target
+
+      [Service]
+      ExecStart=/usr/local/share/grafana-image-renderer/grafana-image-renderer server
+      WorkingDirectory=/usr/local/share/grafana-image-renderer
+      Restart=always
+      User=grafana
+      Group=grafana
+      Environment=HTTP_PORT=8081
+      Environment=CHROME_BIN=/usr/bin/chromium
+      Environment=GF_RENDERER_PLUGIN_MODE=true
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+  notify: Restart Image Renderer
+
+- name: Enable and Start Image Renderer Service
+  ansible.builtin.systemd:
+    name: grafana-image-renderer
+    enabled: true
+    state: started
+
+- name: Remove Old Plugin (Cleanup)
+  ansible.builtin.file:
+    path: /var/lib/grafana/plugins/grafana-image-renderer
+    state: absent
+  notify: Restart Grafana
+
 - name: Configure Grafana SSO (Authentik)
   ansible.builtin.copy:
     dest: /etc/grafana/grafana.ini
@@ -47,6 +152,11 @@
 
       [security]
       admin_password = {{ grafana_admin_password }}
+
+      [rendering]
+      server_url = http://localhost:8081/render
+      callback_url = http://localhost:3000/
+      renderer_log_level = debug
 
 - name: Create Provisioning Directory
   ansible.builtin.file:
@@ -115,6 +225,15 @@
     mode: '0644'
   notify: Restart Grafana
 
+
+  notify: Restart Grafana
+
+- name: Configure Grafana Environment (Unsigned Plugins)
+  ansible.builtin.lineinfile:
+    path: /etc/default/grafana-server
+    line: 'GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=grafana-image-renderer'
+    create: true
+  notify: Restart Grafana
 
 - name: Start Grafana
   ansible.builtin.service:
