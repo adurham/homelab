@@ -1585,7 +1585,45 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.axisPlacement",
+                                "value": "right"
+                            },
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            },
+                            {
+                                "id": "max",
+                                "value": 100
+                            },
+                            {
+                                "id": "min",
+                                "value": 0
+                            },
+                            {
+                                "id": "custom.axisLabel",
+                                "value": "Position (%)"
+                            },
+                            {
+                                "id": "custom.lineInterpolation",
+                                "value": "stepAfter"
+                            },
+                            {
+                                "id": "custom.fillOpacity",
+                                "value": 20
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -1605,6 +1643,26 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_0c83_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (A)",
+                    "refId": "D"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_89ae_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (B)",
+                    "refId": "E"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_a_vent_position\"}",
+                    "legendFormat": "Vent Position (A)",
+                    "refId": "B"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_b_vent_position\"}",
+                    "legendFormat": "Vent Position (B)",
+                    "refId": "C"
                 }
             ],
             "title": "Game Room",
@@ -1625,7 +1683,21 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -1653,6 +1725,26 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_0c83_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (A)",
+                    "refId": "D"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_89ae_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (B)",
+                    "refId": "E"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_a_vent_position\"}",
+                    "legendFormat": "Vent Position (A)",
+                    "refId": "B"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_b_vent_position\"}",
+                    "legendFormat": "Vent Position (B)",
+                    "refId": "C"
                 }
             ],
             "title": "",
@@ -1673,7 +1765,45 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.axisPlacement",
+                                "value": "right"
+                            },
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            },
+                            {
+                                "id": "max",
+                                "value": 100
+                            },
+                            {
+                                "id": "min",
+                                "value": 0
+                            },
+                            {
+                                "id": "custom.axisLabel",
+                                "value": "Position (%)"
+                            },
+                            {
+                                "id": "custom.lineInterpolation",
+                                "value": "stepAfter"
+                            },
+                            {
+                                "id": "custom.fillOpacity",
+                                "value": 20
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -1693,6 +1823,16 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8136_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp",
+                    "refId": "D"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_vent_position\"}",
+                    "legendFormat": "Vent Position",
+                    "refId": "B"
                 }
             ],
             "title": "Guest Bedroom 1",
@@ -1713,7 +1853,21 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -1741,6 +1895,16 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8136_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp",
+                    "refId": "D"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_vent_position\"}",
+                    "legendFormat": "Vent Position",
+                    "refId": "B"
                 }
             ],
             "title": "",
@@ -2047,7 +2211,45 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.axisPlacement",
+                                "value": "right"
+                            },
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            },
+                            {
+                                "id": "max",
+                                "value": 100
+                            },
+                            {
+                                "id": "min",
+                                "value": 0
+                            },
+                            {
+                                "id": "custom.axisLabel",
+                                "value": "Position (%)"
+                            },
+                            {
+                                "id": "custom.lineInterpolation",
+                                "value": "stepAfter"
+                            },
+                            {
+                                "id": "custom.fillOpacity",
+                                "value": 20
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -2067,6 +2269,16 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.7wq7_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.basement_4d79_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp",
+                    "refId": "D"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.basement_vent_position\"}",
+                    "legendFormat": "Vent Position",
+                    "refId": "B"
                 }
             ],
             "title": "Basement",
@@ -2087,7 +2299,21 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -2115,6 +2341,16 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.7wq7_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.basement_4d79_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp",
+                    "refId": "D"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.basement_vent_position\"}",
+                    "legendFormat": "Vent Position",
+                    "refId": "B"
                 }
             ],
             "title": "",
@@ -2209,7 +2445,7 @@
             "type": "stat"
         }
     ],
-    "refresh": "auto",
+    "refresh": "1m",
     "schemaVersion": 27,
     "style": "dark",
     "tags": [
@@ -2220,7 +2456,7 @@
         "list": []
     },
     "time": {
-        "from": "now-6h",
+        "from": "now-1h",
         "to": "now"
     },
     "timepicker": {},

@@ -29,11 +29,11 @@
               entity_id: sensor.econet_hpwh_hot_water
               below: 21
           sequence:
-            - service: climate.set_hvac_mode
+            - service: climate.set_preset_mode
               target:
                 entity_id: climate.econet_hpwh
               data:
-                hvac_mode: "high_demand"
+                preset_mode: "high_demand"
             - service: persistent_notification.create
               data:
                 title: "Hot Water Recovery"
@@ -49,11 +49,11 @@
               attribute: current_temperature
               above: 120
           sequence:
-            - service: climate.set_hvac_mode
+            - service: climate.set_preset_mode
               target:
                 entity_id: climate.econet_hpwh
               data:
-                hvac_mode: "heat_pump"
+                preset_mode: "heat_pump"
             - service: persistent_notification.create
               data:
                 title: "Hot Water Restored"

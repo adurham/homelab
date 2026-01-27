@@ -41,6 +41,15 @@ all:
       vars:
         ansible_user: root
 
+    proxy_server:
+      hosts:
+        proxy-01:
+          ansible_host: 172.16.0.12
+          vmid: 108
+          target_node: pve03
+      vars:
+        ansible_user: root
+
     tailscale:
       hosts:
         tailscale-gw:

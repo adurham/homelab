@@ -52,6 +52,20 @@
   ansible.builtin.shell: "pct set {{ lxc_id }} -net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1"
   when: lxc_check.rc == 0 and net1_check.rc != 0
 
+- name: Ensure Proxy Firewall Configuration
+  ansible.builtin.copy:
+    dest: "/etc/pve/firewall/{{ lxc_id }}.fw"
+    content: |
+      [OPTIONS]
+      enable: 1
+
+      [RULES]
+      IN ACCEPT -p tcp -dport 3128
+    owner: root
+    group: www-data
+    mode: '0640'
+  delegate_to: "{{ proxmox_host }}"
+
 - name: Ensure SSH Service is Running
   delegate_to: "{{ target_node }}"
   ansible.builtin.shell: "pct exec {{ lxc_id }} -- systemctl enable --now ssh"

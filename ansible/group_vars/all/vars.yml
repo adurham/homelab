@@ -6,6 +6,8 @@
 net_private_range: "172.16.0.0/24"
 net_private_gw: "172.16.0.1"
 net_private_bridge: "private"
+net_private_mtu: 1450 # VXLAN Overhead (1500 - 50)
+
 
 # Service IP Addresses (Static)
 ip_dns_primary: "172.16.0.10"

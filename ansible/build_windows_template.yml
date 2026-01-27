@@ -1,0 +1,80 @@
+---
+- name: Provision Windows Server Source VM
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+
+  vars:
+    # Defaults - Override these with -e "vm_id=... vm_name=..."
+    vm_id: 9000
+    vm_name: "win-server-2022-source"
+    target_node: "pve01" # Default to pve01 if not specified
+
+    # ISO Configuration
+    iso_storage: "local"
+    win_iso: "SERVER_EVAL_x64FRE_en-us.iso"
+    virtio_iso: "virtio-win-0.1.285.iso"
+
+    # VM Hardware Specs
+    vm_memory: 4096
+    vm_cores: 4
+    vm_sockets: 1
+    vm_disk_size: "60"
+    vm_disk_storage: "nvme-data"
+
+    # Network
+    vm_bridge: "private" # Using private network for isolation during build
+
+  tasks:
+    - name: "Validate target node"
+      fail:
+        msg: "This playbook must run against the specific target node defined in target_node variable. Current inventory_hostname: {{ inventory_hostname }}"
+      when: inventory_hostname != target_node
+
+    - name: "Check if VM ID {{ vm_id }} already exists"
+      command: "qm status {{ vm_id }}"
+      register: vm_status
+      failed_when: false
+      changed_when: false
+
+    - name: "Fail if VM ID {{ vm_id }} already exists"
+      fail:
+        msg: "VM ID {{ vm_id }} already exists on {{ inventory_hostname }}. Please remove it or choose a different ID."
+      when: vm_status.rc == 0
+
+    - name: "Create Windows Server Source VM ({{ vm_id }})"
+      command: >
+        qm create {{ vm_id }}
+        --name "{{ vm_name }}"
+        --ostype win11
+        --machine q35
+        --bios ovmf
+        --scsihw virtio-scsi-pci
+        --net0 virtio,bridge={{ vm_bridge }},firewall=1
+        --memory {{ vm_memory }}
+        --cores {{ vm_cores }}
+        --sockets {{ vm_sockets }}
+        --efidisk0 {{ vm_disk_storage }}:0,efitype=4m,pre-enrolled-keys=1
+        --ide2 {{ iso_storage }}:iso/{{ win_iso }},media=cdrom
+        --ide0 {{ iso_storage }}:iso/{{ virtio_iso }},media=cdrom
+        --virtio0 {{ vm_disk_storage }}:{{ vm_disk_size }},iothread=1,ssd=1,discard=on
+        --agent 1
+        --vga std
+      register: vm_create
+
+    - name: "Add TPM 2.0 State Drive (Required for Win2022/Win11)"
+      command: "qm set {{ vm_id }} --tpmstate0 {{ vm_disk_storage }}:0,version=v2.0"
+
+    - name: "Set Boot Order"
+      command: "qm set {{ vm_id }} --boot order=ide2;virtio0"
+
+    - name: "Output Success Message"
+      debug:
+        msg:
+          - "Windows Source VM '{{ vm_name }}' ({{ vm_id }}) created successfully on {{ target_node }}."
+          - "Next Steps:"
+          - "1. Open Proxmox Console for VM {{ vm_id }}."
+          - "2. Start the VM."
+          - "3. Proceed with Windows Setup."
+          - "4. When prompted for disk, load 'VirtIO Block' driver from the VirtIO ISO (E:)."
+          - "5. Complete setup and install Guest Agent + NetKVM drivers."

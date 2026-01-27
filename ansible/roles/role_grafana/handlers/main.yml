@@ -3,3 +3,8 @@
   ansible.builtin.service:
     name: grafana-server
     state: restarted
+
+- name: Restart Image Renderer
+  ansible.builtin.service:
+    name: grafana-image-renderer
+    state: restarted

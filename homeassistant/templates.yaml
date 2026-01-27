@@ -71,3 +71,23 @@
       unit_of_measurement: "W"
       device_class: power
       state: "{{ states('sensor.econet_hpwh_power') | float(0) }}"
+
+    - name: "Game Room (A) Vent Position"
+      unique_id: game_room_0c83_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.game_room_0c83_vent', 'current_tilt_position') | float(0) }}"
+
+    - name: "Game Room (B) Vent Position"
+      unique_id: game_room_89ae_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.game_room_89ae_vent', 'current_tilt_position') | float(0) }}"
+
+    - name: "Guest Bedroom 1 Vent Position"
+      unique_id: guest_bedroom_1_8136_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.guest_bedroom_1_8136_vent', 'current_tilt_position') | float(0) }}"
+
+    - name: "Basement Vent Position"
+      unique_id: basement_4d79_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.basement_4d79_vent', 'current_tilt_position') | float(0) }}"

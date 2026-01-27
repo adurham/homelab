@@ -1,0 +1,21 @@
+---
+- name: "Find Node for VM {{ vmid }}"
+  set_fact:
+    vm_node: "{{ (cluster_resources.stdout | from_json | selectattr('vmid', 'equalto', vmid) | list | first).node }}"
+
+
+- name: "Check Network Config for VM {{ vmid }}"
+  delegate_to: "{{ vm_node }}"
+  ansible.builtin.shell: "qm config {{ vmid }} | grep '^net0:' | cut -d' ' -f2-"
+  register: net0_config
+  changed_when: false
+
+- name: "Update Network Interface Firewall and MTU for VM {{ vmid }}"
+  delegate_to: "{{ vm_node }}"
+  ansible.builtin.shell: |
+    CURRENT_CFG="{{ net0_config.stdout }}"
+    # Remove existing firewall or mtu settings to prevent duplication
+    CLEAN_CFG=$(echo "$CURRENT_CFG" | sed -E 's/,firewall=1//g' | sed -E 's/,mtu=[0-9]+//g')
+    # Apply new config with firewall and mtu
+    qm set {{ vmid }} --net0 "${CLEAN_CFG},firewall=1,mtu=1450"
+  when: "'mtu=1450' not in net0_config.stdout or 'firewall=1' not in net0_config.stdout"

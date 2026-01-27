@@ -1,0 +1,17 @@
+---
+- name: Deploy Proxy Container
+  hosts: pve03  # Deploying on pve03 per plan
+  gather_facts: false
+  vars:
+    ip_proxy: "172.16.0.12"
+    proxy_01_root_pass: "changeme" # Should ideally use vault, but using simple default for now as per other roles
+  roles:
+    - proxy_host
+
+- name: Deploy Squid Proxy Service
+  hosts: proxy_server
+  gather_facts: false
+  # Connection via SSH is handled by inventory/group_vars usually, or we ensure keys are injected
+  # The proxy_host role injects keys.
+  roles:
+    - squid_proxy
