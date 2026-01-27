@@ -1,11 +1,72 @@
 ---
 - name: Install Squid
   ansible.builtin.apt:
-    name: squid
+    name:
+      - squid-openssl
+      - openssl
+      - ca-certificates
+      - python3-cryptography
     state: present
     update_cache: true
     cache_valid_time: 3600
 
+- name: Create SSL Directory
+  ansible.builtin.file:
+    path: /etc/squid/ssl
+    state: directory
+    owner: proxy
+    group: proxy
+    mode: '0755'
+
+- name: Generate Private CA Key
+  community.crypto.openssl_privatekey:
+    path: /etc/squid/ssl/squid-ca.key
+    size: 2048
+
+- name: Generate Private CA CSR
+  community.crypto.openssl_csr:
+    path: /etc/squid/ssl/squid-ca.csr
+    privatekey_path: /etc/squid/ssl/squid-ca.key
+    common_name: "Homelab Proxy CA"
+    organization_name: "Homelab"
+    organizational_unit_name: "Proxy Services"
+    basic_constraints: "CA:TRUE"
+    basic_constraints_critical: true
+    key_usage:
+      - keyCertSign
+      - cRLSign
+    key_usage_critical: true
+    owner: proxy
+    group: proxy
+    mode: '0644'
+
+- name: Generate Private CA Certificate
+  community.crypto.x509_certificate:
+    path: /etc/squid/ssl/squid-ca.pem
+    csr_path: /etc/squid/ssl/squid-ca.csr
+    privatekey_path: /etc/squid/ssl/squid-ca.key
+    provider: selfsigned
+    selfsigned_not_after: "+3650d"
+    selfsigned_digest: sha256
+    selfsigned_create_subject_key_identifier: always_create
+    force: true
+    owner: proxy
+    group: proxy
+    mode: '0644'
+  notify: Restart Squid
+
+- name: Initialize SSL Certificate Database
+  ansible.builtin.command:
+    cmd: /usr/lib/squid/security_file_certgen -c -s /var/spool/squid/ssl_db -M 4MB
+    creates: /var/spool/squid/ssl_db
+  become: true
+  become_user: proxy
+
+- name: Fetch CA Certificate to Controller
+  ansible.builtin.fetch:
+    src: /etc/squid/ssl/squid-ca.pem
+    dest: artifacts/
+    flat: true
 - name: Configure Squid
   ansible.builtin.template:
     src: squid.conf.j2
