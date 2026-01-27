@@ -225,9 +225,6 @@
     mode: '0644'
   notify: Restart Grafana
 
-
-  notify: Restart Grafana
-
 - name: Configure Grafana Environment (Unsigned Plugins)
   ansible.builtin.lineinfile:
     path: /etc/default/grafana-server

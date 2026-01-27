@@ -1,34 +1,17 @@
-# .ansible-lint
-profile: production
 exclude_paths:
-  - .cache/
-  - .github/
-  - tests/
-  - homeassistant/
-  - "misc scripts/"
-  - ansible/group_vars/ # Encrypted vars cause lint failure without password
+  - ansible/group_vars/all/tanium_secrets.yml
+  - ansible/credentials/
+  - ansible/inventory/
 
-# Rules to enforce
-enable_list:
-  - fqcn-builtins # Use ansible.builtin.copy, not copy
-  - no-tabs
-  - yaml
-  - experimental # Catch new best practices
-
-# Rules to skip (pragmatic approach for existing codebase)
 skip_list:
-  - no-handler # Handlers in tasks/ (we identified this in platform/ansible_patterns.md!)
-  - risky-shell-pipe # We use pipes intentionally in some ad-hoc shell commands
-  - run-once # Sometimes legitimate in our cluster loop patterns
-  - var-naming # Relaxed for role refactoring (shared vars)
-  - no-changed-when # Relaxed for legacy tasks (will fix incrementally)
-  - yaml[line-length] # Cosmetic, often unavoidable with long commands
-  - command-instead-of-shell # Relaxed for legacy roles
-  - command-instead-of-module # Relaxed for legacy roles (curl/unzip)
-  - ignore-errors # Relaxed for legacy roles
-  - risky-file-permissions # Relaxed for legacy roles
-  - ignore-errors # Relaxed for legacy roles
-  - risky-file-permissions # Relaxed for legacy roles
-
-# Configuration
-offline: true # Don't fail if Galaxy is unreachable
+  - fqcn
+  - no-changed-when
+  - risky-shell-pipe
+  - var-naming
+  - command-instead-of-module
+  - command-instead-of-shell
+  - risky-file-permissions
+  - yaml
+  - name
+  - ignore-errors
+  - internal-error

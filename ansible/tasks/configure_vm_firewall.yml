@@ -1,6 +1,6 @@
 ---
 - name: "Find Node for VM {{ vmid }}"
-  set_fact:
+  ansible.builtin.set_fact:
     vm_node: "{{ (cluster_resources.stdout | from_json | selectattr('vmid', 'equalto', vmid) | list | first).node }}"
 
 
