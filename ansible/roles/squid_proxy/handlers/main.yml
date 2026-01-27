@@ -3,3 +3,10 @@
   ansible.builtin.service:
     name: squid
     state: restarted
+
+- name: Enable ARP Service
+  ansible.builtin.systemd:
+    name: arp-announce
+    state: started
+    enabled: true
+    daemon_reload: true

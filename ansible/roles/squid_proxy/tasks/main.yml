@@ -6,9 +6,31 @@
       - openssl
       - ca-certificates
       - python3-cryptography
+      - iputils-arping
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+- name: Create ARP Announce Service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/arp-announce.service
+    content: |
+      [Unit]
+      Description=Send Gratuitous ARP on network up
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/arping -A -c 5 -I eth0 172.16.0.12
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Enable ARP Service
 
 - name: Create SSL Directory
   ansible.builtin.file:
