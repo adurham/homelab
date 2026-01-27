@@ -160,7 +160,7 @@
             }
         }
     ],
-    "refresh": "1m",
+    "refresh": "auto",
     "schemaVersion": 27,
     "style": "dark",
     "tags": [],
