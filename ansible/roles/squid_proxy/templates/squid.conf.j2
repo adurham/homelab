@@ -18,7 +18,14 @@ acl Safe_ports port 777		# multiling http
 acl CONNECT method CONNECT
 
 # Access Control
-# Allow everything (Security handled by Proxmox Firewall)
+# Tanium Lockdown on Port 3130
+acl tanium_appliances src 172.16.0.51-172.16.0.56
+acl port_3130 localport 3130
+
+http_access allow tanium_appliances port_3130
+http_access deny port_3130
+
+# Allow everything else (Security handled by Proxmox Firewall)
 http_access allow all
 
 # Proxy Port with SSL Bump
