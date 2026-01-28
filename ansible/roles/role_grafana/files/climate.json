@@ -1497,7 +1497,45 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.axisPlacement",
+                                "value": "right"
+                            },
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            },
+                            {
+                                "id": "max",
+                                "value": 100
+                            },
+                            {
+                                "id": "min",
+                                "value": 0
+                            },
+                            {
+                                "id": "custom.axisLabel",
+                                "value": "Position (%)"
+                            },
+                            {
+                                "id": "custom.lineInterpolation",
+                                "value": "stepAfter"
+                            },
+                            {
+                                "id": "custom.fillOpacity",
+                                "value": 20
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -1517,6 +1555,16 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_b58e_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp",
+                    "refId": "D"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b58e_vent_position\"}",
+                    "legendFormat": "Vent Position",
+                    "refId": "B"
                 }
             ],
             "title": "Cat Room",
@@ -1537,7 +1585,21 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -1565,6 +1627,16 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_b58e_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp",
+                    "refId": "D"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b58e_vent_position\"}",
+                    "legendFormat": "Vent Position",
+                    "refId": "B"
                 }
             ],
             "title": "",
@@ -1655,6 +1727,11 @@
                     "refId": "E"
                 },
                 {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_889a_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (C)",
+                    "refId": "G"
+                },
+                {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_a_vent_position\"}",
                     "legendFormat": "Vent Position (A)",
                     "refId": "B"
@@ -1663,6 +1740,11 @@
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_b_vent_position\"}",
                     "legendFormat": "Vent Position (B)",
                     "refId": "C"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_889a_vent_position\"}",
+                    "legendFormat": "Vent Position (C)",
+                    "refId": "F"
                 }
             ],
             "title": "Game Room",
@@ -1737,6 +1819,11 @@
                     "refId": "E"
                 },
                 {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_889a_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (C)",
+                    "refId": "G"
+                },
+                {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_a_vent_position\"}",
                     "legendFormat": "Vent Position (A)",
                     "refId": "B"
@@ -1745,6 +1832,11 @@
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_b_vent_position\"}",
                     "legendFormat": "Vent Position (B)",
                     "refId": "C"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_889a_vent_position\"}",
+                    "legendFormat": "Vent Position (C)",
+                    "refId": "F"
                 }
             ],
             "title": "",
@@ -2109,7 +2201,45 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.axisPlacement",
+                                "value": "right"
+                            },
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            },
+                            {
+                                "id": "max",
+                                "value": 100
+                            },
+                            {
+                                "id": "min",
+                                "value": 0
+                            },
+                            {
+                                "id": "custom.axisLabel",
+                                "value": "Position (%)"
+                            },
+                            {
+                                "id": "custom.lineInterpolation",
+                                "value": "stepAfter"
+                            },
+                            {
+                                "id": "custom.fillOpacity",
+                                "value": 20
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -2129,6 +2259,16 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_e5a3_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp",
+                    "refId": "D"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_e5a3_vent_position\"}",
+                    "legendFormat": "Vent Position",
+                    "refId": "B"
                 }
             ],
             "title": "Guest Bathroom",
@@ -2149,7 +2289,21 @@
                         "showPoints": "never"
                     },
                     "unit": "fahrenheit"
-                }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byRegexp",
+                            "options": ".*Vent.*"
+                        },
+                        "properties": [
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            }
+                        ]
+                    }
+                ]
             },
             "gridPos": {
                 "h": 10,
@@ -2177,6 +2331,16 @@
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_temperature\"} * 1.8) + 32",
                     "legendFormat": "Room Temp",
                     "refId": "A"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_e5a3_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp",
+                    "refId": "D"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_e5a3_vent_position\"}",
+                    "legendFormat": "Vent Position",
+                    "refId": "B"
                 }
             ],
             "title": "",
