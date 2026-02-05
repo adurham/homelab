@@ -6,3 +6,14 @@
   unit_prefix: k
   method: left
   round: 2
+
+# Sony TV Picture Mode (REST API)
+- platform: rest
+  name: "Sony TV Picture Mode"
+  resource: http://192.168.86.195/sony/video
+  method: POST
+  headers:
+    X-Auth-PSK: "232689"
+  payload: '{"method": "getPictureQualitySettings", "version": "1.0", "params": [{"target": "pictureMode"}], "id": 1}'
+  value_template: "{{ value_json.result[0][0].currentValue }}"
+  scan_interval: 10

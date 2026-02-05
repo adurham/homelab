@@ -1,0 +1,166 @@
+# yamllint disable rule:line-length
+- alias: "Entertainment: PS5 Hue Sync"
+  description: "Sync lights when PS5 is on via Sync Box HDMI 2"
+  mode: restart
+
+  trigger:
+    # Trigger on any content change
+    - platform: state
+      entity_id: sensor.living_room_sync_box_content_info
+      id: "content_change"
+    # Trigger on Picture Mode change (e.g. Game -> Standard)
+    - platform: state
+      entity_id: sensor.sony_tv_picture_mode
+      id: "picture_change"
+
+    # Trigger off conditions with duration
+    - platform: state
+      entity_id: sensor.living_room_sync_box_content_info
+      to: "no_signal"
+      for: "00:00:30"
+      id: "off_signal"
+    - platform: state
+      entity_id: sensor.living_room_sync_box_hdmi2_status
+      to: "unplugged"
+      for: "00:00:30"
+      id: "off_unplugged"
+
+  action:
+    # Force update of Picture Mode Sensor to avoid race condition
+    - service: homeassistant.update_entity
+      target:
+        entity_id: sensor.sony_tv_picture_mode
+    - choose:
+        # OFF Sequence
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: trigger
+                  id: "off_signal"
+                - condition: trigger
+                  id: "off_unplugged"
+          sequence:
+            # Stop Light Sync explicitly
+            - service: switch.turn_off
+              target:
+                entity_id: switch.living_room_sync_box_light_sync
+
+            # RESTORE: Try snapshot, fallback to Read
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ states('scene.before_ps5_sync') not in ['unknown', 'unavailable', 'none'] }}"
+                  sequence:
+                    - service: scene.turn_on
+                      target:
+                        entity_id: scene.before_ps5_sync
+              default:
+                - service: scene.turn_on
+                  target:
+                    entity_id: scene.living_room_read
+
+        # GAME Mode (Picture Mode = Game AND Signal Present)
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: trigger
+                  id: "content_change"
+                - condition: trigger
+                  id: "picture_change"
+            - condition: template
+              value_template: "{{ 'no_signal' not in states('sensor.living_room_sync_box_content_info') }}"
+            - condition: template
+              value_template: "{{ '0 x 0' not in states('sensor.living_room_sync_box_content_info') }}"
+            - condition: template
+              value_template: "{{ 'game' in states('sensor.sony_tv_picture_mode') | lower }}"
+          sequence:
+            # SNAPSHOT: Capture state if starting session
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: switch.living_room_sync_box_light_sync
+                      state: "off"
+                  sequence:
+                    - service: scene.create
+                      data:
+                        scene_id: "before_ps5_sync"
+                        snapshot_entities: "light.living_room"
+
+            # Ensure Sync is On (Robust Loop)
+            - repeat:
+                until:
+                  - condition: state
+                    entity_id: switch.living_room_sync_box_light_sync
+                    state: "on"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: switch.living_room_sync_box_light_sync
+                  - delay: "00:00:02"
+            # Set Game Mode
+            - service: select.select_option
+              target:
+                entity_id: select.living_room_sync_box_sync_mode
+              data:
+                option: "game"
+            - delay: "00:00:01"
+            - service: select.select_option
+              target:
+                entity_id: select.living_room_sync_box_intensity
+              data:
+                option: "intense"
+
+        # VIDEO Mode (60Hz / non-VRR / non-Game)
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: trigger
+                  id: "content_change"
+                - condition: trigger
+                  id: "picture_change"
+            - condition: template
+              value_template: "{{ '60' in states('sensor.living_room_sync_box_content_info') }}"
+            - condition: template
+              value_template: "{{ 'vrr' not in states('sensor.living_room_sync_box_content_info') | lower }}"
+            - condition: template
+              value_template: "{{ 'no_signal' not in states('sensor.living_room_sync_box_content_info') }}"
+            - condition: not
+              conditions:
+                - condition: template
+                  value_template: "{{ 'game' in states('sensor.sony_tv_picture_mode') | lower }}"
+          sequence:
+            # SNAPSHOT: Capture state if starting session
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: switch.living_room_sync_box_light_sync
+                      state: "off"
+                  sequence:
+                    - service: scene.create
+                      data:
+                        scene_id: "before_ps5_sync"
+                        snapshot_entities: "light.living_room"
+
+            # Ensure Sync is On (Robust Loop)
+            - repeat:
+                until:
+                  - condition: state
+                    entity_id: switch.living_room_sync_box_light_sync
+                    state: "on"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: switch.living_room_sync_box_light_sync
+                  - delay: "00:00:02"
+            # Set Video Mode
+            - service: select.select_option
+              target:
+                entity_id: select.living_room_sync_box_sync_mode
+              data:
+                option: "video"
+            - delay: "00:00:01"
+            - service: select.select_option
+              target:
+                entity_id: select.living_room_sync_box_intensity
+              data:
+                option: "moderate"
