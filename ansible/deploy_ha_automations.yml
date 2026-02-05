@@ -14,9 +14,10 @@
 
     - name: Copy Files (Automations, Templates, Sensors)
       ansible.builtin.shell: >
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ local_automations_dir }}/*.yaml {{ ansible_user }}@{{ ansible_host }}:/config/automations/ && \
+        scp -P {{ ansible_port }} -r -o StrictHostKeyChecking=no {{ local_automations_dir }} {{ ansible_user }}@{{ ansible_host }}:/config/automations/ && \
         scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ playbook_dir }}/../homeassistant/templates.yaml {{ ansible_user }}@{{ ansible_host }}:/config/ && \
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ playbook_dir }}/../homeassistant/sensors.yaml {{ ansible_user }}@{{ ansible_host }}:/config/
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ playbook_dir }}/../homeassistant/sensors.yaml {{ ansible_user }}@{{ ansible_host }}:/config/ && \
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ playbook_dir }}/../homeassistant/apps/apps.yaml {{ ansible_user }}@{{ ansible_host }}:/config/apps/
       delegate_to: localhost
       register: scp_result
       changed_when: scp_result.rc == 0
@@ -27,7 +28,8 @@
       changed_when: false
       failed_when: "'Command completed successfully' not in config_check.stdout and config_check.rc != 0"
 
-    - name: Restart Core
-      raw: "ha core restart"
-      register: restart_core
-      changed_when: restart_core.rc == 0
+    - name: Reload Automations via API
+      ansible.builtin.shell: "python3 {{ playbook_dir }}/../reload_ha_automations.py"
+      delegate_to: localhost
+      register: reload_result
+      changed_when: reload_result.rc == 0
