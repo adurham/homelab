@@ -20,14 +20,6 @@
     # 2. Check Temperatures (Start Condition)
     - condition: or
       conditions:
-        # Kitchen (Branch off Main) < 75F
-        - condition: numeric_state
-          entity_id: sensor.kitchen_water_temp_sensor
-          below: 75
-        # Main Bath (Branch off Main) < 72F
-        - condition: numeric_state
-          entity_id: sensor.main_bathroom_temp_sensor
-          below: 72
         # Guest Bath (Active Loop Endpoint) < 75F
         - condition: numeric_state
           entity_id: sensor.guest_bathroom_water_temp_sensor
