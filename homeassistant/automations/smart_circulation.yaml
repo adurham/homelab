@@ -11,23 +11,27 @@
     # 1. Cooldown Period (Must be > 30 mins since last stop)
     - condition: template
       value_template: >
-        {% set stop_time = state_attr('input_datetime.smart_circulation_last_stopped', 'timestamp') | default(0) %}
+        {% set stop_time = state_attr(
+          'input_datetime.smart_circulation_last_stopped',
+          'timestamp'
+        ) | default(0) %}
         {{ (now().timestamp() - stop_time) > 600 }}
 
     # 2. Check Temperatures (Start Condition)
     - condition: or
       conditions:
-        # Kitchen (Copper) < 88F
+        # Kitchen (Branch off Main) < 75F
         - condition: numeric_state
           entity_id: sensor.kitchen_water_temp_sensor
-          below: 85
-        # Bathrooms (Calibrated) < 85F
+          below: 75
+        # Main Bath (Branch off Main) < 72F
         - condition: numeric_state
           entity_id: sensor.main_bathroom_temp_sensor
-          below: 80
+          below: 72
+        # Guest Bath (Active Loop Endpoint) < 75F
         - condition: numeric_state
           entity_id: sensor.guest_bathroom_water_temp_sensor
-          below: 85
+          below: 75
 
     # 3. Safety Check (Tank Capacity)
     - condition: numeric_state
@@ -52,12 +56,11 @@
 
     # Monitor Loop (Wait for Cutoff)
     - wait_for_trigger:
-        # Goal: Stop when ALL targets are met
+        # Goal: Stop when Upstairs (Guest) Loop is active
+        # Kitchen and Main Bath are dead legs and may not heat up.
         - platform: template
           value_template: >
             {{
-              states('sensor.kitchen_water_temp_sensor')|float(0) > 90 and
-              states('sensor.main_bathroom_temp_sensor')|float(0) > 85 and
               states('sensor.guest_bathroom_water_temp_sensor')|float(0) > 90
             }}
 

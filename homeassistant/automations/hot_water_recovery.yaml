@@ -7,13 +7,13 @@
     # Trigger 1: Low Hot Water (Emergency Recovery)
     - platform: numeric_state
       entity_id: sensor.econet_hpwh_hot_water
-      below: 21
+      below: 40
       id: "low_hot_water"
 
     # Trigger 2: Recovery Complete
     - platform: numeric_state
       entity_id: sensor.econet_hpwh_hot_water
-      above: 50
+      above: 40
       id: "recovery_complete"
 
   condition: []
@@ -27,7 +27,7 @@
             # Double check state to avoid flapping
             - condition: numeric_state
               entity_id: sensor.econet_hpwh_hot_water
-              below: 21
+              below: 40
           sequence:
             - service: climate.set_preset_mode
               target:
@@ -37,7 +37,7 @@
             - service: persistent_notification.create
               data:
                 title: "Hot Water Recovery"
-                message: "Hot water low (<20%). Switched to High Demand mode."
+                message: "Hot water low (<40%). Switched to High Demand mode."
 
         # Case B: Recovery Complete -> Heat Pump (Eco)
         - conditions:
@@ -53,8 +53,8 @@
               target:
                 entity_id: climate.econet_hpwh
               data:
-                preset_mode: "heat_pump"
+                preset_mode: "Eco Mode"
             - service: persistent_notification.create
               data:
                 title: "Hot Water Restored"
-                message: "Hot water recovered (>50%). Switched back to Heat Pump mode."
+                message: "Hot water recovered (>40%). Back to Eco Mode."
