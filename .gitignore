@@ -126,3 +126,5 @@ misc scripts/grafana_token.txt
 .ansible/
 *.retry
 lint_report.txt
+ansible/files/*.exe
+ansible/files/*.txt

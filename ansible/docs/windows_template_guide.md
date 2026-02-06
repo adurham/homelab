@@ -6,7 +6,7 @@ This guide details the process of creating a "Golden Image" template for Windows
 
 Ensure the following ISOs are available on your Proxmox node's storage (e.g., `local:iso`):
 
-- **Windows Server ISO**: `SERVER_EVAL_x64FRE_en-us.iso`
+- **Windows Server ISO**: `en-us_windows_server_2022_updated_jan_2026_x64_dvd_5241863a.iso`
 - **VirtIO Drivers ISO**: `virtio-win-0.1.285.iso`
 
 ## 2. Infrastructure Provisioning
@@ -29,7 +29,8 @@ ansible-playbook -i ansible/inventory/proxmox.yml ansible/build_windows_template
 3. **Windows Setup**:
     - Select Language/Time/Keyboard.
     - Click **Install Now**.
-    - Select **Windows Server 2022 Standard Evaluation (Desktop Experience)**.
+    - **Enter Product Key**: Retrieve the key from the vault: `ansible-vault view ansible/group_vars/all/vault.yml | grep vault_windows_server_2022_mak` (It is stored in `vault_windows_server_2022_mak`).
+    - Select **Windows Server 2022 Standard (Desktop Experience)**.
     - Accept license terms.
     - Select **Custom: Install Windows only (advanced)**.
 4. **Load Storage Driver**:
@@ -37,7 +38,7 @@ ansible-playbook -i ansible/inventory/proxmox.yml ansible/build_windows_template
     - *Action*: Click **Load Driver** -> **Browse**.
     - Navigate to `virtio-win-0.1.285` (CD Drive) -> `viostor` -> `2k22` -> `amd64`.
     - Select **Red Hat VirtIO SCSI controller** (Note: This is the VirtIO Block driver).
-    - Click **Next**. The 60GB drive should appear.
+    - Click **Next**. The 60GB drive should appear. (Note: `cache=writeback` is enabled for performance).
 5. **Install**: Select the drive and click **Next**. Windows will install and reboot.
 
 ## 4. Post-Installation Configuration

@@ -12,7 +12,7 @@
 
     # ISO Configuration
     iso_storage: "local"
-    win_iso: "SERVER_EVAL_x64FRE_en-us.iso"
+    win_iso: "en-us_windows_server_2022_updated_jan_2026_x64_dvd_5241863a.iso"
     virtio_iso: "virtio-win-0.1.285.iso"
 
     # VM Hardware Specs
@@ -57,7 +57,7 @@
         --efidisk0 {{ vm_disk_storage }}:0,efitype=4m,pre-enrolled-keys=1
         --ide2 {{ iso_storage }}:iso/{{ win_iso }},media=cdrom
         --ide0 {{ iso_storage }}:iso/{{ virtio_iso }},media=cdrom
-        --virtio0 {{ vm_disk_storage }}:{{ vm_disk_size }},iothread=1,ssd=1,discard=on
+        --virtio0 {{ vm_disk_storage }}:{{ vm_disk_size }},iothread=1,cache=writeback
         --agent 1
         --vga std
       register: vm_create
