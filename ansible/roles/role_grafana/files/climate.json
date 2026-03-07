@@ -108,22 +108,22 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_fc56_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp (Left)",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_5d8e_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp (Right)",
+                    "legendFormat": "Duct Temp (B)",
                     "refId": "C"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_left_vent_position\"}",
-                    "legendFormat": "Left Vent",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_right_vent_position\"}",
-                    "legendFormat": "Right Vent",
+                    "legendFormat": "Vent Position (B)",
                     "refId": "E"
                 }
             ],
@@ -214,22 +214,22 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_fc56_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp (Left)",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_5d8e_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp (Right)",
+                    "legendFormat": "Duct Temp (B)",
                     "refId": "C"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_left_vent_position\"}",
-                    "legendFormat": "Left Vent",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_right_vent_position\"}",
-                    "legendFormat": "Right Vent",
+                    "legendFormat": "Vent Position (B)",
                     "refId": "E"
                 }
             ],
@@ -312,12 +312,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.kitchen_d124_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.kitchen_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -408,12 +408,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.kitchen_d124_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.kitchen_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -496,12 +496,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.dining_room_7a28_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.dining_room_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -592,12 +592,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.dining_room_7a28_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.dining_room_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -680,12 +680,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.hallway_907e_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.hallway_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -776,12 +776,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.hallway_907e_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.hallway_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -864,32 +864,32 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_a96d_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct A",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_5c2b_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct B",
+                    "legendFormat": "Duct Temp (B)",
                     "refId": "C"
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_883f_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct C",
+                    "legendFormat": "Duct Temp (C)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_a_vent_position\"}",
-                    "legendFormat": "Vent A",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "E"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_b_vent_position\"}",
-                    "legendFormat": "Vent B",
+                    "legendFormat": "Vent Position (B)",
                     "refId": "F"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_c_vent_position\"}",
-                    "legendFormat": "Vent C",
+                    "legendFormat": "Vent Position (C)",
                     "refId": "G"
                 }
             ],
@@ -980,32 +980,32 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_a96d_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct A",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_5c2b_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct B",
+                    "legendFormat": "Duct Temp (B)",
                     "refId": "C"
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_883f_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct C",
+                    "legendFormat": "Duct Temp (C)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_a_vent_position\"}",
-                    "legendFormat": "Vent A",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "E"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_b_vent_position\"}",
-                    "legendFormat": "Vent B",
+                    "legendFormat": "Vent Position (B)",
                     "refId": "F"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_c_vent_position\"}",
-                    "legendFormat": "Vent C",
+                    "legendFormat": "Vent Position (C)",
                     "refId": "G"
                 }
             ],
@@ -1088,12 +1088,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bathroom_f586_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bathroom_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -1184,12 +1184,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bathroom_f586_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bathroom_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -1272,12 +1272,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.laundry_room_d189_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.laundry_room_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -1368,12 +1368,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.laundry_room_d189_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.laundry_room_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -1557,14 +1557,24 @@
                     "refId": "A"
                 },
                 {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_3075_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (A)",
+                    "refId": "B"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_3075_vent_position\"}",
+                    "legendFormat": "Vent Position (A)",
+                    "refId": "C"
+                },
+                {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_b58e_duct_temperature\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (B)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b58e_vent_position\"}",
-                    "legendFormat": "Vent Position",
-                    "refId": "B"
+                    "legendFormat": "Vent Position (B)",
+                    "refId": "E"
                 }
             ],
             "title": "Cat Room",
@@ -1629,14 +1639,24 @@
                     "refId": "A"
                 },
                 {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_3075_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (A)",
+                    "refId": "B"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_3075_vent_position\"}",
+                    "legendFormat": "Vent Position (A)",
+                    "refId": "C"
+                },
+                {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_b58e_duct_temperature\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (B)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b58e_vent_position\"}",
-                    "legendFormat": "Vent Position",
-                    "refId": "B"
+                    "legendFormat": "Vent Position (B)",
+                    "refId": "E"
                 }
             ],
             "title": "",
@@ -1917,14 +1937,24 @@
                     "refId": "A"
                 },
                 {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8d6d_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (A)",
+                    "refId": "B"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8d6d_vent_position\"}",
+                    "legendFormat": "Vent Position (A)",
+                    "refId": "C"
+                },
+                {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8136_duct_temperature\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (B)",
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_vent_position\"}",
-                    "legendFormat": "Vent Position",
-                    "refId": "B"
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8136_vent_position\"}",
+                    "legendFormat": "Vent Position (B)",
+                    "refId": "E"
                 }
             ],
             "title": "Guest Bedroom 1",
@@ -1989,14 +2019,24 @@
                     "refId": "A"
                 },
                 {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8d6d_duct_temperature\"} * 1.8) + 32",
+                    "legendFormat": "Duct Temp (A)",
+                    "refId": "B"
+                },
+                {
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8d6d_vent_position\"}",
+                    "legendFormat": "Vent Position (A)",
+                    "refId": "C"
+                },
+                {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8136_duct_temperature\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (B)",
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_vent_position\"}",
-                    "legendFormat": "Vent Position",
-                    "refId": "B"
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8136_vent_position\"}",
+                    "legendFormat": "Vent Position (B)",
+                    "refId": "E"
                 }
             ],
             "title": "",
@@ -2078,12 +2118,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_2_1ec7_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_2_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -2174,12 +2214,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_2_1ec7_duct_temperature_2\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "B"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_2_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
             ],
@@ -2262,12 +2302,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_e5a3_duct_temperature\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_e5a3_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "B"
                 }
             ],
@@ -2334,12 +2374,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_e5a3_duct_temperature\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_e5a3_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "B"
                 }
             ],
@@ -2436,12 +2476,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.basement_4d79_duct_temperature\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.basement_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "B"
                 }
             ],
@@ -2508,12 +2548,12 @@
                 },
                 {
                     "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.basement_4d79_duct_temperature\"} * 1.8) + 32",
-                    "legendFormat": "Duct Temp",
+                    "legendFormat": "Duct Temp (A)",
                     "refId": "D"
                 },
                 {
                     "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.basement_vent_position\"}",
-                    "legendFormat": "Vent Position",
+                    "legendFormat": "Vent Position (A)",
                     "refId": "B"
                 }
             ],
