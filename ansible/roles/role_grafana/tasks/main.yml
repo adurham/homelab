@@ -216,6 +216,15 @@
     mode: '0644'
   notify: Restart Grafana
 
+- name: Deploy Heat Pump Water Heater Dashboard
+  ansible.builtin.copy:
+    src: heat_pump_water_heater.json
+    dest: /var/lib/grafana/dashboards/heat_pump_water_heater.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
 - name: Deploy Climate Dashboard
   ansible.builtin.copy:
     src: climate.json
