@@ -528,7 +528,7 @@
             "pluginVersion": "7.5.7",
             "targets": [
                 {
-                    "expr": "homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_discharge_temperature\"}",
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.econet_hpwh_discharge_temperature\"} * 1.8) + 32 or homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_discharge_temperature\"}",
                     "interval": "",
                     "legendFormat": "",
                     "refId": "A"
@@ -666,25 +666,25 @@
             "pluginVersion": "7.5.7",
             "targets": [
                 {
-                    "expr": "homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_evaporator_temperature\"}",
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.econet_hpwh_evaporator_temperature\"} * 1.8) + 32 or homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_evaporator_temperature\"}",
                     "interval": "",
                     "legendFormat": "Evaporator",
                     "refId": "A"
                 },
                 {
-                    "expr": "homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_suction_temperature\"}",
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.econet_hpwh_suction_temperature\"} * 1.8) + 32 or homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_suction_temperature\"}",
                     "interval": "",
                     "legendFormat": "Suction",
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_discharge_temperature\"}",
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.econet_hpwh_discharge_temperature\"} * 1.8) + 32 or homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_discharge_temperature\"}",
                     "interval": "",
                     "legendFormat": "Discharge",
                     "refId": "C"
                 },
                 {
-                    "expr": "homeassistant_sensor_percent{entity=\"sensor.econet_hpwh_expansion_valve_current_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.econet_hpwh_expansion_valve_current_position\"}",
                     "interval": "",
                     "legendFormat": "Expansion Valve",
                     "refId": "D"
