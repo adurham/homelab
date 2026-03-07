@@ -28,12 +28,10 @@
 
   action:
     - choose:
-        # Case A: Low Hot Water or Deadband Hit -> High Demand
+        # Case A: Emergency Low Hot Water -> High Demand (compressor + elements)
         - conditions:
             - condition: trigger
-              id:
-                - "low_hot_water"
-                - "deadband_recovery"
+              id: "low_hot_water"
             - condition: not
               conditions:
                 - condition: state
@@ -48,23 +46,45 @@
                 preset_mode: "High Demand"
             - service: persistent_notification.create
               data:
-                title: "Hot Water Recovery"
+                title: "Hot Water Emergency Recovery"
                 message: >
-                  {% if trigger.id == 'low_hot_water' %}
                   Hot water low (<35%). Switched to High Demand for rapid recovery.
-                  {% else %}
-                  Lower tank {{ states('sensor.econet_hpwh_lower_tank_temperature')|round(0) }}°F
-                  (>10°F below setpoint). Switched to High Demand.
-                  {% endif %}
 
-        # Case B: Recovery Complete -> Eco Mode
+        # Case B: Deadband Hit -> Heat Pump (compressor only, efficient)
         - conditions:
             - condition: trigger
-              id: "recovery_complete"
+              id: "deadband_recovery"
             - condition: state
               entity_id: climate.econet_hpwh
               attribute: preset_mode
-              state: "High Demand"
+              state: "Eco Mode"
+          sequence:
+            - service: climate.set_preset_mode
+              target:
+                entity_id: climate.econet_hpwh
+              data:
+                preset_mode: "Heat Pump"
+            - service: persistent_notification.create
+              data:
+                title: "Hot Water Deadband Recovery"
+                message: >
+                  Lower tank {{ states('sensor.econet_hpwh_lower_tank_temperature')|round(0) }}°F
+                  (>10°F below setpoint). Switched to Heat Pump mode.
+
+        # Case C: Recovery Complete -> Eco Mode
+        - conditions:
+            - condition: trigger
+              id: "recovery_complete"
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: climate.econet_hpwh
+                  attribute: preset_mode
+                  state: "High Demand"
+                - condition: state
+                  entity_id: climate.econet_hpwh
+                  attribute: preset_mode
+                  state: "Heat Pump"
           sequence:
             - service: climate.set_preset_mode
               target:
