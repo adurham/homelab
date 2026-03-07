@@ -1,166 +1,90 @@
-# yamllint disable rule:line-length
+# PS5 Hue Sync - Simplified with Intelligent Scene Restore
 - alias: "Entertainment: PS5 Hue Sync"
-  description: "Sync lights when PS5 is on via Sync Box HDMI 2"
+  id: "ps5_hue_sync_simple"
+  description: "Sync lights when PS5 is on, and intelligently restore previous state/scene"
   mode: restart
 
   trigger:
-    # Trigger on any content change
+    # Trigger when HDMI 2 changes state (PS5 Power)
     - platform: state
-      entity_id: sensor.living_room_sync_box_content_info
-      id: "content_change"
-    # Trigger on Picture Mode change (e.g. Game -> Standard)
-    - platform: state
-      entity_id: sensor.sony_tv_picture_mode
-      id: "picture_change"
-
-    # Trigger off conditions with duration
-    - platform: state
-      entity_id: sensor.living_room_sync_box_content_info
-      to: "no_signal"
-      for: "00:00:30"
-      id: "off_signal"
+      entity_id: sensor.living_room_sync_box_hdmi2_status
+      id: "ps5_on"
     - platform: state
       entity_id: sensor.living_room_sync_box_hdmi2_status
       to: "unplugged"
-      for: "00:00:30"
-      id: "off_unplugged"
+      for: "00:00:15"
+      id: "ps5_off"
 
   action:
-    # Force update of Picture Mode Sensor to avoid race condition
-    - service: homeassistant.update_entity
-      target:
-        entity_id: sensor.sony_tv_picture_mode
     - choose:
-        # OFF Sequence
+        # ON Sequence: PS5 Wakes Up
         - conditions:
-            - condition: or
-              conditions:
-                - condition: trigger
-                  id: "off_signal"
-                - condition: trigger
-                  id: "off_unplugged"
+            - condition: trigger
+              id: "ps5_on"
+            - condition: state
+              entity_id: sensor.living_room_sync_box_hdmi2_status
+              state: "linked"
+            - condition: state
+              entity_id: switch.living_room_sync_box_light_sync
+              state: "off"
           sequence:
-            # Stop Light Sync explicitly
+            # CAPTURE: Determine if a dynamic scene is active and save its name
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.living_room_active_scene
+              data:
+                value: >
+                  {% if state_attr('light.living_room', 'dynamics') == true or state_attr('light.living_room', 'hue_scene') %}
+                    {{ state_attr('light.living_room', 'hue_scene') | default('none') }}
+                  {% else %}
+                    none
+                  {% endif %}
+
+            # CAPTURE: Always create a static snapshot as the ultimate fallback
+            - service: scene.create
+              data:
+                scene_id: "before_ps5_sync"
+                snapshot_entities: "light.living_room"
+
+            # Start Light Sync
+            - service: switch.turn_on
+              target:
+                entity_id: switch.living_room_sync_box_light_sync
+
+        # OFF Sequence: PS5 Sleeps
+        - conditions:
+            - condition: trigger
+              id: "ps5_off"
+          sequence:
+            # Stop Light Sync
             - service: switch.turn_off
               target:
                 entity_id: switch.living_room_sync_box_light_sync
 
-            # RESTORE: Try snapshot, fallback to Read
+            # Wait for sync box to release lights
+            - delay: "00:00:02"
+
+            # RESTORE: Choose between Dynamic Scene or Static Snapshot
             - choose:
+                # If we saved a valid scene name, reactivate it
                 - conditions:
                     - condition: template
-                      value_template: "{{ states('scene.before_ps5_sync') not in ['unknown', 'unavailable', 'none'] }}"
+                      value_template: "{{ states('input_text.living_room_active_scene') not in ['none', 'unknown', 'unavailable'] }}"
                   sequence:
-                    - service: scene.turn_on
+                    - service: hue.activate_scene
                       target:
-                        entity_id: scene.before_ps5_sync
+                        entity_id: light.living_room
+                      data:
+                        scene_name: "{{ states('input_text.living_room_active_scene') }}"
+              # Corrected: default is a direct property of choose
               default:
                 - service: scene.turn_on
                   target:
-                    entity_id: scene.living_room_read
+                    entity_id: scene.before_ps5_sync
 
-        # GAME Mode (Picture Mode = Game AND Signal Present)
-        - conditions:
-            - condition: or
-              conditions:
-                - condition: trigger
-                  id: "content_change"
-                - condition: trigger
-                  id: "picture_change"
-            - condition: template
-              value_template: "{{ 'no_signal' not in states('sensor.living_room_sync_box_content_info') }}"
-            - condition: template
-              value_template: "{{ '0 x 0' not in states('sensor.living_room_sync_box_content_info') }}"
-            - condition: template
-              value_template: "{{ 'game' in states('sensor.sony_tv_picture_mode') | lower }}"
-          sequence:
-            # SNAPSHOT: Capture state if starting session
-            - choose:
-                - conditions:
-                    - condition: state
-                      entity_id: switch.living_room_sync_box_light_sync
-                      state: "off"
-                  sequence:
-                    - service: scene.create
-                      data:
-                        scene_id: "before_ps5_sync"
-                        snapshot_entities: "light.living_room"
-
-            # Ensure Sync is On (Robust Loop)
-            - repeat:
-                until:
-                  - condition: state
-                    entity_id: switch.living_room_sync_box_light_sync
-                    state: "on"
-                sequence:
-                  - service: switch.turn_on
-                    target:
-                      entity_id: switch.living_room_sync_box_light_sync
-                  - delay: "00:00:02"
-            # Set Game Mode
-            - service: select.select_option
+            # Clear the helper
+            - service: input_text.set_value
               target:
-                entity_id: select.living_room_sync_box_sync_mode
+                entity_id: input_text.living_room_active_scene
               data:
-                option: "game"
-            - delay: "00:00:01"
-            - service: select.select_option
-              target:
-                entity_id: select.living_room_sync_box_intensity
-              data:
-                option: "intense"
-
-        # VIDEO Mode (60Hz / non-VRR / non-Game)
-        - conditions:
-            - condition: or
-              conditions:
-                - condition: trigger
-                  id: "content_change"
-                - condition: trigger
-                  id: "picture_change"
-            - condition: template
-              value_template: "{{ '60' in states('sensor.living_room_sync_box_content_info') }}"
-            - condition: template
-              value_template: "{{ 'vrr' not in states('sensor.living_room_sync_box_content_info') | lower }}"
-            - condition: template
-              value_template: "{{ 'no_signal' not in states('sensor.living_room_sync_box_content_info') }}"
-            - condition: not
-              conditions:
-                - condition: template
-                  value_template: "{{ 'game' in states('sensor.sony_tv_picture_mode') | lower }}"
-          sequence:
-            # SNAPSHOT: Capture state if starting session
-            - choose:
-                - conditions:
-                    - condition: state
-                      entity_id: switch.living_room_sync_box_light_sync
-                      state: "off"
-                  sequence:
-                    - service: scene.create
-                      data:
-                        scene_id: "before_ps5_sync"
-                        snapshot_entities: "light.living_room"
-
-            # Ensure Sync is On (Robust Loop)
-            - repeat:
-                until:
-                  - condition: state
-                    entity_id: switch.living_room_sync_box_light_sync
-                    state: "on"
-                sequence:
-                  - service: switch.turn_on
-                    target:
-                      entity_id: switch.living_room_sync_box_light_sync
-                  - delay: "00:00:02"
-            # Set Video Mode
-            - service: select.select_option
-              target:
-                entity_id: select.living_room_sync_box_sync_mode
-              data:
-                option: "video"
-            - delay: "00:00:01"
-            - service: select.select_option
-              target:
-                entity_id: select.living_room_sync_box_intensity
-              data:
-                option: "moderate"
+                value: "none"

@@ -15,7 +15,7 @@
           'input_datetime.smart_circulation_last_stopped',
           'timestamp'
         ) | default(0) %}
-        {{ (now().timestamp() - stop_time) > 600 }}
+        {{ (now().timestamp() - stop_time) > 1800 }}
 
     # 2. Check Temperatures (Start Condition)
     - condition: or
