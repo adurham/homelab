@@ -493,10 +493,14 @@
                             {
                                 "color": "green",
                                 "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 180
                             }
                         ]
                     },
-                    "unit": "h"
+                    "unit": "fahrenheit"
                 },
                 "overrides": []
             },
@@ -524,14 +528,176 @@
             "pluginVersion": "7.5.7",
             "targets": [
                 {
-                    "expr": "homeassistant_sensor_duration_hours{entity=\"sensor.econet_hpwh_compressor_runtime\"} or homeassistant_sensor_hours{entity=\"sensor.econet_hpwh_compressor_runtime\"}",
+                    "expr": "homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_discharge_temperature\"}",
                     "interval": "",
                     "legendFormat": "",
                     "refId": "A"
                 }
             ],
-            "title": "Compressor Runtime",
+            "title": "Discharge Temp",
             "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "drawStyle": "line",
+                        "fillOpacity": 5,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "lineInterpolation": "smooth",
+                        "lineWidth": 2,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "never",
+                        "spanNulls": true,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            }
+                        ]
+                    },
+                    "unit": "fahrenheit"
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "Expansion Valve"
+                        },
+                        "properties": [
+                            {
+                                "id": "unit",
+                                "value": "percent"
+                            },
+                            {
+                                "id": "custom.axisPlacement",
+                                "value": "right"
+                            },
+                            {
+                                "id": "custom.lineStyle",
+                                "value": {
+                                    "dash": [5, 5],
+                                    "fill": "dash"
+                                }
+                            },
+                            {
+                                "id": "custom.fillOpacity",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "AC Current"
+                        },
+                        "properties": [
+                            {
+                                "id": "unit",
+                                "value": "amp"
+                            },
+                            {
+                                "id": "custom.axisPlacement",
+                                "value": "right"
+                            },
+                            {
+                                "id": "custom.lineStyle",
+                                "value": {
+                                    "dash": [10, 5],
+                                    "fill": "dash"
+                                }
+                            },
+                            {
+                                "id": "custom.fillOpacity",
+                                "value": 0
+                            }
+                        ]
+                    }
+                ]
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 8
+            },
+            "id": 23,
+            "options": {
+                "legend": {
+                    "calcs": [
+                        "min",
+                        "max",
+                        "mean"
+                    ],
+                    "displayMode": "table",
+                    "placement": "bottom"
+                },
+                "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                }
+            },
+            "pluginVersion": "7.5.7",
+            "targets": [
+                {
+                    "expr": "homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_evaporator_temperature\"}",
+                    "interval": "",
+                    "legendFormat": "Evaporator",
+                    "refId": "A"
+                },
+                {
+                    "expr": "homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_suction_temperature\"}",
+                    "interval": "",
+                    "legendFormat": "Suction",
+                    "refId": "B"
+                },
+                {
+                    "expr": "homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_discharge_temperature\"}",
+                    "interval": "",
+                    "legendFormat": "Discharge",
+                    "refId": "C"
+                },
+                {
+                    "expr": "homeassistant_sensor_percent{entity=\"sensor.econet_hpwh_expansion_valve_current_position\"}",
+                    "interval": "",
+                    "legendFormat": "Expansion Valve",
+                    "refId": "D"
+                },
+                {
+                    "expr": "homeassistant_sensor_current_a{entity=\"sensor.econet_hpwh_ac_current_rms\"}",
+                    "interval": "",
+                    "legendFormat": "AC Current",
+                    "refId": "E"
+                }
+            ],
+            "title": "Compressor Details",
+            "type": "timeseries"
         },
         {
             "datasource": "VictoriaMetrics",
@@ -673,7 +839,7 @@
                 "h": 9,
                 "w": 24,
                 "x": 0,
-                "y": 8
+                "y": 16
             },
             "id": 1,
             "options": {
@@ -784,7 +950,7 @@
                 "h": 7,
                 "w": 12,
                 "x": 0,
-                "y": 17
+                "y": 25
             },
             "id": 3,
             "options": {
@@ -867,7 +1033,7 @@
                 "h": 7,
                 "w": 12,
                 "x": 12,
-                "y": 17
+                "y": 25
             },
             "id": 4,
             "options": {
@@ -921,7 +1087,7 @@
                 "h": 9,
                 "w": 24,
                 "x": 0,
-                "y": 24
+                "y": 32
             },
             "hiddenSeries": false,
             "id": 2,
