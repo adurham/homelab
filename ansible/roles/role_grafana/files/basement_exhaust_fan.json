@@ -1,0 +1,699 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": "-- Grafana --",
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "gnetId": null,
+    "graphTooltip": 1,
+    "id": null,
+    "links": [],
+    "panels": [
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": { "mode": "thresholds" },
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "dark-red", "value": null },
+                            { "color": "dark-green", "value": 1 }
+                        ]
+                    },
+                    "mappings": [
+                        { "options": { "0": { "text": "OFF" }, "1": { "text": "ON" } }, "type": "value" }
+                    ]
+                },
+                "overrides": []
+            },
+            "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+            "id": 1,
+            "options": {
+                "colorMode": "background",
+                "graphMode": "none",
+                "justifyMode": "auto",
+                "textMode": "value",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+            },
+            "targets": [
+                {
+                    "expr": "homeassistant_switch_state{entity=\"switch.basement_exhaust_fan\"}",
+                    "legendFormat": "Fan State",
+                    "refId": "A"
+                }
+            ],
+            "title": "Exhaust Fan",
+            "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": { "mode": "thresholds" },
+                    "unit": "watt",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "green", "value": null },
+                            { "color": "yellow", "value": 40 },
+                            { "color": "red", "value": 60 }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+            "id": 2,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "textMode": "value",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+            },
+            "targets": [
+                {
+                    "expr": "homeassistant_sensor_power_w{entity=\"sensor.basement_exhaust_fan_power\"}",
+                    "legendFormat": "Power",
+                    "refId": "A"
+                }
+            ],
+            "title": "Current Power",
+            "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": { "mode": "thresholds" },
+                    "unit": "kwatth",
+                    "decimals": 3,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "blue", "value": null }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+            "id": 3,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "textMode": "value",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+            },
+            "targets": [
+                {
+                    "expr": "homeassistant_sensor_energy_kwh{entity=\"sensor.basement_exhaust_fan_energy\"}",
+                    "legendFormat": "Energy",
+                    "refId": "A"
+                }
+            ],
+            "title": "Total Energy",
+            "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": { "mode": "thresholds" },
+                    "unit": "min",
+                    "max": 30,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "green", "value": null },
+                            { "color": "yellow", "value": 20 },
+                            { "color": "red", "value": 28 }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+            "id": 4,
+            "options": {
+                "orientation": "auto",
+                "showThresholdLabels": false,
+                "showThresholdMarkers": true,
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+            },
+            "targets": [
+                {
+                    "expr": "homeassistant_input_number_state_min{entity=\"input_number.exhaust_fan_runtime_minutes\"}",
+                    "legendFormat": "Runtime",
+                    "refId": "A"
+                }
+            ],
+            "title": "Hourly Runtime Budget",
+            "type": "gauge"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": { "mode": "thresholds" },
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "dark-blue", "value": null }
+                        ]
+                    },
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": { "text": "Idle" },
+                                "1": { "text": "Active" }
+                            },
+                            "type": "value"
+                        }
+                    ]
+                },
+                "overrides": []
+            },
+            "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+            "id": 5,
+            "options": {
+                "colorMode": "background",
+                "graphMode": "none",
+                "justifyMode": "auto",
+                "textMode": "value",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+            },
+            "targets": [
+                {
+                    "expr": "max(homeassistant_climate_action{entity=\"climate.ecobee_thermostat\", action=~\"heating|cooling|fan\"})",
+                    "legendFormat": "HVAC",
+                    "refId": "A",
+                    "instant": true
+                }
+            ],
+            "title": "HVAC Blower",
+            "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": { "mode": "thresholds" },
+                    "unit": "fahrenheit",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "blue", "value": null },
+                            { "color": "green", "value": 65 },
+                            { "color": "yellow", "value": 78 },
+                            { "color": "red", "value": 85 }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+            "id": 6,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "textMode": "value",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+            },
+            "targets": [
+                {
+                    "expr": "(homeassistant_climate_current_temperature_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+                    "legendFormat": "Thermostat",
+                    "refId": "A"
+                }
+            ],
+            "title": "House Temp",
+            "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": { "mode": "thresholds" },
+                    "unit": "ppm",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "green", "value": null },
+                            { "color": "yellow", "value": 800 },
+                            { "color": "orange", "value": 1000 },
+                            { "color": "red", "value": 1500 }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": { "h": 4, "w": 6, "x": 0, "y": 4 },
+            "id": 7,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "textMode": "value",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+            },
+            "targets": [
+                {
+                    "expr": "homeassistant_sensor_carbon_dioxide_ppm{entity=\"sensor.ecobee_edgewater_road_co2\",friendly_name=\"Ecobee Edgewater Road CO2\"}",
+                    "legendFormat": "CO2",
+                    "refId": "A"
+                }
+            ],
+            "title": "Indoor CO2",
+            "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": { "mode": "thresholds" },
+                    "unit": "ppb",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "green", "value": null },
+                            { "color": "yellow", "value": 500 },
+                            { "color": "orange", "value": 2000 },
+                            { "color": "red", "value": 5000 }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": { "h": 4, "w": 6, "x": 6, "y": 4 },
+            "id": 8,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "textMode": "value",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+            },
+            "targets": [
+                {
+                    "expr": "homeassistant_sensor_volatile_organic_compounds_parts_ppb{entity=\"sensor.ecobee_edgewater_road_voc\",friendly_name=\"Ecobee Edgewater Road VOC\"}",
+                    "legendFormat": "VOC",
+                    "refId": "A"
+                }
+            ],
+            "title": "Indoor VOC",
+            "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": { "mode": "thresholds" },
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            { "color": "green", "value": null },
+                            { "color": "yellow", "value": 100 },
+                            { "color": "red", "value": 200 }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": { "h": 4, "w": 6, "x": 12, "y": 4 },
+            "id": 9,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "textMode": "value",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+            },
+            "targets": [
+                {
+                    "expr": "homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_air_quality_score\",friendly_name=\"Ecobee Edgewater Road Air Quality Score\"}",
+                    "legendFormat": "AQ Score",
+                    "refId": "A"
+                }
+            ],
+            "title": "Air Quality Score",
+            "type": "stat"
+        },
+        {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": { "custom": {} },
+                "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": { "h": 10, "w": 24, "x": 0, "y": 8 },
+            "hiddenSeries": false,
+            "id": 10,
+            "legend": {
+                "avg": false,
+                "current": true,
+                "max": false,
+                "min": false,
+                "show": true,
+                "total": false,
+                "values": true
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": { "alertThreshold": true },
+            "percentage": false,
+            "pluginVersion": "7.5.7",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [
+                {
+                    "alias": "Fan State",
+                    "color": "#F2495C",
+                    "fill": 2,
+                    "linewidth": 0,
+                    "yaxis": 2
+                },
+                {
+                    "alias": "HVAC Blower",
+                    "color": "#FF9830",
+                    "fill": 1,
+                    "linewidth": 0,
+                    "yaxis": 2
+                }
+            ],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+                {
+                    "expr": "homeassistant_sensor_power_w{entity=\"sensor.basement_exhaust_fan_power\"}",
+                    "interval": "",
+                    "legendFormat": "Power (W)",
+                    "refId": "A"
+                },
+                {
+                    "expr": "homeassistant_switch_state{entity=\"switch.basement_exhaust_fan\"}",
+                    "interval": "",
+                    "legendFormat": "Fan State",
+                    "refId": "B"
+                },
+                {
+                    "expr": "max(homeassistant_climate_action{entity=\"climate.ecobee_thermostat\", action=~\"heating|cooling|fan\"})",
+                    "interval": "",
+                    "legendFormat": "HVAC Blower",
+                    "refId": "C"
+                }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Fan Activity & Power",
+            "tooltip": {
+                "shared": true,
+                "sort": 0,
+                "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+                "buckets": null,
+                "mode": "time",
+                "name": null,
+                "show": true,
+                "values": []
+            },
+            "yaxes": [
+                {
+                    "format": "watt",
+                    "label": "Power",
+                    "logBase": 1,
+                    "max": null,
+                    "min": "0",
+                    "show": true
+                },
+                {
+                    "format": "short",
+                    "label": "State (On/Off)",
+                    "logBase": 1,
+                    "max": "1.5",
+                    "min": "0",
+                    "show": true
+                }
+            ],
+            "yaxis": {
+                "align": false,
+                "alignLevel": null
+            }
+        },
+        {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": { "custom": {} },
+                "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+            "hiddenSeries": false,
+            "id": 11,
+            "legend": {
+                "avg": false,
+                "current": true,
+                "max": false,
+                "min": false,
+                "show": true,
+                "total": false,
+                "values": true
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": { "alertThreshold": true },
+            "percentage": false,
+            "pluginVersion": "7.5.7",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [
+                {
+                    "alias": "Runtime Budget",
+                    "color": "#73BF69",
+                    "fill": 3,
+                    "yaxis": 2
+                }
+            ],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+                {
+                    "expr": "homeassistant_sensor_energy_kwh{entity=\"sensor.basement_exhaust_fan_energy\"}",
+                    "interval": "",
+                    "legendFormat": "Energy (kWh)",
+                    "refId": "A"
+                },
+                {
+                    "expr": "homeassistant_input_number_state_min{entity=\"input_number.exhaust_fan_runtime_minutes\"}",
+                    "interval": "",
+                    "legendFormat": "Runtime Budget",
+                    "refId": "B"
+                }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Energy & Runtime Budget",
+            "tooltip": {
+                "shared": true,
+                "sort": 0,
+                "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+                "buckets": null,
+                "mode": "time",
+                "name": null,
+                "show": true,
+                "values": []
+            },
+            "yaxes": [
+                {
+                    "format": "kwatth",
+                    "label": "Energy",
+                    "logBase": 1,
+                    "max": null,
+                    "min": "0",
+                    "show": true
+                },
+                {
+                    "format": "min",
+                    "label": "Runtime (min/hr)",
+                    "logBase": 1,
+                    "max": "35",
+                    "min": "0",
+                    "show": true
+                }
+            ],
+            "yaxis": {
+                "align": false,
+                "alignLevel": null
+            }
+        },
+        {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": { "custom": {} },
+                "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
+            "hiddenSeries": false,
+            "id": 12,
+            "legend": {
+                "avg": true,
+                "current": true,
+                "max": true,
+                "min": true,
+                "show": true,
+                "total": false,
+                "values": true
+            },
+            "lines": true,
+            "linewidth": 2,
+            "nullPointMode": "connected",
+            "options": { "alertThreshold": true },
+            "percentage": false,
+            "pluginVersion": "7.5.7",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [
+                {
+                    "alias": "VOC (ppb)",
+                    "color": "#B877D9",
+                    "yaxis": 2
+                },
+                {
+                    "alias": "CO2 (ppm)",
+                    "color": "#FF6D00",
+                    "linewidth": 2
+                },
+                {
+                    "alias": "Fan State",
+                    "color": "#73BF69",
+                    "fill": 2,
+                    "linewidth": 0,
+                    "yaxis": 2
+                }
+            ],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+                {
+                    "expr": "last_over_time(homeassistant_sensor_carbon_dioxide_ppm{entity=\"sensor.ecobee_edgewater_road_co2\",friendly_name=\"Ecobee Edgewater Road CO2\"}[10m])",
+                    "interval": "",
+                    "legendFormat": "CO2 (ppm)",
+                    "refId": "A"
+                },
+                {
+                    "expr": "last_over_time(homeassistant_sensor_volatile_organic_compounds_parts_ppb{entity=\"sensor.ecobee_edgewater_road_voc\",friendly_name=\"Ecobee Edgewater Road VOC\"}[10m])",
+                    "interval": "",
+                    "legendFormat": "VOC (ppb)",
+                    "refId": "B"
+                },
+                {
+                    "expr": "homeassistant_switch_state{entity=\"switch.basement_exhaust_fan\"} * 500",
+                    "interval": "",
+                    "legendFormat": "Fan State",
+                    "refId": "C"
+                }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Indoor Air Quality",
+            "tooltip": {
+                "shared": true,
+                "sort": 0,
+                "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+                "buckets": null,
+                "mode": "time",
+                "name": null,
+                "show": true,
+                "values": []
+            },
+            "yaxes": [
+                {
+                    "format": "ppm",
+                    "label": "CO2 (ppm)",
+                    "logBase": 1,
+                    "max": null,
+                    "min": "0",
+                    "show": true
+                },
+                {
+                    "format": "ppb",
+                    "label": "VOC (ppb)",
+                    "logBase": 1,
+                    "max": null,
+                    "min": "0",
+                    "show": true
+                }
+            ],
+            "yaxis": {
+                "align": false,
+                "alignLevel": null
+            }
+        }
+    ],
+    "refresh": "auto",
+    "schemaVersion": 27,
+    "style": "dark",
+    "tags": ["exhaust", "air-quality"],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "",
+    "title": "Basement Exhaust Fan",
+    "uid": "basement_exhaust_fan",
+    "version": 1
+}
