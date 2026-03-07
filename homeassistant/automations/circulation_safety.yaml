@@ -8,10 +8,42 @@
       event: start
 
   action:
+    # Force all relay-controlled devices OFF to prevent orphaned state
     - service: switch.turn_off
       target:
-        entity_id: switch.shelly1minig3_28372f21c1dc
+        entity_id:
+          - switch.shelly1minig3_28372f21c1dc
+          - switch.basement_exhaust_fan
+
+    # If exhaust fan was mid-cycle, account for partial runtime
+    - if:
+        - condition: template
+          value_template: >
+            {% set last = state_attr(
+              'input_datetime.exhaust_fan_last_started',
+              'timestamp'
+            ) | default(0) %}
+            {% set window = state_attr(
+              'input_datetime.exhaust_fan_window_start',
+              'timestamp'
+            ) | default(0) %}
+            {{ last > 0 and last >= window and
+               (now().timestamp() - last) < 300 }}
+      then:
+        - service: input_number.set_value
+          target:
+            entity_id: input_number.exhaust_fan_runtime_minutes
+          data:
+            value: >
+              {% set last = state_attr(
+                'input_datetime.exhaust_fan_last_started',
+                'timestamp'
+              ) | default(0) %}
+              {% set partial = ((now().timestamp() - last) / 60) | round(0) %}
+              {% set current = states('input_number.exhaust_fan_runtime_minutes') | float(0) %}
+              {{ current + partial }}
+
     - service: persistent_notification.create
       data:
         title: "Safety Watchdog"
-        message: "Circulation pump forced OFF on startup to prevent orphaned state."
+        message: "Circulation pump and exhaust fan forced OFF on startup to prevent orphaned state."
