@@ -345,6 +345,207 @@
             "fieldConfig": {
                 "defaults": {
                     "color": {
+                        "mode": "thresholds"
+                    },
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": {
+                                    "color": "green",
+                                    "index": 0,
+                                    "text": "Off"
+                                },
+                                "1": {
+                                    "color": "orange",
+                                    "index": 1,
+                                    "text": "Running"
+                                }
+                            },
+                            "type": "value"
+                        }
+                    ],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "orange",
+                                "value": 1
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 0,
+                "y": 4
+            },
+            "id": 20,
+            "options": {
+                "colorMode": "background",
+                "graphMode": "none",
+                "justifyMode": "auto",
+                "orientation": "auto",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "textMode": "auto"
+            },
+            "pluginVersion": "7.5.7",
+            "targets": [
+                {
+                    "expr": "homeassistant_binary_sensor_state{entity=\"binary_sensor.econet_hpwh_compressor\"}",
+                    "interval": "",
+                    "legendFormat": "",
+                    "refId": "A"
+                }
+            ],
+            "title": "Compressor State",
+            "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "blue",
+                                "value": null
+                            },
+                            {
+                                "color": "green",
+                                "value": 50
+                            },
+                            {
+                                "color": "orange",
+                                "value": 85
+                            },
+                            {
+                                "color": "red",
+                                "value": 100
+                            }
+                        ]
+                    },
+                    "unit": "fahrenheit"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 8,
+                "y": 4
+            },
+            "id": 21,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "orientation": "auto",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "textMode": "auto"
+            },
+            "pluginVersion": "7.5.7",
+            "targets": [
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.econet_hpwh_ambient_temperature\"} * 1.8) + 32 or homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_ambient_temperature\"}",
+                    "interval": "",
+                    "legendFormat": "",
+                    "refId": "A"
+                }
+            ],
+            "title": "Ambient Temperature",
+            "type": "stat"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "mappings": [],
+                    "max": 100,
+                    "min": 0,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": null
+                            },
+                            {
+                                "color": "orange",
+                                "value": 50
+                            },
+                            {
+                                "color": "green",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "percent"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 16,
+                "y": 4
+            },
+            "id": 22,
+            "options": {
+                "orientation": "auto",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "showThresholdLabels": false,
+                "showThresholdMarkers": true
+            },
+            "pluginVersion": "7.5.7",
+            "targets": [
+                {
+                    "expr": "homeassistant_sensor_percent{entity=\"sensor.econet_hpwh_compressor_health\"}",
+                    "interval": "",
+                    "legendFormat": "",
+                    "refId": "A"
+                }
+            ],
+            "title": "Compressor Health",
+            "type": "gauge"
+        },
+        {
+            "datasource": "VictoriaMetrics",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
                         "mode": "palette-classic"
                     },
                     "custom": {
@@ -447,6 +648,32 @@
                                 }
                             }
                         ]
+                    },
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "Ambient"
+                        },
+                        "properties": [
+                            {
+                                "id": "color",
+                                "value": {
+                                    "fixedColor": "purple",
+                                    "mode": "fixed"
+                                }
+                            },
+                            {
+                                "id": "custom.lineStyle",
+                                "value": {
+                                    "dash": [5, 5],
+                                    "fill": "dash"
+                                }
+                            },
+                            {
+                                "id": "custom.fillOpacity",
+                                "value": 0
+                            }
+                        ]
                     }
                 ]
             },
@@ -454,7 +681,7 @@
                 "h": 9,
                 "w": 24,
                 "x": 0,
-                "y": 4
+                "y": 8
             },
             "id": 1,
             "options": {
@@ -491,6 +718,12 @@
                     "interval": "",
                     "legendFormat": "Setpoint",
                     "refId": "C"
+                },
+                {
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.econet_hpwh_ambient_temperature\"} * 1.8) + 32 or homeassistant_sensor_temperature_fahrenheit{entity=\"sensor.econet_hpwh_ambient_temperature\"}",
+                    "interval": "",
+                    "legendFormat": "Ambient",
+                    "refId": "D"
                 }
             ],
             "title": "Tank Temperatures",
@@ -559,7 +792,7 @@
                 "h": 7,
                 "w": 12,
                 "x": 0,
-                "y": 13
+                "y": 17
             },
             "id": 3,
             "options": {
@@ -642,7 +875,7 @@
                 "h": 7,
                 "w": 12,
                 "x": 12,
-                "y": 13
+                "y": 17
             },
             "id": 4,
             "options": {
@@ -667,6 +900,12 @@
                     "interval": "",
                     "legendFormat": "Power",
                     "refId": "A"
+                },
+                {
+                    "expr": "homeassistant_binary_sensor_state{entity=\"binary_sensor.econet_hpwh_compressor\"} * 1000",
+                    "interval": "",
+                    "legendFormat": "Compressor Active",
+                    "refId": "B"
                 }
             ],
             "title": "Power Consumption",
@@ -690,7 +929,7 @@
                 "h": 9,
                 "w": 24,
                 "x": 0,
-                "y": 20
+                "y": 24
             },
             "hiddenSeries": false,
             "id": 2,
