@@ -1,0 +1,7 @@
+exhaust_fan_runtime_minutes:
+  name: "Exhaust Fan Runtime This Hour"
+  min: 0
+  max: 60
+  step: 1
+  unit_of_measurement: "min"
+  icon: mdi:fan-clock

@@ -3,3 +3,15 @@ smart_circulation_last_stopped:
   has_date: true
   has_time: true
   icon: mdi:clock-end
+
+exhaust_fan_window_start:
+  name: "Exhaust Fan Hour Window Start"
+  has_date: true
+  has_time: true
+  icon: mdi:fan-clock
+
+exhaust_fan_last_started:
+  name: "Exhaust Fan Last Started"
+  has_date: true
+  has_time: true
+  icon: mdi:fan
