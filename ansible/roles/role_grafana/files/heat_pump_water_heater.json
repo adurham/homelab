@@ -487,26 +487,16 @@
                         "mode": "thresholds"
                     },
                     "mappings": [],
-                    "max": 100,
-                    "min": 0,
                     "thresholds": {
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "red",
-                                "value": null
-                            },
-                            {
-                                "color": "orange",
-                                "value": 50
-                            },
-                            {
                                 "color": "green",
-                                "value": 80
+                                "value": null
                             }
                         ]
                     },
-                    "unit": "percent"
+                    "unit": "h"
                 },
                 "overrides": []
             },
@@ -518,6 +508,9 @@
             },
             "id": 22,
             "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
                 "orientation": "auto",
                 "reduceOptions": {
                     "calcs": [
@@ -526,20 +519,19 @@
                     "fields": "",
                     "values": false
                 },
-                "showThresholdLabels": false,
-                "showThresholdMarkers": true
+                "textMode": "auto"
             },
             "pluginVersion": "7.5.7",
             "targets": [
                 {
-                    "expr": "homeassistant_sensor_percent{entity=\"sensor.econet_hpwh_compressor_health\"}",
+                    "expr": "homeassistant_sensor_duration_hours{entity=\"sensor.econet_hpwh_compressor_runtime\"} or homeassistant_sensor_hours{entity=\"sensor.econet_hpwh_compressor_runtime\"}",
                     "interval": "",
                     "legendFormat": "",
                     "refId": "A"
                 }
             ],
-            "title": "Compressor Health",
-            "type": "gauge"
+            "title": "Compressor Runtime",
+            "type": "stat"
         },
         {
             "datasource": "VictoriaMetrics",
