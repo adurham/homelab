@@ -4,50 +4,67 @@
   max_exceeded: silent
 
   trigger:
-    # Trigger 1: Low Hot Water (Emergency Recovery)
+    # Trigger 1: Low Hot Water % (Emergency Recovery)
     - platform: numeric_state
       entity_id: sensor.econet_hpwh_hot_water
-      below: 40
+      below: 35
       id: "low_hot_water"
 
-    # Trigger 2: Recovery Complete
-    - platform: numeric_state
-      entity_id: sensor.econet_hpwh_hot_water
-      above: 40
+    # Trigger 2: Lower Tank Deadband (10F below setpoint)
+    - platform: template
+      value_template: >
+        {{ states('sensor.econet_hpwh_lower_tank_temperature')|float(0) <
+           (state_attr('climate.econet_hpwh', 'temperature')|float(140) - 10) }}
+      id: "deadband_recovery"
+
+    # Trigger 3: Recovery Complete (lower tank within 5F of setpoint)
+    - platform: template
+      value_template: >
+        {{ states('sensor.econet_hpwh_lower_tank_temperature')|float(0) >
+           (state_attr('climate.econet_hpwh', 'temperature')|float(140) - 5) }}
       id: "recovery_complete"
 
   condition: []
 
   action:
     - choose:
-        # Case A: Low Hot Water -> High Demand
+        # Case A: Low Hot Water or Deadband Hit -> High Demand
         - conditions:
             - condition: trigger
-              id: "low_hot_water"
-            # Double check state to avoid flapping
-            - condition: numeric_state
-              entity_id: sensor.econet_hpwh_hot_water
-              below: 40
+              id:
+                - "low_hot_water"
+                - "deadband_recovery"
+            - condition: not
+              conditions:
+                - condition: state
+                  entity_id: climate.econet_hpwh
+                  attribute: preset_mode
+                  state: "High Demand"
           sequence:
             - service: climate.set_preset_mode
               target:
                 entity_id: climate.econet_hpwh
               data:
-                preset_mode: "high_demand"
+                preset_mode: "High Demand"
             - service: persistent_notification.create
               data:
                 title: "Hot Water Recovery"
-                message: "Hot water low (<40%). Switched to High Demand mode."
+                message: >
+                  {% if trigger.id == 'low_hot_water' %}
+                  Hot water low (<35%). Switched to High Demand for rapid recovery.
+                  {% else %}
+                  Lower tank {{ states('sensor.econet_hpwh_lower_tank_temperature')|round(0) }}°F
+                  (>10°F below setpoint). Switched to High Demand.
+                  {% endif %}
 
-        # Case B: Recovery Complete -> Heat Pump (Eco)
+        # Case B: Recovery Complete -> Eco Mode
         - conditions:
             - condition: trigger
               id: "recovery_complete"
-            # Ensure Tank Temp is also back to target (e.g., 120F or setpoint)
-            - condition: numeric_state
+            - condition: state
               entity_id: climate.econet_hpwh
-              attribute: current_temperature
-              above: 120
+              attribute: preset_mode
+              state: "High Demand"
           sequence:
             - service: climate.set_preset_mode
               target:
@@ -56,5 +73,7 @@
                 preset_mode: "Eco Mode"
             - service: persistent_notification.create
               data:
-                title: "Hot Water Restored"
-                message: "Hot water recovered (>40%). Back to Eco Mode."
+                title: "Hot Water Recovery Complete"
+                message: >
+                  Lower tank recovered to {{ states('sensor.econet_hpwh_lower_tank_temperature')|round(0) }}°F.
+                  Resuming Eco Mode.
