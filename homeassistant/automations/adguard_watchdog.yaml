@@ -1,0 +1,29 @@
+# AdGuard Health Watchdog
+- alias: "Infrastructure: AdGuard Home Watchdog"
+  id: "infrastructure_adguard_watchdog"
+  description: "Restart AdGuard and notify if DNS service stops"
+  mode: single
+
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.adguard_home_running
+      to: "off"
+      for: "00:02:00"
+
+  action:
+    # 1. NOTIFY (Critical Alert)
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "CRITICAL: AdGuard Offline"
+        message: "AdGuard Home DNS has stopped. Internet access may be interrupted. Attempting restart..."
+        data:
+          push:
+            sound:
+              name: "default"
+              critical: 1
+              volume: 1.0
+
+    # 2. RESTART (Try to self-heal)
+    - service: hassio.addon_restart
+      data:
+        addon: "a0d7b954_adguard"

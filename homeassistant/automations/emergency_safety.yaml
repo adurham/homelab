@@ -1,0 +1,54 @@
+# Emergency Life-Safety Automation
+- alias: "Safety: Smoke and CO Emergency"
+  id: "safety_smoke_co_emergency"
+  description: "Stop HVAC and illuminate house if smoke or CO is detected by Nest Protects"
+  mode: single
+
+  trigger:
+    # Living Room Protect
+    - platform: state
+      entity_id: binary_sensor.nest_protect_living_room_smoke_status
+      to: "on"
+      id: "smoke"
+    - platform: state
+      entity_id: binary_sensor.nest_protect_living_room_co_status
+      to: "on"
+      id: "co"
+    # Foyer Protect
+    - platform: state
+      entity_id: binary_sensor.nest_protect_foyer_smoke_status
+      to: "on"
+      id: "smoke"
+    - platform: state
+      entity_id: binary_sensor.nest_protect_foyer_co_status
+      to: "on"
+      id: "co"
+
+  action:
+    # 1. STOP HVAC (Stop smoke/CO spread)
+    - service: climate.set_hvac_mode
+      target:
+        entity_id: climate.ecobee_thermostat
+      data:
+        hvac_mode: "off"
+
+    # 2. ILLUMINATE (Help occupants see and wake up)
+    - service: light.turn_on
+      target:
+        entity_id:
+          - light.living_room
+          - light.main_bedroom_ceiling_fan_light
+      data:
+        brightness_pct: 100
+
+    # 3. NOTIFY (Critical Alert)
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "EMERGENCY: {{ 'Smoke' if trigger.id == 'smoke' else 'Carbon Monoxide' }} Detected!"
+        message: "The Nest Protect in the {{ state_attr(trigger.entity_id, 'friendly_name') }} has detected a life-safety emergency. HVAC has been disabled and lights turned on."
+        data:
+          push:
+            sound:
+              name: "default"
+              critical: 1
+              volume: 1.0
