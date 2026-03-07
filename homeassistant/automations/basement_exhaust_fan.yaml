@@ -1,0 +1,139 @@
+- alias: "Basement Exhaust Fan After HVAC"
+  id: "basement_exhaust_fan_after_hvac"
+  description: >
+    Runs basement exhaust fan for 5 minutes after HVAC blower stops
+    to draw fresh air in via negative pressure. Max 30 minutes per hour.
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: state
+      entity_id: climate.ecobee_thermostat
+      attribute: hvac_action
+      to: "idle"
+
+  condition:
+    # Check runtime budget (max 30 min per rolling hour)
+    - condition: template
+      value_template: >
+        {% set window_start = state_attr(
+          'input_datetime.exhaust_fan_window_start',
+          'timestamp'
+        ) | default(0) %}
+        {% set elapsed = now().timestamp() - window_start %}
+        {% set runtime = states('input_number.exhaust_fan_runtime_minutes') | float(0) %}
+        {% if elapsed > 3600 %}
+          true
+        {% else %}
+          {{ runtime + 5 <= 30 }}
+        {% endif %}
+
+  action:
+    # Reset hour window if expired
+    - if:
+        - condition: template
+          value_template: >
+            {% set window_start = state_attr(
+              'input_datetime.exhaust_fan_window_start',
+              'timestamp'
+            ) | default(0) %}
+            {{ (now().timestamp() - window_start) > 3600 }}
+      then:
+        - service: input_datetime.set_datetime
+          target:
+            entity_id: input_datetime.exhaust_fan_window_start
+          data:
+            timestamp: "{{ now().timestamp() }}"
+        - service: input_number.set_value
+          target:
+            entity_id: input_number.exhaust_fan_runtime_minutes
+          data:
+            value: 0
+
+    # Record start time for reboot recovery
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.exhaust_fan_last_started
+      data:
+        timestamp: "{{ now().timestamp() }}"
+
+    # Turn on exhaust fan
+    - service: switch.turn_on
+      target:
+        entity_id: switch.basement_exhaust_fan
+
+    # Run for 5 minutes
+    - delay: "00:05:00"
+
+    # Turn off exhaust fan
+    - service: switch.turn_off
+      target:
+        entity_id: switch.basement_exhaust_fan
+
+    # Update runtime counter
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.exhaust_fan_runtime_minutes
+      data:
+        value: "{{ states('input_number.exhaust_fan_runtime_minutes') | float(0) + 5 }}"
+
+- alias: "Basement Exhaust Fan CO2 Override"
+  id: "basement_exhaust_fan_co2_override"
+  description: >
+    Runs basement exhaust fan continuously when indoor CO2 exceeds 1000 ppm.
+    Bypasses the normal runtime budget since this is health-related.
+    Safety timeout of 60 minutes to prevent running forever.
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.ecobee_edgewater_road_co2
+      above: 1000
+    # Also trigger when sensor appears (e.g. after HA restart) already above threshold
+    - platform: state
+      entity_id: sensor.ecobee_edgewater_road_co2
+      from: "unavailable"
+    - platform: state
+      entity_id: sensor.ecobee_edgewater_road_co2
+      from: "unknown"
+
+  condition:
+    # Ensure CO2 is actually above 1000 (needed for the from-unavailable triggers)
+    - condition: numeric_state
+      entity_id: sensor.ecobee_edgewater_road_co2
+      above: 1000
+
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.basement_exhaust_fan
+
+    - service: persistent_notification.create
+      data:
+        title: "CO2 Override Active"
+        message: "Indoor CO2 at {{ states('sensor.ecobee_edgewater_road_co2') }} ppm. Exhaust fan running until below 1000 ppm."
+        notification_id: "co2_override"
+
+    # Wait for CO2 to drop below 1000 ppm (or 60 min safety timeout)
+    - wait_for_trigger:
+        - platform: numeric_state
+          entity_id: sensor.ecobee_edgewater_road_co2
+          below: 1000
+      timeout: "01:00:00"
+      continue_on_timeout: true
+
+    - service: switch.turn_off
+      target:
+        entity_id: switch.basement_exhaust_fan
+
+    - service: persistent_notification.create
+      data:
+        title: "CO2 Override Complete"
+        message: >
+          {% if wait.trigger %}
+            CO2 dropped to {{ states('sensor.ecobee_edgewater_road_co2') }} ppm. Fan off.
+          {% else %}
+            Safety timeout reached (60 min). CO2 still at {{ states('sensor.ecobee_edgewater_road_co2') }} ppm. Fan off.
+          {% endif %}
+        notification_id: "co2_override"

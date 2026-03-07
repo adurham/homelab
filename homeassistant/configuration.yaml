@@ -30,6 +30,12 @@ script custom: !include_dir_merge_list scripts/
 scene: !include scenes.yaml
 scene custom: !include_dir_merge_list scenes/
 input_datetime: !include input_datetime.yaml
+input_number: !include input_number.yaml
+
+input_text:
+  living_room_active_scene:
+    name: "Living Room Active Scene"
+    initial: "none"
 
 timer:
   garage_lights_motion_timeout:

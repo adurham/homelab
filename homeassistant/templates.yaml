@@ -91,3 +91,69 @@
       unique_id: basement_4d79_vent_position
       unit_of_measurement: "%"
       state: "{{ state_attr('cover.basement_4d79_vent', 'current_tilt_position') | float(0) }}"
+
+    - name: "House Temperature Delta"
+      unique_id: house_temperature_delta
+      unit_of_measurement: "°F"
+      state: >
+        {% set temps = [
+          states('sensor.dining_room_temperature') | float(0),
+          states('sensor.main_bedroom_temperature') | float(0),
+          states('sensor.living_room_temperature') | float(0),
+          states('sensor.kitchen_temperature') | float(0),
+          states('sensor.guest_bedroom_1_temperature') | float(0),
+          states('sensor.game_room_temperature') | float(0),
+          states('sensor.guest_bedroom_2_temperature') | float(0),
+          states('sensor.cat_room_temperature') | float(0),
+          states('sensor.main_bathroom_temperature') | float(0),
+          states('sensor.half_bathroom_temperature') | float(0),
+          states('sensor.laundry_room_temperature') | float(0),
+          states('sensor.guest_bathroom_temperature') | float(0)
+        ] | select('>', 0) | list %}
+        {{ (temps | max - temps | min) | round(1) if temps | count > 0 else 0 }}
+
+    - name: "House Average Temperature"
+      unique_id: house_average_temperature
+      unit_of_measurement: "°F"
+      state: >
+        {% set temps = [
+          states('sensor.dining_room_temperature') | float(0),
+          states('sensor.main_bedroom_temperature') | float(0),
+          states('sensor.living_room_temperature') | float(0),
+          states('sensor.kitchen_temperature') | float(0),
+          states('sensor.guest_bedroom_1_temperature') | float(0),
+          states('sensor.game_room_temperature') | float(0),
+          states('sensor.guest_bedroom_2_temperature') | float(0),
+          states('sensor.cat_room_temperature') | float(0),
+          states('sensor.main_bathroom_temperature') | float(0),
+          states('sensor.half_bathroom_temperature') | float(0),
+          states('sensor.laundry_room_temperature') | float(0),
+          states('sensor.guest_bathroom_temperature') | float(0)
+        ] | select('>', 0) | list %}
+        {{ (temps | sum / temps | count) | round(1) if temps | count > 0 else 0 }}
+
+- binary_sensor:
+    - name: "Washing Machine Running"
+      unique_id: washing_machine_running
+      delay_off: "00:05:00"
+      device_class: running
+      state: "{{ states('sensor.laundry_switch_plug_power') | float(0) > 10 }}"
+
+    - name: "House Occupied"
+      unique_id: house_occupied
+      device_class: occupancy
+      state: >
+        {{ is_state('binary_sensor.kitchen_occupancy', 'on') or
+           is_state('binary_sensor.dining_room_occupancy', 'on') or
+           is_state('binary_sensor.main_bedroom_occupancy', 'on') or
+           is_state('binary_sensor.living_room_occupancy', 'on') or
+           is_state('binary_sensor.guest_bedroom_1_occupancy', 'on') or
+           is_state('binary_sensor.game_room_occupancy', 'on') or
+           is_state('binary_sensor.guest_bedroom_2_occupancy', 'on') or
+           is_state('binary_sensor.cat_room_occupancy', 'on') or
+           is_state('binary_sensor.main_bathroom_occupancy', 'on') or
+           is_state('binary_sensor.half_bathroom_occupancy', 'on') or
+           is_state('binary_sensor.laundry_room_occupancy', 'on') or
+           is_state('binary_sensor.guest_bathroom_occupancy', 'on') or
+           is_state('binary_sensor.nest_protect_living_room_occupancy', 'on') or
+           is_state('binary_sensor.nest_protect_foyer_occupancy', 'on') }}
