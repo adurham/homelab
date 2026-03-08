@@ -197,3 +197,53 @@
         title: "CO2 Exhaust Fan Off"
         message: "Exhaust fan off after post-idle cooldown. CO2 at {{ states('sensor.ecobee_edgewater_road_co2') }} ppm."
         notification_id: "co2_override"
+
+- alias: "Basement Exhaust Fan Window Flush"
+  id: "basement_exhaust_fan_window_flush"
+  description: >
+    Runs basement exhaust fan when any first floor window is opened to pull
+    fresh air through the house via negative pressure. Runs until all
+    windows are closed.
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.kitchen_window_contact
+        - binary_sensor.kitchen_window_contact_2
+        - binary_sensor.kitchen_window_contact_3
+        - binary_sensor.living_room_window_contact
+        - binary_sensor.living_room_window_contact_2
+      to: "on"
+
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.basement_exhaust_fan
+
+    - service: persistent_notification.create
+      data:
+        title: "Window Flush Active"
+        message: "Window opened. Exhaust fan running to flush fresh air."
+        notification_id: "window_flush"
+
+    # Wait until all windows are closed
+    - wait_for_trigger:
+        - platform: template
+          value_template: >
+            {{ is_state('binary_sensor.kitchen_window_contact', 'off')
+               and is_state('binary_sensor.kitchen_window_contact_2', 'off')
+               and is_state('binary_sensor.kitchen_window_contact_3', 'off')
+               and is_state('binary_sensor.living_room_window_contact', 'off')
+               and is_state('binary_sensor.living_room_window_contact_2', 'off') }}
+
+    - service: switch.turn_off
+      target:
+        entity_id: switch.basement_exhaust_fan
+
+    - service: persistent_notification.create
+      data:
+        title: "Window Flush Complete"
+        message: "All windows closed. Exhaust fan off."
+        notification_id: "window_flush"
