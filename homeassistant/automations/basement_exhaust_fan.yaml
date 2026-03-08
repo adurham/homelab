@@ -216,6 +216,19 @@
         - binary_sensor.living_room_window_contact
         - binary_sensor.living_room_window_contact_2
       to: "on"
+    # Also trigger on HA startup in case a window was already open
+    - platform: homeassistant
+      event: start
+
+  condition:
+    # Ensure at least one window is actually open
+    - condition: template
+      value_template: >
+        {{ is_state('binary_sensor.kitchen_window_contact', 'on')
+           or is_state('binary_sensor.kitchen_window_contact_2', 'on')
+           or is_state('binary_sensor.kitchen_window_contact_3', 'on')
+           or is_state('binary_sensor.living_room_window_contact', 'on')
+           or is_state('binary_sensor.living_room_window_contact_2', 'on') }}
 
   action:
     - service: switch.turn_on
