@@ -77,12 +77,12 @@
       data:
         value: "{{ states('input_number.exhaust_fan_runtime_minutes') | float(0) + 5 }}"
 
-- alias: "Basement Exhaust Fan CO2 Override"
-  id: "basement_exhaust_fan_co2_override"
+- alias: "Basement Exhaust Fan CO2 On"
+  id: "basement_exhaust_fan_co2_on"
   description: >
-    Runs basement exhaust fan and HVAC fan continuously when indoor CO2 exceeds
-    1000 ppm. Bypasses the normal runtime budget since this is health-related.
-    Loops until CO2 drops below 1000 ppm, checking every 5 minutes.
+    Turns on basement exhaust fan and HVAC fan when CO2 is above 1000 ppm.
+    No loops or waits — just ensures everything is on. Re-checks every 5 minutes
+    so it can never get stuck.
   mode: single
   max_exceeded: silent
 
@@ -90,16 +90,18 @@
     - platform: numeric_state
       entity_id: sensor.ecobee_edgewater_road_co2
       above: 1000
-    # Also trigger when sensor appears (e.g. after HA restart) already above threshold
     - platform: state
       entity_id: sensor.ecobee_edgewater_road_co2
       from: "unavailable"
     - platform: state
       entity_id: sensor.ecobee_edgewater_road_co2
       from: "unknown"
+    - platform: time_pattern
+      minutes: "/5"
+    - platform: homeassistant
+      event: start
 
   condition:
-    # Ensure CO2 is actually above 1000 (needed for the from-unavailable triggers)
     - condition: numeric_state
       entity_id: sensor.ecobee_edgewater_road_co2
       above: 1000
@@ -109,7 +111,6 @@
       target:
         entity_id: switch.basement_exhaust_fan
 
-    # Turn on HVAC fan to circulate air throughout the house
     - service: climate.set_fan_mode
       target:
         entity_id: climate.ecobee_thermostat
@@ -119,19 +120,26 @@
     - service: persistent_notification.create
       data:
         title: "CO2 Override Active"
-        message: "Indoor CO2 at {{ states('sensor.ecobee_edgewater_road_co2') }} ppm. Exhaust fan and HVAC fan running until below 1000 ppm."
+        message: "Indoor CO2 at {{ states('sensor.ecobee_edgewater_road_co2') }} ppm. Exhaust fan and HVAC fan on."
         notification_id: "co2_override"
 
-    # Loop until CO2 drops below 1000 ppm, checking every 5 minutes
-    - repeat:
-        while:
-          - condition: numeric_state
-            entity_id: sensor.ecobee_edgewater_road_co2
-            above: 1000
-        sequence:
-          - delay: "00:05:00"
+- alias: "Basement Exhaust Fan CO2 Off"
+  id: "basement_exhaust_fan_co2_off"
+  description: >
+    Turns off exhaust fan and restores HVAC fan when CO2 drops below 1000 ppm.
+  mode: single
+  max_exceeded: silent
 
-    # CO2 is now below 1000 ppm — restore HVAC fan to auto
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.ecobee_edgewater_road_co2
+      below: 1000
+
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.basement_exhaust_fan
+
     - service: climate.set_fan_mode
       target:
         entity_id: climate.ecobee_thermostat
@@ -141,61 +149,7 @@
     - service: persistent_notification.create
       data:
         title: "CO2 Override Complete"
-        message: "CO2 dropped to {{ states('sensor.ecobee_edgewater_road_co2') }} ppm. HVAC fan restored to auto."
-        notification_id: "co2_override"
-
-    # Keep exhaust fan running for 5 minutes after HVAC fan goes idle
-    - wait_for_trigger:
-        - platform: state
-          entity_id: climate.ecobee_thermostat
-          attribute: hvac_action
-          to: "idle"
-      timeout: "00:30:00"
-      continue_on_timeout: true
-
-    - delay: "00:05:00"
-
-    # If CO2 climbed back above 1000 during wind-down, re-enter the loop
-    - if:
-        - condition: numeric_state
-          entity_id: sensor.ecobee_edgewater_road_co2
-          above: 1000
-      then:
-        - service: climate.set_fan_mode
-          target:
-            entity_id: climate.ecobee_thermostat
-          data:
-            fan_mode: "on"
-
-        - service: persistent_notification.create
-          data:
-            title: "CO2 Override Re-engaged"
-            message: "CO2 back above 1000 ppm ({{ states('sensor.ecobee_edgewater_road_co2') }} ppm). Resuming override."
-            notification_id: "co2_override"
-
-        # Re-enter the loop
-        - repeat:
-            while:
-              - condition: numeric_state
-                entity_id: sensor.ecobee_edgewater_road_co2
-                above: 1000
-            sequence:
-              - delay: "00:05:00"
-
-        - service: climate.set_fan_mode
-          target:
-            entity_id: climate.ecobee_thermostat
-          data:
-            fan_mode: "auto"
-
-    - service: switch.turn_off
-      target:
-        entity_id: switch.basement_exhaust_fan
-
-    - service: persistent_notification.create
-      data:
-        title: "CO2 Exhaust Fan Off"
-        message: "Exhaust fan off after post-idle cooldown. CO2 at {{ states('sensor.ecobee_edgewater_road_co2') }} ppm."
+        message: "CO2 dropped to {{ states('sensor.ecobee_edgewater_road_co2') }} ppm. Exhaust fan off, HVAC fan auto."
         notification_id: "co2_override"
 
 - alias: "Basement Exhaust Fan Window Flush"
