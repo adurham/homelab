@@ -110,8 +110,6 @@
     - platform: state
       entity_id: sensor.ecobee_edgewater_road_co2
       from: "unknown"
-    - platform: homeassistant
-      event: start
     # Re-engage when HVAC finishes a cycle
     - platform: state
       entity_id: climate.ecobee_thermostat
@@ -180,9 +178,6 @@
         - binary_sensor.living_room_window_contact
         - binary_sensor.living_room_window_contact_2
       to: "on"
-    # Also trigger on HA startup in case a window was already open
-    - platform: homeassistant
-      event: start
     # Re-engage when HVAC finishes a cycle while windows are still open
     - platform: state
       entity_id: climate.ecobee_thermostat
