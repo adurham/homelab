@@ -41,3 +41,6 @@ timer:
   garage_lights_motion_timeout:
     name: "Garage Lights Motion Timeout"
     duration: "00:15:00"
+  exhaust_fan_post_hvac:
+    name: "Exhaust Fan Post-HVAC Countdown"
+    duration: "00:05:00"
