@@ -1,266 +1,89 @@
-- alias: "Basement Exhaust Fan After HVAC On"
-  id: "basement_exhaust_fan_after_hvac_on"
-  description: >
-    Turns on the exhaust fan and starts a 5-minute timer when HVAC goes idle.
-    Max 30 minutes per rolling hour.
-  mode: single
-  max_exceeded: silent
-
-  trigger:
-    - platform: state
-      entity_id: climate.ecobee_thermostat
-      attribute: hvac_action
-      to: "idle"
-
-  condition:
-    # Check runtime budget (max 30 min per rolling hour)
-    - condition: template
-      value_template: >
-        {% set window_start = state_attr(
-          'input_datetime.exhaust_fan_window_start',
-          'timestamp'
-        ) | default(0) %}
-        {% set elapsed = now().timestamp() - window_start %}
-        {% set runtime = states('input_number.exhaust_fan_runtime_minutes') | float(0) %}
-        {% if elapsed > 3600 %}
-          true
-        {% else %}
-          {{ runtime + 5 <= 30 }}
-        {% endif %}
-
-  action:
-    # Reset hour window if expired
-    - if:
-        - condition: template
-          value_template: >
-            {% set window_start = state_attr(
-              'input_datetime.exhaust_fan_window_start',
-              'timestamp'
-            ) | default(0) %}
-            {{ (now().timestamp() - window_start) > 3600 }}
-      then:
-        - service: input_datetime.set_datetime
-          target:
-            entity_id: input_datetime.exhaust_fan_window_start
-          data:
-            timestamp: "{{ now().timestamp() }}"
-        - service: input_number.set_value
-          target:
-            entity_id: input_number.exhaust_fan_runtime_minutes
-          data:
-            value: 0
-
-    # Record start time for reboot recovery
-    - service: input_datetime.set_datetime
-      target:
-        entity_id: input_datetime.exhaust_fan_last_started
-      data:
-        timestamp: "{{ now().timestamp() }}"
-
-    # Turn on exhaust fan and start countdown
-    - service: switch.turn_on
-      target:
-        entity_id: switch.basement_exhaust_fan
-
-    - service: timer.start
-      target:
-        entity_id: timer.exhaust_fan_post_hvac
-
-    # Update runtime counter
-    - service: input_number.set_value
-      target:
-        entity_id: input_number.exhaust_fan_runtime_minutes
-      data:
-        value: "{{ states('input_number.exhaust_fan_runtime_minutes') | float(0) + 5 }}"
-
-- alias: "Basement Exhaust Fan After HVAC Off"
-  id: "basement_exhaust_fan_after_hvac_off"
-  description: >
-    Turns off the exhaust fan when the post-HVAC timer finishes.
-  mode: single
-  max_exceeded: silent
-
-  trigger:
-    - platform: event
-      event_type: timer.finished
-      event_data:
-        entity_id: timer.exhaust_fan_post_hvac
-
-  action:
-    - service: switch.turn_off
-      target:
-        entity_id: switch.basement_exhaust_fan
-
 - alias: "Basement Exhaust Fan CO2 On"
   id: "basement_exhaust_fan_co2_on"
   description: >
-    Turns on basement exhaust fan when CO2 is above 1000 ppm and HVAC is idle.
-    Cannot run simultaneously with HVAC blower due to air pressure conflicts.
-    Re-engages when HVAC goes idle or CO2 sensor recovers.
+    Turns on the basement exhaust fan when CO2 rises above 800 ppm.
+    Whole-house strategy: negative pressure pulls outside air in via
+    infiltration; ecobee 30/60 circulate distributes through ducts.
+    Runs regardless of HVAC blower state — 100 CFM is not enough to
+    cause meaningful pressure issues.
   mode: single
   max_exceeded: silent
 
   trigger:
     - platform: numeric_state
       entity_id: sensor.ecobee_edgewater_road_co2
-      above: 1000
-    - platform: state
-      entity_id: sensor.ecobee_edgewater_road_co2
-      from: "unavailable"
-    - platform: state
-      entity_id: sensor.ecobee_edgewater_road_co2
-      from: "unknown"
-    # Re-engage when HVAC finishes a cycle
-    - platform: state
-      entity_id: climate.ecobee_thermostat
-      attribute: hvac_action
-      to: "idle"
+      above: 800
+    - platform: homeassistant
+      event: start
 
   condition:
     - condition: numeric_state
       entity_id: sensor.ecobee_edgewater_road_co2
-      above: 1000
-    # Only run when HVAC blower is not active
-    - condition: template
-      value_template: >
-        {{ state_attr('climate.ecobee_thermostat', 'hvac_action') == 'idle' }}
+      above: 800
 
   action:
     - service: switch.turn_on
       target:
         entity_id: switch.basement_exhaust_fan
 
-    - service: persistent_notification.create
-      data:
-        title: "CO2 Override Active"
-        message: "Indoor CO2 at {{ states('sensor.ecobee_edgewater_road_co2') }} ppm. Exhaust fan on (HVAC idle)."
-        notification_id: "co2_override"
-
 - alias: "Basement Exhaust Fan CO2 Off"
   id: "basement_exhaust_fan_co2_off"
   description: >
-    Turns off exhaust fan when CO2 drops below 1000 ppm.
+    Turns off the basement exhaust fan when CO2 drops below 550 ppm.
+    250 ppm hysteresis (on at 800, off at 550) prevents short-cycling
+    and pushes harder than the old 900/700 to actually win against
+    evening occupancy loads.
   mode: single
   max_exceeded: silent
 
   trigger:
     - platform: numeric_state
       entity_id: sensor.ecobee_edgewater_road_co2
-      below: 1000
+      below: 550
 
   action:
     - service: switch.turn_off
       target:
         entity_id: switch.basement_exhaust_fan
 
-    - service: persistent_notification.create
-      data:
-        title: "CO2 Override Complete"
-        message: "CO2 dropped to {{ states('sensor.ecobee_edgewater_road_co2') }} ppm. Exhaust fan off."
-        notification_id: "co2_override"
-
-- alias: "Basement Exhaust Fan Window Flush"
-  id: "basement_exhaust_fan_window_flush"
+- alias: "Basement Exhaust Fan Baseline On"
+  id: "basement_exhaust_fan_baseline_on"
   description: >
-    Runs basement exhaust fan when any first floor window is opened to pull
-    fresh air through the house via negative pressure. Runs until all
-    windows are closed. Will not run while HVAC blower is active; the
-    HVAC preempt automation handles turning it off if HVAC starts mid-flush.
+    Baseline ventilation: runs fan 15 min at the top of every hour
+    regardless of CO2. At 100 CFM × 25% duty that's ~25 CFM average —
+    roughly ASHRAE 62.2 minimum for 2 people in a tight-ish envelope.
+    Prevents CO2 from climbing uncontested during evening occupancy.
   mode: single
   max_exceeded: silent
 
   trigger:
-    - platform: state
-      entity_id:
-        - binary_sensor.kitchen_window_contact
-        - binary_sensor.kitchen_window_contact_2
-        - binary_sensor.kitchen_window_contact_3
-        - binary_sensor.living_room_window_contact
-        - binary_sensor.living_room_window_contact_2
-      to: "on"
-    # Re-engage when HVAC finishes a cycle while windows are still open
-    - platform: state
-      entity_id: climate.ecobee_thermostat
-      attribute: hvac_action
-      to: "idle"
-
-  condition:
-    # Ensure at least one window is actually open
-    - condition: template
-      value_template: >
-        {{ is_state('binary_sensor.kitchen_window_contact', 'on')
-           or is_state('binary_sensor.kitchen_window_contact_2', 'on')
-           or is_state('binary_sensor.kitchen_window_contact_3', 'on')
-           or is_state('binary_sensor.living_room_window_contact', 'on')
-           or is_state('binary_sensor.living_room_window_contact_2', 'on') }}
-    # Only run when HVAC blower is not active
-    - condition: template
-      value_template: >
-        {{ state_attr('climate.ecobee_thermostat', 'hvac_action') == 'idle' }}
+    - platform: time_pattern
+      minutes: "0"
 
   action:
     - service: switch.turn_on
       target:
         entity_id: switch.basement_exhaust_fan
 
-    - service: persistent_notification.create
-      data:
-        title: "Window Flush Active"
-        message: "Window opened. Exhaust fan running to flush fresh air (HVAC idle)."
-        notification_id: "window_flush"
-
-    # Wait until all windows are closed
-    - wait_for_trigger:
-        - platform: template
-          value_template: >
-            {{ is_state('binary_sensor.kitchen_window_contact', 'off')
-               and is_state('binary_sensor.kitchen_window_contact_2', 'off')
-               and is_state('binary_sensor.kitchen_window_contact_3', 'off')
-               and is_state('binary_sensor.living_room_window_contact', 'off')
-               and is_state('binary_sensor.living_room_window_contact_2', 'off') }}
-
-    - service: switch.turn_off
-      target:
-        entity_id: switch.basement_exhaust_fan
-
-    - service: persistent_notification.create
-      data:
-        title: "Window Flush Complete"
-        message: "All windows closed. Exhaust fan off."
-        notification_id: "window_flush"
-
-- alias: "Basement Exhaust Fan HVAC Preempt"
-  id: "basement_exhaust_fan_hvac_preempt"
+- alias: "Basement Exhaust Fan Baseline Off"
+  id: "basement_exhaust_fan_baseline_off"
   description: >
-    Safety net: immediately turns off the exhaust fan whenever the HVAC
-    blower starts. Also cancels any running post-HVAC timer. The exhaust
-    fan and HVAC blower must never run at the same time due to air
-    pressure conflicts.
+    Ends the hourly baseline run 15 min after it started — unless CO2
+    is still above the ON threshold, in which case the CO2 On path
+    holds the fan until CO2 drops to 550 ppm.
   mode: single
   max_exceeded: silent
 
   trigger:
-    - platform: state
-      entity_id: climate.ecobee_thermostat
-      attribute: hvac_action
-      from: "idle"
+    - platform: time_pattern
+      minutes: "15"
 
   condition:
-    - condition: state
-      entity_id: switch.basement_exhaust_fan
-      state: "on"
+    - condition: numeric_state
+      entity_id: sensor.ecobee_edgewater_road_co2
+      below: 800
 
   action:
     - service: switch.turn_off
       target:
         entity_id: switch.basement_exhaust_fan
-
-    - service: timer.cancel
-      target:
-        entity_id: timer.exhaust_fan_post_hvac
-
-    - service: persistent_notification.create
-      data:
-        title: "Exhaust Fan Preempted"
-        message: "HVAC started ({{ state_attr('climate.ecobee_thermostat', 'hvac_action') }}). Exhaust fan turned off."
-        notification_id: "hvac_preempt"

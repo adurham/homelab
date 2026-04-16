@@ -48,14 +48,11 @@
         title: "Safety Watchdog"
         message: "Circulation pump and exhaust fan forced OFF on startup to prevent orphaned state."
 
-    # After cleanup, re-engage exhaust fan if CO2 is high and HVAC is idle
+    # After cleanup, re-engage exhaust fan if CO2 is high
     - if:
         - condition: numeric_state
           entity_id: sensor.ecobee_edgewater_road_co2
-          above: 1000
-        - condition: template
-          value_template: >
-            {{ state_attr('climate.ecobee_thermostat', 'hvac_action') == 'idle' }}
+          above: 800
       then:
         - service: switch.turn_on
           target:
