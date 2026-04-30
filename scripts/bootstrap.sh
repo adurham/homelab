@@ -11,7 +11,6 @@
 set -euo pipefail
 
 # Colors
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
@@ -178,7 +177,7 @@ ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
 # zsh-autosuggestions
 if [ ! -d "$ZSH_CUSTOM/plugins/zsh-autosuggestions" ]; then
     echo -e "${YELLOW}Installing zsh-autosuggestions...${NC}"
-    git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM}/plugins/zsh-autosuggestions
+    git clone https://github.com/zsh-users/zsh-autosuggestions "${ZSH_CUSTOM}/plugins/zsh-autosuggestions"
 else
     echo -e "${GREEN}✅ zsh-autosuggestions installed${NC}"
 fi
@@ -186,7 +185,7 @@ fi
 # zsh-syntax-highlighting
 if [ ! -d "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" ]; then
     echo -e "${YELLOW}Installing zsh-syntax-highlighting...${NC}"
-    git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM}/plugins/zsh-syntax-highlighting
+    git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "${ZSH_CUSTOM}/plugins/zsh-syntax-highlighting"
 else
     echo -e "${GREEN}✅ zsh-syntax-highlighting installed${NC}"
 fi

@@ -18,20 +18,20 @@ fi
 
 # Sync Automations Dir
 echo "Syncing automations directory..."
-scp -i $HOME/.ssh/id_ansible -P $HA_PORT -r homeassistant/automations/ $HA_USER@$HA_HOST:$CONFIG_DIR/
+scp -i "$HOME/.ssh/id_ansible" -P "$HA_PORT" -r homeassistant/automations/ "$HA_USER@$HA_HOST:$CONFIG_DIR/"
 
 # Sync Core Files
 echo "Syncing configuration files..."
-# scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/automations.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
-scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/configuration.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
-scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/scripts.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
-scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/sensors.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
-scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/input_datetime.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
-scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/input_number.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
-scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/templates.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
-# scp -i $HOME/.ssh/id_ansible -P $HA_PORT homeassistant/scenes.yaml $HA_USER@$HA_HOST:$CONFIG_DIR/
+# scp -i "$HOME/.ssh/id_ansible" -P "$HA_PORT" homeassistant/automations.yaml "$HA_USER@$HA_HOST:$CONFIG_DIR/"
+scp -i "$HOME/.ssh/id_ansible" -P "$HA_PORT" homeassistant/configuration.yaml "$HA_USER@$HA_HOST:$CONFIG_DIR/"
+scp -i "$HOME/.ssh/id_ansible" -P "$HA_PORT" homeassistant/scripts.yaml "$HA_USER@$HA_HOST:$CONFIG_DIR/"
+scp -i "$HOME/.ssh/id_ansible" -P "$HA_PORT" homeassistant/sensors.yaml "$HA_USER@$HA_HOST:$CONFIG_DIR/"
+scp -i "$HOME/.ssh/id_ansible" -P "$HA_PORT" homeassistant/input_datetime.yaml "$HA_USER@$HA_HOST:$CONFIG_DIR/"
+scp -i "$HOME/.ssh/id_ansible" -P "$HA_PORT" homeassistant/input_number.yaml "$HA_USER@$HA_HOST:$CONFIG_DIR/"
+scp -i "$HOME/.ssh/id_ansible" -P "$HA_PORT" homeassistant/templates.yaml "$HA_USER@$HA_HOST:$CONFIG_DIR/"
+# scp -i "$HOME/.ssh/id_ansible" -P "$HA_PORT" homeassistant/scenes.yaml "$HA_USER@$HA_HOST:$CONFIG_DIR/"
 
 echo "Deployment complete!"
 echo "Restarting Home Assistant Core..."
-ssh -i $HOME/.ssh/id_ansible -p $HA_PORT $HA_USER@$HA_HOST "ha core restart"
+ssh -i "$HOME/.ssh/id_ansible" -p "$HA_PORT" "$HA_USER@$HA_HOST" "ha core restart"
 echo "Done. Please wait for HA to come back online."

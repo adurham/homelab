@@ -33,18 +33,19 @@ run_test() {
     echo -e "${YELLOW}Testing $distro ($image)...${NC}"
 
     # Create a temporary directory for the test
-    local test_dir=$(mktemp -d)
+    local test_dir
+    test_dir=$(mktemp -d)
     cp bootstrap.sh "$test_dir/"
 
     # Set platform for Arch Linux (use x86_64 emulation)
-    PLATFORM_FLAG=""
+    PLATFORM_FLAG=()
     if [[ "$image" == "archlinux:latest" ]]; then
-        PLATFORM_FLAG="--platform linux/amd64"
+        PLATFORM_FLAG=(--platform linux/amd64)
     fi
 
     # Run the test in Docker
     if docker run --rm \
-        $PLATFORM_FLAG \
+        "${PLATFORM_FLAG[@]}" \
         -v "$test_dir:/test" \
         -w /test \
         "$image" \

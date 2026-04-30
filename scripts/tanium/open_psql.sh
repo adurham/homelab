@@ -25,12 +25,8 @@ get_pg_vars() {
     fi
 }
 
-# Try finding an **enabled** PostgreSQL service
-if get_pg_vars "postgresql-ts"; then
-    SERVICE_NAME="postgresql-ts"
-elif get_pg_vars "postgresql-tms"; then
-    SERVICE_NAME="postgresql-tms"
-else
+# Try finding an **enabled** PostgreSQL service (sets PGDATA / PGPORT)
+if ! get_pg_vars "postgresql-ts" && ! get_pg_vars "postgresql-tms"; then
     echo "Error: No enabled PostgreSQL services found. Exiting."
     exit 1
 fi
