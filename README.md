@@ -115,11 +115,17 @@ GitHub Actions runs four lint jobs on push and PR (see `.github/workflows/lint.y
 - `yamllint` (configured by `.yamllint`)
 - `ruff` for Python (configured by `pyproject.toml`)
 
-Run locally with:
+To get the same enforcement on your laptop, run the installer once:
 
 ```bash
-pip install pre-commit
-pre-commit install
+./scripts/install_dev_tools.sh
+```
+
+It installs `pre-commit`, `ansible-core`, `ansible-lint`, the ansible
+collections, and wires up the git hooks. After that, hooks run on every
+`git commit`; to lint the whole tree manually:
+
+```bash
 pre-commit run --all-files
 ```
 
