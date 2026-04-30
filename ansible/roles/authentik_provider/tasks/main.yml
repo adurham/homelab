@@ -216,8 +216,6 @@
     status_code: [200]
   when: grafana_provider_id is defined
 
-
-
 - name: Get Grafana Application
   ansible.builtin.uri:
     url: "{{ authentik_url }}/api/v3/core/applications/grafana/"
