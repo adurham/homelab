@@ -69,7 +69,6 @@ is_vpn_connected() {
 # Function to disconnect from VPN
 disconnect_vpn() {
     sudo pkill openconnect
-    vpn_interface=""
 }
 
 # Function to get VPN username and password from 1Password
@@ -107,16 +106,11 @@ handle_yubikey_state_change() {
             echo "YubiKey detected. VPN connected."
         fi
     fi
-
-    # Update previous states
-    prev_yubikey_state=$([ $current_yubikey_state -eq 0 ] && echo "true" || echo "false")
-    prev_vpn_state=$([ $current_vpn_state -eq 0 ] && echo "true" || echo "false")
 }
 
 # Function to print the initial state on startup
 print_initial_state() {
-    check_yubikey
-    if [ $? -eq 0 ]; then
+    if check_yubikey; then
         yubikey_state="YubiKey detected"
     else
         yubikey_state="YubiKey not detected"
