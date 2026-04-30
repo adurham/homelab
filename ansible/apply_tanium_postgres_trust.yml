@@ -102,12 +102,27 @@
           [Service]
           Type=oneshot
           ExecStart=/usr/local/bin/open_psql.sh
-          RemainAfterExit=yes
+          # No RemainAfterExit — unit must return to inactive (dead) after
+          # success so subsequent postgres starts re-trigger it via the
+          # WantedBy chain. Keeping it "active" would make systemd skip
+          # re-runs as already-satisfied.
 
           [Install]
           WantedBy=postgresql-ts.service postgresql-tms.service
       become: true
       register: unit_file
+
+    # Cleanup: an earlier version of open_psql.sh added an iptables rule
+    # without a source filter (open to all). Remove any such rule, leaving
+    # only the lab-subnet-scoped one created by the iptables task above.
+    - name: Remove legacy open-to-all postgres iptables rule
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ pg_port }}"
+        jump: ACCEPT
+        state: absent
+      become: true
 
     - name: Enable tanium-postgres-lab-trust to run on postgres start
       ansible.builtin.systemd:
@@ -115,6 +130,17 @@
         enabled: true
         daemon_reload: "{{ unit_file.changed }}"
       become: true
+
+    # When the unit definition changes, force a fresh run so systemd
+    # re-evaluates state under the new options (otherwise a unit stuck
+    # in `active (exited)` from an earlier definition won't re-trigger
+    # via WantedBy on the next postgres start).
+    - name: Restart unit so new definition takes effect
+      ansible.builtin.systemd:
+        name: tanium-postgres-lab-trust.service
+        state: restarted
+      become: true
+      when: unit_file.changed
 
   handlers:
     - name: Reload Postgres
