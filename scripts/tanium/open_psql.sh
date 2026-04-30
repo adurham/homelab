@@ -55,12 +55,12 @@ else
     HBA_CHANGED=1
 fi
 
-# Apply iptables rule (idempotent).
-if sudo iptables -C INPUT -p tcp --dport "$PGPORT" -j ACCEPT 2>/dev/null; then
-    echo "Port $PGPORT already open in iptables."
+# Apply iptables rule scoped to the lab subnet (idempotent).
+if sudo iptables -C INPUT -p tcp -s "$LAB_SUBNET" --dport "$PGPORT" -j ACCEPT 2>/dev/null; then
+    echo "Port $PGPORT already open from $LAB_SUBNET in iptables."
 else
-    sudo iptables -A INPUT -p tcp --dport "$PGPORT" -j ACCEPT
-    echo "Opened port $PGPORT in iptables."
+    sudo iptables -I INPUT -p tcp -s "$LAB_SUBNET" --dport "$PGPORT" -j ACCEPT
+    echo "Opened port $PGPORT from $LAB_SUBNET in iptables."
 fi
 
 # Reload postgres only when pg_hba changed; otherwise the change never takes effect.
