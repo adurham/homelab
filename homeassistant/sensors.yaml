@@ -13,7 +13,7 @@
   resource: http://192.168.86.195/sony/video
   method: POST
   headers:
-    X-Auth-PSK: "232689"
+    X-Auth-PSK: !secret sony_tv_psk
   payload: '{"method": "getPictureQualitySettings", "version": "1.0", "params": [{"target": "pictureMode"}], "id": 1}'
   value_template: "{{ value_json.result[0][0].currentValue }}"
   scan_interval: 10
