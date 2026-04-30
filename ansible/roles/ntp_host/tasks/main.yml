@@ -26,7 +26,7 @@
     --storage nvme-data
     --unprivileged 1
     --features nesting=1
-    --password "{{ lookup('password', 'credentials/ntp_01_root_pass chars=ascii_letters,digits length=20') }}"
+    --password "{{ ntp_01_root_pass }}"
     --start 1
     --onboot 1
   delegate_to: pve-01

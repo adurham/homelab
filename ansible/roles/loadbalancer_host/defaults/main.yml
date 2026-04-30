@@ -7,7 +7,9 @@ lxc_swap: 512
 lxc_disk_size: "4G"
 lxc_net_ip: "{{ ip_loadbalancer }}/24"
 lxc_net_gw: "{{ net_private_gw }}"
-lxc_password: "{{ lookup('password', 'credentials/lb_01_root_pass chars=ascii_letters,digits length=20') }}"
+# Sourced from inventory/group_vars/all.yml (vault-encrypted) — also exposed
+# via the lxc_password alias for authentik_host's downstream reference.
+lxc_password: "{{ lb_01_root_pass }}"
 target_node: "pve-01"
 lxc_template_storage: "local"
 lxc_template_file: "ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
