@@ -3,8 +3,13 @@
   ansible.builtin.command: pveam update
   changed_when: false
 
-- name: Check if Container exists
-  ansible.builtin.command: pct config {{ vmid }}
+# Cluster-wide existence check. `pct config` is node-local; HA can migrate
+# a CT to any node, so we ask pmxcfs for the full cluster resource list and
+# look for the vmid anywhere. rc=0 means it exists somewhere in the cluster.
+- name: Check if Container exists in cluster
+  ansible.builtin.shell: |
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]=={{ vmid }} for r in json.load(sys.stdin)) else 1)'
   register: ct_check
   failed_when: false
   changed_when: false
@@ -29,11 +34,15 @@
     --ssh-public-keys /root/.ssh/authorized_keys
   when: ct_check.rc != 0
 
-- name: Ensure Container is Running
+# Only start right after creation. After that, HA owns the running-state of
+# managed CTs — calling `pct start` from a non-owning node would fail anyway,
+# and HA already keeps the CT alive across node reboots.
+- name: Start Container (post-create only)
   ansible.builtin.command: pct start {{ vmid }}
   register: ct_start
   failed_when: ct_start.rc != 0 and ("already running" not in ct_start.stderr)
   changed_when: ct_start.rc == 0
+  when: ct_check.rc != 0
 
 - name: Add Host to Inventory
   ansible.builtin.add_host:
