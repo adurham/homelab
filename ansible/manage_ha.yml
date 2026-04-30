@@ -16,6 +16,10 @@
         name: "lb-01"
       - id: 104
         name: "mail-01"
+      - id: 106
+        name: "vm-01"
+      - id: 107
+        name: "graf-01"
 
     # Replication Config
     replication_targets:
@@ -33,7 +37,15 @@
         --rate 15
       loop: "{{ ha_containers | product(replication_targets) | list }}"
       register: pvesr_create
-      failed_when: pvesr_create.rc != 0 and "already exists" not in pvesr_create.stderr
+      # Accept two non-fatal outcomes:
+      #   - "already exists" (re-run after first apply)
+      #   - "Source and target must not be identical" (HA migrated a CT
+      #     onto the same node we'd ask to replicate to; the OTHER target
+      #     in replication_targets covers it).
+      failed_when:
+        - pvesr_create.rc != 0
+        - "'already exists' not in pvesr_create.stderr"
+        - "'Source and target must not be identical' not in pvesr_create.stderr"
       changed_when: pvesr_create.rc == 0
 
     - name: Enable Replication Jobs
