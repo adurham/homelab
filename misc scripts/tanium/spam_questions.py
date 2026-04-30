@@ -1,3 +1,4 @@
+import os
 import time
 import requests
 import random
@@ -5,9 +6,13 @@ import urllib3
 from urllib3.exceptions import NotOpenSSLWarning
 import warnings
 
-# Suppress SSL and LibreSSL warnings
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+VERIFY_TLS = os.getenv("TANIUM_VERIFY_TLS", "true").lower() != "false"
+
+# Suppress LibreSSL warnings; suppress InsecureRequestWarning only when TLS
+# verification is explicitly disabled via TANIUM_VERIFY_TLS=false
 warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
+if not VERIFY_TLS:
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BASE_URL = "https://172.16.1.18"
 SENSORS_URL = f"{BASE_URL}/api/v2/sensors"
@@ -29,7 +34,7 @@ success_count = 0
 
 def fetch_sensor_names():
     try:
-        resp = requests.get(SENSORS_URL, headers=HEADERS, verify=False)
+        resp = requests.get(SENSORS_URL, headers=HEADERS, verify=VERIFY_TLS)
         if resp.status_code == 200:
             data = resp.json().get("data", [])
             names = [
@@ -50,7 +55,7 @@ def generate_question_text(sensor_names):
 
 def parse_question(raw_query):
     try:
-        resp = requests.post(PARSE_URL, json={"text": raw_query}, headers=HEADERS, verify=False)
+        resp = requests.post(PARSE_URL, json={"text": raw_query}, headers=HEADERS, verify=VERIFY_TLS)
         if resp.status_code == 200:
             data = resp.json().get("data", [])
             if data and "question_text" in data[0]:
@@ -68,7 +73,7 @@ def send_question(query_text, max_retries=3):
 
     for attempt in range(1, max_retries + 1):
         try:
-            resp = requests.post(QUESTION_URL, json=payload, headers=HEADERS, verify=False)
+            resp = requests.post(QUESTION_URL, json=payload, headers=HEADERS, verify=VERIFY_TLS)
             if resp.status_code == 200:
                 data = resp.json()
                 question_id = data.get("data", {}).get("id")

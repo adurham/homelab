@@ -1,4 +1,9 @@
 #!/bin/bash
+#
+# WARNING: lab-only convenience script.
+# Adds a passwordless ("trust") PostgreSQL auth entry scoped to the lab
+# subnet (172.16.0.0/24) and opens the listener port in iptables. Do not
+# run on shared, internet-reachable, or production hosts.
 
 # Function to get PGDATA and PGPORT from systemd for an enabled service
 get_pg_vars() {
@@ -32,7 +37,7 @@ fi
 
 # Define the path to pg_hba.conf
 FILE="$PGDATA/pg_hba.conf"
-LINE="host all all 0.0.0.0/0 trust"  # Replace with the exact line you want to ensure is present
+LINE="host all all 172.16.0.0/24 trust"  # lab subnet only — see warning header
 
 # Ensure pg_hba.conf exists before modifying it
 if [ ! -f "$FILE" ]; then
