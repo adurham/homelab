@@ -48,7 +48,10 @@ repos:
     hooks:
       - id: ansible-lint
         name: Ansible Lint
-        entry: env ANSIBLE_CONFIG=ansible/ansible.cfg ansible-lint
+        # Run from the ansible/ directory so ansible-lint picks up
+        # ansible.cfg (it has relative paths that require this cwd) and
+        # actually scans files instead of silently exiting 0.
+        entry: bash -c 'cd ansible && ansible-lint --offline'
         language: system
-        files: \.(yaml|yml)$
-        pass_filenames: true
+        files: ^ansible/.*\.(yaml|yml)$
+        pass_filenames: false
