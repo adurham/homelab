@@ -1,0 +1,76 @@
+---
+# WARNING: lab-only convenience play.
+# Adds a passwordless ("trust") PostgreSQL pg_hba entry scoped to the
+# lab subnet (172.16.0.0/24) and opens the listener port in iptables on
+# every Tanium platform appliance (TS x2, TMS x2). Do not apply on shared,
+# internet-reachable, or production Tanium servers.
+#
+# scripts/tanium/open_psql.sh does the same thing per-host as a fallback.
+
+- name: Open Tanium Postgres for lab subnet access
+  hosts: tanium_servers:tanium_modules
+  gather_facts: false
+  vars:
+    lab_subnet: "172.16.0.0/24"
+    candidate_services:
+      - postgresql-ts
+      - postgresql-tms
+
+  tasks:
+    - name: Find enabled Postgres service
+      ansible.builtin.command: "systemctl is-enabled {{ item }}"
+      register: pg_check
+      changed_when: false
+      failed_when: false
+      loop: "{{ candidate_services }}"
+
+    - name: Resolve service name from enabled candidate
+      ansible.builtin.set_fact:
+        pg_service: >-
+          {{ (pg_check.results
+              | selectattr('rc', 'equalto', 0)
+              | map(attribute='item')
+              | list
+              | first)
+              | default('') }}
+
+    - name: Fail if no candidate Postgres service is enabled
+      ansible.builtin.fail:
+        msg: "Neither postgresql-ts nor postgresql-tms is enabled on this host."
+      when: pg_service == ""
+
+    - name: Read systemd Environment for the enabled service
+      ansible.builtin.command: "systemctl show {{ pg_service }} --property=Environment"
+      register: pg_env
+      changed_when: false
+
+    - name: Extract PGDATA and PGPORT
+      ansible.builtin.set_fact:
+        pg_data: "{{ (pg_env.stdout | regex_search('PGDATA=([^ \\n]+)', '\\1')) | first }}"
+        pg_port: "{{ (pg_env.stdout | regex_search('PGPORT=([0-9]+)', '\\1')) | first }}"
+
+    - name: Open Postgres port in iptables for lab subnet
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ pg_port }}"
+        source: "{{ lab_subnet }}"
+        jump: ACCEPT
+        action: insert
+        state: present
+      become: true
+
+    - name: Add lab-subnet trust entry to pg_hba.conf
+      ansible.builtin.lineinfile:
+        path: "{{ pg_data }}/pg_hba.conf"
+        line: "host    all    all    {{ lab_subnet }}    trust"
+        state: present
+      become: true
+      notify: Reload Postgres
+
+  handlers:
+    - name: Reload Postgres
+      ansible.builtin.systemd:
+        name: "{{ pg_service }}"
+        state: reloaded
+      become: true

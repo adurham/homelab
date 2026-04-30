@@ -100,6 +100,21 @@ Verify via `https://proxmox.chi.lab.amd-e.com` or SSH.
 ./scripts/bootstrap.sh
 ```
 
+### Opening Tanium Postgres for the lab subnet
+
+Lab-only convenience: adds a passwordless ("trust") `pg_hba.conf` entry
+scoped to `172.16.0.0/24` and opens the listener port in iptables on all
+four Tanium platform appliances (TS x2, TMS x2). Auto-detects whichever
+postgres service is enabled per host and reloads it on change.
+
+```bash
+ansible-playbook -i ansible/inventory/proxmox.yml \
+  ansible/apply_tanium_postgres_trust.yml
+```
+
+`scripts/tanium/open_psql.sh` does the same thing per-host as a manual
+fallback (run on the appliance directly).
+
 ## Secrets & Credentials
 
 - **Ansible Vault** for per-role secrets (`ansible/inventory/group_vars/all.yml`).
