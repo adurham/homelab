@@ -110,7 +110,7 @@
           [Install]
           WantedBy=postgresql-ts.service postgresql-tms.service
       become: true
-      register: unit_file
+      notify: Restart trust unit
 
     # Cleanup: an earlier version of open_psql.sh added an iptables rule
     # without a source filter (open to all). Remove any such rule, leaving
@@ -128,23 +128,23 @@
       ansible.builtin.systemd:
         name: tanium-postgres-lab-trust.service
         enabled: true
-        daemon_reload: "{{ unit_file.changed }}"
+        daemon_reload: true
       become: true
-
-    # When the unit definition changes, force a fresh run so systemd
-    # re-evaluates state under the new options (otherwise a unit stuck
-    # in `active (exited)` from an earlier definition won't re-trigger
-    # via WantedBy on the next postgres start).
-    - name: Restart unit so new definition takes effect
-      ansible.builtin.systemd:
-        name: tanium-postgres-lab-trust.service
-        state: restarted
-      become: true
-      when: unit_file.changed
 
   handlers:
     - name: Reload Postgres
       ansible.builtin.systemd:
         name: "{{ pg_service }}"
         state: reloaded
+      become: true
+
+    # When the unit definition changes, force a fresh run so systemd
+    # re-evaluates state under the new options. Otherwise a unit left
+    # in `active (exited)` from a previous definition won't re-trigger
+    # via WantedBy on the next postgres start.
+    - name: Restart trust unit
+      ansible.builtin.systemd:
+        name: tanium-postgres-lab-trust.service
+        state: restarted
+        daemon_reload: true
       become: true
