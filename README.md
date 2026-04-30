@@ -1,203 +1,128 @@
-# 🏠 Homelab Infrastructure Repository
+# Homelab Infrastructure Repository
 
-A comprehensive homelab setup featuring infrastructure automation, smart home automation, system management, and development tools.
+A personal homelab managed as code: Proxmox-based hyper-converged private cloud, Home Assistant smart home automation, and a collection of utility scripts.
 
-## 🚀 Quick Start
+## Architecture
 
-### System Bootstrap Script
+This repository manages a hyper-converged private cloud built on Proxmox VE. The lab is treated as a software-defined datacenter, with Ansible providing end-to-end automation of infrastructure, networking, and services.
 
-Restore your entire terminal/shell setup from scratch after a system wipe:
+- **Orchestrator**: Ansible (roles & playbooks).
+- **Hypervisor**: Proxmox VE — 3-node cluster (`pve01`, `pve02`, `pve03`).
+- **Networking**:
+  - **Physical**: LAN (`vmbr0`, `192.168.86.0/24`).
+  - **SDN**: VXLAN-based private network (`172.16.0.0/24`) for isolated service communication.
+  - **Ingress**: Tailscale Gateway (`172.16.0.101`) for secure remote access and NAT.
+- **Identity**: Authentik (`auth.chi.lab.amd-e.com`) with OIDC integration for Proxmox SSO.
+- **Storage**: ZFS (NVMe) with automated replication for High Availability.
+
+### Core Services & Addressing
+
+| Service          | Hostname           | Private IP     | Public/LAN         | Description                                       |
+| :--------------- | :----------------- | :------------- | :----------------- | :------------------------------------------------ |
+| Gateway          | `proxmox` (VNet)   | `172.16.0.1`   | -                  | SDN gateway for the private network               |
+| DNS              | `dns-01`           | `172.16.0.10`  | -                  | Internal Bind9 authority (`chi.lab.amd-e.com`)    |
+| Identity         | `authentik`        | `172.16.0.20`  | `100.x.y.z` (TS)   | SSO provider; access via load balancer            |
+| Load Balancer    | `lb-01`            | `172.16.0.30`  | -                  | Nginx Layer 7 proxy for the cluster and services  |
+| Tailscale GW     | `tailscale-gw`     | `172.16.0.101` | `100.x.y.z`        | Ingress / NAT gateway                             |
+
+External access URL: `https://proxmox.chi.lab.amd-e.com` → `lb-01`.
+
+### High Availability
+
+The core infrastructure survives a single-node failure (N-1 redundancy).
+
+- **Mechanism**: Proxmox HA Manager (watchdog) + ZFS replication.
+- **Replication rate**: every 15 minutes.
+- **Target nodes**: all peers (`pve02`, `pve03`).
+- **Protected resources**:
+  - `ct:100` — Authentik
+  - `ct:101` — Tailscale GW
+  - `ct:102` — DNS
+  - `ct:103` — Load Balancer
+
+If a node fails, Proxmox HA automatically restarts protected containers on a healthy node. Check status with `ha-manager status` on any node.
+
+## Repository Layout
+
+### `ansible/` — automated provisioning
+
+Manages the lifecycle of LXC containers, VMs, and cluster configuration.
+
+- **Inventory**: `ansible/inventory/proxmox.yml` defines nodes and static IPs for core services.
+- **Playbooks** (selected):
+  - `deploy_dns.yml` — Bind9 DNS (`dns-01`).
+  - `deploy_authentik.yml` — Authentik IDP.
+  - `deploy_loadbalancer.yml` — Nginx LB (`lb-01`).
+  - `deploy_tailscale_gw.yml` — Tailscale gateway.
+  - `configure_sso.yml` — Proxmox OIDC realm & permissions.
+  - `manage_ha.yml` — ZFS replication & HA resources.
+  - `manage_authentik.yml` — declarative Authentik config (providers, apps, groups).
+  - `deploy_tanium_clients.yml` — Tanium client install across mixed OS targets.
+  - `deploy_monitoring.yml` — VictoriaMetrics + Grafana.
+
+### `homeassistant/` — smart home automation
+
+Home Assistant configuration deployed to the HA host. Notable subsystems:
+
+- **Water heater circulator pump** — occupancy-driven, with daily runtime limits and cooldown.
+- **Lighting automations** — cat room, front porch sconces, garage door motion, stair lighting.
+- **Climate control** — Flair vents, Ecobee sensors.
+- **Deployment** — `homeassistant/deploy_homeassistant.sh` syncs configs and reloads.
+
+### `scripts/` — utilities
+
+- `bootstrap.sh` — restore terminal/shell setup on a fresh machine (macOS, Debian/Ubuntu, RHEL family, Arch).
+- `yubikey_vpn_connect.sh` — YubiKey-based VPN connection.
+- `patch_binary.sh` — binary patching helper.
+- `tanium/` — Tanium platform tooling (client API, TDS, performance testing, sensors, etc.).
+
+## Operational Procedures
+
+### Deploying Ansible changes
 
 ```bash
-# Run the bootstrap script to restore your terminal setup
+ansible-playbook -i ansible/inventory/proxmox.yml ansible/<playbook_name>.yml
+```
+
+Verify via `https://proxmox.chi.lab.amd-e.com` or SSH.
+
+### Deploying Home Assistant changes
+
+```bash
+./deploy_ha.sh
+# or for AppDaemon apps:
+./deploy_appdaemon.sh
+```
+
+### Bootstrapping a new workstation
+
+```bash
 ./scripts/bootstrap.sh
 ```
 
-The bootstrap script supports:
+## Secrets & Credentials
 
-- ✅ **macOS** (Intel and Apple Silicon)
-- ✅ **Ubuntu/Debian-based** (Ubuntu, Debian, Pop!_OS, Elementary, Linux Mint)
-- ✅ **CentOS/RHEL-based** (CentOS, RHEL, Rocky Linux, AlmaLinux, Fedora)
-- ✅ **Arch-based** (Arch Linux, Manjaro)
+- **Ansible Vault** for per-role secrets (`ansible/inventory/group_vars/all.yml`).
+- **`ansible/credentials/`** for raw API tokens (gitignored): `desec_token_proxmox`, `authentik_api_token`, etc.
+- **Home Assistant** secrets in `/config/secrets.yaml` on the HA host (gitignored locally; see `homeassistant/secrets.yaml.example`).
 
-## 📁 Repository Overview
+## Linting & CI
 
-This repository contains a complete homelab infrastructure setup with the following major components:
+GitHub Actions runs four lint jobs on push and PR (see `.github/workflows/lint.yml`):
 
-### 🤖 Configuration Management (`ansible/`)
+- `ansible-lint` (configured by `ansible/ansible.cfg` + `.ansible-lint`)
+- `shellcheck` (configured by `.shellcheckrc`)
+- `yamllint` (configured by `.yamllint`)
+- `ruff` for Python (configured by `pyproject.toml`)
 
-**Automated System Configuration**
-
-- **Tanium Client Deployment**: Automated installation across multiple OS types
-  - Windows guests
-  - Linux distributions (Ubuntu, RHEL, Oracle Linux, CentOS)
-  - Version management (3.14 and 3.15 clients)
-- **OS-Specific Configurations**: Tailored settings for different operating systems
-- **Proxmox Inventory**: Inventory sourced from Proxmox
-
-#### 🏃 Runner Setup
-
-To prepare a new machine (CI/CD runner or workstation) with all dependencies:
+Run locally with:
 
 ```bash
-./ansible/setup_runner.sh
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
 ```
 
-### 🏠 Smart Home Automation (`homeassistant/`)
+## License
 
-**Intelligent Home Control System**
-
-#### 🌡️ Water Heater Circulator Pump System
-
-- **Smart Pump Control**: Automatic water heater circulator pump based on occupancy detection
-- **Occupancy Detection**: Monitors kitchen and bathroom occupancy sensors
-- **Safety Features**: Daily runtime limits (8 hours max), cooldown periods (45 minutes)
-- **Room Coverage**: Kitchen, half bathroom, main bathroom, guest bathroom
-- **Automation Logic**: 15-minute pump cycles with intelligent scheduling
-
-#### 💡 Lighting Automation
-
-- **Cat Room Lighting**: Automated main lights control
-- **Front Porch Sconces**: Motion-activated lighting
-- **Garage Lighting**: Door motion control integration
-- **Stair Lighting**: Automated on/off control
-
-#### 🔧 Advanced Features
-
-- **Deployment Safety**: Change detection, automatic backups, validation layers
-- **Error Recovery**: Auto-restore from backups if deployment fails
-- **Virtual Environment**: Isolated Python dependencies
-- **YAML Linting**: Automated configuration validation
-
-### 🛠️ Utility Scripts (`scripts/`)
-
-#### 🚀 System Bootstrap (`bootstrap.sh`)
-
-**Complete Terminal Environment Restoration**
-
-- **Package Management**: Homebrew (macOS), apt (Ubuntu/Debian), dnf/yum (CentOS/RHEL), pacman (Arch)
-- **Shell Setup**: zsh, Oh My Zsh, Starship prompt with custom configuration
-- **Development Tools**: direnv, htop, jq, fzf, tree, vim, git, curl, wget
-- **Cross-Platform**: Automatically detects OS and configures appropriately
-
-#### 🔧 System Management Scripts
-
-- **Binary Patching**: `patch_binary.sh` - Binary modification tools
-- **VPN Connectivity**: `yubikey_vpn_connect.sh` - YubiKey VPN connection automation
-
-#### 🔒 Tanium Management (`tanium/`)
-
-**Enterprise Security Platform Tools**
-
-- **Client Management**: API interactions, client configuration
-- **Security Operations**: TLS testing, alert management, sensor toggling
-- **Data Management**: SQL operations, MD5 checksums, metric pushing
-- **Automation**: Question loading, action creation, user/group imports
-- **Airgap Operations**: Secure deployment scripts for isolated environments
-
-## 🎯 Key Features
-
-### 🔐 Security & Compliance
-
-- **Tanium Integration**: Enterprise-grade endpoint security
-- **Airgap Environments**: Secure deployments for sensitive workloads
-
-### 🏠 Smart Home Intelligence
-
-- **Occupancy-Based Automation**: Intelligent pump control based on room usage
-- **Safety Mechanisms**: Runtime limits, cooldown periods, manual overrides
-- **Comprehensive Monitoring**: Daily statistics, cycle tracking, usage analytics
-
-### 🚀 Development Productivity
-
-- **Cross-Platform Compatibility**: Works on macOS, Linux, and Windows
-- **Automated Setup**: One-command environment restoration
-- **Quality Assurance**: Automated testing and validation
-
-### 📊 Monitoring & Observability
-
-- **Grafana Integration**: Comprehensive monitoring dashboards
-- **Home Assistant Logging**: Detailed automation logging and debugging
-
-## 🛠️ Technology Stack
-
-### Infrastructure
-
-- **Proxmox**: Virtualization platform
-- **Ansible**: Configuration management
-
-### Smart Home
-
-- **Home Assistant**: Open-source home automation platform
-- **Python**: Automation scripting and deployment tools
-- **YAML**: Configuration management
-
-### Development
-
-- **VS Code**: Integrated development environment
-- **Git**: Version control
-
-### System Management
-
-- **Bash/Shell Scripting**: Automation and system management
-- **PowerShell**: Windows system management
-- **Python**: Cross-platform scripting and APIs
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- Home Assistant instance
-- Python 3.x
-- Git
-
-### Initial Setup
-
-1. **Clone the Repository**
-
-   ```bash
-   git clone <repository-url>
-   cd homelab
-   ```
-
-2. **Restore Terminal Environment** (Optional)
-
-   ```bash
-   ./scripts/bootstrap.sh
-   ```
-
-3. **Configure Home Assistant**
-
-   ```bash
-   cd homeassistant
-   cp ha_config.env.example ha_config.env
-   # Edit ha_config.env with your HA credentials
-   ./setup_venv.sh
-   ```
-
-## 📚 Documentation
-
-- **Home Assistant**: See `homeassistant/README.md` and `homeassistant/water_heater_pump_README.md`
-- **Tanium Management**: See `scripts/tanium/` for various utility scripts
-- **System Bootstrap**: See `scripts/bootstrap.sh` for cross-platform terminal setup
-
-## 🔧 Maintenance
-
-### Regular Tasks
-
-- **Home Assistant**: Deploy configuration changes with `./homeassistant/deploy_homeassistant.sh`
-- **Ansible**: Run playbooks for system configuration updates
-- **Monitoring**: Check Grafana dashboards
-
-### Backup & Recovery
-
-- **Home Assistant**: Automatic backups created during deployments
-- **Configuration**: Git repository provides version control
-
-## 🤝 Contributing
-
-This is a personal homelab repository, but the utility scripts and configurations may be useful for others. Feel free to adapt and use the components that fit your needs.
-
-## 📄 License
-
-This repository contains personal homelab configurations and utility scripts. Use at your own discretion and adapt as needed for your environment.
+Personal homelab configuration. Use at your own discretion and adapt as needed.
