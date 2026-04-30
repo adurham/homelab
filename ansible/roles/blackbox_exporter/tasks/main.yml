@@ -1,0 +1,110 @@
+---
+- name: Create blackbox_exporter group
+  ansible.builtin.group:
+    name: blackbox_exporter
+    state: present
+
+- name: Create blackbox_exporter user
+  ansible.builtin.user:
+    name: blackbox_exporter
+    group: blackbox_exporter
+    shell: /sbin/nologin
+    create_home: false
+    system: true
+
+- name: Download blackbox_exporter
+  ansible.builtin.unarchive:
+    src: "https://github.com/prometheus/blackbox_exporter/releases/download/v{{ blackbox_exporter_version }}/blackbox_exporter-{{ blackbox_exporter_version }}.linux-amd64.tar.gz"
+    dest: /tmp/
+    remote_src: true
+    creates: "/tmp/blackbox_exporter-{{ blackbox_exporter_version }}.linux-amd64/blackbox_exporter"
+
+- name: Install binary
+  ansible.builtin.copy:
+    src: "/tmp/blackbox_exporter-{{ blackbox_exporter_version }}.linux-amd64/blackbox_exporter"
+    dest: /usr/local/bin/blackbox_exporter
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart blackbox_exporter
+
+- name: Create config directory
+  ansible.builtin.file:
+    path: /etc/blackbox_exporter
+    state: directory
+    mode: '0755'
+
+- name: Configure blackbox_exporter modules
+  ansible.builtin.copy:
+    dest: /etc/blackbox_exporter/blackbox.yml
+    content: |
+      modules:
+        # TCP connect — we only care that the port accepts connections,
+        # which is enough to confirm postgres is up + iptables is open
+        # + tanium-postgres-lab-trust unit ran successfully.
+        tcp_connect:
+          prober: tcp
+          timeout: 5s
+
+        # HTTPS GET. Sets probe_ssl_earliest_cert_expiry so we can alert
+        # on certs about to expire. fail_if_not_ssl forces us to fail if
+        # the endpoint downgrades.
+        https_2xx:
+          prober: http
+          timeout: 8s
+          http:
+            valid_status_codes: [200, 301, 302, 401, 403]
+            method: GET
+            fail_if_not_ssl: true
+            preferred_ip_protocol: ip4
+            tls_config:
+              insecure_skip_verify: false
+    owner: root
+    group: blackbox_exporter
+    mode: '0640'
+  notify: Restart blackbox_exporter
+
+- name: Deploy blackbox_exporter systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/blackbox_exporter.service
+    content: |
+      [Unit]
+      Description=Blackbox Exporter
+      After=network.target
+
+      [Service]
+      User=blackbox_exporter
+      Group=blackbox_exporter
+      Type=simple
+      # Drop CAP_NET_RAW so ICMP probes work without root, but we don't use
+      # them here — TCP/HTTPS only.
+      ExecStart=/usr/local/bin/blackbox_exporter \
+        --config.file=/etc/blackbox_exporter/blackbox.yml \
+        --web.listen-address=:9115
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+  notify: Restart blackbox_exporter
+
+# Flush before "Start and enable" so a first-run install doesn't trigger a
+# pointless second restart at end-of-play (start task starts it; handler
+# would then restart it). Subsequent runs only restart once via the handler.
+- name: Flush handlers so config/binary changes apply before enable
+  ansible.builtin.meta: flush_handlers
+
+- name: Start and enable blackbox_exporter
+  ansible.builtin.systemd:
+    name: blackbox_exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Cleanup tmp
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/blackbox_exporter-{{ blackbox_exporter_version }}.linux-amd64.tar.gz"
+    - "/tmp/blackbox_exporter-{{ blackbox_exporter_version }}.linux-amd64"

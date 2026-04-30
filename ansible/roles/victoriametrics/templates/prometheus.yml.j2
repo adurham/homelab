@@ -26,3 +26,57 @@ scrape_configs:
         regex: '(.+)'
         target_label: instance
         replacement: '$1'
+
+  # ---------------------------------------------------------------------
+  # Blackbox-driven probes (Tanium postgres reachability + cert expiry)
+  # blackbox_exporter runs alongside victoria-metrics-prod on this host.
+  # ---------------------------------------------------------------------
+
+  # TCP probes to Tanium postgres ports. Server appliances run the TS
+  # postgres on 5432; module servers run the TMS postgres on 5433.
+  # `probe_success == 0` means: host down, postgres down, iptables wrong,
+  # or tanium-postgres-lab-trust unit failed — all of which we want to know.
+  - job_name: 'blackbox_tanium_postgres'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+{% for host in groups['tanium_servers'] | default([]) %}
+      - targets: ['{{ hostvars[host].ansible_host }}:5432']
+        labels:
+          instance: '{{ host }}'
+          tanium_role: 'server'
+{% endfor %}
+{% for host in groups['tanium_modules'] | default([]) %}
+      - targets: ['{{ hostvars[host].ansible_host }}:5433']
+        labels:
+          instance: '{{ host }}'
+          tanium_role: 'module'
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
+  # HTTPS probes to public-facing services. probe_ssl_earliest_cert_expiry
+  # is exposed automatically; we alert when it gets close to now().
+  # Targets come from blackbox_https_targets (roles/victoriametrics/defaults).
+  - job_name: 'blackbox_https_cert'
+    metrics_path: /probe
+    params:
+      module: [https_2xx]
+    static_configs:
+      - targets:
+{% for url in blackbox_https_targets | default([]) %}
+          - {{ url }}
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115

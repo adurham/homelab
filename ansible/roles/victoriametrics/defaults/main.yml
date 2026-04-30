@@ -1,2 +1,9 @@
 ---
 homeassistant_token: "{{ lookup('file', 'credentials/homeassistant_token') }}"
+
+# Public-facing HTTPS endpoints we probe for cert expiry + reachability.
+# Override at inventory level if a host should add/remove targets.
+blackbox_https_targets:
+  - https://grafana.chi.lab.amd-e.com
+  - https://auth.chi.lab.amd-e.com
+  - https://proxmox.chi.lab.amd-e.com

@@ -33,6 +33,7 @@
   roles:
     - common_monitoring
     - victoriametrics
+    - blackbox_exporter
 
 - name: Configure Grafana
   hosts: grafana

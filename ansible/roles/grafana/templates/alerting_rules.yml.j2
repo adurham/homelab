@@ -49,7 +49,7 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        noDataState: NoData
+        noDataState: Alerting
         execErrState: Error
         for: 5m
         annotations:
@@ -57,6 +57,168 @@ groups:
           description: "node_exporter on {{ '{{' }} $labels.instance {{ '}}' }} hasn't responded for 5 minutes"
         labels:
           severity: critical
+        isPaused: false
+
+      - uid: tanium_postgres_unreachable
+        title: Tanium postgres unreachable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: probe_success{job="blackbox_tanium_postgres"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "{{ '{{' }} $labels.instance {{ '}}' }} postgres unreachable on {{ '{{' }} $labels.target {{ '}}' }}"
+          description: "blackbox TCP probe to {{ '{{' }} $labels.target {{ '}}' }} has failed for 5 minutes — host down, postgres down, iptables, or tanium-postgres-lab-trust unit"
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: https_endpoint_unreachable
+        title: HTTPS endpoint unreachable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: probe_success{job="blackbox_https_cert"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "{{ '{{' }} $labels.instance {{ '}}' }} unreachable"
+          description: "blackbox HTTPS probe to {{ '{{' }} $labels.instance {{ '}}' }} has failed for 5 minutes — DNS, connection refused, TLS, or non-2xx response. Cert-expiry alerts depend on this probe succeeding, so this fires first if the endpoint is fully down."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: cert_expiring_soon
+        title: TLS certificate expiring soon
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: (probe_ssl_earliest_cert_expiry{job="blackbox_https_cert"} - time()) / 86400
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [14]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "Cert for {{ '{{' }} $labels.instance {{ '}}' }} expires in less than 14 days"
+          description: "Less than 14 days until the TLS certificate served by {{ '{{' }} $labels.instance {{ '}}' }} expires; auto-renewal may have failed"
+        labels:
+          severity: warning
         isPaused: false
 
       - uid: disk_full
@@ -103,7 +265,7 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        noDataState: NoData
+        noDataState: OK
         execErrState: Error
         for: 10m
         annotations:

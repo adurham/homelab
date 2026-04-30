@@ -18,19 +18,28 @@
   variables:
     alerts: "{{ trigger.json.alerts | default([]) }}"
     firing_count: "{{ alerts | selectattr('status', 'eq', 'firing') | list | count }}"
+    # iOS critical-alert override (bypasses Do Not Disturb / silent mode) is
+    # reserved for severity=critical alerts. Warnings and resolved messages
+    # come in as normal pushes — they wake the screen but don't override DND.
+    has_critical: >-
+      {{ alerts
+         | selectattr('status', 'eq', 'firing')
+         | selectattr('labels.severity', 'defined')
+         | selectattr('labels.severity', 'eq', 'critical')
+         | list | count > 0 }}
 
   action:
     - service: notify.mobile_app_adams_iphone_16
       data:
         title: >-
           {%- if firing_count > 0 -%}
-          🔴 Grafana: {{ firing_count }} alert{% if firing_count > 1 %}s{% endif %} firing
+          {%- if has_critical %}🔴{% else %}🟡{% endif %} Grafana: {{ firing_count }} alert{% if firing_count > 1 %}s{% endif %} firing
           {%- else -%}
           🟢 Grafana: alerts resolved
           {%- endif -%}
         message: >-
           {%- for a in alerts -%}
-          [{{ a.status }}] {{ a.labels.alertname | default('alert') }}
+          [{{ a.status }}{% if a.labels.severity is defined %}/{{ a.labels.severity }}{% endif %}] {{ a.labels.alertname | default('alert') }}
           {%- if a.labels.instance is defined %} on {{ a.labels.instance }}{% endif %}
           {%- if a.annotations.summary is defined %}: {{ a.annotations.summary }}
           {%- elif a.annotations.description is defined %}: {{ a.annotations.description }}{% endif %}{% if not loop.last %}
@@ -40,5 +49,5 @@
           push:
             sound:
               name: "default"
-              critical: 1
-              volume: 1.0
+              critical: "{{ 1 if has_critical else 0 }}"
+              volume: "{{ 1.0 if has_critical else 0.5 }}"
