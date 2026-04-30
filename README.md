@@ -10,7 +10,7 @@ Restore your entire terminal/shell setup from scratch after a system wipe:
 
 ```bash
 # Run the bootstrap script to restore your terminal setup
-./misc\ scripts/bootstrap.sh
+./scripts/bootstrap.sh
 ```
 
 The bootstrap script supports:
@@ -69,7 +69,7 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 - **Virtual Environment**: Isolated Python dependencies
 - **YAML Linting**: Automated configuration validation
 
-### 🛠️ Utility Scripts (`misc scripts/`)
+### 🛠️ Utility Scripts (`scripts/`)
 
 #### 🚀 System Bootstrap (`bootstrap.sh`)
 
@@ -163,7 +163,7 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 2. **Restore Terminal Environment** (Optional)
 
    ```bash
-   ./misc\ scripts/bootstrap.sh
+   ./scripts/bootstrap.sh
    ```
 
 3. **Configure Home Assistant**
@@ -178,8 +178,8 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 ## 📚 Documentation
 
 - **Home Assistant**: See `homeassistant/README.md` and `homeassistant/water_heater_pump_README.md`
-- **Tanium Management**: See `misc scripts/tanium/` for various utility scripts
-- **System Bootstrap**: See `misc scripts/bootstrap.sh` for cross-platform terminal setup
+- **Tanium Management**: See `scripts/tanium/` for various utility scripts
+- **System Bootstrap**: See `scripts/bootstrap.sh` for cross-platform terminal setup
 
 ## 🔧 Maintenance
 

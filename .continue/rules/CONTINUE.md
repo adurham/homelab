@@ -23,7 +23,7 @@ This repository contains a comprehensive homelab infrastructure setup that combi
 
 2. Restore terminal environment (optional):
    ```bash
-   ./misc\ scripts/bootstrap.sh
+   ./scripts/bootstrap.sh
    ```
 
 3. Configure Home Assistant:
@@ -67,7 +67,7 @@ This repository contains a comprehensive homelab infrastructure setup that combi
 - **Virtual Environment**: Isolated Python dependencies
 - **YAML Linting**: Automated configuration validation
 
-### Utility Scripts (`misc scripts/`)
+### Utility Scripts (`scripts/`)
 
 #### System Bootstrap (`bootstrap.sh`)
 **Complete Terminal Environment Restoration**
@@ -146,8 +146,8 @@ cd homeassistant
 
 ### Documentation
 - **Home Assistant**: `homeassistant/README.md` and `homeassistant/water_heater_pump_README.md`
-- **Tanium Management**: `misc scripts/tanium/` for various utility scripts
-- **System Bootstrap**: `misc scripts/bootstrap.sh` for cross-platform terminal setup
+- **Tanium Management**: `scripts/tanium/` for various utility scripts
+- **System Bootstrap**: `scripts/bootstrap.sh` for cross-platform terminal setup
 
 ### Technology Stack
 - **Infrastructure**: Proxmox VE, Ansible
@@ -156,5 +156,5 @@ cd homeassistant
 - **System Management**: Bash/Shell Scripting, Python
 
 ### Related Resources
-- [Tanium Download Performance Analysis Guide](misc scripts/tanium/ANALYZE_TANIUM_PCAPS_README.md)
+- [Tanium Download Performance Analysis Guide](scripts/tanium/ANALYZE_TANIUM_PCAPS_README.md)
 - [Home Assistant Configuration Guide](https://www.home-assistant.io/docs/)
