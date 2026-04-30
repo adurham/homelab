@@ -1,0 +1,11 @@
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: homeassistant
+    receivers:
+      - uid: ha_webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: "{{ homeassistant_url }}/api/webhook/{{ grafana_alert_webhook_id }}"
+          httpMethod: POST

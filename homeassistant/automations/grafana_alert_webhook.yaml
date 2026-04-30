@@ -1,0 +1,44 @@
+# Receives webhook POSTs from Grafana unified alerting and forwards each
+# alert to the iPhone as a critical push notification. Webhook URL is
+# http://homeassistant.local:8123/api/webhook/<grafana_alert_webhook_id>
+# (the id comes from /config/secrets.yaml; see secrets.yaml.example).
+- alias: "Infrastructure: Grafana alert webhook"
+  id: "infrastructure_grafana_alert_webhook"
+  description: "Receive Grafana alerts via webhook and push to iPhone"
+  mode: queued
+  max: 10
+
+  trigger:
+    - platform: webhook
+      webhook_id: !secret grafana_alert_webhook_id
+      allowed_methods:
+        - POST
+      local_only: false  # graf-01 lives on the lab subnet, not loopback
+
+  variables:
+    alerts: "{{ trigger.json.alerts | default([]) }}"
+    firing_count: "{{ alerts | selectattr('status', 'eq', 'firing') | list | count }}"
+
+  action:
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: >-
+          {%- if firing_count > 0 -%}
+          🔴 Grafana: {{ firing_count }} alert{% if firing_count > 1 %}s{% endif %} firing
+          {%- else -%}
+          🟢 Grafana: alerts resolved
+          {%- endif -%}
+        message: >-
+          {%- for a in alerts -%}
+          [{{ a.status }}] {{ a.labels.alertname | default('alert') }}
+          {%- if a.labels.instance is defined %} on {{ a.labels.instance }}{% endif %}
+          {%- if a.annotations.summary is defined %}: {{ a.annotations.summary }}
+          {%- elif a.annotations.description is defined %}: {{ a.annotations.description }}{% endif %}{% if not loop.last %}
+
+          {% endif %}{% endfor %}
+        data:
+          push:
+            sound:
+              name: "default"
+              critical: 1
+              volume: 1.0
