@@ -1,5 +1,5 @@
 import json
-import sys
+import os
 
 def extract_entities(file_path):
     with open(file_path, 'r') as f:
@@ -27,4 +27,5 @@ def extract_entities(file_path):
         print(f"{e['id']} | {e['state']} | {e['unit']} | {e['name']}")
 
 if __name__ == "__main__":
-    extract_entities('/Users/adam.durham/repos/homelab/homeassistant/ha_states.json')
+    here = os.path.dirname(os.path.abspath(__file__))
+    extract_entities(os.path.join(here, 'ha_states.json'))
