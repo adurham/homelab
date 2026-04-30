@@ -2,7 +2,7 @@ import json
 import os
 
 def extract_entities(file_path):
-    with open(file_path, 'r') as f:
+    with open(file_path) as f:
         data = json.load(f)
 
     keywords = ['emporia', 'ecobee', 'flair', 'climate', 'power', 'energy', 'temperature', 'humidity']
