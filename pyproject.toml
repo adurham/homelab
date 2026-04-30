@@ -27,16 +27,21 @@ ignore = [
 # inherited security warnings without weakening rules globally.
 "scripts/tanium/**" = [
     "S105", "S106",
+    "S108",  # /tmp paths in test/diagnostic tooling
+    "S110",  # try/except/pass acceptable for opportunistic probes
     "S113",  # requests without timeout (legacy)
-    "S310",  # urlopen scheme audit (config-driven URLs)
+    "S311",  # random.* used for non-crypto purposes (jitter, sampling)
     "S314",  # xml.etree on untrusted data
     "S318",  # xml.dom.minidom on untrusted data
+    "S323",  # ssl._create_unverified_context for self-signed lab servers
     "E402",  # module-level import not at top (legacy layout)
     "E701",  # multiple statements on one line (legacy formatting)
+    "E722",  # bare except (legacy)
     "F401",  # unused imports
     "F841",  # unused locals
     "B007",  # unused loop variable
     "B018",  # useless expression
+    "B023",  # function loop-variable binding (closures over loop vars)
     "B904",  # raise from
 ]
 "homeassistant/**" = [

@@ -21,6 +21,10 @@ rules:
   truthy:
     # GitHub Actions uses `on:` as a key
     check-keys: false
+  # ansible-lint embeds yamllint and requires these settings
+  comments-indentation: false
+  octal-values:
+    forbid-implicit-octal: true
 
 ignore: |
   .git/

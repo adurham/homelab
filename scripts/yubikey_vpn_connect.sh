@@ -39,11 +39,6 @@ YKMAN_PATH="/opt/homebrew/bin/ykman"
 OPENCONNECT_PATH="/opt/homebrew/bin/openconnect"
 OP_PATH="/opt/homebrew/bin/op"
 
-# Initialize previous states
-prev_yubikey_state="unknown"
-prev_vpn_state="unknown"
-vpn_interface=""
-
 # Function to check if YubiKey is inserted
 check_yubikey() {
     $YKMAN_PATH list | grep -q "$YUBIKEY_SERIAL"
@@ -59,7 +54,6 @@ get_interfaces() {
 is_vpn_connected() {
     for iface in $(get_interfaces); do
         if ifconfig "$iface" | grep -q "inet "; then
-            vpn_interface="$iface"
             return 0
         fi
     done
