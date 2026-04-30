@@ -30,6 +30,7 @@ ignore = [
     "S108",  # /tmp paths in test/diagnostic tooling
     "S110",  # try/except/pass acceptable for opportunistic probes
     "S113",  # requests without timeout (legacy)
+    "S310",  # urlopen scheme audit — config-driven URLs in lab tooling
     "S311",  # random.* used for non-crypto purposes (jitter, sampling)
     "S314",  # xml.etree on untrusted data
     "S318",  # xml.dom.minidom on untrusted data
