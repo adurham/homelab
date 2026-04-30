@@ -6,6 +6,7 @@ Reads HA_URL and HA_TOKEN from homeassistant/ha_config.env and POSTs to
 
 Used by ansible/deploy_ha_automations.yml after pushing automation files.
 """
+
 import os
 import sys
 import urllib.error
