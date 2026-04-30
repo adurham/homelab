@@ -2,6 +2,9 @@ exclude_paths:
   - ansible/group_vars/all/tanium_secrets.yml
   - ansible/credentials/
   - ansible/inventory/
+  - homeassistant/
+  - scripts/
+  - .github/
 
 skip_list:
   - fqcn
