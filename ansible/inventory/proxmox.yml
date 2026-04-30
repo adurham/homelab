@@ -240,7 +240,10 @@ all:
       vars:
         ansible_user: root
         # Proxy through Tailscale Gateway (Access to Private Net)
-        ansible_ssh_common_args: '-o ProxyCommand="ssh -W %h:%p -q root@192.168.86.62"'
+        # Jump through the personal MacBook (Tailscale IP) — the work MacBook
+        # has no direct route to the 172.16.0.0/24 private subnet. accept-new
+        # lets this work first-time on a fresh known_hosts.
+        ansible_ssh_common_args: '-o ProxyCommand="ssh -W %h:%p -q adam.durham@100.66.19.20" -o StrictHostKeyChecking=accept-new'
 
         vm_cores: 1
         vm_memory: 1024
