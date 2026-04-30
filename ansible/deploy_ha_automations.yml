@@ -29,7 +29,7 @@
       failed_when: "'Command completed successfully' not in config_check.stdout and config_check.rc != 0"
 
     - name: Reload Automations via API
-      ansible.builtin.shell: "python3 {{ playbook_dir }}/../reload_ha_automations.py"
+      ansible.builtin.command: "python3 {{ playbook_dir }}/../homeassistant/reload_ha_automations.py"
       delegate_to: localhost
       register: reload_result
       changed_when: reload_result.rc == 0
