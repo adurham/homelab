@@ -123,7 +123,9 @@ all:
               vm_disk: 500
               ansible_host: 172.16.0.56 # Placeholder IP
       vars:
-        ansible_user: root
+        # ansible_user / SSH options for tanium_cluster live in
+        # inventory/group_vars/tanium_cluster.yml so they override the
+        # defaults set in group_vars/all.yml.
         vm_storage: nvme-data
         vm_bridge: private
         vm_iso: "local:iso/TanOS.1.8.6.0134-DEV.iso"

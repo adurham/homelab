@@ -22,6 +22,7 @@
       register: pg_check
       changed_when: false
       failed_when: false
+      check_mode: false
       loop: "{{ candidate_services }}"
 
     - name: Resolve service name from enabled candidate
@@ -43,11 +44,17 @@
       ansible.builtin.command: "systemctl show {{ pg_service }} --property=Environment"
       register: pg_env
       changed_when: false
+      check_mode: false
 
     - name: Extract PGDATA and PGPORT
       ansible.builtin.set_fact:
-        pg_data: "{{ (pg_env.stdout | regex_search('PGDATA=([^ \\n]+)', '\\1')) | first }}"
-        pg_port: "{{ (pg_env.stdout | regex_search('PGPORT=([0-9]+)', '\\1')) | first }}"
+        pg_data: "{{ pg_env.stdout | regex_search('PGDATA=\\S+') | default('PGDATA=', true) | regex_replace('^PGDATA=', '') }}"
+        pg_port: "{{ pg_env.stdout | regex_search('PGPORT=\\d+') | default('PGPORT=', true) | regex_replace('^PGPORT=', '') }}"
+
+    - name: Fail if PGDATA or PGPORT could not be parsed
+      ansible.builtin.fail:
+        msg: "Could not parse PGDATA/PGPORT from `systemctl show {{ pg_service }}`: {{ pg_env.stdout }}"
+      when: pg_data == "" or pg_port == ""
 
     - name: Open Postgres port in iptables for lab subnet
       ansible.builtin.iptables:

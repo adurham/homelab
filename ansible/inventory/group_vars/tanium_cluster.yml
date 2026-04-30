@@ -1,0 +1,36 @@
+---
+# Tanium TanOS appliance overrides — see project memory
+# `tanos_appliance_users` for context.
+
+# tandev = full sudo-capable user on TanOS dev images.
+# root SSH is disabled; tanadmin is the locked-down menu UI.
+ansible_user: tandev
+
+# Reach the lab subnet via Tailscale through the personal Mac jump host;
+# its 1Password SSH agent serves the key actually authorized on the
+# appliances. Override per-machine in ~/.ssh/config if running from the
+# personal Mac directly (no jump needed there).
+#
+# Host-key checking off because TanOS appliances are rebuilt frequently
+# and the wire is already authenticated by Tailscale.
+ansible_ssh_common_args: >-
+  -o ProxyJump=100.66.19.20
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o LogLevel=ERROR
+
+# Don't pin a specific identity file — let ssh negotiate via the agent
+# on the jump host.
+ansible_ssh_private_key_file: null
+
+# Override ansible's hardcoded SSH args. The default
+# `-o KbdInteractiveAuthentication=no -o PreferredAuthentications=...,publickey`
+# blocks the empty keyboard-interactive PAM challenge that TanOS issues after
+# publickey succeeds (server-side `AuthenticationMethods publickey,
+# keyboard-interactive` is satisfied without a prompt). Re-enable both so
+# ansible can complete the second factor non-interactively.
+ansible_ssh_args: >-
+  -o ControlMaster=auto
+  -o ControlPersist=60s
+  -o KbdInteractiveAuthentication=yes
+  -o PreferredAuthentications=publickey,keyboard-interactive
