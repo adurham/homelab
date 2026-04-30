@@ -10,7 +10,7 @@ CONFIG_DIR="/config"
 echo "Deploying Core Config to $HA_HOST..."
 
 # Check connectivity
-if ! ssh -i $HOME/.ssh/id_ansible -q -p $HA_PORT -o BatchMode=yes -o StrictHostKeyChecking=no $HA_USER@$HA_HOST "ls $CONFIG_DIR > /dev/null"; then
+if ! ssh -i "$HOME/.ssh/id_ansible" -q -p "$HA_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$HA_USER@$HA_HOST" "ls $CONFIG_DIR > /dev/null"; then
     echo "Error: Cannot connect to $HA_HOST or find $CONFIG_DIR."
     echo "Make sure you have your SSH key added and the host is reachable."
     exit 1

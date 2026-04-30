@@ -10,7 +10,8 @@ TMS_01_IP="172.16.0.53"
 TMS_02_IP="172.16.0.54"
 # Users
 USER="tanadmin"
-PASS="Tanium1" # Note: In production, consider using ssh keys or sshpass prompt
+read -rsp "Tanium appliance password for ${USER}: " PASS
+echo
 
 # Color codes
 GREEN='\033[0;32m'
@@ -26,7 +27,7 @@ fi
 
 # Function to run command on TS-01
 run_cli() {
-    sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no "$USER@$TS_01_IP" "$1"
+    sshpass -p "$PASS" ssh -o StrictHostKeyChecking=accept-new "$USER@$TS_01_IP" "$1"
 }
 
 # 1. Create Array on TS-01
@@ -73,7 +74,7 @@ ROLES_JSON_CONTENT='[
 ]'
 
 echo "Applying Roles Configuration..."
-echo "$ROLES_JSON_CONTENT" | sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no "$USER@$TS_01_IP" "array assign roles apply"
+echo "$ROLES_JSON_CONTENT" | sshpass -p "$PASS" ssh -o StrictHostKeyChecking=accept-new "$USER@$TS_01_IP" "array assign roles apply"
 
 # 4. Verification
 echo -e "${GREEN}[4/4] Verifying Cluster Status...${NC}"

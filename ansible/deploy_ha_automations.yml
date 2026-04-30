@@ -14,10 +14,10 @@
 
     - name: Copy Files (Automations, Templates, Sensors)
       ansible.builtin.shell: >
-        scp -P {{ ansible_port }} -r -o StrictHostKeyChecking=no {{ local_automations_dir }} {{ ansible_user }}@{{ ansible_host }}:/config/automations/ && \
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ playbook_dir }}/../homeassistant/templates.yaml {{ ansible_user }}@{{ ansible_host }}:/config/ && \
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ playbook_dir }}/../homeassistant/sensors.yaml {{ ansible_user }}@{{ ansible_host }}:/config/ && \
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=no {{ playbook_dir }}/../homeassistant/apps/apps.yaml {{ ansible_user }}@{{ ansible_host }}:/config/apps/
+        scp -P {{ ansible_port }} -r -o StrictHostKeyChecking=accept-new {{ local_automations_dir }} {{ ansible_user }}@{{ ansible_host }}:/config/automations/ && \
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=accept-new {{ playbook_dir }}/../homeassistant/templates.yaml {{ ansible_user }}@{{ ansible_host }}:/config/ && \
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=accept-new {{ playbook_dir }}/../homeassistant/sensors.yaml {{ ansible_user }}@{{ ansible_host }}:/config/ && \
+        scp -P {{ ansible_port }} -o StrictHostKeyChecking=accept-new {{ playbook_dir }}/../homeassistant/apps/apps.yaml {{ ansible_user }}@{{ ansible_host }}:/config/apps/
       delegate_to: localhost
       register: scp_result
       changed_when: scp_result.rc == 0
