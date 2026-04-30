@@ -1,0 +1,24 @@
+---
+# Manage tandev's authorized_keys on the Tanium appliances.
+# Idempotent: each public key listed below is ensured present, so adding
+# or removing entries here is the canonical way to grant/revoke access.
+# Other keys already in authorized_keys are left alone (use exclusive: true
+# below if you want this play to be the sole source of truth).
+
+- name: Manage tandev authorized_keys on Tanium appliances
+  hosts: tanium_servers:tanium_modules
+  gather_facts: false
+  vars:
+    tandev_authorized_keys:
+      - "{{ playbook_dir }}/files/personal_macbook.pub"
+      - "{{ playbook_dir }}/files/tanium_macbook.pub"
+
+  tasks:
+    - name: Ensure tandev has the listed public keys in authorized_keys
+      ansible.posix.authorized_key:
+        user: tandev
+        key: "{{ lookup('file', item) }}"
+        state: present
+      loop: "{{ tandev_authorized_keys }}"
+      loop_control:
+        label: "{{ item | basename }}"
