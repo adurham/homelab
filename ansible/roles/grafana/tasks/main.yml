@@ -56,9 +56,28 @@
     state: present
     update_cache: true
 
-- name: Install Golang 1.25.6
+# Detect installed Go version via the VERSION file Go ships at the
+# install root (e.g. "go1.26.2\nlinux/amd64\n...").
+- name: Detect installed Go version
+  ansible.builtin.command: cat /usr/local/go/VERSION
+  register: current_go
+  failed_when: false
+  changed_when: false
+
+# If the installed version doesn't match what we want, blow away the
+# existing tree so the unarchive below won't be no-op'd by `creates:`.
+- name: Remove old Go install if version mismatched
+  ansible.builtin.file:
+    path: /usr/local/go
+    state: absent
+  when:
+    - current_go.rc == 0
+    - ('go' + go_version) not in current_go.stdout
+  become: true
+
+- name: Install Golang {{ go_version }}
   ansible.builtin.unarchive:
-    src: https://go.dev/dl/go1.25.6.linux-amd64.tar.gz
+    src: "https://go.dev/dl/go{{ go_version }}.linux-amd64.tar.gz"
     dest: /usr/local
     remote_src: true
     creates: /usr/local/go/bin/go
