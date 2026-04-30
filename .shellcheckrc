@@ -1,0 +1,8 @@
+# Use Bash dialect by default (most scripts use #!/bin/bash or #!/usr/bin/env bash)
+shell=bash
+
+# Allow sourcing files that shellcheck can't resolve at lint time
+external-sources=true
+
+# SC1091: skip following sourced files (they may be runtime-only)
+disable=SC1091
