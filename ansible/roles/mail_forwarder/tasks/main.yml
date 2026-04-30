@@ -16,13 +16,10 @@
     group: root
     mode: '0644'
 
-- name: Read SASL Password
-  ansible.builtin.set_fact:
-    sasl_password: "{{ lookup('file', 'credentials/icloud_sasl_password') | trim }}"
-
 - name: Configure SASL Password Map
   ansible.builtin.copy:
-    content: "[smtp.mail.me.com]:587 amdnative@icloud.com:{{ sasl_password }}"
+    # icloud_sasl_password comes from inventory/group_vars/all.yml (vault-encrypted)
+    content: "[smtp.mail.me.com]:587 amdnative@icloud.com:{{ icloud_sasl_password }}"
     dest: /etc/postfix/sasl_passwd
     owner: root
     group: root

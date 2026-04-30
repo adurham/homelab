@@ -1,5 +1,5 @@
 ---
-homeassistant_token: "{{ lookup('file', 'credentials/homeassistant_token') }}"
+# homeassistant_token comes from inventory/group_vars/all.yml (vault-encrypted)
 
 # Public-facing HTTPS endpoints we probe for cert expiry + reachability.
 # Override at inventory level if a host should add/remove targets.
