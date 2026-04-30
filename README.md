@@ -107,13 +107,19 @@ scoped to `172.16.0.0/24` and opens the listener port in iptables on all
 four Tanium platform appliances (TS x2, TMS x2). Auto-detects whichever
 postgres service is enabled per host and reloads it on change.
 
+The play also installs `/usr/local/bin/open_psql.sh` and a oneshot
+systemd unit pulled in by `postgresql-ts.service` and
+`postgresql-tms.service`, so the rules survive reboots — iptables state
+is reapplied on every postgres start (`pg_hba.conf` already persists).
+
 ```bash
 ansible-playbook -i ansible/inventory/proxmox.yml \
   ansible/apply_tanium_postgres_trust.yml
 ```
 
-`scripts/tanium/open_psql.sh` does the same thing per-host as a manual
-fallback (run on the appliance directly).
+`scripts/tanium/open_psql.sh` is the per-host script the systemd unit
+runs; you can also invoke it directly on an appliance for one-off
+recovery.
 
 ## Secrets & Credentials
 

@@ -68,6 +68,47 @@
       become: true
       notify: Reload Postgres
 
+    # Persistence: install open_psql.sh + a oneshot unit that runs every time
+    # postgres starts. iptables rules don't survive a reboot, so we re-apply
+    # them on each postgres start. The script is idempotent (no-op when state
+    # is already correct).
+    - name: Install open_psql.sh on the appliance
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/tanium/open_psql.sh"
+        dest: /usr/local/bin/open_psql.sh
+        owner: root
+        group: root
+        mode: '0755'
+      become: true
+
+    - name: Install tanium-postgres-lab-trust systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tanium-postgres-lab-trust.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Open Tanium Postgres for lab-subnet trust access (lab-only)
+          After=postgresql-ts.service postgresql-tms.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/open_psql.sh
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=postgresql-ts.service postgresql-tms.service
+      become: true
+      register: unit_file
+
+    - name: Enable tanium-postgres-lab-trust to run on postgres start
+      ansible.builtin.systemd:
+        name: tanium-postgres-lab-trust.service
+        enabled: true
+        daemon_reload: "{{ unit_file.changed }}"
+      become: true
+
   handlers:
     - name: Reload Postgres
       ansible.builtin.systemd:
