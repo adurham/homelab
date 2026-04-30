@@ -32,6 +32,7 @@ TOKEN_VALIDATE_URL = f"https://{FQDN}/api/v2/api_tokens"
 TPAN_ACCOUNT = "AMD-Enterprises"
 TPAN_ENVIRONMENT = "Prod"
 DEBUG = os.getenv("DEBUG")
+VERIFY_TLS = os.getenv("TANIUM_VERIFY_TLS", "true").lower() != "false"
 
 # Static labels
 LABELS = {
@@ -51,7 +52,7 @@ def update_env_file(new_token_response):
 
 def validate_and_renew_token(session_token, token_id):
     headers = {'session': session_token}
-    response = requests.get(f"{TOKEN_VALIDATE_URL}/{token_id}", headers=headers, verify=False)
+    response = requests.get(f"{TOKEN_VALIDATE_URL}/{token_id}", headers=headers, verify=VERIFY_TLS)
     if response.status_code != 200:
         log(f"Error: Failed to validate token. Response: {response.text}")
         raise Exception("Token validation failed")
@@ -67,7 +68,7 @@ def validate_and_renew_token(session_token, token_id):
 
     if time_remaining < 3600:
         renew_payload = {"token_string": session_token}
-        renew_response = requests.patch(TOKEN_VALIDATE_URL, headers=headers, json=renew_payload, verify=False)
+        renew_response = requests.patch(TOKEN_VALIDATE_URL, headers=headers, json=renew_payload, verify=VERIFY_TLS)
         if renew_response.status_code != 200:
             log(f"Error: Failed to renew token. Response: {renew_response.text}")
             raise Exception("Token renewal failed")
@@ -111,7 +112,7 @@ def inject_labels(metrics, labels):
 
 def push_metrics(metrics):
     headers = {'Content-Type': 'text/plain'}
-    response = requests.post(VM_URL, headers=headers, data=metrics, verify=False)
+    response = requests.post(VM_URL, headers=headers, data=metrics, verify=VERIFY_TLS)
 
     if response.status_code != 200:
         log(f"Failed to push metrics to VictoriaMetrics. HTTP response code: {response.status_code}")
@@ -139,7 +140,7 @@ def main():
         log(f"Scraping metrics from {METRICS_URL}...")
         start_time = time.time()
         headers = {'session': session_token}
-        response = requests.get(METRICS_URL, headers=headers, verify=False)
+        response = requests.get(METRICS_URL, headers=headers, verify=VERIFY_TLS)
         end_time = time.time()
         duration = end_time - start_time
 
