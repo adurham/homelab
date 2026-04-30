@@ -1,0 +1,18 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = [
+    "homeassistant/flair_sensor.py",  # snapshot of upstream HA integration
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = [
+    "E501",  # line length handled by formatter / yamllint warnings
+    "S101",  # asserts ok in scripts
+    "S603",  # subprocess call review case-by-case
+    "S607",  # partial executable paths ok in scripts
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["S101", "S603", "S607", "S105", "S106"]

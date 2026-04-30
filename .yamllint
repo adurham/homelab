@@ -1,0 +1,30 @@
+---
+extends: default
+
+rules:
+  line-length:
+    max: 160
+    level: warning
+  trailing-spaces:
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  document-start:
+    present: false
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  truthy:
+    # GitHub Actions uses `on:` as a key
+    check-keys: false
+
+ignore: |
+  .git/
+  .venv/
+  venv/
+  .vscode/
+  ansible/credentials/
+  homeassistant/backup/
