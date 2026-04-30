@@ -5,13 +5,9 @@
   roles:
     - loadbalancer_host
 
-
-
 - name: Configure Load Balancer Service (Nginx)
   hosts: loadbalancer
   gather_facts: false
-
-
   vars:
     acme_dedyn_token_proxmox: "{{ vault_desec_token_proxmox }}"
     noip_username: "{{ vault_noip_username }}"

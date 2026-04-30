@@ -1,4 +1,3 @@
-
 - platform: integration
   source: sensor.econet_hpwh_power
   name: "Water Heater Energy Total"

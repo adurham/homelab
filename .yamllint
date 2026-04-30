@@ -9,8 +9,9 @@ rules:
     level: warning
   comments:
     min-spaces-from-content: 1
-  document-start:
-    present: false
+  # HA YAML configs by community style omit ---; ansible files include it.
+  # Allow either rather than retrofitting 30+ files.
+  document-start: disable
   braces:
     min-spaces-inside: 0
     max-spaces-inside: 1

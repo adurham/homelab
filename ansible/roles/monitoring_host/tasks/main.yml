@@ -35,8 +35,6 @@
   failed_when: ct_start.rc != 0 and ("already running" not in ct_start.stderr)
   changed_when: ct_start.rc == 0
 
-
-
 - name: Add Host to Inventory
   ansible.builtin.add_host:
     name: "{{ inventory_hostname }}"
