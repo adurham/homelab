@@ -32,7 +32,7 @@
   gather_facts: true
   roles:
     - common_monitoring
-    - role_victoriametrics
+    - victoriametrics
 
 - name: Configure Grafana
   hosts: grafana
@@ -40,4 +40,4 @@
   # Secrets loaded from group_vars/all.yml
   roles:
     - common_monitoring
-    - role_grafana
+    - grafana
