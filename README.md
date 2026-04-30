@@ -24,21 +24,6 @@ The bootstrap script supports:
 
 This repository contains a complete homelab infrastructure setup with the following major components:
 
-### 🏗️ Infrastructure as Code (`terraform/`)
-
-**VMware vSphere Infrastructure Management**
-
-- **Active Directory**: Domain controller and authentication services
-- **Tanium**: Endpoint security and management platform
-  - Airgap environments for secure deployments
-  - QA client environments (versions 7.2, 7.4, 7.6, 7.7)
-  - Grafana monitoring integration
-- **Consul**: Service discovery and configuration management
-- **Vault**: Secrets management and encryption
-- **Keycloak**: Identity and access management
-- **NSX**: Network virtualization and security
-- **vCenter**: VMware vCenter Server management
-
 ### 🤖 Configuration Management (`ansible/`)
 
 **Automated System Configuration**
@@ -47,9 +32,8 @@ This repository contains a complete homelab infrastructure setup with the follow
   - Windows guests
   - Linux distributions (Ubuntu, RHEL, Oracle Linux, CentOS)
   - Version management (3.14 and 3.15 clients)
-- **VMware Tools**: Automated VMware tools installation and testing
 - **OS-Specific Configurations**: Tailored settings for different operating systems
-- **Inventory Management**: vSphere inventory integration
+- **Proxmox Inventory**: Inventory sourced from Proxmox
 
 #### 🏃 Runner Setup
 
@@ -96,22 +80,10 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 - **Development Tools**: direnv, htop, jq, fzf, tree, vim, git, curl, wget
 - **Cross-Platform**: Automatically detects OS and configures appropriately
 
-#### 🤖 AI Development Assistant (`continue-dev/`)
-
-**Cursor-like AI Functionality with Continue.dev**
-
-- **Autonomous AI Agent**: Analyze codebases, generate code, debug issues, execute commands
-- **Multiple AI Models**: Local (Ollama) and cloud (OpenAI, Anthropic, Google) support
-- **Smart Commands**: 12 specialized commands for different development tasks
-- **Privacy Options**: Local models for sensitive code without external data transmission
-- **Model Recommendations**: AI analyzes tasks and suggests optimal models
-
 #### 🔧 System Management Scripts
 
-- **VM Management**: `reimport_vms.sh` - VMware VM reimport utilities
 - **Binary Patching**: `patch_binary.sh` - Binary modification tools
 - **VPN Connectivity**: `yubikey_vpn_connect.sh` - YubiKey VPN connection automation
-- **System Shutdown**: `shutdown-amd-vmcl01.ps1` - PowerShell shutdown scripts
 
 #### 🔒 Tanium Management (`tanium/`)
 
@@ -129,8 +101,6 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 
 - **Tanium Integration**: Enterprise-grade endpoint security
 - **Airgap Environments**: Secure deployments for sensitive workloads
-- **Vault Integration**: Centralized secrets management
-- **Network Security**: NSX-based network virtualization
 
 ### 🏠 Smart Home Intelligence
 
@@ -140,7 +110,6 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 
 ### 🚀 Development Productivity
 
-- **AI-Powered Development**: Local and cloud AI models for coding assistance
 - **Cross-Platform Compatibility**: Works on macOS, Linux, and Windows
 - **Automated Setup**: One-command environment restoration
 - **Quality Assurance**: Automated testing and validation
@@ -148,18 +117,14 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 ### 📊 Monitoring & Observability
 
 - **Grafana Integration**: Comprehensive monitoring dashboards
-- **Consul Service Discovery**: Dynamic service registration and health checking
 - **Home Assistant Logging**: Detailed automation logging and debugging
 
 ## 🛠️ Technology Stack
 
 ### Infrastructure
 
-- **VMware vSphere**: Virtualization platform
-- **Terraform**: Infrastructure as Code
+- **Proxmox**: Virtualization platform
 - **Ansible**: Configuration management
-- **Consul**: Service discovery
-- **Vault**: Secrets management
 
 ### Smart Home
 
@@ -169,8 +134,6 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 
 ### Development
 
-- **Continue.dev**: AI-powered development assistant
-- **Ollama**: Local AI model hosting
 - **VS Code**: Integrated development environment
 - **Git**: Version control
 
@@ -184,7 +147,6 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 
 ### Prerequisites
 
-- VMware vSphere environment
 - Home Assistant instance
 - Python 3.x
 - Git
@@ -204,13 +166,7 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
    ./misc\ scripts/bootstrap.sh
    ```
 
-3. **Setup AI Development Assistant** (Optional)
-
-   ```bash
-   ./misc\ scripts/continue-dev/setup-continue-dev.sh
-   ```
-
-4. **Configure Home Assistant**
+3. **Configure Home Assistant**
 
    ```bash
    cd homeassistant
@@ -219,20 +175,9 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
    ./setup_venv.sh
    ```
 
-5. **Deploy Infrastructure** (Production)
-
-   ```bash
-   cd terraform
-   # Configure terraform.tfvars with your environment details
-   terraform init
-   terraform plan
-   terraform apply
-   ```
-
 ## 📚 Documentation
 
 - **Home Assistant**: See `homeassistant/README.md` and `homeassistant/water_heater_pump_README.md`
-- **AI Development**: See `misc scripts/continue-dev/README.md`
 - **Tanium Management**: See `misc scripts/tanium/` for various utility scripts
 - **System Bootstrap**: See `misc scripts/bootstrap.sh` for cross-platform terminal setup
 
@@ -241,14 +186,12 @@ To prepare a new machine (CI/CD runner or workstation) with all dependencies:
 ### Regular Tasks
 
 - **Home Assistant**: Deploy configuration changes with `./homeassistant/deploy_homeassistant.sh`
-- **Infrastructure**: Update Terraform configurations as needed
 - **Ansible**: Run playbooks for system configuration updates
-- **Monitoring**: Check Grafana dashboards and Consul health status
+- **Monitoring**: Check Grafana dashboards
 
 ### Backup & Recovery
 
 - **Home Assistant**: Automatic backups created during deployments
-- **Infrastructure**: Terraform state files backed up
 - **Configuration**: Git repository provides version control
 
 ## 🤝 Contributing

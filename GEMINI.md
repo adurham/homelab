@@ -31,9 +31,6 @@ The heart of the operation. Manages the lifecycle of LXC containers, VMs, and cl
     *   `manage_ha.yml`: Configures ZFS Replication & HA Resources.
     *   `manage_authentik.yml`: Declarative config for Authentik (Providers, Apps, Groups).
 
-### `terraform/` (Legacy/Reference)
-Contains configuration for older VMware vSphere infrastructure. *Status: Deprecated/Maintenance.*
-
 ## 🏗️ Core Services & Addressing
 
 | Service | Hostname | IP (Private) | Public/LAN | Description |

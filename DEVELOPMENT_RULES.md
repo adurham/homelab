@@ -10,7 +10,7 @@
 ## Security
 - Be extra careful with sensitive files (passwords, API keys, credentials)
 - Check .gitignore before committing any new files
-- Never commit terraform.tfvars or similar credential files
+- Never commit `.tfvars`, `.env`, vault password files, or similar credential files
 
 ## General Development
 - Always explain what changes are being made
