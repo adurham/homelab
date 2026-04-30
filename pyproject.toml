@@ -1,11 +1,6 @@
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = [
-    # Snapshot of an upstream HA integration kept for reference; not loadable
-    # without sibling __init__.py / const.py / coordinator.py.
-    "flair_sensor.py",
-]
 
 [tool.ruff.lint]
 # Start with a pragmatic core: errors, pyflakes, warnings, bugbear, security.
