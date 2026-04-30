@@ -158,6 +158,9 @@
       callback_url = http://localhost:3000/
       renderer_log_level = debug
 
+      [unified_alerting]
+      enabled = true
+
 - name: Create Provisioning Directory
   ansible.builtin.file:
     path: /etc/grafana/provisioning/datasources
@@ -231,6 +234,33 @@
     dest: /var/lib/grafana/dashboards/climate.json
     owner: grafana
     group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
+- name: Create Alerting Provisioning Directory
+  ansible.builtin.file:
+    path: /etc/grafana/provisioning/alerting
+    state: directory
+    mode: '0755'
+
+- name: Provision Grafana Alerting Contact Points
+  ansible.builtin.template:
+    src: alerting_contact_points.yml.j2
+    dest: /etc/grafana/provisioning/alerting/contact_points.yml
+    mode: '0644'
+  notify: Restart Grafana
+
+- name: Provision Grafana Notification Policies
+  ansible.builtin.template:
+    src: alerting_policies.yml.j2
+    dest: /etc/grafana/provisioning/alerting/policies.yml
+    mode: '0644'
+  notify: Restart Grafana
+
+- name: Provision Grafana Alert Rules
+  ansible.builtin.template:
+    src: alerting_rules.yml.j2
+    dest: /etc/grafana/provisioning/alerting/rules.yml
     mode: '0644'
   notify: Restart Grafana
 
