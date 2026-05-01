@@ -102,6 +102,7 @@ all:
         tailscale:
         mail_server:
         ntp_server:
+        tanium_clients:
 
     # Tanium Cluster
     tanium_cluster:
@@ -260,6 +261,9 @@ all:
         tailscale-gw:
         mail-01:
         ntp-01:
+        tc-debian12:
+        tc-rocky9:
+        tc-suse15:
 
     # Monitoring Infrastructure
     monitoring:
