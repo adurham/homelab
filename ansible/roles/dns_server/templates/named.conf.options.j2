@@ -1,5 +1,6 @@
 acl "trusted" {
         127.0.0.0/8;
+        ::1;              # IPv6 loopback — needed for `dig @localhost` from dns-01 itself
         192.168.86.0/24;  # LAN
         172.16.0.0/24;    # Private SDN
         100.64.0.0/10;    # Tailscale (just in case)
@@ -10,28 +11,32 @@ tls local-tls {
     cert-file "/etc/bind/ssl/fullchain.pem";
 };
 
-tls upstream-tls {
-    ca-file "/etc/ssl/certs/ca-certificates.crt";
-    remote-hostname "cloudflare-dns.com";
-};
-
 options {
         directory "/var/cache/bind";
 
         recursion yes;
         allow-query { trusted; };
 
-        # Upstream (Cloudflare via standard DNS - DoT upstream requires complex config in Bind 9.18)
+        # Upstream Cloudflare via standard plaintext DNS. DoT-in-forwarders
+        # syntax (`port 853 tls <name>`) was added in Bind 9.19; the LTS
+        # 9.18 we're on doesn't accept it. Revisit once Ubuntu ships a 9.19
+        # build, or front bind with stubby/unbound for DoT upstream.
         forwarders {
                 1.1.1.1;
                 1.0.0.1;
         };
 
+        # Don't fingerprint bind by version string. Default behavior is to
+        # respond with the full build string for `version.bind` / `hostname.bind`
+        # CHAOS-class TXT queries; this makes bind respond with "none" instead.
+        version "none";
+        hostname "none";
+
         dnssec-validation auto;
         listen-on { any; };
         listen-on-v6 { any; };
 
-        # DoT Listener
+        # DoT Listener (server-side — accepts encrypted queries from clients)
         listen-on port 853 tls local-tls { any; };
         listen-on-v6 port 853 tls local-tls { any; };
 };
