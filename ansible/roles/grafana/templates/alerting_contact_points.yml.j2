@@ -9,3 +9,17 @@ contactPoints:
         settings:
           url: "{{ homeassistant_url }}/api/webhook/{{ grafana_alert_webhook_id }}"
           httpMethod: POST
+
+  # Fallback path: emails the operator via mail-01 -> iCloud SMTP relay.
+  # If HA is down, the webhook above fails and notifications drop. Email
+  # via mail-01 doesn't depend on HA. Doesn't help if mail-01 is also
+  # down -- for that, an external check is needed (deferred).
+  - orgId: 1
+    name: email
+    receivers:
+      - uid: email_fallback
+        type: email
+        disableResolveMessage: false
+        settings:
+          addresses: "{{ alert_email_to }}"
+          singleEmail: false

@@ -182,6 +182,13 @@
       [unified_alerting]
       enabled = true
 
+      [smtp]
+      enabled = true
+      host = {{ ip_mail_server }}:25
+      from_address = grafana@chi.lab.amd-e.com
+      from_name = Grafana Homelab
+      skip_verify = true
+
 - name: Create Provisioning Directory
   ansible.builtin.file:
     path: /etc/grafana/provisioning/datasources
