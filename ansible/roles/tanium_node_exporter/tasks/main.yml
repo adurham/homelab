@@ -2,8 +2,9 @@
 # This role installs node_exporter on Tanium TanOS appliances. TanOS is
 # Rocky 8.10 underneath but with hardened defaults: SELinux Enforcing,
 # `iptables -P INPUT DROP`, no firewalld, no package install of monitoring
-# agents. We do NOT use roles/common_monitoring because its RHEL path
-# runs `nft flush ruleset`, which would undo Tanium's static rules.
+# agents. The general-purpose `roles/alloy/` is .deb/.rpm package-based
+# and would conflict with TanOS's static iptables rules; this role drops
+# in a single binary + targeted INPUT allow rule for the vm-01 scrape.
 
 - name: Create node_exporter group
   ansible.builtin.group:

@@ -14,15 +14,21 @@ sync when adding/removing/moving CTs or VMs.
 - `172.16.0.101` is `tailscale-gw` — subnet router advertising `172.16.0.0/24` over Tailscale.
 - MTU on `private` is 1450 (1500 minus VXLAN overhead — `net_private_mtu` in `ansible/group_vars/all/vars.yml`).
 
-## Proxmox nodes (LAN, static)
+## Proxmox nodes (dual-homed)
 
-| Host    | LAN IP          | Notes                           |
-| :------ | :-------------- | :------------------------------ |
-| `pve01` | `192.168.86.11` | Proxmox cluster member          |
-| `pve02` | `192.168.86.12` | Proxmox cluster member          |
-| `pve03` | `192.168.86.13` | Proxmox cluster member          |
+pve hosts are on the LAN by default; `roles/pve_private_ip/` adds a static
+IP on the `private` SDN bridge so they have a private-subnet source IP for
+Alloy push to vm-01:8428. Inbound on `private` is dropped via the
+`PRIVATE-MONITORING-IN` iptables user chain — pve management stays
+LAN-only despite the L3 endpoint on the SDN.
 
-Source: `ansible/inventory/proxmox.yml`.
+| Host    | LAN IP          | Private IP    | Notes                           |
+| :------ | :-------------- | :------------ | :------------------------------ |
+| `pve01` | `192.168.86.11` | `172.16.0.2`  | Proxmox cluster member          |
+| `pve02` | `192.168.86.12` | `172.16.0.3`  | Proxmox cluster member          |
+| `pve03` | `192.168.86.13` | `172.16.0.4`  | Proxmox cluster member          |
+
+Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.yml`.
 
 ## Service CTs (private subnet)
 
@@ -34,7 +40,7 @@ Source: `ansible/inventory/proxmox.yml`.
 | `lb-01`         | 103  | `172.16.0.30`    | DHCP (`192.168.86.x`) | Nginx L7 reverse proxy                  |
 | `mail-01`       | 104  | `172.16.0.40`    | -                  | Postfix → iCloud SMTP relay                 |
 | `ntp-01`        | 105  | `172.16.0.11`    | -                  | Chrony, syncs against `time.nist.gov`       |
-| `vm-01`         | 106  | `172.16.0.42`    | DHCP (`192.168.86.x`) | VictoriaMetrics + blackbox + Loki + Promtail |
+| `vm-01`         | 106  | `172.16.0.42`    | DHCP (`192.168.86.x`) | VictoriaMetrics + blackbox + Loki + Alloy   |
 | `graf-01`       | 107  | `172.16.0.41`    | -                  | Grafana + image renderer                    |
 | `proxy-01`      | 108  | `172.16.0.12`    | -                  | Squid caching proxy                         |
 
@@ -64,24 +70,31 @@ VMIDs 300-313, IPs `172.16.0.60–73`. See `inventory/proxmox.yml` under `tanium
 
 ## Where IPs are defined (in order of authority)
 
-This is fragmented and should be consolidated. Today there are three sources:
+1. **`ansible/group_vars/all/vars.yml`** — `ip_*` vars are the canonical
+   source for the 9 core service CTs:
+   `ip_dns_primary`, `ip_ntp_server`, `ip_proxy`, `ip_authentik`,
+   `ip_loadbalancer`, `ip_mail_server`, `ip_grafana`, `ip_vm`,
+   `ip_tailscale_gw`.
+2. **`ansible/inventory/proxmox.yml`** — every host's `ansible_host:`.
+   For the 9 core CTs, this is templated as `"{{ ip_<name> }}"`, so
+   `vars.yml` and inventory can't drift. Tanium hosts (cluster +
+   clients) and the pve LAN IPs are inlined here directly because
+   nothing else needs to consume them as vars.
+3. **`ansible/roles/pve_private_ip/defaults/main.yml`** — pve hosts'
+   private-subnet IPs (`pve_private_ip_map`).
 
-1. **`ansible/inventory/proxmox.yml`** — every host's `ansible_host:` and (for monitoring CTs) `net_private_ip:`. **This is the de-facto authority** since ansible uses `ansible_host` for connections.
-2. **`ansible/group_vars/all/vars.yml`** — partial coverage as `ip_*` vars: `ip_dns_primary`, `ip_authentik`, `ip_loadbalancer`, `ip_mail_server`, `ip_ntp_server`, `ip_tailscale_gw`. Missing: `ip_proxy`, `ip_grafana`, `ip_vm`. Roles consume these variables in their `pct create` invocations.
-3. **`ansible/deploy_proxy.yml`** — defines `ip_proxy: "172.16.0.12"` as a play-level var because it's not in `vars.yml`.
-
-When the `ip_*` var doesn't match the inventory's `ansible_host` (as happened with vm-01/mail-01), bad things happen silently. Goal: every service should have its IP defined in `vars.yml` once, with the inventory's `ansible_host` derived from it.
+When the `ip_*` var doesn't match the inventory's `ansible_host` (as
+happened with vm-01/mail-01 before the consolidation), bad things
+happen silently. The current pattern keeps them in lockstep.
 
 ## Adding a new CT
 
 1. Pick a free IP in the appropriate range (check this file).
 2. Pick a free VMID (next sequential within the convention range).
-3. Add the host to `ansible/inventory/proxmox.yml` with `ansible_host`, `vmid`, and `target_node`.
-4. If the CT belongs to the private subnet, add it to the `private_subnet` parent group in `proxmox.yml` so it inherits the work-MacBook ProxyCommand.
-5. Add an `ip_<name>` entry to `ansible/group_vars/all/vars.yml` (don't define it inline in the playbook).
+3. Add an `ip_<name>` entry to `ansible/group_vars/all/vars.yml`.
+4. Add the host to `ansible/inventory/proxmox.yml` with
+   `ansible_host: "{{ ip_<name> }}"`, plus `vmid` and `target_node`.
+5. If the CT belongs to the private subnet, ensure it's a member of the
+   `private_subnet` parent group in `proxmox.yml` (directly or via a
+   child group) so it inherits the work-MacBook ProxyCommand.
 6. Update this file with the new allocation.
-
-## Open inconsistencies
-
-- `vars.yml` is incomplete — missing `ip_proxy`, `ip_grafana`, `ip_vm`. Roles for those CTs hardcode the IP via inventory or per-playbook vars. **Fix:** consolidate.
-- The Tanium IPs aren't in `vars.yml` at all (they're set on each host in inventory). Acceptable since they're not referenced by other roles.
