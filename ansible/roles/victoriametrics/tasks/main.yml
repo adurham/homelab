@@ -14,7 +14,7 @@
 
 - name: Download VictoriaMetrics
   ansible.builtin.unarchive:
-    src: "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.97.1/victoria-metrics-linux-amd64-v1.97.1.tar.gz"
+    src: "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v{{ victoriametrics_version }}/victoria-metrics-linux-amd64-v{{ victoriametrics_version }}.tar.gz"
     dest: /usr/local/bin/
     remote_src: true
     creates: /usr/local/bin/victoria-metrics-prod

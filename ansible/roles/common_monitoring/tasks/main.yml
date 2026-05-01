@@ -28,19 +28,19 @@
 
 - name: Download Node Exporter (Universal Binary)
   ansible.builtin.get_url:
-    url: https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
-    dest: /tmp/node_exporter-1.7.0.linux-amd64.tar.gz
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
     mode: '0644'
 
 - name: Extract Node Exporter
   ansible.builtin.shell: |
-    tar -xzf /tmp/node_exporter-1.7.0.linux-amd64.tar.gz -C /tmp/
+    tar -xzf /tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz -C /tmp/
   args:
-    creates: /tmp/node_exporter-1.7.0.linux-amd64/node_exporter
+    creates: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
 
 - name: Move binary to /usr/local/bin
   ansible.builtin.copy:
-    src: /tmp/node_exporter-1.7.0.linux-amd64/node_exporter
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
     dest: /usr/local/bin/node_exporter
     remote_src: true
     mode: '0755'
@@ -66,5 +66,5 @@
     path: "{{ item }}"
     state: absent
   loop:
-    - /tmp/node_exporter-1.7.0.linux-amd64.tar.gz
-    - /tmp/node_exporter-1.7.0.linux-amd64
+    - "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    - "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64"
