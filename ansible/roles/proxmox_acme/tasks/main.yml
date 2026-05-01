@@ -1,9 +1,13 @@
 ---
 - name: Check for existing ACME accounts
-  ansible.builtin.shell: pvenode acme account list
+  ansible.builtin.command: pvenode acme account list
   register: acme_accounts
   changed_when: false
-  ignore_errors: true
+  # `pvenode acme account list` exits non-zero when no accounts exist, which
+  # is a normal first-run state. Use failed_when: false instead of
+  # ignore_errors: true so a real proxmox API failure surfaces if the
+  # output is unexpected.
+  failed_when: false
 
 - name: Register ACME Account
   ansible.builtin.shell: |
@@ -28,20 +32,31 @@
   # Only runs if user provides the data (API key etc) via vars
 
 - name: Check current certificate issuer
-  ansible.builtin.shell: "openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -issuer"
+  ansible.builtin.command: "openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -issuer"
   register: cert_issuer
   changed_when: false
-  ignore_errors: true
+  # If /etc/pve/local/pve-ssl.pem is missing or unreadable, that's a real
+  # problem — but we still want the role to continue so the cert ORDER task
+  # below can repair it. Tolerate non-zero rc, but gate downstream logic on
+  # `rc == 0` so we don't act on empty stdout.
+  failed_when: false
 
 - name: Set Node ACME Domain (and Plugin)
   ansible.builtin.command: >
     pvenode config set --acmedomain0 domain="{{ ansible_hostname }}.{{ proxmox_domain_base }},plugin={{ acme_plugin_name }}"
   when:
+    - cert_issuer.rc == 0
     - not cert_issuer.stdout | regex_search('Let.s Encrypt')
     - acme_plugin_name is defined
 
+# Cert renewal only fires when the issuer isn't Let's Encrypt — i.e., we're
+# missing or have a self-signed cert. Failure here means we'll hit a
+# certificate-expiring event later, which is exactly what cert_expiring_soon
+# alerts us to. Don't suppress failures here; let the play fail loudly so
+# the operator notices on the spot.
 - name: Order Certificate (If self-signed/invalid)
   ansible.builtin.command: pvenode acme cert order
   when:
+    - cert_issuer.rc == 0
     - not cert_issuer.stdout | regex_search('Let.s Encrypt')
     - acme_plugin_name is defined
