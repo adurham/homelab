@@ -1,5 +1,22 @@
 ---
 # -------------------------------------------------------------------------
+# Authentik Flow / Stage / Binding provisioning
+#
+# Pattern note: many POST tasks below use `ignore_errors: true` or
+# `failed_when: false` to tolerate "already exists" responses from
+# Authentik on re-runs. A subsequent GET ("Idempotency") task fetches the
+# existing resource when create failed. This works but is overly broad —
+# 5xx failures are also silently swallowed.
+#
+# TODO: tighten by extending each `status_code: [200, 201]` to include
+# Authentik's actual conflict-response code (likely 400 with a
+# DRF-shaped `{"name": ["entry with this name already exists"]}` body),
+# then drop `ignore_errors: true` / `failed_when: false`. Update
+# downstream `when: create_*.failed` to use the specific status check.
+# Requires testing against a live Authentik to confirm exact error
+# response shape — not done in the audit pass on 2026-04-30.
+#
+# -------------------------------------------------------------------------
 # Recovery Flow
 # -------------------------------------------------------------------------
 
