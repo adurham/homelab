@@ -259,6 +259,53 @@ Net change: roughly equal or slightly lower per host. Not a concern.
 ## Status as of 2026-05-01
 
 - Loki: 3.7.1 (current)
-- Promtail: 3.0.0 (last bundled with Loki)
-- node_exporter: 1.11.1 (current)
-- Alloy migration: planned, not started.
+- Promtail: 3.0.0 (still installed on tanium_clients only — see below)
+- node_exporter: 1.11.1 (still installed on tanium_clients + tanium_cluster
+  + pve01–03 — alloy doesn't replace these)
+- Alloy: 1.16.0
+- Alloy migration: **complete on all 9 core hosts** (vm-01, graf-01,
+  authentik, dns-01, lb-01, mail-01, ntp-01, proxy-01, tailscale-gw).
+
+### What actually landed (vs. plan)
+
+- **Topology flipped from pull to push, not "VM scrape config does NOT
+  change".** `prometheus.exporter.unix` doesn't expose a `:9100/metrics`
+  the way the original plan assumed; Alloy's HTTP server only serves its
+  own UI/metrics. Final form: `prometheus.exporter.unix` →
+  `prometheus.scrape` → `prometheus.remote_write` to
+  `vm-01:8428/api/v1/write`. VM's scrape config in
+  `roles/victoriametrics/templates/prometheus.yml.j2` now excludes hosts
+  in the `alloy_cutover` inventory group from the `node_exporter` job.
+- **Job-label override needed.** `prometheus.exporter.unix` defaults its
+  target's `job` label to `integrations/unix`; `prometheus.scrape.job_name`
+  doesn't override it. A `discovery.relabel` block stamps
+  `job="node_exporter"` so existing dashboards/alerts that filter on the
+  job label keep working post-cutover.
+- **Phase-1 marker label.** During parallel deploy, alloy-pushed series
+  carried `agent="alloy"` so they stayed distinguishable from the live
+  `:9100` scrape. The role default is now `alloy_external_labels: {}`;
+  re-enable the marker by overriding the var in the play if doing a
+  similar parallel deploy on a new host.
+- **Cutover gating uses an inventory group.** `alloy_cutover` in
+  `inventory/proxmox.yml` controls who gets the push path. `tanium_clients`
+  (mixed RHEL/SUSE/Debian test CTs) are deliberately excluded — the alloy
+  role is .deb-only. They keep `roles/promtail/` and the Debian-path
+  parts of `roles/common_monitoring/` alive, so neither role was deleted.
+- **Renovate.** Added a `grafana/alloy` manager. Promtail tracking remains
+  disabled (404s on every Loki release post-3.7.0). node_exporter manager
+  remains active (still pinning the binary used by tanium_clients +
+  pve hosts + tanium_cluster).
+- **Phase-1 first-startup nit.** Alloy's `loki.source.journal` reads
+  `max_age=12h` of journal on cold start; Loki rejects entries older than
+  its `max_look_back_period` (~4h) with `400 entry too far behind`. About
+  3 batches got dropped per host on initial deploy — one-time cost, live
+  entries flow normally afterward. Promtail had the same property; we
+  just hadn't observed it with positions files persisted.
+
+### What did NOT land
+
+- `roles/common_monitoring/` not deleted — still installs node_exporter
+  on tanium_clients.
+- `roles/promtail/` not deleted — still installs promtail on tanium_clients.
+- `node_exporter_version` and `promtail_version` defaults not removed.
+- `docs/ipam.md` not edited (no IP changes).

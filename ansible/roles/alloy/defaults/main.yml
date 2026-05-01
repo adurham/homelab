@@ -1,0 +1,25 @@
+---
+# Grafana Alloy — unified telemetry agent replacing promtail (logs) and
+# node_exporter (metrics). See docs/promtail-to-alloy-plan.md.
+alloy_version: "1.16.0"
+
+# Alloy's built-in HTTP server (UI + own metrics, NOT node-exporter metrics).
+# We don't expose this externally; VM scrapes vm-01:8428 push receiver, not
+# this port. Bind to localhost on cutover hosts; loopback is enough.
+alloy_listen_addr: "127.0.0.1:12345"
+
+# Loki push endpoint — same shape promtail used.
+loki_url: "http://{{ hostvars['vm-01']['ansible_host'] }}:3100/loki/api/v1/push"
+
+# VictoriaMetrics remote-write receiver. VM exposes this on the same :8428
+# port that serves the query API; no extra config needed on the VM side.
+vm_remote_write_url: "http://{{ hostvars['vm-01']['ansible_host'] }}:8428/api/v1/write"
+
+# Extra labels stamped on all pushed metrics. Empty in production. Used
+# during the original promtail/node_exporter→alloy migration to mark
+# alloy-pushed series with `agent="alloy"` while VM was still scraping the
+# same hosts via :9100 — kept the two sources distinguishable until the
+# legacy agents were stopped. Re-enable the same way (override to
+# `{agent: alloy}` in the play) if doing a similar parallel-deploy on a new
+# host. See docs/promtail-to-alloy-plan.md.
+alloy_external_labels: {}

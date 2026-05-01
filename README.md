@@ -26,7 +26,7 @@ This repository manages a hyper-converged private cloud built on Proxmox VE. The
 | Identity          | `authentik`        | `172.16.0.20`  | `100.x.y.z` (TS)   | SSO provider; access via load balancer            |
 | Load Balancer     | `lb-01`            | `172.16.0.30`  | LAN/DHCP           | Nginx Layer 7 proxy for the cluster and services  |
 | Mail Forwarder    | `mail-01`          | `172.16.0.40`  | -                  | Postfix → iCloud SMTP relay for alert email       |
-| VictoriaMetrics   | `vm-01`            | `172.16.0.40`  | -                  | TSDB + blackbox_exporter + Loki + Promtail        |
+| VictoriaMetrics   | `vm-01`            | `172.16.0.42`  | -                  | TSDB + blackbox_exporter + Loki                   |
 | Grafana           | `graf-01`          | `172.16.0.41`  | -                  | Dashboards + unified alerting + image renderer    |
 | Tailscale GW      | `tailscale-gw`     | `172.16.0.101` | LAN + `100.x.y.z`  | Subnet router; ingress / NAT gateway              |
 
@@ -54,15 +54,31 @@ If a node fails, Proxmox HA automatically restarts protected containers on a hea
 
 Single-host metrics + logs stack on `vm-01` and `graf-01`:
 
-- **Metrics** — VictoriaMetrics scrapes `node_exporter` on every host, plus
-  blackbox_exporter probes:
+- **Agents** — Grafana Alloy on every "core" host (vm-01, graf-01, and the
+  private_subnet CTs) is the unified telemetry agent. It runs
+  `prometheus.exporter.unix` for node-exporter-shape metrics and
+  `loki.source.journal` for the systemd journal, then pushes both via
+  `prometheus.remote_write` (to VM at `:8428/api/v1/write`) and
+  `loki.write` (to Loki at `:3100/loki/api/v1/push`). Membership of the
+  push-path is controlled by the `alloy_cutover` inventory group.
+  Tanium client containers (tc-*) span RHEL/SUSE/Debian and stay on the
+  legacy `node_exporter` (pulled at `:9100`) + `promtail` path because
+  the alloy role only ships a Debian package. Tanium appliances
+  (tanium_cluster) run a hardened `node_exporter` install via
+  `roles/tanium_node_exporter`.
+- **Metrics** — VictoriaMetrics receives node_exporter-shape metrics two
+  ways: pushed by Alloy (cutover hosts) and pulled at `:9100` from the
+  remaining hosts (pve01–03, tc-*, tanium_cluster). Blackbox_exporter
+  probes also land in VM:
   - TCP probes to Tanium postgres (5432 on TS, 5433 on TMS) → `tanium_postgres_unreachable`
   - TCP probe to Tanium server console (:443) → `tanium_console_unreachable`
   - HTTPS probes to grafana / auth / proxmox public URLs → `https_endpoint_unreachable`,
     `cert_expiring_soon` (cert <14 days)
-- **Logs** — Loki on `vm-01:3100`; Promtail on every host tails the systemd journal
-  and ships to Loki. 14-day retention, filesystem storage. Loki is also a Grafana
-  datasource — query logs in the same UI as metrics.
+- **Logs** — Loki on `vm-01:3100`. Cutover hosts ship via Alloy's
+  `loki.source.journal`; tc-* still use Promtail. Same labels (`host`,
+  `job`, `unit`, `severity`, `nodename`) regardless of agent. 14-day
+  retention, filesystem storage. Loki is also a Grafana datasource — query
+  logs in the same UI as metrics.
 - **Alerts** — Grafana unified alerting. Rules live in
   `roles/grafana/templates/alerting_rules.yml.j2`. Includes metric-backed
   alerts (host_down, disk_full, cert/probe alerts) and log-backed alerts
@@ -76,9 +92,11 @@ Single-host metrics + logs stack on `vm-01` and `graf-01`:
 
 Self-hosted Renovate runs weekly via GitHub Actions
 (`.github/workflows/renovate.yml`). Tracks the version pins in role
-`defaults/main.yml` files (blackbox_exporter, node_exporter, victoriametrics,
-loki/promtail, golang/go, grafana_image_renderer) and opens PRs for upstream
-releases. Dashboard: GitHub issue #1 in this repo.
+`defaults/main.yml` files (alloy, blackbox_exporter, node_exporter,
+victoriametrics, loki, golang/go, grafana_image_renderer) and opens PRs
+for upstream releases. Promtail tracking is intentionally disabled
+(deprecated by Alloy starting Loki 3.7.0). Dashboard: GitHub issue #1 in
+this repo.
 
 ## Repository Layout
 

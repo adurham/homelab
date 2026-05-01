@@ -1,0 +1,76 @@
+// Managed by ansible — see roles/alloy/templates/config.alloy.j2.
+
+// ----- Metrics: replaces node_exporter -----
+// prometheus.exporter.unix produces the same metric shape as node_exporter
+// (it's a node_exporter fork). prometheus.scrape pulls from it in-process,
+// then prometheus.remote_write pushes to VictoriaMetrics.
+prometheus.exporter.unix "host" { }
+
+// Override the exporter's default `job="integrations/unix"` with
+// `job="node_exporter"` so series match what VM's old static_configs scrape
+// produced. Existing alerts (host_down etc.) filter on this label.
+discovery.relabel "host" {
+    targets = prometheus.exporter.unix.host.targets
+    rule {
+        target_label = "job"
+        replacement  = "node_exporter"
+    }
+}
+
+prometheus.scrape "host_metrics" {
+    targets         = discovery.relabel.host.output
+    forward_to      = [prometheus.remote_write.vm.receiver]
+    scrape_interval = "15s"
+}
+
+prometheus.remote_write "vm" {
+    endpoint {
+        url = "{{ vm_remote_write_url }}"
+    }
+    // instance/hostname/env match what VM's old static_configs scrape
+    // attached. Keeps existing dashboards & alerts working unchanged.
+    external_labels = {
+        instance = constants.hostname,
+        hostname = constants.hostname,
+        env      = "homelab",
+{% for k, v in (alloy_external_labels | default({})).items() %}
+        {{ k }} = "{{ v }}",
+{% endfor %}
+    }
+}
+
+// ----- Logs: replaces promtail journal scrape -----
+// Same labels promtail produced — host, job, unit, severity, nodename —
+// so existing log alerts (log_oom_kill, log_ssh_brute_force, etc.) keep
+// working post-cutover.
+loki.relabel "journal" {
+    forward_to = []
+    rule {
+        source_labels = ["__journal__systemd_unit"]
+        target_label  = "unit"
+    }
+    rule {
+        source_labels = ["__journal_priority_keyword"]
+        target_label  = "severity"
+    }
+    rule {
+        source_labels = ["__journal__hostname"]
+        target_label  = "nodename"
+    }
+}
+
+loki.source.journal "system" {
+    max_age       = "12h"
+    labels        = {
+        host = constants.hostname,
+        job  = "systemd-journal",
+    }
+    forward_to    = [loki.write.vm.receiver]
+    relabel_rules = loki.relabel.journal.rules
+}
+
+loki.write "vm" {
+    endpoint {
+        url = "{{ loki_url }}"
+    }
+}

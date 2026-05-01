@@ -21,31 +21,115 @@
         inventory_hostname: "graf-01"
         template: "{{ hostvars['graf-01']['template'] }}"
 
-- name: Install Node Exporter (Agents)
+- name: Install Telemetry Agents (private_subnet + tanium_clients)
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster
   gather_facts: true
-  roles:
-    - common_monitoring
-    - promtail
+  # alloy_cutover hosts run alloy (push to VM + Loki). Non-cutover hosts
+  # (tanium_clients — mixed RHEL/SUSE/Debian, alloy role is .deb-only) stay
+  # on legacy node_exporter+promtail. See docs/promtail-to-alloy-plan.md.
+  tasks:
+    - name: Install node_exporter (legacy — skipped on alloy_cutover hosts)
+      ansible.builtin.include_role:
+        name: common_monitoring
+      when: inventory_hostname not in groups.get('alloy_cutover', [])
+
+    - name: Install promtail (legacy — skipped on alloy_cutover hosts)
+      ansible.builtin.include_role:
+        name: promtail
+      when: inventory_hostname not in groups.get('alloy_cutover', [])
+
+    - name: Install alloy
+      ansible.builtin.include_role:
+        name: alloy
+      when: inventory_hostname in groups.get('alloy_cutover', [])
+
+    - name: Stop+disable legacy agents on alloy_cutover hosts
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - promtail
+        - node_exporter
+      when: inventory_hostname in groups.get('alloy_cutover', [])
+      failed_when: false
 
 - name: Configure VictoriaMetrics
   hosts: victoriametrics
   gather_facts: true
-  roles:
-    - common_monitoring
-    - victoriametrics
-    - blackbox_exporter
-    - loki
-    - promtail
+  tasks:
+    - name: Install node_exporter (legacy — skipped on alloy_cutover hosts)
+      ansible.builtin.include_role:
+        name: common_monitoring
+      when: inventory_hostname not in groups.get('alloy_cutover', [])
+
+    - name: Install victoriametrics
+      ansible.builtin.include_role:
+        name: victoriametrics
+
+    - name: Install blackbox_exporter
+      ansible.builtin.include_role:
+        name: blackbox_exporter
+
+    - name: Install loki
+      ansible.builtin.include_role:
+        name: loki
+
+    - name: Install promtail (legacy — skipped on alloy_cutover hosts)
+      ansible.builtin.include_role:
+        name: promtail
+      when: inventory_hostname not in groups.get('alloy_cutover', [])
+
+    - name: Install alloy
+      ansible.builtin.include_role:
+        name: alloy
+      when: inventory_hostname in groups.get('alloy_cutover', [])
+
+    - name: Stop+disable legacy agents on alloy_cutover hosts
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - promtail
+        - node_exporter
+      when: inventory_hostname in groups.get('alloy_cutover', [])
+      failed_when: false
 
 - name: Configure Grafana
   hosts: grafana
   gather_facts: true
-  # Secrets loaded from group_vars/all.yml
-  roles:
-    - common_monitoring
-    - grafana
-    - promtail
+  # Secrets loaded from group_vars/all.yml.
+  tasks:
+    - name: Install node_exporter (legacy — skipped on alloy_cutover hosts)
+      ansible.builtin.include_role:
+        name: common_monitoring
+      when: inventory_hostname not in groups.get('alloy_cutover', [])
+
+    - name: Install grafana
+      ansible.builtin.include_role:
+        name: grafana
+
+    - name: Install promtail (legacy — skipped on alloy_cutover hosts)
+      ansible.builtin.include_role:
+        name: promtail
+      when: inventory_hostname not in groups.get('alloy_cutover', [])
+
+    - name: Install alloy
+      ansible.builtin.include_role:
+        name: alloy
+      when: inventory_hostname in groups.get('alloy_cutover', [])
+
+    - name: Stop+disable legacy agents on alloy_cutover hosts
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - promtail
+        - node_exporter
+      when: inventory_hostname in groups.get('alloy_cutover', [])
+      failed_when: false
 
 # Tanium appliances need a different role — common_monitoring's RHEL path
 # does `nft flush ruleset` which would wipe TanOS's hardened firewall.
