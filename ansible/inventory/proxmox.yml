@@ -261,8 +261,19 @@ all:
         tailscale-gw:
         mail-01:
         ntp-01:
-        tc-debian12:
+        tc-ubuntu22:
+        tc-ubuntu24:
+        tc-rocky8:
         tc-rocky9:
+        tc-debian12:
+        # tc-debian11 omitted — CT 306 has no IPv4 on eth0, unreachable from
+        # ansible. Re-add once the CT's network is fixed.
+        tc-oracle9:
+        tc-oracle8:
+        tc-alma9:
+        tc-alma8:
+        tc-rhel8:
+        tc-rhel9:
         tc-suse15:
 
     # Monitoring Infrastructure
