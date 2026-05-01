@@ -1,0 +1,26 @@
+server:
+  http_listen_port: {{ promtail_port }}
+  grpc_listen_port: 0
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: {{ loki_url }}
+
+scrape_configs:
+  # Tail systemd journal — covers ssh, networking, every systemd-managed
+  # service. Most modern Debian/Ubuntu services log here exclusively.
+  - job_name: journal
+    journal:
+      max_age: 12h
+      labels:
+        job: systemd-journal
+        host: {{ inventory_hostname }}
+    relabel_configs:
+      - source_labels: ['__journal__systemd_unit']
+        target_label: unit
+      - source_labels: ['__journal_priority_keyword']
+        target_label: severity
+      - source_labels: ['__journal__hostname']
+        target_label: nodename

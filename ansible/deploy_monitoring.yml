@@ -26,6 +26,7 @@
   gather_facts: true
   roles:
     - common_monitoring
+    - promtail
 
 - name: Configure VictoriaMetrics
   hosts: victoriametrics
@@ -34,6 +35,8 @@
     - common_monitoring
     - victoriametrics
     - blackbox_exporter
+    - loki
+    - promtail
 
 - name: Configure Grafana
   hosts: grafana
@@ -42,3 +45,4 @@
   roles:
     - common_monitoring
     - grafana
+    - promtail

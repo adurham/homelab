@@ -1,0 +1,110 @@
+---
+# Loki release artifacts ship as zips, not tarballs. Need unzip on the host.
+- name: Install unzip dependency
+  ansible.builtin.apt:
+    name: unzip
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create loki group
+  ansible.builtin.group:
+    name: "{{ loki_group }}"
+    state: present
+    system: true
+
+- name: Create loki user
+  ansible.builtin.user:
+    name: "{{ loki_user }}"
+    group: "{{ loki_group }}"
+    shell: /sbin/nologin
+    create_home: false
+    system: true
+
+- name: Create storage directory
+  ansible.builtin.file:
+    path: "{{ loki_storage_dir }}"
+    state: directory
+    owner: "{{ loki_user }}"
+    group: "{{ loki_group }}"
+    mode: '0755'
+
+- name: Create config directory
+  ansible.builtin.file:
+    path: /etc/loki
+    state: directory
+    mode: '0755'
+
+- name: Download loki release zip
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/loki/releases/download/v{{ loki_version }}/loki-linux-amd64.zip"
+    dest: "/tmp/loki-{{ loki_version }}.zip"
+    mode: '0644'
+
+- name: Extract loki binary
+  ansible.builtin.unarchive:
+    src: "/tmp/loki-{{ loki_version }}.zip"
+    dest: /tmp/
+    remote_src: true
+    creates: /tmp/loki-linux-amd64
+
+- name: Install binary
+  ansible.builtin.copy:
+    src: /tmp/loki-linux-amd64
+    dest: /usr/local/bin/loki
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart loki
+
+- name: Render loki config
+  ansible.builtin.template:
+    src: loki.yml.j2
+    dest: /etc/loki/loki.yml
+    owner: root
+    group: "{{ loki_group }}"
+    mode: '0640'
+  notify: Restart loki
+
+- name: Deploy loki systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/loki.service
+    content: |
+      [Unit]
+      Description=Grafana Loki log aggregator
+      After=network.target
+
+      [Service]
+      User={{ loki_user }}
+      Group={{ loki_group }}
+      Type=simple
+      ExecStart=/usr/local/bin/loki -config.file=/etc/loki/loki.yml
+      Restart=on-failure
+      LimitNOFILE=65536
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+  notify: Restart loki
+
+# Flush before "Start and enable" so a first-run install doesn't trigger a
+# pointless second restart at end-of-play (start task starts it; handler
+# would then restart it). Subsequent runs only restart once via the handler.
+- name: Flush handlers so config/binary changes apply before enable
+  ansible.builtin.meta: flush_handlers
+
+- name: Start and enable loki
+  ansible.builtin.systemd:
+    name: loki
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Cleanup tmp
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/loki-{{ loki_version }}.zip"
+    - "/tmp/loki-linux-amd64"
