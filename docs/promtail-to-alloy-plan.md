@@ -256,15 +256,17 @@ Net change: roughly equal or slightly lower per host. Not a concern.
 
 **Total ~90 min focused.** Should be one session, not split.
 
-## Status as of 2026-05-01
+## Status as of 2026-05-01 (later, after Phase 3b)
 
 - Loki: 3.7.1 (current)
-- Promtail: 3.0.0 (still installed on tanium_clients only — see below)
-- node_exporter: 1.11.1 (still installed on tanium_clients + tanium_cluster
-  + pve01–03 — alloy doesn't replace these)
+- Promtail: 3.0.0 (still installed on **pve01–03 only** — see blockers below)
+- node_exporter: 1.11.1 (still installed on **pve01–03 + tanium_cluster**;
+  pve hosts also have the Debian-packaged `prometheus-node-exporter` —
+  surprise discovery during the abortive 3a attempt)
 - Alloy: 1.16.0
-- Alloy migration: **complete on all 9 core hosts** (vm-01, graf-01,
-  authentik, dns-01, lb-01, mail-01, ntp-01, proxy-01, tailscale-gw).
+- Alloy migration: **complete on 22 of 25 hosts** — all 9 core LXCs +
+  all 13 tc-* tanium_clients (Debian, Ubuntu, Rocky, Alma, Oracle, RHEL,
+  SUSE). Outstanding: pve01/02/03 only.
 
 ### What actually landed (vs. plan)
 
@@ -287,14 +289,20 @@ Net change: roughly equal or slightly lower per host. Not a concern.
   re-enable the marker by overriding the var in the play if doing a
   similar parallel deploy on a new host.
 - **Cutover gating uses an inventory group.** `alloy_cutover` in
-  `inventory/proxmox.yml` controls who gets the push path. `tanium_clients`
-  (mixed RHEL/SUSE/Debian test CTs) are deliberately excluded — the alloy
-  role is .deb-only. They keep `roles/promtail/` and the Debian-path
-  parts of `roles/common_monitoring/` alive, so neither role was deleted.
+  `inventory/proxmox.yml` controls who gets the push path. After Phase 3b
+  this includes all 13 tc-* tanium_clients (the alloy role gained
+  multi-OS support — apt for Debian/Ubuntu, dnf for RHEL/Alma/Rocky/
+  Oracle, zypper-via-shell for SUSE, with an EL8 dnf-via-shell fallback
+  because EL8's python3.9 ships without the python3-dnf bindings the
+  ansible dnf module requires).
+- **`tanium_clients` was added as a child of `private_subnet`** so the
+  12 reachable tc-* hosts inherit the personal-MacBook ProxyCommand.
+  Without that they were unreachable from the work MacBook (a quiet
+  pre-existing gap — they had been deployed by running ansible from
+  the personal MacBook directly).
 - **Renovate.** Added a `grafana/alloy` manager. Promtail tracking remains
   disabled (404s on every Loki release post-3.7.0). node_exporter manager
-  remains active (still pinning the binary used by tanium_clients +
-  pve hosts + tanium_cluster).
+  remains active (pve hosts + tanium_cluster still depend on it).
 - **Phase-1 first-startup nit.** Alloy's `loki.source.journal` reads
   `max_age=12h` of journal on cold start; Loki rejects entries older than
   its `max_look_back_period` (~4h) with `400 entry too far behind`. About
@@ -305,7 +313,19 @@ Net change: roughly equal or slightly lower per host. Not a concern.
 ### What did NOT land
 
 - `roles/common_monitoring/` not deleted — still installs node_exporter
-  on tanium_clients.
-- `roles/promtail/` not deleted — still installs promtail on tanium_clients.
+  on pve01-03 (with a footgun: it port-conflicts on `:9100` with the
+  apt-packaged `prometheus-node-exporter` already running on those
+  hosts, so the role's install has been silently failing on pve forever
+  — apt is the actual source of pve metrics).
+- `roles/promtail/` not deleted — still installs promtail on pve01-03.
 - `node_exporter_version` and `promtail_version` defaults not removed.
 - `docs/ipam.md` not edited (no IP changes).
+- **pve01/02/03 — blocked on routing.** pve hosts host the `private`
+  bridge but have no IP on it, so Alloy push to `vm-01:8428` (172.16.0.42)
+  routes via the LAN gateway and times out. Resolution requires assigning
+  pve hosts IPs on the private subnet (e.g., `.2/.3/.4`) via
+  `/etc/network/interfaces.d/sdn-private` or a Proxmox SDN Subnet config.
+  Tracked in memory `project_alloy_phase3_pve_blocker.md`.
+- **tc-debian11** had no IPv4 on `eth0` (CT 306 networking was wedged);
+  resolved with `ifdown && ifup eth0` inside the CT during 3b. Watch for
+  recurrence on next reboot.
