@@ -6,21 +6,21 @@ enable: 1
 # Allow Ping (ICMP) from anywhere (Diagnostic)
 IN ACCEPT -p icmp
 
-# Allow Incoming SSH (22) from Private/LAN
-IN ACCEPT -source 172.16.0.0/24 -p tcp -dport 22
+# Allow Incoming SSH (22) from Private
+IN ACCEPT -source {{ net_private_range }} -p tcp -dport 22
 
-# Allow Incoming Tanium Port (17472) from Private/LAN
-IN ACCEPT -source 172.16.0.0/24 -p tcp -dport 17472
+# Allow Incoming Tanium Port (17472) from Private
+IN ACCEPT -source {{ net_private_range }} -p tcp -dport 17472
 
 # Allow All Incoming from Cluster (Private Network)
-IN ACCEPT -source 172.16.0.0/24
+IN ACCEPT -source {{ net_private_range }}
 
-# Allow All Incoming from Tailscale (100.x.y.z)
+# Allow All Incoming from Tailscale (100.x.y.z CGNAT range)
 IN ACCEPT -source 100.64.0.0/10
 
 # OUTBOUND RULES
-# Allow Outbound to Private (DNS 172.16.0.10, Other Nodes)
-OUT ACCEPT -dest 172.16.0.0/24
+# Allow Outbound to Private (DNS {{ ip_dns_primary }}, Other Nodes)
+OUT ACCEPT -dest {{ net_private_range }}
 
 
 # DROP All other Outbound (Internet)

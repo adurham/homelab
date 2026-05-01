@@ -16,7 +16,7 @@ server_tokens off;
 geo $is_internal {
     default 0;
     192.168.86.0/24 1;  # LAN
-    172.16.0.0/24   1;  # Private VLAN
+    {{ net_private_range }}   1;  # Private VLAN
     100.64.0.0/10   1;  # Tailscale
     127.0.0.0/8     1;  # Localhost
     ::1             1;

@@ -69,7 +69,7 @@
 - name: Configure Chrony (Allow Private Network & NIST Sync)
   ansible.builtin.shell: |
     pct exec 105 -- sh -c "grep -q 'time.nist.gov' /etc/chrony/chrony.conf || echo 'server time.nist.gov iburst' >> /etc/chrony/chrony.conf"
-    pct exec 105 -- sh -c "grep -q 'allow 172.16.0.0/24' /etc/chrony/chrony.conf || echo 'allow 172.16.0.0/24' >> /etc/chrony/chrony.conf"
+    pct exec 105 -- sh -c "grep -q 'allow {{ net_private_range }}' /etc/chrony/chrony.conf || echo 'allow {{ net_private_range }}' >> /etc/chrony/chrony.conf"
     pct exec 105 -- systemctl restart chrony
   delegate_to: pve01
 
