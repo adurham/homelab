@@ -46,3 +46,13 @@
     - common_monitoring
     - grafana
     - promtail
+
+# Tanium appliances need a different role — common_monitoring's RHEL path
+# does `nft flush ruleset` which would wipe TanOS's hardened firewall.
+# tanium_node_exporter installs node_exporter with a single targeted
+# iptables INPUT rule (allow vm-01 to scrape :9100), nothing else.
+- name: Install Node Exporter on Tanium appliances
+  hosts: tanium_cluster
+  gather_facts: true
+  roles:
+    - tanium_node_exporter

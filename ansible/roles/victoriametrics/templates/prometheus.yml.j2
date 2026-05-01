@@ -20,6 +20,20 @@ scrape_configs:
           env: 'homelab'
 {% endif %}
 {% endfor %}
+{# Tanium zone servers (tzs-*) excluded for now -- ansible can't reach them
+   from the work MacBook via the personal MacBook jump path, so node_exporter
+   isn't deployed there yet. Once connectivity is sorted, drop the
+   `not in groups['tanium_zones']` filter. #}
+{% for host in groups['tanium_cluster'] | default([]) %}
+{% if hostvars[host].ansible_host is defined and host not in groups['tanium_zones'] %}
+      - targets: ['{{ hostvars[host].ansible_host }}:9100']
+        labels:
+          hostname: '{{ host }}'
+          instance: '{{ host }}'
+          env: 'homelab'
+          tanium_role: '{{ "server" if host in groups["tanium_servers"] else "module" if host in groups["tanium_modules"] else "client" }}'
+{% endif %}
+{% endfor %}
 
     relabel_configs:
       - source_labels: [hostname]
