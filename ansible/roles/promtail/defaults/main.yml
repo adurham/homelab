@@ -1,6 +1,6 @@
 ---
 # Pin to the same release tag as loki — promtail and loki ship together.
-promtail_version: "3.0.0"
+promtail_version: "3.7.1"
 # Loki push endpoint. Uses vm-01's private-subnet IP from inventory so this
 # resolves regardless of whether the source host has DNS.
 loki_url: "http://{{ hostvars['vm-01']['ansible_host'] }}:3100/loki/api/v1/push"
