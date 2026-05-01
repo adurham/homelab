@@ -11,12 +11,12 @@ ansible_user: tandev
 # appliances. Override per-machine in ~/.ssh/config if running from the
 # personal Mac directly (no jump needed there).
 #
-# Host-key checking off because TanOS appliances are rebuilt frequently
-# and the wire is already authenticated by Tailscale.
+# `accept-new` does TOFU: pin the host key on first connection, refuse on
+# change. After a TanOS rebuild you'll get a host-key-mismatch on the
+# rebuilt appliance — clear its line from ~/.ssh/known_hosts to recover.
 ansible_ssh_common_args: >-
   -o ProxyJump=100.66.19.20
-  -o StrictHostKeyChecking=no
-  -o UserKnownHostsFile=/dev/null
+  -o StrictHostKeyChecking=accept-new
   -o LogLevel=ERROR
 
 # Don't pin a specific identity file — let ssh negotiate via the agent

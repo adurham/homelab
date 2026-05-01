@@ -152,6 +152,7 @@
   notify: Restart Grafana
 
 - name: Configure Grafana SSO (Authentik)
+  no_log: true
   ansible.builtin.copy:
     dest: /etc/grafana/grafana.ini
     mode: '0640'

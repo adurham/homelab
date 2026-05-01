@@ -137,10 +137,7 @@
     headers: "{{ headers }}"
     return_content: true
   register: grafana_providers_found
-
-- name: Debug Grafana Providers
-  ansible.builtin.debug:
-    var: grafana_providers_found
+  no_log: true
 
 - name: Get Grafana Auth Flow
   ansible.builtin.uri:
@@ -185,6 +182,7 @@
     status_code: [200, 201]
   when: grafana_providers_found.json.results | length == 0
   register: new_grafana_provider
+  no_log: true
 
 - name: Capture Grafana Provider ID (Original)
   ansible.builtin.set_fact:
@@ -215,6 +213,7 @@
       invalidation_flow: "{{ (grafana_invalid_flow.json.results[0].pk if (not grafana_invalid_flow.failed and grafana_invalid_flow.json.results | length > 0) else grafana_auth_flow.json.results[0].pk) }}"
     status_code: [200]
   when: grafana_provider_id is defined
+  no_log: true
 
 - name: Get Grafana Application
   ansible.builtin.uri:
