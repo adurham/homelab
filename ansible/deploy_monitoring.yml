@@ -54,6 +54,27 @@
       when: inventory_hostname in groups.get('alloy_cutover', [])
       failed_when: false
 
+    - name: Remove legacy unit files + binaries + state on alloy_cutover hosts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/promtail.service
+        - /etc/systemd/system/node_exporter.service
+        - /usr/local/bin/promtail
+        - /usr/local/bin/node_exporter
+        - /etc/promtail
+        - /var/lib/promtail
+      when: inventory_hostname in groups.get('alloy_cutover', [])
+      register: legacy_removal
+
+    - name: Reload systemd if legacy unit files were removed
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when:
+        - inventory_hostname in groups.get('alloy_cutover', [])
+        - legacy_removal is changed
+
 - name: Configure VictoriaMetrics
   hosts: victoriametrics
   gather_facts: true
@@ -96,6 +117,27 @@
       when: inventory_hostname in groups.get('alloy_cutover', [])
       failed_when: false
 
+    - name: Remove legacy unit files + binaries + state on alloy_cutover hosts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/promtail.service
+        - /etc/systemd/system/node_exporter.service
+        - /usr/local/bin/promtail
+        - /usr/local/bin/node_exporter
+        - /etc/promtail
+        - /var/lib/promtail
+      when: inventory_hostname in groups.get('alloy_cutover', [])
+      register: legacy_removal
+
+    - name: Reload systemd if legacy unit files were removed
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when:
+        - inventory_hostname in groups.get('alloy_cutover', [])
+        - legacy_removal is changed
+
 - name: Configure Grafana
   hosts: grafana
   gather_facts: true
@@ -130,6 +172,27 @@
         - node_exporter
       when: inventory_hostname in groups.get('alloy_cutover', [])
       failed_when: false
+
+    - name: Remove legacy unit files + binaries + state on alloy_cutover hosts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/promtail.service
+        - /etc/systemd/system/node_exporter.service
+        - /usr/local/bin/promtail
+        - /usr/local/bin/node_exporter
+        - /etc/promtail
+        - /var/lib/promtail
+      when: inventory_hostname in groups.get('alloy_cutover', [])
+      register: legacy_removal
+
+    - name: Reload systemd if legacy unit files were removed
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when:
+        - inventory_hostname in groups.get('alloy_cutover', [])
+        - legacy_removal is changed
 
 # Tanium appliances need a different role — common_monitoring's RHEL path
 # does `nft flush ruleset` which would wipe TanOS's hardened firewall.
