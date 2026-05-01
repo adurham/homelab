@@ -23,6 +23,11 @@ ip_grafana: "172.16.0.41"
 ip_vm: "172.16.0.42"
 ip_tailscale_gw: "172.16.0.101"
 
+# Email destination for the Grafana fallback contact point. Routes through
+# mail-01's postfix relay -> iCloud SMTP. Used as a backup channel when the
+# HA webhook is broken.
+alert_email_to: "amdnative@icloud.com"
+
 # Cluster Nodes (Physical LAN)
 # Used for SDN Peering and Corosync
 proxmox_cluster_peers: "192.168.86.11,192.168.86.12,192.168.86.13"

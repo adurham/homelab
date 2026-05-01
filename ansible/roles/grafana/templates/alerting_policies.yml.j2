@@ -8,3 +8,13 @@ policies:
     group_wait: 30s
     group_interval: 5m
     repeat_interval: 4h
+    routes:
+      # Mirror every alert to the email fallback. Dual-fanout (continue: true)
+      # so it doesn't replace the HA webhook -- both fire. Repeat interval
+      # is longer here so the inbox doesn't get hammered if an alert is
+      # stuck firing.
+      - receiver: email
+        continue: true
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 12h
