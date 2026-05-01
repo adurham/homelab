@@ -2,19 +2,18 @@
 # -------------------------------------------------------------------------
 # Authentik Flow / Stage / Binding provisioning
 #
-# Pattern note: many POST tasks below use `ignore_errors: true` or
-# `failed_when: false` to tolerate "already exists" responses from
-# Authentik on re-runs. A subsequent GET ("Idempotency") task fetches the
-# existing resource when create failed. This works but is overly broad —
-# 5xx failures are also silently swallowed.
+# POST-then-conflict pattern: tasks that create a resource which may
+# already exist accept HTTP 400 in addition to 200/201. Authentik (DRF)
+# returns 400 with a body like `{"name": ["stage with this name already
+# exists."]}` on duplicate stages and `{"non_field_errors": ["The fields
+# target, stage, order must make a unique set."]}` on duplicate bindings.
+# A subsequent GET ("Idempotency") fetches the existing resource when
+# the create returned non-201; capture-ID set_facts gate on
+# `register.status == 201`. Conflict-response shapes confirmed against
+# live Authentik on 2026-05-01.
 #
-# TODO: tighten by extending each `status_code: [200, 201]` to include
-# Authentik's actual conflict-response code (likely 400 with a
-# DRF-shaped `{"name": ["entry with this name already exists"]}` body),
-# then drop `ignore_errors: true` / `failed_when: false`. Update
-# downstream `when: create_*.failed` to use the specific status check.
-# Requires testing against a live Authentik to confirm exact error
-# response shape — not done in the audit pass on 2026-04-30.
+# Anything other than 200/201/400 (genuine 5xx, auth failures, etc.)
+# fails the task as it should.
 #
 # -------------------------------------------------------------------------
 # Recovery Flow
@@ -249,8 +248,7 @@
       target: "{{ flow_recovery_id }}"
       stage: "{{ stage_ident_id }}"
       order: 0
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
 
 - name: Bind Email Stage to Flow (Order 10)
   ansible.builtin.uri:
@@ -262,8 +260,7 @@
       target: "{{ flow_recovery_id }}"
       stage: "{{ stage_email_id }}"
       order: 10
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
 
 - name: Bind Prompt Stage to Flow (Order 20)
   ansible.builtin.uri:
@@ -275,10 +272,9 @@
       target: "{{ flow_recovery_id }}"
       stage: "{{ stage_prompt_id }}"
       order: 20
-    status_code: [200, 201]
+    status_code: [200, 201, 400]
   register: bind_prompt_result
   changed_when: bind_prompt_result.status == 201
-  failed_when: false
 
 - name: Bind User Write Stage to Flow (Order 30)
   ansible.builtin.uri:
@@ -290,10 +286,9 @@
       target: "{{ flow_recovery_id }}"
       stage: "{{ stage_write_id }}"
       order: 30
-    status_code: [200, 201]
+    status_code: [200, 201, 400]
   register: bind_write_result
   changed_when: bind_write_result.status == 201
-  ignore_errors: true
 
 # -------------------------------------------------------------------------
 # MFA Flow
@@ -308,8 +303,7 @@
     body:
       name: "MFA-TOTP-Setup"
       digits: 6
-    status_code: [200, 201]
-  ignore_errors: true
+    status_code: [200, 201, 400]
   register: create_totp_setup
 
 - name: Get TOTP Setup Stage (Idempotency)
@@ -318,7 +312,7 @@
     method: GET
     headers: "{{ headers }}"
   register: get_totp_setup
-  when: create_totp_setup.failed
+  when: create_totp_setup.status != 201
 
 - name: Capture TOTP Stage ID
   ansible.builtin.set_fact:
@@ -338,8 +332,7 @@
     body:
       name: "MFA-WebAuthn-Setup"
       user_verification: "preferred"
-    status_code: [200, 201]
-  ignore_errors: true
+    status_code: [200, 201, 400]
   register: create_webauthn_setup
 
 - name: Get WebAuthn Setup Stage (Idempotency)
@@ -348,7 +341,7 @@
     method: GET
     headers: "{{ headers }}"
   register: get_webauthn_setup
-  when: create_webauthn_setup.failed
+  when: create_webauthn_setup.status != 201
 
 - name: Capture WebAuthn Stage ID
   ansible.builtin.set_fact:
@@ -368,8 +361,7 @@
     body:
       name: "MFA-Static-Setup"
       token_count: 6
-    status_code: [200, 201]
-  ignore_errors: true
+    status_code: [200, 201, 400]
   register: create_static_setup
 
 - name: Get Static Setup Stage (Idempotency)
@@ -378,7 +370,7 @@
     method: GET
     headers: "{{ headers }}"
   register: get_static_setup
-  when: create_static_setup.failed
+  when: create_static_setup.status != 201
 
 - name: Capture Static Stage ID
   ansible.builtin.set_fact:
@@ -400,8 +392,7 @@
       slug: "mfa-setup-flow"
       title: "Set up Multi-Factor Authentication"
       designation: "stage_configuration"
-    status_code: [200, 201]
-  ignore_errors: true
+    status_code: [200, 201, 400]
   register: create_mfa_flow
 
 - name: Get MFA Setup Flow (Idempotency)
@@ -410,7 +401,7 @@
     method: GET
     headers: "{{ headers }}"
   register: get_mfa_flow
-  when: create_mfa_flow.failed
+  when: create_mfa_flow.status != 201
 
 - name: Capture MFA Setup Flow ID
   ansible.builtin.set_fact:
@@ -431,8 +422,7 @@
       target: "{{ flow_mfa_setup_id }}"
       stage: "{{ stage_totp_id }}"
       order: 10
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
 
 - name: Bind WebAuthn to Setup Flow
   ansible.builtin.uri:
@@ -444,8 +434,7 @@
       target: "{{ flow_mfa_setup_id }}"
       stage: "{{ stage_webauthn_id }}"
       order: 20
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
 
 - name: Bind Static (Backup Codes) to Setup Flow
   ansible.builtin.uri:
@@ -457,8 +446,7 @@
       target: "{{ flow_mfa_setup_id }}"
       stage: "{{ stage_static_id }}"
       order: 30
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
 
 - name: Create Backup Codes Flow
   ansible.builtin.uri:
@@ -471,8 +459,7 @@
       slug: "enroll-backup-codes"
       title: "Generate Backup Codes"
       designation: "stage_configuration"
-    status_code: [200, 201]
-  ignore_errors: true
+    status_code: [200, 201, 400]
   register: create_backup_flow
 
 - name: Get Backup Codes Flow (Idempotency)
@@ -481,14 +468,14 @@
     method: GET
     headers: "{{ headers }}"
   register: get_backup_flow
-  when: create_backup_flow.failed
+  when: create_backup_flow.status != 201
 
 - name: Capture Backup Flow ID
   ansible.builtin.set_fact:
     flow_backup_id: >-
       {{
         (create_backup_flow.json.pk
-          if (create_backup_flow is defined and not create_backup_flow.failed)
+          if (create_backup_flow is defined and create_backup_flow.status == 201)
           else get_backup_flow.json.results[0].pk)
       }}
 
@@ -502,8 +489,7 @@
       target: "{{ flow_backup_id }}"
       stage: "{{ stage_static_id }}"
       order: 10
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
 
 - name: Create MFA Validation Stage
   ansible.builtin.uri:
@@ -518,8 +504,7 @@
         - static
         - totp
         - webauthn
-    status_code: [200, 201]
-  ignore_errors: true
+    status_code: [200, 201, 400]
   register: create_mfa_validate
 
 - name: Get MFA Validation Stage (Idempotency)
@@ -528,14 +513,14 @@
     method: GET
     headers: "{{ headers }}"
   register: get_mfa_validate
-  when: create_mfa_validate.failed
+  when: create_mfa_validate.status != 201
 
 - name: Capture MFA Validate Stage ID
   ansible.builtin.set_fact:
     stage_mfa_validate_id: >-
       {{
         (create_mfa_validate.json.pk
-          if (create_mfa_validate is defined and not create_mfa_validate.failed)
+          if (create_mfa_validate is defined and create_mfa_validate.status == 201)
           else get_mfa_validate.json.results[0].pk)
       }}
 
@@ -586,8 +571,7 @@
       target: "{{ auth_flow_list.json.results[0].pk }}"
       stage: "{{ stage_mfa_validate_id }}"
       order: 30
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
 
 # -------------------------------------------------------------------------
 # Invitation Flow
@@ -601,8 +585,7 @@
     body_format: json
     body:
       name: "Enrollment-Invitation-Stage"
-    status_code: [200, 201]
-  ignore_errors: true
+    status_code: [200, 201, 400]
   register: create_invitation
 
 - name: Get Invitation Stage (Idempotency)
@@ -611,14 +594,14 @@
     method: GET
     headers: "{{ headers }}"
   register: get_invitation
-  when: create_invitation.failed
+  when: create_invitation.status != 201
 
 - name: Capture Invitation Stage ID
   ansible.builtin.set_fact:
     stage_invitation_id: >-
       {{
         (create_invitation.json.pk
-          if (create_invitation is defined and not create_invitation.failed)
+          if (create_invitation is defined and create_invitation.status == 201)
           else get_invitation.json.results[0].pk)
       }}
 
@@ -654,8 +637,7 @@
       slug: "enrollment-invitation"
       title: "Redeem Invitation"
       designation: "enrollment"
-    status_code: [200, 201]
-  ignore_errors: true
+    status_code: [200, 201, 400]
   register: create_invitation_flow
 
 - name: Get Invitation Flow (Idempotency)
@@ -664,7 +646,7 @@
     method: GET
     headers: "{{ headers }}"
   register: get_invitation_flow
-  when: create_invitation_flow.failed
+  when: create_invitation_flow.status != 201
 
 - name: Capture Invitation Flow ID
   ansible.builtin.set_fact:
@@ -685,8 +667,7 @@
       target: "{{ flow_invitation_id }}"
       stage: "{{ stage_invitation_id }}"
       order: 0
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
 
 - name: Bind Default Prompt (Order 10)
   ansible.builtin.uri:
@@ -698,8 +679,7 @@
       target: "{{ flow_invitation_id }}"
       stage: "{{ default_prompt_list.json.results[0].pk }}"
       order: 10
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
   when: default_prompt_list.json.results | length > 0
 
 - name: Bind Default Write (Order 20)
@@ -712,8 +692,7 @@
       target: "{{ flow_invitation_id }}"
       stage: "{{ default_write_list.json.results[0].pk }}"
       order: 20
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
   when: default_write_list.json.results | length > 0
 
 - name: Bind Default Login (Order 30)
@@ -726,8 +705,7 @@
       target: "{{ flow_invitation_id }}"
       stage: "{{ default_login_list.json.results[0].pk }}"
       order: 30
-    status_code: [200, 201]
-  failed_when: false
+    status_code: [200, 201, 400]
   when: default_login_list.json.results | length > 0
 
 # -------------------------------------------------------------------------

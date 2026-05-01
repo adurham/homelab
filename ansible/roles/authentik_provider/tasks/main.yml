@@ -63,6 +63,9 @@
   register: get_app_direct
 
 - name: Create Proxmox Application
+  # 400 covers the TOCTOU race: GET returned 404, but between GET and POST
+  # another actor created the app — Authentik (DRF) returns 400 with a
+  # `{"slug": ["..."]}` body. 5xx still fails the play.
   ansible.builtin.uri:
     url: "{{ authentik_url }}/api/v3/core/applications/"
     method: POST
@@ -73,9 +76,8 @@
       slug: "{{ app_slug }}"
       provider: "{{ provider_id }}"
       meta_icon: "https://avatars.githubusercontent.com/u/4362756?s=200&v=4"
-    status_code: [200, 201]
+    status_code: [200, 201, 400]
   when: get_app_direct.status == 404
-  ignore_errors: true
   register: create_app
 
 - name: Update Proxmox Application (Ensure URL)
