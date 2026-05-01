@@ -305,7 +305,9 @@
   ansible.builtin.template:
     src: alerting_contact_points.yml.j2
     dest: /etc/grafana/provisioning/alerting/contact_points.yml
-    mode: '0644'
+    owner: root
+    group: grafana
+    mode: '0640'
   notify: Restart Grafana
   no_log: true
 
