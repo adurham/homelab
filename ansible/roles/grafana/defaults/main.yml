@@ -4,3 +4,7 @@
 # triggered an auto-toolchain download that fails on the grafana user's
 # perms inside the CT.
 go_version: "1.26.2"
+
+# grafana-image-renderer release tag. Pinned (not `master`) so upstream
+# changes don't silently break the build at re-deploy time.
+grafana_image_renderer_version: "v5.8.2"
