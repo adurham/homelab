@@ -1,5 +1,5 @@
 ---
-victoriametrics_version: "1.97.1"
+victoriametrics_version: "1.142.0"
 
 # homeassistant_token comes from inventory/group_vars/all.yml (vault-encrypted)
 
