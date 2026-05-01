@@ -242,41 +242,6 @@ all:
           ansible_python_interpreter: /usr/bin/python3.11
           target_node: pve03
 
-    # All Alloy-push hosts. After the 2026-05-01 migration, this is every
-    # managed host except `tanium_cluster` (TanOS appliances run a separate
-    # `roles/tanium_node_exporter/` install) and `localhost`. The group is
-    # currently tautological for `deploy_monitoring.yml`'s play-2 scope —
-    # kept because `roles/victoriametrics/templates/prometheus.yml.j2`
-    # uses it to exclude push hosts from the `:9100` scrape. See
-    # `docs/promtail-to-alloy-plan.md`.
-    alloy_cutover:
-      hosts:
-        vm-01:
-        graf-01:
-        lb-01:
-        authentik:
-        dns-01:
-        proxy-01:
-        tailscale-gw:
-        mail-01:
-        ntp-01:
-        pve01:
-        pve02:
-        pve03:
-        tc-ubuntu22:
-        tc-ubuntu24:
-        tc-rocky8:
-        tc-rocky9:
-        tc-debian12:
-        tc-debian11:
-        tc-oracle9:
-        tc-oracle8:
-        tc-alma9:
-        tc-alma8:
-        tc-rhel8:
-        tc-rhel9:
-        tc-suse15:
-
     # Monitoring Infrastructure
     monitoring:
       children:

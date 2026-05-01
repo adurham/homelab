@@ -296,13 +296,16 @@ Net change: roughly equal or slightly lower per host. Not a concern.
   `:9100` scrape. The role default is now `alloy_external_labels: {}`;
   re-enable the marker by overriding the var in the play if doing a
   similar parallel deploy on a new host.
-- **Cutover gating uses an inventory group.** `alloy_cutover` in
-  `inventory/proxmox.yml` controls who gets the push path. After Phase 3b
-  this includes all 13 tc-* tanium_clients (the alloy role gained
-  multi-OS support — apt for Debian/Ubuntu, dnf for RHEL/Alma/Rocky/
-  Oracle, zypper-via-shell for SUSE, with an EL8 dnf-via-shell fallback
-  because EL8's python3.9 ships without the python3-dnf bindings the
-  ansible dnf module requires).
+- **Cutover gating used an inventory group during the migration.**
+  `alloy_cutover` in `inventory/proxmox.yml` controlled who got the
+  push path while the migration was per-host. Once everyone migrated,
+  the group became tautological for play 2's scope and was removed
+  (post-3c follow-up). Push-vs-scrape is now decided by simple group
+  membership: anything in `tanium_cluster` is scraped via
+  `roles/tanium_node_exporter/`; everything else runs Alloy. The
+  multi-OS work that 3b introduced (apt for Debian/Ubuntu, dnf for
+  RHEL/Alma/Rocky/Oracle, zypper-via-shell for SUSE, EL8 dnf-via-shell
+  fallback) lives in the role itself.
 - **`tanium_clients` was added as a child of `private_subnet`** so the
   12 reachable tc-* hosts inherit the personal-MacBook ProxyCommand.
   Without that they were unreachable from the work MacBook (a quiet

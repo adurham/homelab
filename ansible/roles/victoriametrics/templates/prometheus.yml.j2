@@ -9,20 +9,13 @@ scrape_configs:
       - targets: ['192.168.86.2:8123']
     bearer_token: "{{ homeassistant_token }}"
 
-  # Hosts in groups['alloy_cutover'] are excluded — they push node_exporter-
-  # shape metrics to VM via Alloy's prometheus.remote_write. Pulling :9100
-  # post-cutover would just produce up==0 (node_exporter is stopped).
+  # node_exporter-shape metrics:
+  #   - All Alloy hosts push to VM via prometheus.remote_write — no scrape
+  #     entries needed.
+  #   - tanium_cluster (TanOS appliances) is the only pull-target group;
+  #     they run a hardened :9100 install via roles/tanium_node_exporter.
   - job_name: 'node_exporter'
     static_configs:
-{% for host in groups['all'] %}
-{% if hostvars[host].ansible_host is defined and host != 'localhost' and host not in groups['tanium_cluster'] and host not in (groups['alloy_cutover'] | default([])) %}
-      - targets: ['{{ hostvars[host].ansible_host }}:9100']
-        labels:
-          hostname: '{{ host }}'
-          instance: '{{ host }}'
-          env: 'homelab'
-{% endif %}
-{% endfor %}
 {# Tanium zone servers (tzs-*) excluded for now -- ansible can't reach them
    from the work MacBook via the personal MacBook jump path, so node_exporter
    isn't deployed there yet. Once connectivity is sorted, drop the

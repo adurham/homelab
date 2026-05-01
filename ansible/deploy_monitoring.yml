@@ -36,42 +36,16 @@
 - name: Install Telemetry Agents
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster
   gather_facts: true
-  # All hosts in scope are now on Alloy (logs + metrics in one agent).
-  # The legacy promtail + node_exporter cleanup tasks are kept as
-  # idempotent defensive cleanup — no-op on freshly-deployed hosts but
-  # safe if any are reintroduced. See docs/promtail-to-alloy-plan.md.
+  # Every host in this play's scope runs Alloy. Any legacy
+  # promtail / node_exporter artifacts on existing hosts were cleaned
+  # up during the 2026-05-01 migration; defensive cleanup tasks were
+  # removed once the migration finished. If a host ever ends up with
+  # leftovers again, run `git log -- deploy_monitoring.yml` for the
+  # cleanup snippet.
   tasks:
     - name: Install alloy
       ansible.builtin.include_role:
         name: alloy
-
-    - name: Stop+disable any leftover legacy agents
-      ansible.builtin.systemd:
-        name: "{{ item }}"
-        state: stopped
-        enabled: false
-      loop:
-        - promtail
-        - node_exporter
-      failed_when: false
-
-    - name: Remove leftover legacy unit files + binaries + state
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /etc/systemd/system/promtail.service
-        - /etc/systemd/system/node_exporter.service
-        - /usr/local/bin/promtail
-        - /usr/local/bin/node_exporter
-        - /etc/promtail
-        - /var/lib/promtail
-      notify: Reload systemd
-
-  handlers:
-    - name: Reload systemd
-      ansible.builtin.systemd:
-        daemon_reload: true
 
 - name: Configure VictoriaMetrics
   hosts: victoriametrics
