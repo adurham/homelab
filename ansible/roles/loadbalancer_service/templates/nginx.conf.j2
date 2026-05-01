@@ -1,3 +1,17 @@
+# Don't leak the nginx version in `Server:` headers or default error pages.
+server_tokens off;
+
+# Defense-in-depth security headers reused across every TLS server block.
+# CSP is intentionally narrow — only frame-ancestors, since stricter CSPs
+# break the proxied apps' inline scripts/styles (Tanium console, Grafana,
+# Authentik, Proxmox WebUI all use them).
+{% set security_headers %}
+    add_header X-Frame-Options                "DENY" always;
+    add_header X-Content-Type-Options         "nosniff" always;
+    add_header Referrer-Policy                "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy        "frame-ancestors 'none'" always;
+{% endset %}
+
 # ACL: Define Internal Networks
 geo $is_internal {
     default 0;
@@ -53,6 +67,7 @@ server {
 
     # HSTS
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers }}
 
     location / {
         proxy_pass https://tanium_servers;
@@ -90,9 +105,13 @@ server {
     ssl_certificate_key /etc/nginx/ssl/wildcard.key;
 
     # SSL Optimization
+    ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
     ssl_buffer_size 4k;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers }}
 
     # Allow large uploads (ISOs)
     client_max_body_size 0;
@@ -131,6 +150,10 @@ server {
 
     ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
     ssl_certificate_key /etc/nginx/ssl/wildcard.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers }}
 
     # Authentik Forward Auth
     location / {
@@ -186,13 +209,14 @@ server {
 
     # HSTS (Strict-Transport-Security)
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers }}
 
     # Compression
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
 
     location / {
-        proxy_pass https://172.16.0.20;
+        proxy_pass https://{{ ip_authentik }};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -230,8 +254,12 @@ server {
     ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
     ssl_certificate_key /etc/nginx/ssl/wildcard.key;
 
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers }}
+
     location / {
-        proxy_pass http://172.16.0.41:3000;
+        proxy_pass http://{{ ip_grafana }}:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -257,8 +285,15 @@ server {
     ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
     ssl_certificate_key /etc/nginx/ssl/wildcard.key;
 
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers }}
+
+    # IP source-of-truth: ip_vm in group_vars/all/vars.yml. Was hardcoded
+    # to 172.16.0.40 (mail-01) before the 2026-05-01 IP move and stuck
+    # there because this template wasn't templated.
     location / {
-        proxy_pass http://172.16.0.40:8428;
+        proxy_pass http://{{ ip_vm }}:8428;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
