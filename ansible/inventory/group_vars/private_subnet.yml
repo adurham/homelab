@@ -1,0 +1,9 @@
+---
+# Hosts on the 172.16.0.0/24 private subnet are not directly reachable from
+# the work MacBook — jump through the personal MacBook (Tailscale 100.66.19.20)
+# as user adam.durham. accept-new auto-populates known_hosts on first connect.
+#
+# This must live in group_vars/private_subnet.yml (not in the inventory file's
+# `vars:` block) — inventory-file group vars rank below group_vars/all.yml,
+# which sets a default ansible_ssh_common_args.
+ansible_ssh_common_args: '-o ProxyCommand="ssh -W %h:%p -q adam.durham@100.66.19.20" -o StrictHostKeyChecking=accept-new'
