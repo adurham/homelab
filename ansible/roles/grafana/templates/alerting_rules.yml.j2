@@ -329,6 +329,64 @@ groups:
           severity: warning
         isPaused: false
 
+      - uid: loki_disk_pressure
+        title: Loki disk pressure on vm-01
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # vm-01 ships Loki chunks to /var/lib/loki on `/` (ZFS subvol).
+              # If `/` fills, Loki stops accepting writes and the log_* alerts
+              # below all silently lose their substrate. Fire earlier than
+              # the generic `disk_full` (which triggers at 90% used) so we
+              # have headroom to prune chunks or expand storage.
+              expr: 100 - (node_filesystem_avail_bytes{instance="vm-01",mountpoint="/"} / node_filesystem_size_bytes{instance="vm-01",mountpoint="/"} * 100)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [70]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "vm-01 root filesystem >70% full — Loki at risk"
+          description: "vm-01's root filesystem (where /var/lib/loki lives) has been over 70% full for 10 minutes. If it fills, Loki stops accepting writes and every log_* alert loses its substrate. Prune old chunks or grow the subvol."
+        labels:
+          severity: warning
+        isPaused: false
+
       # ---------------------------------------------------------------------
       # Loki-backed log alerts. These query the systemd-journal stream that
       # Promtail ships from every host. Use noDataState=OK so a Promtail
@@ -542,6 +600,61 @@ groups:
           description: "Kernel reported an I/O error, EXT4 filesystem error, buffer error, or block-layer failure on {{ '{{' }} $labels.host {{ '}}' }} — could be failing disk, ZFS scrub finding, or filesystem corruption"
         labels:
           severity: critical
+        isPaused: false
+
+      - uid: log_postfix_relay_failure
+        title: Postfix relay failures on mail-01
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              # Track postfix logging deferred or bounced messages on mail-01.
+              # Catches "iCloud SMTP not authenticating", "queue piling up",
+              # "rate limit hit" — anything that prevents alert email delivery.
+              expr: 'sum (count_over_time({job="systemd-journal", host="mail-01"} |~ "postfix.*status=(deferred|bounced)" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [3]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Postfix relay failures on mail-01"
+          description: "More than 3 postfix `status=deferred` / `status=bounced` events in the last 10 minutes. Likely auth failure to smtp.mail.me.com, network issue, or rate limit. Check `postqueue -p` and `journalctl -u postfix`."
+        labels:
+          severity: warning
         isPaused: false
 
       - uid: log_postgres_fatal
