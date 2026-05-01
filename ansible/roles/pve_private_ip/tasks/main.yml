@@ -1,0 +1,55 @@
+---
+- name: Render /etc/network/interfaces.d/private-monitoring
+  ansible.builtin.template:
+    src: private-monitoring.j2
+    dest: /etc/network/interfaces.d/private-monitoring
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload network
+
+- name: Render hardening firewall script
+  ansible.builtin.template:
+    src: pve-private-firewall.j2
+    dest: /usr/local/sbin/pve-private-firewall
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Re-apply private firewall
+
+- name: Render hardening firewall systemd unit
+  ansible.builtin.template:
+    src: private-monitoring-firewall.service.j2
+    dest: /etc/systemd/system/private-monitoring-firewall.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd unit files
+
+- name: Flush handlers so the static IP and firewall rule apply now
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable + start the hardening firewall service
+  ansible.builtin.systemd:
+    name: private-monitoring-firewall.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Verify pve has the private-subnet source IP
+  ansible.builtin.shell: |
+    set -o pipefail
+    ip -4 -br addr show {{ pve_private_iface }} | grep -qw {{ pve_private_ip }}/{{ pve_private_cidr }}
+  changed_when: false
+
+- name: Verify route to vm-01 prefers the private bridge
+  ansible.builtin.shell: |
+    set -o pipefail
+    ip route get {{ hostvars['vm-01']['ansible_host'] }} | grep -qE 'dev {{ pve_private_iface }} '
+  changed_when: false
+
+- name: Verify INPUT chain has the hardening jump at position 1
+  ansible.builtin.shell: |
+    set -o pipefail
+    /usr/sbin/iptables -S INPUT | head -2 | grep -q -- '-i {{ pve_private_iface }} -j PRIVATE-MONITORING-IN'
+  changed_when: false

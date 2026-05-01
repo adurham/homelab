@@ -1,0 +1,17 @@
+---
+- name: Reload network
+  # ifreload (ifupdown2) brings up only what changed without flapping the
+  # rest. -a applies all stanzas in /etc/network/interfaces*; the new
+  # `iface private inet static` block is what gets activated.
+  ansible.builtin.command: ifreload -a
+  changed_when: true
+
+- name: Reload systemd unit files
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Re-apply private firewall
+  # Re-runs `pve-private-firewall apply` so the new chain rules go in
+  # immediately rather than waiting for the next reboot.
+  ansible.builtin.command: /usr/local/sbin/pve-private-firewall apply
+  changed_when: true

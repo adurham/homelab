@@ -21,6 +21,18 @@
         inventory_hostname: "graf-01"
         template: "{{ hostvars['graf-01']['template'] }}"
 
+- name: Configure pve hosts for monitoring egress
+  # pve hosts host the `private` SDN bridge but have no L3 endpoint there
+  # by default — without an IP on the bridge, Alloy push to vm-01:8428
+  # routes via the LAN gateway and times out. This play assigns each pve
+  # host a private-subnet IP (172.16.0.{2,3,4}) and hardens inbound on
+  # that interface via pve-firewall. Must run before the Install
+  # Telemetry Agents play so alloy has a working push path.
+  hosts: proxmox_nodes
+  gather_facts: false
+  roles:
+    - pve_private_ip
+
 - name: Install Telemetry Agents (private_subnet + tanium_clients)
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster
   gather_facts: true

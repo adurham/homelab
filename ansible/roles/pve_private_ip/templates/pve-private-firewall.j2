@@ -1,0 +1,39 @@
+#!/bin/sh
+# Managed by ansible — see roles/pve_private_ip/.
+# Hardens inbound on the `{{ pve_private_iface }}` bridge so pve management
+# (sshd on :22, rpcbind, etc., which listen on 0.0.0.0) is not reachable
+# from CTs on the SDN. Egress and reply traffic are unaffected.
+#
+# We use a dedicated user chain (PRIVATE-MONITORING-IN) so pve-firewall's
+# periodic reloads — which only manage PVEFW-* chains — don't wipe these
+# rules. The jump lives at INPUT position 1, so it fires before
+# pve-firewall's PVEFW-INPUT jump.
+#
+# The host-firewall path (host.fw enable: 1) was tried first but breaks
+# cross-host VXLAN bridge forwarding for CTs.
+set -eu
+
+CHAIN=PRIVATE-MONITORING-IN
+IFACE={{ pve_private_iface }}
+
+apply() {
+    /usr/sbin/iptables -N "$CHAIN" 2>/dev/null || true
+    /usr/sbin/iptables -F "$CHAIN"
+    /usr/sbin/iptables -A "$CHAIN" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    /usr/sbin/iptables -A "$CHAIN" -j DROP
+    if ! /usr/sbin/iptables -C INPUT -i "$IFACE" -j "$CHAIN" 2>/dev/null; then
+        /usr/sbin/iptables -I INPUT 1 -i "$IFACE" -j "$CHAIN"
+    fi
+}
+
+remove() {
+    /usr/sbin/iptables -D INPUT -i "$IFACE" -j "$CHAIN" 2>/dev/null || true
+    /usr/sbin/iptables -F "$CHAIN" 2>/dev/null || true
+    /usr/sbin/iptables -X "$CHAIN" 2>/dev/null || true
+}
+
+case "${1:-}" in
+    apply)  apply ;;
+    remove) remove ;;
+    *)      echo "usage: $0 {apply|remove}" >&2; exit 2 ;;
+esac

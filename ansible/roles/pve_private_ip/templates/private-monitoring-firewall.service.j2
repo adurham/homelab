@@ -1,0 +1,16 @@
+[Unit]
+Description=Drop new inbound on the `{{ pve_private_iface }}` bridge for pve management hardening
+# Run after pve-firewall so our rules layer on top of (and survive) any
+# of its periodic reloads. We add to a dedicated user chain that
+# pve-firewall doesn't manage.
+After=network-online.target pve-firewall.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/pve-private-firewall apply
+ExecStop=/usr/local/sbin/pve-private-firewall remove
+
+[Install]
+WantedBy=multi-user.target
