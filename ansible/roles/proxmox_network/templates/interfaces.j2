@@ -7,7 +7,7 @@ iface {{ physical_interface }} inet manual
 auto vmbr0
 iface vmbr0 inet static
 	address {{ hostvars[inventory_hostname].ansible_host }}/24
-	gateway 192.168.86.1
+	gateway {{ net_lan_gateway }}
 	bridge-ports {{ physical_interface }}
 	bridge-stp off
 	bridge-fd 0

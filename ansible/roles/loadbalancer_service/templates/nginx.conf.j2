@@ -15,7 +15,7 @@ server_tokens off;
 # ACL: Define Internal Networks
 geo $is_internal {
     default 0;
-    192.168.86.0/24 1;  # LAN
+    {{ net_lan_range }} 1;  # LAN
     {{ net_private_range }}   1;  # Private VLAN
     100.64.0.0/10   1;  # Tailscale
     127.0.0.0/8     1;  # Localhost

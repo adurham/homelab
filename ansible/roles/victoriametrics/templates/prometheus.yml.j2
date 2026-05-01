@@ -6,7 +6,7 @@ scrape_configs:
     metrics_path: /api/prometheus
     scheme: http
     static_configs:
-      - targets: ['192.168.86.2:8123']
+      - targets: ['{{ ip_homeassistant }}:8123']
     bearer_token: "{{ homeassistant_token }}"
 
   # node_exporter-shape metrics:

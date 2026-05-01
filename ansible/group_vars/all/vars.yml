@@ -8,6 +8,16 @@ net_private_gw: "172.16.0.1"
 net_private_bridge: "private"
 net_private_mtu: 1450 # VXLAN Overhead (1500 - 50)
 
+# LAN (vmbr0). Static config on every host (DHCP reservations on the
+# router); single source of truth for nginx ACLs, DNS trusted-ACL, and
+# pve interfaces.j2.
+net_lan_range: "192.168.86.0/24"
+net_lan_gateway: "192.168.86.1"
+
+# Home Assistant lives on the LAN, not the SDN — it's the iOS push relay
+# for Grafana alerts (see homeassistant/automations/grafana_alert_webhook.yaml).
+ip_homeassistant: "192.168.86.2"
+
 
 # Service IP Addresses (Static)
 # Single source of truth for service IPs. Inventory's `ansible_host:` should
