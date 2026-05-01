@@ -96,7 +96,7 @@
   ansible.builtin.git:
     repo: https://github.com/grafana/grafana-image-renderer.git
     dest: /usr/local/share/grafana-image-renderer
-    version: master
+    version: "{{ grafana_image_renderer_version }}"
     force: true
   become: true
   become_user: grafana
