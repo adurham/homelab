@@ -242,12 +242,14 @@ all:
         victoriametrics:
           hosts:
             vm-01:
-              ansible_host: 172.16.0.40
+              # 172.16.0.40 was already in use by mail-01 (CT 104, ip_mail_server)
+              # — kept colliding via ARP. Moved to .42 (next free after graf-01 at .41).
+              ansible_host: 172.16.0.42
               vmid: 106
               template: debian-12-standard_12.12-1_amd64.tar.zst
               target_node: pve01
               features: "nesting=1"
-              net_private_ip: 172.16.0.40/24
+              net_private_ip: 172.16.0.42/24
         grafana:
           hosts:
             graf-01:
