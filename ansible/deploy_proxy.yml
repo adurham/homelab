@@ -2,9 +2,7 @@
 - name: Deploy Proxy Container
   hosts: pve03  # Deploying on pve03 per plan
   gather_facts: false
-  # ip_proxy lives in group_vars/all/vars.yml (single source of truth).
-  vars:
-    proxy_01_root_pass: "changeme" # Should ideally use vault, but using simple default for now as per other roles
+  # ip_proxy + proxy_01_root_pass live in group_vars/all/{vars.yml,vault.yml}.
   roles:
     - proxy_host
 
