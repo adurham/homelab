@@ -234,6 +234,15 @@
     mode: '0644'
   notify: Restart Grafana
 
+- name: Deploy Blackbox Probes Dashboard
+  ansible.builtin.copy:
+    src: blackbox_probes.json
+    dest: /var/lib/grafana/dashboards/blackbox-probes.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
 - name: Deploy Smart Circulation Dashboard
   ansible.builtin.copy:
     src: smart_circulation.json
