@@ -29,20 +29,20 @@ map $http_upgrade $connection_upgrade {
 
 upstream proxmox_cluster {
     ip_hash;
-    # Sticky sessions based on IP.
-    # Note: With Tailscale Gateway (SNAT), all traffic might appear as 172.16.0.1.
-
-    server 192.168.86.11:8006;
-    server 192.168.86.12:8006;
-    server 192.168.86.13:8006;
+    # Sticky sessions based on IP. Note: with Tailscale Gateway (SNAT),
+    # all traffic might appear as {{ net_private_gw }}.
+{% for node in groups['proxmox_nodes'] | sort %}
+    server {{ hostvars[node].ansible_host }}:8006;
+{% endfor %}
 
     keepalive 32;
 }
 
 upstream tanium_servers {
     ip_hash;
-    server 172.16.0.51:443 max_fails=3 fail_timeout=10s;
-    server 172.16.0.52:443 max_fails=3 fail_timeout=10s;
+{% for node in groups['tanium_servers'] | sort %}
+    server {{ hostvars[node].ansible_host }}:443 max_fails=3 fail_timeout=10s;
+{% endfor %}
     keepalive 32;
 }
 
