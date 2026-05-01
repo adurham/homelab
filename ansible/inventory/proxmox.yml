@@ -241,6 +241,26 @@ all:
           ansible_python_interpreter: /usr/bin/python3.11
           target_node: pve03
 
+    # Hosts that have completed the promtail/node_exporter -> Grafana Alloy
+    # cutover. Membership flips per-host as Phase 2/3 of the migration
+    # progresses. Effects:
+    #   - deploy_monitoring.yml skips installing common_monitoring + promtail
+    #   - alloy is deployed without the `agent="alloy"` Phase-1 marker label
+    #   - legacy promtail + node_exporter services are stopped + disabled
+    #   - vm-01's prometheus.yml drops the host from node_exporter scrape
+    # See docs/promtail-to-alloy-plan.md.
+    alloy_cutover:
+      hosts:
+        vm-01:
+        graf-01:
+        lb-01:
+        authentik:
+        dns-01:
+        proxy-01:
+        tailscale-gw:
+        mail-01:
+        ntp-01:
+
     # Monitoring Infrastructure
     monitoring:
       children:

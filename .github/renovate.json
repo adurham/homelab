@@ -73,6 +73,16 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
+        "/^ansible/roles/alloy/defaults/main\\.yml$/"
+      ],
+      "matchStrings": ["alloy_version:\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "grafana/alloy",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
         "/^ansible/roles/grafana/defaults/main\\.yml$/"
       ],
       "matchStrings": ["go_version:\\s*\"(?<currentValue>[^\"]+)\""],
