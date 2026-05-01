@@ -119,6 +119,7 @@
     mode: '0640'
     owner: root
     group: root
+  no_log: true
 
 - name: Deploy .env file
   ansible.builtin.template:
@@ -127,6 +128,7 @@
     mode: '0600'
     owner: root
     group: root
+  no_log: true
 
 - name: Start Authentik Configuration
   community.docker.docker_compose_v2:

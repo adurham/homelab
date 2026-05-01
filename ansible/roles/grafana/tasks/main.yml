@@ -307,6 +307,7 @@
     dest: /etc/grafana/provisioning/alerting/contact_points.yml
     mode: '0644'
   notify: Restart Grafana
+  no_log: true
 
 - name: Provision Grafana Notification Policies
   ansible.builtin.template:

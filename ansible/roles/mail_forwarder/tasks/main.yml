@@ -25,6 +25,7 @@
     group: root
     mode: '0600'
   notify: Update SASL Map
+  no_log: true
 
 - name: Configure Receiver Canonical Map
   ansible.builtin.template:

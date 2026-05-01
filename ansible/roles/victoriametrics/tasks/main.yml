@@ -88,6 +88,7 @@
     dest: /etc/victoriametrics/prometheus.yml
     mode: '0644'
   notify: Restart VictoriaMetrics
+  no_log: true
 
 - name: Start VictoriaMetrics
   ansible.builtin.service:
