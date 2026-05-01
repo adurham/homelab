@@ -1,6 +1,11 @@
 ---
-- name: Check if Mail Container Exists
-  ansible.builtin.shell: pct list | grep -w 104
+# Cluster-wide existence check. `pct list` is node-local; HA can migrate
+# the CT to any node, so we ask pmxcfs for the full cluster resource list.
+# rc=0 means the CT exists somewhere in the cluster.
+- name: Check if Mail Container Exists in cluster
+  ansible.builtin.shell: |
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==104 for r in json.load(sys.stdin)) else 1)'
   register: pct_check
   failed_when: false
   changed_when: false
@@ -43,5 +48,11 @@
     cat /root/.ssh/authorized_keys | pct exec 104 -- sh -c "cat > /root/.ssh/authorized_keys"
     pct exec 104 -- chmod 700 /root/.ssh
     pct exec 104 -- chmod 600 /root/.ssh/authorized_keys
-  delegate_to: pve-01
   when: pct_check.rc != 0
+
+# openssh-server ships with the Ubuntu LXC template but is not enabled by
+# default. Without this the CT is only reachable via `pct exec` from the
+# proxmox host — direct SSH from ansible against the CT's IP fails.
+- name: Ensure SSH is enabled and running
+  ansible.builtin.command: pct exec 104 -- systemctl enable --now ssh
+  changed_when: false

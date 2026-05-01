@@ -1,7 +1,12 @@
 ---
-- name: Check if Load Balancer LXC exists
+# Cluster-wide existence check. `pct list` is node-local; HA can migrate
+# the CT to any node, so we ask pmxcfs for the full cluster resource list.
+# rc=0 means the CT exists somewhere in the cluster.
+- name: Check if Load Balancer LXC exists in cluster
   delegate_to: "{{ target_node }}"
-  ansible.builtin.shell: "pct list | grep {{ lxc_id }}"
+  ansible.builtin.shell: |
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]=={{ lxc_id }} for r in json.load(sys.stdin)) else 1)'
   register: lxc_check
   failed_when: false
   changed_when: false
@@ -26,8 +31,6 @@
     --password {{ lb_01_root_pass }}
     --features nesting=1
     --ostype debian
-    --unprivileged 1
-    --ssh-public-keys /root/.ssh/authorized_keys
     --unprivileged 1
     --ssh-public-keys /root/.ssh/authorized_keys
   no_log: true

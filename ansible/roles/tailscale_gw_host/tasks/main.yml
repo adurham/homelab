@@ -3,8 +3,13 @@
   ansible.builtin.command: pveam update
   changed_when: false
 
-- name: Check if Tailscale GW exists
-  ansible.builtin.command: pct config 101
+# Cluster-wide existence check. `pct config` is node-local; HA can migrate
+# the CT to any node, so we ask pmxcfs for the full cluster resource list.
+# rc=0 means the CT exists somewhere in the cluster.
+- name: Check if Tailscale GW exists in cluster
+  ansible.builtin.shell: |
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==101 for r in json.load(sys.stdin)) else 1)'
   register: gw_check
   failed_when: false
   changed_when: false
@@ -57,3 +62,10 @@
     ansible_host: "{{ gw_ip.stdout }}"
     ansible_user: "root"
     groups: "tailscale_gateways"
+
+# openssh-server ships with the Ubuntu LXC template but is not enabled by
+# default. Without this the CT is only reachable via `pct exec` from the
+# proxmox host — direct SSH from ansible against the CT's IP fails.
+- name: Ensure SSH is enabled and running
+  ansible.builtin.command: pct exec 101 -- systemctl enable --now ssh
+  changed_when: false

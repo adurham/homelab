@@ -1,18 +1,23 @@
 ---
 - name: Update Template Database
   ansible.builtin.command: pveam update
-  delegate_to: pve-01
+  delegate_to: pve01
   changed_when: false
 
 - name: Download Ubuntu 22.04 Template
   ansible.builtin.command: pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
-  delegate_to: pve-01
+  delegate_to: pve01
   args:
     creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
 
-- name: Check if NTP Container Exists
-  ansible.builtin.command: pct config 105
-  delegate_to: pve-01
+# Cluster-wide existence check. `pct config` is node-local; HA can migrate
+# the CT to any node, so we ask pmxcfs for the full cluster resource list.
+# rc=0 means the CT exists somewhere in the cluster.
+- name: Check if NTP Container Exists in cluster
+  ansible.builtin.shell: |
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==105 for r in json.load(sys.stdin)) else 1)'
+  delegate_to: pve01
   register: pct_check
   failed_when: false
   changed_when: false
@@ -29,19 +34,19 @@
     --password "{{ ntp_01_root_pass }}"
     --start 1
     --onboot 1
-  delegate_to: pve-01
+  delegate_to: pve01
   when: pct_check.rc != 0
 
 - name: Ensure NTP Container is Running
   ansible.builtin.command: pct start 105
-  delegate_to: pve-01
+  delegate_to: pve01
   register: ntp_start
   failed_when: ntp_start.rc != 0 and ("already running" not in ntp_start.stderr and "already running" not in ntp_start.stdout)
   changed_when: ntp_start.rc == 0
 
 - name: Wait for NTP Container IP
   ansible.builtin.shell: pct exec 105 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
-  delegate_to: pve-01
+  delegate_to: pve01
   register: ip_check
   until: ip_check.rc == 0
   retries: 20
@@ -50,19 +55,19 @@
 
 - name: Update Apt Cache
   ansible.builtin.command: pct exec 105 -- apt-get update
-  delegate_to: pve-01
+  delegate_to: pve01
   when: pct_check.rc != 0
 
 - name: Install Python3 & Chrony
   ansible.builtin.command: pct exec 105 -- apt-get install -y python3 chrony
-  delegate_to: pve-01
+  delegate_to: pve01
 
 - name: Configure Chrony (Allow Private Network & NIST Sync)
   ansible.builtin.shell: |
     pct exec 105 -- sh -c "grep -q 'time.nist.gov' /etc/chrony/chrony.conf || echo 'server time.nist.gov iburst' >> /etc/chrony/chrony.conf"
     pct exec 105 -- sh -c "grep -q 'allow 172.16.0.0/24' /etc/chrony/chrony.conf || echo 'allow 172.16.0.0/24' >> /etc/chrony/chrony.conf"
     pct exec 105 -- systemctl restart chrony
-  delegate_to: pve-01
+  delegate_to: pve01
 
 - name: Add NTP Host to Inventory
   ansible.builtin.add_host:
@@ -71,11 +76,19 @@
     ansible_user: "root"
     groups: "ntp_server"
 
+# openssh-server ships with the Ubuntu LXC template but is not enabled by
+# default. Without this the CT is only reachable via `pct exec` from the
+# proxmox host — direct SSH from ansible against the CT's IP fails.
+- name: Ensure SSH is enabled and running
+  ansible.builtin.command: pct exec 105 -- systemctl enable --now ssh
+  delegate_to: pve01
+  changed_when: false
+
 - name: Inject SSH Key
   ansible.builtin.shell: |
     pct exec 105 -- mkdir -p /root/.ssh
     cat /root/.ssh/authorized_keys | pct exec 105 -- sh -c "cat > /root/.ssh/authorized_keys"
     pct exec 105 -- chmod 700 /root/.ssh
     pct exec 105 -- chmod 600 /root/.ssh/authorized_keys
-  delegate_to: pve-01
+  delegate_to: pve01
   when: pct_check.rc != 0
