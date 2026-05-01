@@ -52,3 +52,34 @@ jobs:
       - uses: astral-sh/ruff-action@v4.0.0
         with:
           args: check
+
+  # Catches AWS keys, GitHub PATs, OAuth tokens, etc. that pre-commit's
+  # detect-private-key check (PEM-only) misses. Ansible vault blocks are
+  # encrypted and don't trigger gitleaks.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Validates inventory parses + every group/host reference resolves.
+  # Catches `groups['typo']` references and orphan host entries that
+  # ansible-lint doesn't.
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Install ansible
+        run: pip install ansible-core
+      - name: Install ansible collections
+        run: ansible-galaxy collection install -r ansible/requirements.yml
+      - name: Validate inventory graph
+        working-directory: ansible
+        run: ansible-inventory -i inventory --graph

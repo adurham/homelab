@@ -1,0 +1,40 @@
+name: Renovate backlog watch
+
+# Pings Mondays at 11am Chicago time (17:00 UTC), shortly after Renovate's
+# weekly run (configured for "before 9am on monday" in renovate.json).
+# Fails the job if the open dependency-PR backlog exceeds the threshold,
+# which surfaces as a GitHub Actions failure email — visible without
+# needing to remember to check the dependency-dashboard issue.
+
+on:
+  schedule:
+    - cron: "0 17 * * MON"
+  workflow_dispatch:
+
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      THRESHOLD: 5
+    steps:
+      - name: Count open dependency PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          OPEN=$(gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --label dependencies \
+              --state open \
+              --json number \
+              -q length)
+          echo "Open dependency PRs: $OPEN (threshold: $THRESHOLD)"
+          if [ "$OPEN" -gt "$THRESHOLD" ]; then
+            URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pulls?q=is%3Apr+is%3Aopen+label%3Adependencies"
+            echo "::error title=Renovate backlog::Backlog is $OPEN PRs (>${THRESHOLD}). $URL"
+            exit 1
+          fi
