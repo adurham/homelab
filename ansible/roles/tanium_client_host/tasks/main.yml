@@ -56,7 +56,9 @@
       when: pct_check.results[idx].rc != 0
 
     - name: Wait for Container IP
-      ansible.builtin.shell: "pct exec {{ hostvars[item].vmid }} -- ip a show eth0 | grep 'inet ' | grep -v '127.0.0.1'"
+      ansible.builtin.shell: |
+        set -o pipefail
+        pct exec {{ hostvars[item].vmid }} -- ip a show eth0 | grep 'inet ' | grep -v '127.0.0.1'
       register: ip_check
       until: ip_check.rc == 0
       retries: 20
@@ -68,6 +70,7 @@
 
     - name: Enforce DNS Settings
       ansible.builtin.shell: |
+        set -o pipefail
         pct set {{ hostvars[item].vmid }} --nameserver 172.16.0.10 --searchdomain chi.lab.amd-e.com
         if pct status {{ hostvars[item].vmid }} | grep -q running; then
            pct exec {{ hostvars[item].vmid }} -- sh -c "echo 'nameserver 172.16.0.10' > /etc/resolv.conf && echo 'search chi.lab.amd-e.com' >> /etc/resolv.conf"

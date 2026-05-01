@@ -8,6 +8,7 @@
 # rc=0 means the CT exists somewhere in the cluster.
 - name: Check if Tailscale GW exists in cluster
   ansible.builtin.shell: |
+    set -o pipefail
     pvesh get /cluster/resources --type vm --output-format json |
       python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==101 for r in json.load(sys.stdin)) else 1)'
   register: gw_check
@@ -49,7 +50,9 @@
 
 # Since it uses DHCP on eth0, we must query it.
 - name: Get Gateway IP
-  ansible.builtin.shell: pct exec 101 -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 101 -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
   register: gw_ip
   changed_when: false
   until: gw_ip.stdout != ""

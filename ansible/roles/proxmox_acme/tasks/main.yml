@@ -6,9 +6,9 @@
   ignore_errors: true
 
 - name: Register ACME Account
-  ansible.builtin.shell: >
-     echo "y" | pvenode acme account register default {{ acme_email }}
-     --directory {{ acme_directory }}
+  ansible.builtin.shell: |
+    set -o pipefail
+    echo "y" | pvenode acme account register default {{ acme_email }} --directory {{ acme_directory }}
   when: "'default' not in acme_accounts.stdout"
   register: acme_register
   changed_when: "'Account already registered' not in acme_register.stderr"

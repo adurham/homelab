@@ -4,7 +4,9 @@
   gather_facts: false
   tasks:
     - name: Get Container Status
-      ansible.builtin.shell: "pvesh get /cluster/resources --output-format json | jq -r '.[] | select(.vmid == {{ hostvars[item].vmid }}) | .node'"
+      ansible.builtin.shell: |
+        set -o pipefail
+        pvesh get /cluster/resources --output-format json | jq -r '.[] | select(.vmid == {{ hostvars[item].vmid }}) | .node'
       loop: "{{ groups['all'] }}"
       when: hostvars[item].target_node is defined
       register: current_node_output

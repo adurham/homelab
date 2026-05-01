@@ -4,6 +4,7 @@
 # rc=0 means the CT exists somewhere in the cluster.
 - name: Check if Authentik CT exists in cluster
   ansible.builtin.shell: |
+    set -o pipefail
     pvesh get /cluster/resources --type vm --output-format json |
       python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==100 for r in json.load(sys.stdin)) else 1)'
   register: authentik_host_ct_check

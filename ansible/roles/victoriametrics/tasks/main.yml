@@ -37,6 +37,7 @@
 - name: Configure VictoriaMetrics Service
   ansible.builtin.copy:
     dest: /etc/systemd/system/victoriametrics.service
+    mode: '0644'
     content: |
       [Unit]
       Description=VictoriaMetrics
@@ -64,6 +65,7 @@
   ansible.builtin.template:
     src: prometheus.yml.j2
     dest: /etc/victoriametrics/prometheus.yml
+    mode: '0644'
   notify: Restart VictoriaMetrics
 
 - name: Start VictoriaMetrics

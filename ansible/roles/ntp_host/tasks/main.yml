@@ -15,6 +15,7 @@
 # rc=0 means the CT exists somewhere in the cluster.
 - name: Check if NTP Container Exists in cluster
   ansible.builtin.shell: |
+    set -o pipefail
     pvesh get /cluster/resources --type vm --output-format json |
       python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==105 for r in json.load(sys.stdin)) else 1)'
   delegate_to: pve01
@@ -45,7 +46,9 @@
   changed_when: ntp_start.rc == 0
 
 - name: Wait for NTP Container IP
-  ansible.builtin.shell: pct exec 105 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 105 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
   delegate_to: pve01
   register: ip_check
   until: ip_check.rc == 0
@@ -86,6 +89,7 @@
 
 - name: Inject SSH Key
   ansible.builtin.shell: |
+    set -o pipefail
     pct exec 105 -- mkdir -p /root/.ssh
     cat /root/.ssh/authorized_keys | pct exec 105 -- sh -c "cat > /root/.ssh/authorized_keys"
     pct exec 105 -- chmod 700 /root/.ssh

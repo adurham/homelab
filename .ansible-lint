@@ -9,11 +9,9 @@ exclude_paths:
 skip_list:
   - fqcn
   - no-changed-when
-  - risky-shell-pipe
   - var-naming
   - command-instead-of-module
   - command-instead-of-shell
-  - risky-file-permissions
   - yaml
   - name
   - ignore-errors

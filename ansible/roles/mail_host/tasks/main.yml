@@ -4,6 +4,7 @@
 # rc=0 means the CT exists somewhere in the cluster.
 - name: Check if Mail Container Exists in cluster
   ansible.builtin.shell: |
+    set -o pipefail
     pvesh get /cluster/resources --type vm --output-format json |
       python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==104 for r in json.load(sys.stdin)) else 1)'
   register: pct_check
@@ -25,7 +26,9 @@
   when: pct_check.rc != 0
 
 - name: Wait for Mail Container IP
-  ansible.builtin.shell: pct exec 104 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 104 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
   register: ip_check
   until: ip_check.rc == 0
   retries: 20
@@ -44,6 +47,7 @@
 
 - name: Inject SSH Key into Mail Container
   ansible.builtin.shell: |
+    set -o pipefail
     pct exec 104 -- mkdir -p /root/.ssh
     cat /root/.ssh/authorized_keys | pct exec 104 -- sh -c "cat > /root/.ssh/authorized_keys"
     pct exec 104 -- chmod 700 /root/.ssh

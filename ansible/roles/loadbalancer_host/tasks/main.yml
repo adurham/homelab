@@ -5,6 +5,7 @@
 - name: Check if Load Balancer LXC exists in cluster
   delegate_to: "{{ target_node }}"
   ansible.builtin.shell: |
+    set -o pipefail
     pvesh get /cluster/resources --type vm --output-format json |
       python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]=={{ lxc_id }} for r in json.load(sys.stdin)) else 1)'
   register: lxc_check
@@ -45,7 +46,9 @@
 
 - name: Check if Net1 exists
   delegate_to: "{{ target_node }}"
-  ansible.builtin.shell: "pct config {{ lxc_id }} | grep net1"
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct config {{ lxc_id }} | grep net1
   register: net1_check
   failed_when: false
   changed_when: false
