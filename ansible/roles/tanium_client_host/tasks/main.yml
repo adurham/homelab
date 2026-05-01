@@ -12,7 +12,7 @@
       args:
         creates: "/var/lib/vz/template/cache/{{ hostvars[item].template }}"
       loop: "{{ groups['tanium_clients'] }}"
-      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
       when: hostvars[item].template_url is not defined
 
     - name: Download Template (Manual URL)
@@ -21,16 +21,24 @@
         dest: "/var/lib/vz/template/cache/{{ hostvars[item].template }}"
         mode: '0644'
       loop: "{{ groups['tanium_clients'] }}"
-      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
       when: hostvars[item].template_url is defined
 
-    - name: Check if Container Exists
-      ansible.builtin.command: "pct config {{ hostvars[item].vmid }}"
+    # Cluster-wide existence check. `pct config` is node-local; HA can
+    # migrate a CT to any node, so query pmxcfs cluster resources instead.
+    # Same fix pattern as monitoring_host / mail_host / etc.
+    - name: Check if Container Exists in cluster
+      ansible.builtin.shell: |
+        set -o pipefail
+        pvesh get /cluster/resources --type vm --output-format json |
+          python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]=={{ hostvars[item].vmid }} for r in json.load(sys.stdin)) else 1)'
       register: pct_check
       failed_when: false
       changed_when: false
       loop: "{{ groups['tanium_clients'] }}"
-      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      # The cluster query is the same from any node, so don't bother
+      # delegating to target_node — pve01 always works.
+      delegate_to: pve01
 
     - name: Create Container
       ansible.builtin.command: >
@@ -52,7 +60,7 @@
       loop: "{{ groups['tanium_clients'] }}"
       loop_control:
         index_var: idx
-      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
       when: pct_check.results[idx].rc != 0
 
     - name: Wait for Container IP
@@ -66,7 +74,7 @@
       changed_when: false
       failed_when: false
       loop: "{{ groups['tanium_clients'] }}"
-      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
 
     - name: Enforce DNS Settings
       ansible.builtin.shell: |
@@ -76,7 +84,7 @@
            pct exec {{ hostvars[item].vmid }} -- sh -c "echo 'nameserver 172.16.0.10' > /etc/resolv.conf && echo 'search chi.lab.amd-e.com' >> /etc/resolv.conf"
         fi
       loop: "{{ groups['tanium_clients'] }}"
-      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
       changed_when: false
 
     - name: Update Apt/Dnf Cache and Install Python and SSH
@@ -119,4 +127,4 @@
           exit 1
         fi
       loop: "{{ groups['tanium_clients'] }}"
-      delegate_to: "{{ hostvars[item].target_node | default('pve-01') }}"
+      delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
