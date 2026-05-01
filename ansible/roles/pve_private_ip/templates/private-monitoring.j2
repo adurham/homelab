@@ -1,0 +1,8 @@
+# Managed by ansible — see roles/pve_private_ip/.
+# Per-pve-host IP on the `private` SDN bridge so monitoring (Alloy) can push
+# directly to vm-01:8428 ({{ hostvars['vm-01']['ansible_host'] }}). The Proxmox-managed `iface private` block
+# in /etc/network/interfaces.d/sdn handles the bridge L2 config; this file
+# stacks on a static IPv4 address. Inbound on this interface is dropped by
+# pve-firewall (see /etc/pve/nodes/{{ inventory_hostname }}/host.fw).
+iface {{ pve_private_iface }} inet static
+        address {{ pve_private_ip }}/{{ pve_private_cidr }}

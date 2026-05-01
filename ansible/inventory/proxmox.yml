@@ -261,6 +261,9 @@ all:
         tailscale-gw:
         mail-01:
         ntp-01:
+        pve01:
+        pve02:
+        pve03:
         tc-ubuntu22:
         tc-ubuntu24:
         tc-rocky8:

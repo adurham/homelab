@@ -1,0 +1,18 @@
+---
+# Per-pve-host static IP on the `private` SDN bridge. Required so pve hosts
+# can push monitoring telemetry (Alloy → vm-01:8428) without traversing the
+# LAN gateway, which has no route back to 172.16.0.0/24. Inbound on this
+# interface is hardened off via pve-firewall — the IP is purely a source
+# address for outbound, not a management endpoint.
+#
+# Override per host in inventory/proxmox.yml. The defaults below match the
+# IPAM allocation in docs/ipam.md (.2/.3/.4 reserved for pve hosts; .1 is
+# the gateway, .10+ are services).
+pve_private_ip_map:
+  pve01: "172.16.0.2"
+  pve02: "172.16.0.3"
+  pve03: "172.16.0.4"
+
+pve_private_ip: "{{ pve_private_ip_map[inventory_hostname] }}"
+pve_private_cidr: "24"
+pve_private_iface: "private"
