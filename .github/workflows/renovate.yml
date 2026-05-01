@@ -27,3 +27,7 @@ jobs:
           # RENOVATE_TOKEN. The default GITHUB_TOKEN won't work for
           # renovatebot/github-action.
           token: ${{ secrets.RENOVATE_TOKEN }}
+        env:
+          # Without this, renovate logs "No repositories found" — it doesn't
+          # auto-discover from the workflow's repo unless told to.
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
