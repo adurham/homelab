@@ -54,49 +54,51 @@ If a node fails, Proxmox HA automatically restarts protected containers on a hea
 
 Single-host metrics + logs stack on `vm-01` and `graf-01`:
 
-- **Agents** — Grafana Alloy on every "core" host (vm-01, graf-01, and the
-  private_subnet CTs) is the unified telemetry agent. It runs
-  `prometheus.exporter.unix` for node-exporter-shape metrics and
-  `loki.source.journal` for the systemd journal, then pushes both via
-  `prometheus.remote_write` (to VM at `:8428/api/v1/write`) and
-  `loki.write` (to Loki at `:3100/loki/api/v1/push`). Membership of the
-  push-path is controlled by the `alloy_cutover` inventory group.
-  Tanium client containers (tc-*) span RHEL/SUSE/Debian and stay on the
-  legacy `node_exporter` (pulled at `:9100`) + `promtail` path because
-  the alloy role only ships a Debian package. Tanium appliances
-  (tanium_cluster) run a hardened `node_exporter` install via
-  `roles/tanium_node_exporter`.
-- **Metrics** — VictoriaMetrics receives node_exporter-shape metrics two
-  ways: pushed by Alloy (cutover hosts) and pulled at `:9100` from the
-  remaining hosts (pve01–03, tc-*, tanium_cluster). Blackbox_exporter
-  probes also land in VM:
+- **Agents** — Grafana Alloy is the unified telemetry agent on **every
+  managed host except the Tanium appliances** (the `tanium_cluster`
+  group). It runs `prometheus.exporter.unix` for node-exporter-shape
+  metrics and `loki.source.journal` for the systemd journal, then pushes
+  both via `prometheus.remote_write` (to VM at `:8428/api/v1/write`)
+  and `loki.write` (to Loki at `:3100/loki/api/v1/push`). The
+  `roles/alloy/` role supports apt (Debian/Ubuntu), dnf (RHEL 9+), dnf
+  via shell (EL8 — python3.9 lacks dnf bindings), and zypper (SUSE).
+  Tanium appliances run a narrow `node_exporter` install via
+  `roles/tanium_node_exporter/` instead — different hardening profile.
+- **Metrics** — VictoriaMetrics receives node_exporter-shape metrics
+  two ways: pushed by Alloy (every Alloy host) and pulled at `:9100`
+  from `tanium_cluster`. Blackbox_exporter probes also land in VM:
   - TCP probes to Tanium postgres (5432 on TS, 5433 on TMS) → `tanium_postgres_unreachable`
   - TCP probe to Tanium server console (:443) → `tanium_console_unreachable`
   - HTTPS probes to grafana / auth / proxmox public URLs → `https_endpoint_unreachable`,
     `cert_expiring_soon` (cert <14 days)
-- **Logs** — Loki on `vm-01:3100`. Cutover hosts ship via Alloy's
-  `loki.source.journal`; tc-* still use Promtail. Same labels (`host`,
-  `job`, `unit`, `severity`, `nodename`) regardless of agent. 14-day
-  retention, filesystem storage. Loki is also a Grafana datasource — query
-  logs in the same UI as metrics.
+- **Logs** — Loki on `vm-01:3100`. All Alloy hosts ship via
+  `loki.source.journal`; Tanium appliances don't ship logs. Labels
+  (`host`, `job`, `unit`, `severity`, `nodename`) are stable across
+  hosts. 14-day retention, filesystem storage. Loki is also a Grafana
+  datasource — query logs in the same UI as metrics.
 - **Alerts** — Grafana unified alerting. Rules live in
   `roles/grafana/templates/alerting_rules.yml.j2`. Includes metric-backed
-  alerts (host_down, disk_full, cert/probe alerts) and log-backed alerts
+  alerts (host_down, disk_full, cert/probe alerts), log-backed alerts
   (`log_oom_kill`, `log_service_restart_loop`, `log_ssh_brute_force`,
-  `log_kernel_io_error`, `log_postgres_fatal`).
-- **Delivery** — Grafana → webhook → Home Assistant automation
-  (`homeassistant/automations/grafana_alert_webhook.yaml`) → iOS critical push.
-  `severity=critical` overrides Do Not Disturb; warnings come in as normal pushes.
+  `log_kernel_io_error`, `log_postgres_fatal`), and a `dead_mans_switch`
+  meta-alert routed exclusively to a healthchecks.io webhook (so an
+  outage of Grafana / mail-01 / the LAN doesn't leave you blind).
+- **Delivery** — Three contact points:
+  1. Home Assistant webhook → iOS critical push (`severity=critical`
+     overrides Do Not Disturb; warnings come in as normal pushes).
+  2. iCloud SMTP fallback via `mail-01` for resilience if HA is down.
+  3. healthchecks.io webhook for the dead-man's-switch only — pages
+     out-of-band (gmail, not via mail-01) if the rest of the pipeline
+     is broken.
 
 ### Dependency tracking
 
 Self-hosted Renovate runs weekly via GitHub Actions
 (`.github/workflows/renovate.yml`). Tracks the version pins in role
-`defaults/main.yml` files (alloy, blackbox_exporter, node_exporter,
-victoriametrics, loki, golang/go, grafana_image_renderer) and opens PRs
-for upstream releases. Promtail tracking is intentionally disabled
-(deprecated by Alloy starting Loki 3.7.0). Dashboard: GitHub issue #1 in
-this repo.
+`defaults/main.yml` files (alloy, blackbox_exporter,
+tanium_node_exporter, victoriametrics, loki, golang/go,
+grafana_image_renderer) and opens PRs for upstream releases. Dashboard:
+GitHub issue #1 in this repo.
 
 ## Repository Layout
 

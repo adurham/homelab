@@ -464,7 +464,7 @@ groups:
               datasource:
                 type: loki
                 uid: loki
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|promtail.service"} |~ "Out of memory|invoked oom-killer" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "Out of memory|invoked oom-killer" [5m]))'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -516,7 +516,7 @@ groups:
               datasource:
                 type: loki
                 uid: loki
-              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|promtail.service"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
+              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -620,7 +620,7 @@ groups:
               datasource:
                 type: loki
                 uid: loki
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|promtail.service"} |~ "I/O error|EXT4-fs error|Buffer I/O error|Medium error|blk_update_request" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "I/O error|EXT4-fs error|Buffer I/O error|Medium error|blk_update_request" [5m]))'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -795,7 +795,7 @@ groups:
               datasource:
                 type: loki
                 uid: loki
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|promtail.service"} |~ "FATAL:|PANIC:" |~ "postgres" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "FATAL:|PANIC:" |~ "postgres" [5m]))'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200

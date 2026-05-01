@@ -1,6 +1,7 @@
 ---
-# Bump in lockstep with promtail (they ship from the same release tag).
-# Verify against https://github.com/grafana/loki/releases before changing.
+# Renovate tracks https://github.com/grafana/loki releases. Verify the
+# release notes between current and target before bumping — schema_config
+# and compactor keys have shifted across 3.x.
 loki_version: "3.7.1"
 loki_port: 3100
 loki_retention_period: "336h"  # 14 days

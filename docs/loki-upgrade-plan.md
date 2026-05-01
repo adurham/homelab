@@ -1,8 +1,15 @@
-# Loki 3.0.0 → 3.7.1 upgrade plan
+# Loki 3.0.0 → 3.7.1 upgrade plan (HISTORICAL — completed)
 
-Renovate PR #5 bumps `loki_version` and `promtail_version` from `3.0.0`
-to `3.7.1`. We deferred merging it because 7 minor versions can carry
-schema / config changes; this is the deliberate plan to land it.
+> **Status (2026-05-01):** This upgrade has landed. Loki is on 3.7.1 and
+> Promtail has been retired entirely (replaced by Grafana Alloy — see
+> `docs/promtail-to-alloy-plan.md`). The body below is kept as a
+> reference for future Loki minor-version bumps; ignore the
+> Promtail-specific sections.
+
+Original context: Renovate PR #5 bumped `loki_version` (and the
+since-deleted `promtail_version`) from `3.0.0` to `3.7.1`. Merging was
+deferred because 7 minor versions can carry schema / config changes;
+this is the deliberate plan that was executed.
 
 ## Pre-flight
 
