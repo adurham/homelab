@@ -61,6 +61,30 @@ scrape_configs:
       - target_label: __address__
         replacement: 127.0.0.1:9115
 
+  # TCP probe to Tanium SERVER consoles on port 443. Catches "appliance up +
+  # postgres up + httpd or Tanium services crashed" — a failure the
+  # postgres-only probe (5432) misses. Module and zone servers don't expose
+  # a console on 443, so they're not probed here (verified empirically — only
+  # tanium_servers respond on 443).
+  - job_name: 'blackbox_tanium_console'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+{% for host in groups['tanium_servers'] | default([]) %}
+      - targets: ['{{ hostvars[host].ansible_host }}:443']
+        labels:
+          instance: '{{ host }}'
+          tanium_role: 'server'
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
   # HTTPS probes to public-facing services. probe_ssl_earliest_cert_expiry
   # is exposed automatically; we alert when it gets close to now().
   # Targets come from blackbox_https_targets (roles/victoriametrics/defaults).
