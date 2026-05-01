@@ -47,7 +47,7 @@ grafana_alert_webhook_id: !vault |
           38306231346534346130643834393832343337663266626435373933393762323366306634623235
           31613631626466303565
 # Home Assistant base URL (LAN; reachable from graf-01 via vmbr0/eth0)
-homeassistant_url: "http://192.168.86.2:8123"
+homeassistant_url: "http://{{ ip_homeassistant }}:8123"
 # Long-lived access token for the VictoriaMetrics → HA Prometheus scrape.
 homeassistant_token: !vault |
           $ANSIBLE_VAULT;1.1;AES256
