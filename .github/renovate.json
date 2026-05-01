@@ -82,6 +82,35 @@
       "matchStrings": ["grafana_image_renderer_version:\\s*\"(?<currentValue>[^\"]+)\""],
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "grafana/grafana-image-renderer"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^ansible/roles/authentik_service/defaults/main\\.yml$/"
+      ],
+      "matchStrings": ["authentik_tag:\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "ghcr.io/goauthentik/server"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^ansible/roles/authentik_service/defaults/main\\.yml$/"
+      ],
+      "matchStrings": ["authentik_postgres_tag:\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "docker.io/library/postgres",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)-alpine$"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^ansible/roles/authentik_service/defaults/main\\.yml$/"
+      ],
+      "matchStrings": ["authentik_redis_tag:\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "docker.io/library/redis",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-alpine$"
     }
   ]
 }
