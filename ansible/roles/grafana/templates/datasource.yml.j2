@@ -7,7 +7,7 @@ datasources:
     access: proxy
     url: http://{{ hostvars['vm-01']['ansible_host'] }}:8428
     isDefault: true
-    version: 1
+    version: 2
     editable: true
     jsonData:
       httpMethod: POST
@@ -17,5 +17,5 @@ datasources:
     type: loki
     access: proxy
     url: http://{{ hostvars['vm-01']['ansible_host'] }}:3100
-    version: 1
+    version: 2
     editable: true
