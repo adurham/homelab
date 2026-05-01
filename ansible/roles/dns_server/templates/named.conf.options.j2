@@ -2,7 +2,7 @@ acl "trusted" {
         127.0.0.0/8;
         ::1;              # IPv6 loopback — needed for `dig @localhost` from dns-01 itself
         192.168.86.0/24;  # LAN
-        172.16.0.0/24;    # Private SDN
+        {{ net_private_range }};    # Private SDN
         100.64.0.0/10;    # Tailscale (just in case)
 };
 
