@@ -11,7 +11,7 @@
   hosts: tanium_servers:tanium_modules
   gather_facts: false
   vars:
-    lab_subnet: "172.16.0.0/24"
+    lab_subnet: "{{ net_private_range }}"
     candidate_services:
       - postgresql-ts
       - postgresql-tms
