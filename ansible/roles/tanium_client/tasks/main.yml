@@ -8,6 +8,7 @@
     -o /tmp/tanium-init.dat
   args:
     creates: /tmp/tanium-init.dat
+  no_log: true
 
 - name: Download Tanium Client Bundle Direct (Curl)
   ansible.builtin.shell: |
@@ -16,6 +17,7 @@
     -o /tmp/tanium-client-bundle.zip
   args:
     creates: /tmp/tanium-client-bundle.zip
+  no_log: true
 
 - name: Unzip Client Bundle
   ansible.builtin.shell: unzip -o /tmp/tanium-client-bundle.zip -d /tmp/

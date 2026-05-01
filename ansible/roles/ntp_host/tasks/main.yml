@@ -37,6 +37,7 @@
     --onboot 1
   delegate_to: pve01
   when: pct_check.rc != 0
+  no_log: true
 
 - name: Ensure NTP Container is Running
   ansible.builtin.command: pct start 105

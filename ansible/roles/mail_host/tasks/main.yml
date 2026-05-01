@@ -24,6 +24,7 @@
     --start 1
     --onboot 1
   when: pct_check.rc != 0
+  no_log: true
 
 - name: Wait for Mail Container IP
   ansible.builtin.shell: |
