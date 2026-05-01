@@ -1,7 +1,7 @@
 ---
 # Bump in lockstep with promtail (they ship from the same release tag).
 # Verify against https://github.com/grafana/loki/releases before changing.
-loki_version: "3.0.0"
+loki_version: "3.7.1"
 loki_port: 3100
 loki_retention_period: "336h"  # 14 days
 loki_storage_dir: "/var/lib/loki"
