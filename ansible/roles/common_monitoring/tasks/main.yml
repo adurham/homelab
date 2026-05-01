@@ -18,12 +18,12 @@
 
 - name: Install dependencies (Debian)
   ansible.builtin.shell: apt-get update && apt-get install -y tar gzip
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts['os_family'] == 'Debian'
   changed_when: false
 
 - name: Install dependencies (Suse)
   ansible.builtin.shell: zypper install -y tar gzip
-  when: ansible_os_family == 'Suse'
+  when: ansible_facts['os_family'] == 'Suse'
   changed_when: false
 
 - name: Download Node Exporter (Universal Binary)
