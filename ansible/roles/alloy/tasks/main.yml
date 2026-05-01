@@ -1,36 +1,98 @@
 ---
-# Install via the .deb published on grafana/alloy GitHub releases. Same
-# distribution channel pattern as node_exporter / promtail / VM (all via
-# GitHub release artifacts), and Renovate tracks `alloy_version` against
-# grafana/alloy releases the same way.
+# Install via the .deb / .rpm published on grafana/alloy GitHub releases.
+# Same distribution channel as the other monitoring agents (Renovate
+# tracks `alloy_version` against grafana/alloy releases).
 
-- name: Install dependencies
+- name: Install dependencies (Debian)
   ansible.builtin.apt:
     name:
       - ca-certificates
     state: present
     update_cache: true
     cache_valid_time: 3600
+  when: ansible_facts['os_family'] == 'Debian'
 
-- name: Detect installed alloy version
-  ansible.builtin.command: dpkg-query -W -f='${Version}' alloy
-  register: current_alloy
-  failed_when: false
+- name: Install dependencies (RedHat)
+  ansible.builtin.dnf:
+    name:
+      - ca-certificates
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Install dependencies (Suse)
+  ansible.builtin.shell: zypper install -y ca-certificates
+  when: ansible_facts['os_family'] == 'Suse'
   changed_when: false
 
-- name: Download alloy .deb
+- name: Detect installed alloy version (Debian)
+  ansible.builtin.command: dpkg-query -W -f='${Version}' alloy
+  register: current_alloy_deb
+  failed_when: false
+  changed_when: false
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Detect installed alloy version (RPM-based)
+  ansible.builtin.command: rpm -q --queryformat '%{VERSION}-%{RELEASE}' alloy
+  register: current_alloy_rpm
+  failed_when: false
+  changed_when: false
+  when: ansible_facts['os_family'] in ['RedHat', 'Suse']
+
+- name: Compute whether alloy needs (re)install
+  ansible.builtin.set_fact:
+    alloy_needs_install: >-
+      {{ (current_alloy_deb.rc | default(1) != 0 or
+          alloy_version not in (current_alloy_deb.stdout | default('')))
+         if ansible_facts['os_family'] == 'Debian'
+         else (current_alloy_rpm.rc | default(1) != 0 or
+               alloy_version not in (current_alloy_rpm.stdout | default(''))) }}
+
+- name: Download alloy .deb (Debian)
   ansible.builtin.get_url:
     url: "https://github.com/grafana/alloy/releases/download/v{{ alloy_version }}/alloy-{{ alloy_version }}-1.amd64.deb"
     dest: "/tmp/alloy-{{ alloy_version }}.deb"
     mode: '0644'
-  when: current_alloy.rc != 0 or alloy_version not in current_alloy.stdout
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - alloy_needs_install
 
-- name: Install alloy package
+- name: Download alloy .rpm (RPM-based)
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/alloy/releases/download/v{{ alloy_version }}/alloy-{{ alloy_version }}-1.amd64.rpm"
+    dest: "/tmp/alloy-{{ alloy_version }}.rpm"
+    mode: '0644'
+  when:
+    - ansible_facts['os_family'] in ['RedHat', 'Suse']
+    - alloy_needs_install
+
+- name: Install alloy package (Debian)
   ansible.builtin.apt:
     deb: "/tmp/alloy-{{ alloy_version }}.deb"
     state: present
-  when: current_alloy.rc != 0 or alloy_version not in current_alloy.stdout
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - alloy_needs_install
   notify: Restart alloy
+
+- name: Install alloy package (RedHat)
+  ansible.builtin.dnf:
+    name: "/tmp/alloy-{{ alloy_version }}.rpm"
+    state: present
+    disable_gpg_check: true
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - alloy_needs_install
+  notify: Restart alloy
+
+- name: Install alloy package (Suse)
+  ansible.builtin.shell: >
+    zypper --no-gpg-checks install -y --allow-unsigned-rpm
+    /tmp/alloy-{{ alloy_version }}.rpm
+  when:
+    - ansible_facts['os_family'] == 'Suse'
+    - alloy_needs_install
+  notify: Restart alloy
+  changed_when: true
 
 - name: Render alloy config
   ansible.builtin.template:
@@ -41,9 +103,11 @@
     mode: '0640'
   notify: Restart alloy
 
+# Debian alloy package reads /etc/default/alloy as systemd EnvironmentFile;
+# RPM-based packages read /etc/sysconfig/alloy. Same content either way.
 - name: Configure alloy CLI args
   ansible.builtin.copy:
-    dest: /etc/default/alloy
+    dest: "{{ '/etc/default/alloy' if ansible_facts['os_family'] == 'Debian' else '/etc/sysconfig/alloy' }}"
     owner: root
     group: root
     mode: '0644'
@@ -66,7 +130,10 @@
     enabled: true
     daemon_reload: true
 
-- name: Cleanup tmp .deb
+- name: Cleanup tmp package files
   ansible.builtin.file:
-    path: "/tmp/alloy-{{ alloy_version }}.deb"
+    path: "{{ item }}"
     state: absent
+  loop:
+    - "/tmp/alloy-{{ alloy_version }}.deb"
+    - "/tmp/alloy-{{ alloy_version }}.rpm"
