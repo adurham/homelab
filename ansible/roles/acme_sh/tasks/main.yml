@@ -10,7 +10,8 @@
     cache_valid_time: 3600
 
 - name: Install acme.sh # noqa: command-instead-of-module
-  ansible.builtin.shell: >
+  ansible.builtin.shell: |
+    set -o pipefail
     curl https://get.acme.sh | sh -s email=admin@lab.amd-e.com
   args:
     creates: /root/.acme.sh/acme.sh

@@ -13,6 +13,7 @@
   ansible.builtin.get_url:
     url: https://packages.grafana.com/gpg.key
     dest: /usr/share/keyrings/grafana.key
+    mode: '0644'
 
 - name: Add Grafana Repository
   ansible.builtin.apt_repository:
@@ -153,6 +154,7 @@
 - name: Configure Grafana SSO (Authentik)
   ansible.builtin.copy:
     dest: /etc/grafana/grafana.ini
+    mode: '0640'
     content: |
       [server]
       root_url = https://grafana.chi.lab.amd-e.com
@@ -190,6 +192,7 @@
   ansible.builtin.template:
     src: datasource.yml.j2
     dest: /etc/grafana/provisioning/datasources/victoriametrics.yml
+    mode: '0644'
   notify: Restart Grafana
 
 - name: Create Dashboard Provisioning Directory
@@ -210,6 +213,7 @@
   ansible.builtin.template:
     src: dashboards.yml.j2
     dest: /etc/grafana/provisioning/dashboards/default.yml
+    mode: '0644'
   notify: Restart Grafana
 
 - name: Deploy Node Exporter Dashboard (Patched)
@@ -288,6 +292,7 @@
     path: /etc/default/grafana-server
     line: 'GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=grafana-image-renderer'
     create: true
+    mode: '0644'
   notify: Restart Grafana
 
 - name: Start Grafana

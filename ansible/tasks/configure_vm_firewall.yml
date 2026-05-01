@@ -6,13 +6,16 @@
 
 - name: "Check Network Config for VM {{ vmid }}"
   delegate_to: "{{ vm_node }}"
-  ansible.builtin.shell: "qm config {{ vmid }} | grep '^net0:' | cut -d' ' -f2-"
+  ansible.builtin.shell: |
+    set -o pipefail
+    qm config {{ vmid }} | grep '^net0:' | cut -d' ' -f2-
   register: net0_config
   changed_when: false
 
 - name: "Update Network Interface Firewall and MTU for VM {{ vmid }}"
   delegate_to: "{{ vm_node }}"
   ansible.builtin.shell: |
+    set -o pipefail
     CURRENT_CFG="{{ net0_config.stdout }}"
     # Remove existing firewall or mtu settings to prevent duplication
     CLEAN_CFG=$(echo "$CURRENT_CFG" | sed -E 's/,firewall=1//g' | sed -E 's/,mtu=[0-9]+//g')

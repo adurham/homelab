@@ -8,6 +8,7 @@
 # look for the vmid anywhere. rc=0 means it exists somewhere in the cluster.
 - name: Check if Container exists in cluster
   ansible.builtin.shell: |
+    set -o pipefail
     pvesh get /cluster/resources --type vm --output-format json |
       python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]=={{ vmid }} for r in json.load(sys.stdin)) else 1)'
   register: ct_check
