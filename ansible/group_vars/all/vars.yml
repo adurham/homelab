@@ -10,12 +10,18 @@ net_private_mtu: 1450 # VXLAN Overhead (1500 - 50)
 
 
 # Service IP Addresses (Static)
+# Single source of truth for service IPs. Inventory's `ansible_host:` should
+# match — when they diverge, ARP races silently send traffic to the wrong CT
+# (see docs/ipam.md).
 ip_dns_primary: "172.16.0.10"
+ip_ntp_server: "172.16.0.11"
+ip_proxy: "172.16.0.12"
 ip_authentik: "172.16.0.20"
 ip_loadbalancer: "172.16.0.30"
 ip_mail_server: "172.16.0.40"
+ip_grafana: "172.16.0.41"
+ip_vm: "172.16.0.42"
 ip_tailscale_gw: "172.16.0.101"
-ip_ntp_server: "172.16.0.11"
 
 # Cluster Nodes (Physical LAN)
 # Used for SDN Peering and Corosync
