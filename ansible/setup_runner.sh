@@ -1,33 +1,42 @@
 #!/bin/bash
 # setup_runner.sh
-# Bootstraps a fresh machine (CI Runner or Workstation) to run this Ansible collection.
+# Bootstraps a fresh Linux machine (self-hosted CI runner, or dev VM) to run
+# this Ansible repo. macOS users want `scripts/install_dev_tools.sh` instead.
+#
+# Idempotent: safe to re-run.
 
-set -e
+set -euo pipefail
 
-echo ">>> Installing System Dependencies..."
-# Detect OS (Debian/Ubuntu assumed for runners)
-if [ -f /etc/debian_version ]; then
-    sudo apt-get update
-    sudo apt-get install -y python3-pip git sshpass
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    # MacOS (Assumes Homebrew)
-    echo "MacOS detected. Ensuring python3 and sshpass..."
-    brew install python3 hudochenkov/sshpass/sshpass 2>/dev/null || true
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "macOS detected. Use scripts/install_dev_tools.sh instead — this script is Linux-only." >&2
+    exit 1
 fi
 
-echo ">>> Installing Python Dependencies..."
-pip3 install ansible ansible-lint netaddr passlib
+if [ ! -f /etc/debian_version ]; then
+    cat <<EOF >&2
+This installer assumes Debian/Ubuntu. On other distros install the
+equivalents with your package manager and then run:
 
-echo ">>> Installing Ansible Collections..."
-ansible-galaxy collection install \
-    community.general \
-    community.docker \
-    community.crypto \
-    ansible.posix \
-    ansi.passthru
+  pip3 install --user ansible-core ansible-lint
+  ansible-galaxy collection install -r ansible/requirements.yml
 
-echo ">>> Verifying Installation..."
+EOF
+    exit 1
+fi
+
+echo ">>> Installing system dependencies..."
+sudo apt-get update
+sudo apt-get install -y python3-pip python3-venv git sshpass
+
+echo ">>> Installing Python tooling (ansible-core + ansible-lint)..."
+pip3 install --user ansible-core ansible-lint
+
+# requirements.yml is the single source of truth for collections; using it
+# here keeps this script in sync with CI (see .github/workflows/lint.yml).
+echo ">>> Installing Ansible collections from requirements.yml..."
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ansible-galaxy collection install -r "$script_dir/requirements.yml"
+
+echo ">>> Verifying installation..."
 ansible --version
 ansible-lint --version
-
-echo ">>> SUCCESS: Runner is ready!"
