@@ -1,0 +1,104 @@
+{
+  "annotations": {"list": []},
+  "description": "systemd-journal logs from every host shipping to Loki, filterable by host and unit.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 0},
+      "id": 2,
+      "options": {
+        "calcs": ["lastNotNull"],
+        "displayMode": "list",
+        "showUnfilled": false,
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["sum"], "fields": "", "values": false}
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "sum by (host) (count_over_time({job=\"systemd-journal\", host=~\"$host\"} [$__interval]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Log volume per host (last $__interval bucket)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 18, "w": 24, "x": 0, "y": 6},
+      "id": 1,
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "{job=\"systemd-journal\", host=~\"$host\", unit=~\"$unit\"} |~ \"$search\"",
+          "refId": "A"
+        }
+      ],
+      "title": "systemd-journal",
+      "type": "logs"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["logs", "loki", "homelab"],
+  "templating": {
+    "list": [
+      {
+        "current": {"selected": true, "text": ["All"], "value": ["$__all"]},
+        "datasource": {"type": "loki", "uid": "loki"},
+        "definition": "label_values({job=\"systemd-journal\"}, host)",
+        "includeAll": true,
+        "label": "Host",
+        "multi": true,
+        "name": "host",
+        "options": [],
+        "query": {"label": "host", "refId": "Loki", "stream": "{job=\"systemd-journal\"}", "type": 1},
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "current": {"selected": true, "text": ["All"], "value": ["$__all"]},
+        "datasource": {"type": "loki", "uid": "loki"},
+        "definition": "label_values({job=\"systemd-journal\", host=~\"$host\"}, unit)",
+        "includeAll": true,
+        "label": "Unit",
+        "multi": true,
+        "name": "unit",
+        "options": [],
+        "query": {"label": "unit", "refId": "Loki", "stream": "{job=\"systemd-journal\", host=~\"$host\"}", "type": 1},
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "current": {"text": "", "value": ""},
+        "label": "Filter (regex)",
+        "name": "search",
+        "options": [{"selected": true, "text": "", "value": ""}],
+        "query": "",
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Logs (Loki)",
+  "uid": "logs-loki",
+  "version": 1,
+  "weekStart": ""
+}

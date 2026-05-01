@@ -17,13 +17,18 @@ This repository manages a hyper-converged private cloud built on Proxmox VE. The
 
 ### Core Services & Addressing
 
-| Service          | Hostname           | Private IP     | Public/LAN         | Description                                       |
-| :--------------- | :----------------- | :------------- | :----------------- | :------------------------------------------------ |
-| Gateway          | `proxmox` (VNet)   | `172.16.0.1`   | -                  | SDN gateway for the private network               |
-| DNS              | `dns-01`           | `172.16.0.10`  | -                  | Internal Bind9 authority (`chi.lab.amd-e.com`)    |
-| Identity         | `authentik`        | `172.16.0.20`  | `100.x.y.z` (TS)   | SSO provider; access via load balancer            |
-| Load Balancer    | `lb-01`            | `172.16.0.30`  | -                  | Nginx Layer 7 proxy for the cluster and services  |
-| Tailscale GW     | `tailscale-gw`     | `172.16.0.101` | `100.x.y.z`        | Ingress / NAT gateway                             |
+| Service           | Hostname           | Private IP     | Public/LAN         | Description                                       |
+| :---------------- | :----------------- | :------------- | :----------------- | :------------------------------------------------ |
+| Gateway           | `proxmox` (VNet)   | `172.16.0.1`   | -                  | SDN gateway for the private network               |
+| DNS               | `dns-01`           | `172.16.0.10`  | -                  | Internal Bind9 authority (`chi.lab.amd-e.com`)    |
+| NTP               | `ntp-01`           | `172.16.0.11`  | -                  | Chrony, syncs against `time.nist.gov`             |
+| Squid Proxy       | `proxy-01`         | `172.16.0.12`  | -                  | Outbound caching proxy                            |
+| Identity          | `authentik`        | `172.16.0.20`  | `100.x.y.z` (TS)   | SSO provider; access via load balancer            |
+| Load Balancer     | `lb-01`            | `172.16.0.30`  | LAN/DHCP           | Nginx Layer 7 proxy for the cluster and services  |
+| Mail Forwarder    | `mail-01`          | `172.16.0.40`  | -                  | Postfix → iCloud SMTP relay for alert email       |
+| VictoriaMetrics   | `vm-01`            | `172.16.0.40`  | -                  | TSDB + blackbox_exporter + Loki + Promtail        |
+| Grafana           | `graf-01`          | `172.16.0.41`  | -                  | Dashboards + unified alerting + image renderer    |
+| Tailscale GW      | `tailscale-gw`     | `172.16.0.101` | LAN + `100.x.y.z`  | Subnet router; ingress / NAT gateway              |
 
 External access URL: `https://proxmox.chi.lab.amd-e.com` → `lb-01`.
 
@@ -39,8 +44,41 @@ The core infrastructure survives a single-node failure (N-1 redundancy).
   - `ct:101` — Tailscale GW
   - `ct:102` — DNS
   - `ct:103` — Load Balancer
+  - `ct:104` — Mail forwarder
+  - `ct:106` — VictoriaMetrics (vm-01)
+  - `ct:107` — Grafana (graf-01)
 
 If a node fails, Proxmox HA automatically restarts protected containers on a healthy node. Check status with `ha-manager status` on any node.
+
+### Observability
+
+Single-host metrics + logs stack on `vm-01` and `graf-01`:
+
+- **Metrics** — VictoriaMetrics scrapes `node_exporter` on every host, plus
+  blackbox_exporter probes:
+  - TCP probes to Tanium postgres (5432 on TS, 5433 on TMS) → `tanium_postgres_unreachable`
+  - TCP probe to Tanium server console (:443) → `tanium_console_unreachable`
+  - HTTPS probes to grafana / auth / proxmox public URLs → `https_endpoint_unreachable`,
+    `cert_expiring_soon` (cert <14 days)
+- **Logs** — Loki on `vm-01:3100`; Promtail on every host tails the systemd journal
+  and ships to Loki. 14-day retention, filesystem storage. Loki is also a Grafana
+  datasource — query logs in the same UI as metrics.
+- **Alerts** — Grafana unified alerting. Rules live in
+  `roles/grafana/templates/alerting_rules.yml.j2`. Includes metric-backed
+  alerts (host_down, disk_full, cert/probe alerts) and log-backed alerts
+  (`log_oom_kill`, `log_service_restart_loop`, `log_ssh_brute_force`,
+  `log_kernel_io_error`, `log_postgres_fatal`).
+- **Delivery** — Grafana → webhook → Home Assistant automation
+  (`homeassistant/automations/grafana_alert_webhook.yaml`) → iOS critical push.
+  `severity=critical` overrides Do Not Disturb; warnings come in as normal pushes.
+
+### Dependency tracking
+
+Self-hosted Renovate runs weekly via GitHub Actions
+(`.github/workflows/renovate.yml`). Tracks the version pins in role
+`defaults/main.yml` files (blackbox_exporter, node_exporter, victoriametrics,
+loki/promtail, golang/go, grafana_image_renderer) and opens PRs for upstream
+releases. Dashboard: GitHub issue #1 in this repo.
 
 ## Repository Layout
 
