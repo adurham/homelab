@@ -1,35 +1,74 @@
 ---
+# Pushes the HA config files we manage in this repo to the Home Assistant
+# host and reloads automations via the REST API. Pass `-e ha_restart=true`
+# to do a full `ha core restart` instead of just automation reload — needed
+# when configuration.yaml changes (everything else can be hot-reloaded).
 - name: Deploy Home Assistant Automations
   hosts: homeassistant
-  gather_facts: false # No python on HA OS usually
+  gather_facts: false  # No python on HA OS usually
   vars:
-    # Use playbook_dir to ensure paths are correct regardless of where ansible-playbook is run
-    local_automations_dir: "{{ playbook_dir }}/../homeassistant/automations/"
+    ha_root: "{{ playbook_dir }}/../homeassistant"
+    ha_restart: false
+    ssh_opts: "-o StrictHostKeyChecking=accept-new"
+    # Files that go to /config/ (root). Add new ones here as the surface
+    # of this repo's HA config grows.
+    config_files:
+      - templates.yaml
+      - sensors.yaml
+      - configuration.yaml
+      - scripts.yaml
+      - input_datetime.yaml
+      - input_number.yaml
 
   tasks:
-    - name: Ensure target directory exists
-      raw: "mkdir -p /config/automations"
+    - name: Ensure target directories exist
+      ansible.builtin.raw: "mkdir -p /config/automations /config/apps"
       register: mkdir_result
       changed_when: mkdir_result.rc == 0
 
-    - name: Copy Files (Automations, Templates, Sensors)
-      ansible.builtin.shell: >
-        scp -P {{ ansible_port }} -r -o StrictHostKeyChecking=accept-new {{ local_automations_dir }} {{ ansible_user }}@{{ ansible_host }}:/config/automations/ && \
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=accept-new {{ playbook_dir }}/../homeassistant/templates.yaml {{ ansible_user }}@{{ ansible_host }}:/config/ && \
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=accept-new {{ playbook_dir }}/../homeassistant/sensors.yaml {{ ansible_user }}@{{ ansible_host }}:/config/ && \
-        scp -P {{ ansible_port }} -o StrictHostKeyChecking=accept-new {{ playbook_dir }}/../homeassistant/apps/apps.yaml {{ ansible_user }}@{{ ansible_host }}:/config/apps/
+    - name: Copy automations directory
+      ansible.builtin.shell: >-
+        scp -P {{ ansible_port }} -r {{ ssh_opts }}
+        {{ ha_root }}/automations/
+        {{ ansible_user }}@{{ ansible_host }}:/config/automations/
       delegate_to: localhost
-      register: scp_result
-      changed_when: scp_result.rc == 0
+      register: scp_automations
+      changed_when: scp_automations.rc == 0
+
+    - name: Copy /config/ files
+      ansible.builtin.shell: >-
+        scp -P {{ ansible_port }} {{ ssh_opts }}
+        {{ ha_root }}/{{ item }}
+        {{ ansible_user }}@{{ ansible_host }}:/config/
+      delegate_to: localhost
+      loop: "{{ config_files }}"
+      register: scp_config
+      changed_when: scp_config.rc == 0
+
+    - name: Copy apps/apps.yaml
+      ansible.builtin.shell: >-
+        scp -P {{ ansible_port }} {{ ssh_opts }}
+        {{ ha_root }}/apps/apps.yaml
+        {{ ansible_user }}@{{ ansible_host }}:/config/apps/
+      delegate_to: localhost
+      register: scp_apps
+      changed_when: scp_apps.rc == 0
 
     - name: Check Configuration
-      raw: "ha core check"
+      ansible.builtin.raw: "ha core check"
       register: config_check
       changed_when: false
       failed_when: "'Command completed successfully' not in config_check.stdout and config_check.rc != 0"
 
-    - name: Reload Automations via API
-      ansible.builtin.command: "python3 {{ playbook_dir }}/../homeassistant/reload_ha_automations.py"
+    - name: Reload Automations via API (fast path — no restart)
+      ansible.builtin.command: "python3 {{ ha_root }}/reload_ha_automations.py"
       delegate_to: localhost
       register: reload_result
       changed_when: reload_result.rc == 0
+      when: not (ha_restart | bool)
+
+    - name: Restart HA core (slow path — required for configuration.yaml changes)
+      ansible.builtin.raw: "ha core restart"
+      register: restart_result
+      changed_when: restart_result.rc == 0
+      when: ha_restart | bool

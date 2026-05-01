@@ -89,9 +89,15 @@ Verify via `https://proxmox.chi.lab.amd-e.com` or SSH.
 ### Deploying Home Assistant changes
 
 ```bash
-./deploy_ha.sh
-# or for AppDaemon apps:
-./deploy_appdaemon.sh
+# Fast path — automations / templates / sensors / inputs / apps.yaml
+# (everything that can be hot-reloaded). Reloads automations via API, no
+# restart, ~5 seconds.
+ansible-playbook ansible/deploy_ha_automations.yml
+
+# Slow path — same plus a full `ha core restart`. Use when
+# configuration.yaml changes (anything that requires a restart to take
+# effect).
+ansible-playbook ansible/deploy_ha_automations.yml -e ha_restart=true
 ```
 
 ### Bootstrapping a new workstation
@@ -123,9 +129,15 @@ recovery.
 
 ## Secrets & Credentials
 
-- **Ansible Vault** for per-role secrets (`ansible/inventory/group_vars/all.yml`).
-- **`ansible/credentials/`** for raw API tokens (gitignored): `desec_token_proxmox`, `authentik_api_token`, etc.
-- **Home Assistant** secrets in `/config/secrets.yaml` on the HA host (gitignored locally; see `homeassistant/secrets.yaml.example`).
+- **Ansible Vault** is the single source of truth for ansible secrets.
+  Inline `!vault |` blocks in `ansible/inventory/group_vars/all.yml` and a
+  fully-encrypted `ansible/group_vars/all/vault.yml`. Decrypted at runtime
+  using `.vault_pass` (gitignored).
+- **`ansible.log` is disabled** in `ansible/ansible.cfg` — `ansible-inventory --host`
+  and any debug task that prints vars dumps decrypted hostvars to log_path,
+  so we don't write logs to disk. See the comment in ansible.cfg.
+- **Home Assistant** secrets in `/config/secrets.yaml` on the HA host
+  (gitignored locally; see `homeassistant/secrets.yaml.example`).
 
 ## Linting & CI
 
