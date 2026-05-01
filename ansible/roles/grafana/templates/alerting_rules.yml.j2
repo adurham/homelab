@@ -59,6 +59,60 @@ groups:
           severity: critical
         isPaused: false
 
+      - uid: tanium_console_unreachable
+        title: Tanium console unreachable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: probe_success{job="blackbox_tanium_console"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "{{ '{{' }} $labels.instance {{ '}}' }} ({{ '{{' }} $labels.tanium_role {{ '}}' }}) console unreachable on {{ '{{' }} $labels.target {{ '}}' }}"
+          description: "blackbox TCP probe to {{ '{{' }} $labels.target {{ '}}' }} (Tanium console :443) has failed for 5 minutes — httpd down, Tanium services crashed, or the appliance is fully down. If postgres is also unreachable for the same host, the appliance is down."
+        labels:
+          severity: critical
+        isPaused: false
+
       - uid: tanium_postgres_unreachable
         title: Tanium postgres unreachable
         condition: C
