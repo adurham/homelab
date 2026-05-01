@@ -10,8 +10,8 @@ policies:
     repeat_interval: 4h
     routes:
 {% if healthchecks_dms_ping_url is defined and healthchecks_dms_ping_url %}
-      # Dead-man's-switch route. The `dms_enabled = "true"` matcher catches
-      # only the always-firing `dead_mans_switch` rule and routes ONLY to
+      # Dead-man's-switch route. The `dms = "true"` matcher catches only
+      # the always-firing `dead_mans_switch` rule and routes ONLY to
       # healthchecks.io — `continue: false` prevents fanout to HA/email,
       # which would mean a notification every 5m on those channels.
       # repeat_interval = 5m gives healthchecks (period=5m) a fresh ping

@@ -23,17 +23,16 @@ grafana_admin_password: !vault |
 # `dead_mans_switch` rule POSTs to this URL via the `healthchecks_dms`
 # contact point every 5m; if pings stop, healthchecks pages out-of-band.
 # The whole DMS pipeline (rule + contact point + policy) is gated on this
-# var being set — uncomment + populate when the healthchecks check exists.
-#
-# To populate: create a check at https://healthchecks.io (period=5m,
-# grace=15m), then run
-#   ansible-vault encrypt_string --name healthchecks_dms_ping_url \
-#       'https://hc-ping.com/<your-uuid-here>'
-# and paste the resulting block here (uncommented).
-#
-# healthchecks_dms_ping_url: !vault |
-#           $ANSIBLE_VAULT;1.1;AES256
-#           ...
+# var being set, so removing this block disables the feature cleanly.
+healthchecks_dms_ping_url: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          64373163623163333034366130343135366531623034613930626363323531616430626134653931
+          6135636136616339353162646333376534633434383839380a633263623664663464333733613164
+          35616238353931666135653563613938626365356462323364356665343936663438353461623663
+          6633613433663165640a373862396138376462386233303062636466376665633731663137633437
+          39303339653033663436366132613536663435373734663139613736353239373464643632343062
+          39613235386264336665373963646438623536383465343438653439646661313261616239306230
+          353631636331656265303266333232633433
 
 # Webhook ID HA listens on for Grafana alerts; must match
 # /config/secrets.yaml: grafana_alert_webhook_id on the HA host.
