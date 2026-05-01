@@ -71,7 +71,9 @@
     },
     {
       "customType": "regex",
-      "fileMatch": ["^ansible/roles/grafana/defaults/main\\.yml$"],
+      "managerFilePatterns": [
+        "/^ansible/roles/grafana/defaults/main\\.yml$/"
+      ],
       "matchStrings": ["grafana_image_renderer_version:\\s*\"(?<currentValue>[^\"]+)\""],
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "grafana/grafana-image-renderer"
