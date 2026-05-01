@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
     command: server
     extra_hosts:
-      - "mail.chi.lab.amd-e.com:172.16.0.40"
+      - "mail.chi.lab.amd-e.com:{{ ip_mail_server }}"
     environment:
       AUTHENTIK_REDIS__HOST: redis
       AUTHENTIK_POSTGRESQL__HOST: postgresql
@@ -62,7 +62,7 @@ services:
     restart: unless-stopped
     command: worker
     extra_hosts:
-      - "mail.chi.lab.amd-e.com:172.16.0.40"
+      - "mail.chi.lab.amd-e.com:{{ ip_mail_server }}"
     environment:
       AUTHENTIK_REDIS__HOST: redis
       AUTHENTIK_POSTGRESQL__HOST: postgresql
