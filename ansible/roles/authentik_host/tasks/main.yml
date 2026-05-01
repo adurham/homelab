@@ -1,8 +1,13 @@
 ---
-- name: Check if Authentik CT exists
-  ansible.builtin.shell: pct list | grep 100
+# Cluster-wide existence check. `pct list` is node-local; HA can migrate
+# the CT to any node, so we ask pmxcfs for the full cluster resource list.
+# rc=0 means the CT exists somewhere in the cluster.
+- name: Check if Authentik CT exists in cluster
+  ansible.builtin.shell: |
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==100 for r in json.load(sys.stdin)) else 1)'
   register: authentik_host_ct_check
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Update Template Database
@@ -40,6 +45,12 @@
   ansible.builtin.command: pct start 100
   changed_when: true
   when: authentik_host_ct_check.rc != 0
+
+# openssh-server ships with the Ubuntu LXC template but is not enabled by
+# default. Enable it before the network-wait loop so the loop succeeds.
+- name: Ensure SSH is enabled and running
+  ansible.builtin.command: pct exec 100 -- systemctl enable --now ssh
+  changed_when: false
 
 - name: Wait for Container Network (via Gateway)
   ansible.builtin.shell: pct exec 101 -- timeout 1 bash -c "cat < /dev/null > /dev/tcp/{{ ip_authentik }}/22"

@@ -8,8 +8,13 @@
   args:
     creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
 
-- name: Check if Proxy Container Exists
-  ansible.builtin.command: pct config 108
+# Cluster-wide existence check. `pct config` is node-local; HA can migrate
+# the CT to any node, so we ask pmxcfs for the full cluster resource list.
+# rc=0 means the CT exists somewhere in the cluster.
+- name: Check if Proxy Container Exists in cluster
+  ansible.builtin.shell: |
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==108 for r in json.load(sys.stdin)) else 1)'
   register: pct_check
   failed_when: false
   changed_when: false
@@ -80,3 +85,10 @@
   ansible.builtin.command: pct set 108 -net0 name=eth0,bridge=private,ip={{ ip_proxy }}/24,gw={{ net_private_gw }},firewall=1
   when: pct_check.rc != 0 or (ip_check.rc == 0) # Apply if created or existing
   changed_when: false # Don't report change every time for now (lazy)
+
+# openssh-server ships with the Ubuntu LXC template but is not enabled by
+# default. Without this the CT is only reachable via `pct exec` from the
+# proxmox host — direct SSH from ansible against the CT's IP fails.
+- name: Ensure SSH is enabled and running
+  ansible.builtin.command: pct exec 108 -- systemctl enable --now ssh
+  changed_when: false
