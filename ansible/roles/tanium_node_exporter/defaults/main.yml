@@ -1,0 +1,8 @@
+---
+# Track in lockstep with common_monitoring's node_exporter_version. Renovate
+# tracks this var separately because it's a different role file path.
+tanium_node_exporter_version: "1.11.1"
+
+# vm-01's private-subnet IP — the only host that should be allowed to
+# scrape :9100 on the Tanium appliances. Sourced from group_vars/all/vars.yml.
+tanium_node_exporter_scrape_src: "{{ ip_vm }}"

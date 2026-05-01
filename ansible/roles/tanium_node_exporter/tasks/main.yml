@@ -1,0 +1,123 @@
+---
+# This role installs node_exporter on Tanium TanOS appliances. TanOS is
+# Rocky 8.10 underneath but with hardened defaults: SELinux Enforcing,
+# `iptables -P INPUT DROP`, no firewalld, no package install of monitoring
+# agents. We do NOT use roles/common_monitoring because its RHEL path
+# runs `nft flush ruleset`, which would undo Tanium's static rules.
+
+- name: Create node_exporter group
+  ansible.builtin.group:
+    name: node_exporter
+    state: present
+    system: true
+  become: true
+
+- name: Create node_exporter user
+  ansible.builtin.user:
+    name: node_exporter
+    group: node_exporter
+    shell: /sbin/nologin
+    create_home: false
+    system: true
+  become: true
+
+# Tanium appliances have no direct internet egress on the private subnet.
+# Route the download through the lab's squid proxy (proxy-01:3129).
+- name: Download node_exporter (via lab proxy)
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ tanium_node_exporter_version }}/node_exporter-{{ tanium_node_exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/node_exporter-{{ tanium_node_exporter_version }}.linux-amd64.tar.gz"
+    mode: '0644'
+  environment:
+    https_proxy: "http://{{ ip_proxy }}:3129"
+    http_proxy: "http://{{ ip_proxy }}:3129"
+  become: true
+
+- name: Extract node_exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/node_exporter-{{ tanium_node_exporter_version }}.linux-amd64.tar.gz"
+    dest: /tmp/
+    remote_src: true
+    creates: "/tmp/node_exporter-{{ tanium_node_exporter_version }}.linux-amd64/node_exporter"
+  become: true
+
+- name: Install binary
+  ansible.builtin.copy:
+    src: "/tmp/node_exporter-{{ tanium_node_exporter_version }}.linux-amd64/node_exporter"
+    dest: /usr/local/bin/node_exporter
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+  notify: Restart tanium node_exporter
+
+# /usr/local/bin gets `bin_t` SELinux context by default, so a binary
+# placed there inherits it. systemd-spawned services run with appropriate
+# context. If denials appear, run `audit2allow -a` and load a policy
+# module — but the default for /usr/local/bin should work for
+# node_exporter's read-only scraping of /proc + /sys.
+- name: Deploy systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/node_exporter.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Node Exporter (homelab monitoring)
+      After=network.target
+
+      [Service]
+      User=node_exporter
+      Group=node_exporter
+      Type=simple
+      ExecStart=/usr/local/bin/node_exporter
+
+      [Install]
+      WantedBy=multi-user.target
+  become: true
+  notify: Restart tanium node_exporter
+
+# Insert an INPUT rule allowing TCP/9100 from vm-01 only. Use `iptables -C`
+# to make this idempotent (only insert if not already present). NOT a
+# blanket 0.0.0.0/0 ACCEPT — Tanium's firewall posture stays restrictive.
+- name: Check if iptables rule already exists
+  ansible.builtin.shell: |
+    iptables -C INPUT -p tcp -s {{ tanium_node_exporter_scrape_src }} --dport 9100 -j ACCEPT
+  register: ipt_check
+  failed_when: false
+  changed_when: false
+  become: true
+
+- name: Insert iptables rule for node_exporter scrape
+  ansible.builtin.shell: |
+    iptables -I INPUT -p tcp -s {{ tanium_node_exporter_scrape_src }} --dport 9100 -j ACCEPT \
+      -m comment --comment "node_exporter from vm-01"
+  when: ipt_check.rc != 0
+  become: true
+
+# Persist the rule into /etc/sysconfig/iptables so it survives reboot.
+# Using `iptables-save` overwrites the file with current runtime state —
+# safe because we just added the rule we want.
+- name: Persist iptables rules
+  ansible.builtin.shell: iptables-save > /etc/sysconfig/iptables
+  when: ipt_check.rc != 0
+  become: true
+  args:
+    executable: /bin/bash
+
+- name: Start and enable node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: Cleanup tmp
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/node_exporter-{{ tanium_node_exporter_version }}.linux-amd64.tar.gz"
+    - "/tmp/node_exporter-{{ tanium_node_exporter_version }}.linux-amd64"
+  become: true
