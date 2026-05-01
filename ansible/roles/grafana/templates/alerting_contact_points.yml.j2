@@ -13,7 +13,7 @@ contactPoints:
   # Fallback path: emails the operator via mail-01 -> iCloud SMTP relay.
   # If HA is down, the webhook above fails and notifications drop. Email
   # via mail-01 doesn't depend on HA. Doesn't help if mail-01 is also
-  # down -- for that, an external check is needed (deferred).
+  # down -- for that, the dead-man's-switch below covers external paging.
   - orgId: 1
     name: email
     receivers:
@@ -23,3 +23,20 @@ contactPoints:
         settings:
           addresses: "{{ alert_email_to }}"
           singleEmail: false
+{% if healthchecks_dms_ping_url is defined and healthchecks_dms_ping_url %}
+
+  # Dead-man's-switch: receives pings from the always-firing
+  # `dead_mans_switch` rule. healthchecks.io expects a hit every N min;
+  # if pings stop, healthchecks pages out-of-band — catches the failure
+  # mode where Grafana / network / mail-01 are all down at once and the
+  # other two contact points can't deliver.
+  - orgId: 1
+    name: healthchecks_dms
+    receivers:
+      - uid: healthchecks_dms
+        type: webhook
+        disableResolveMessage: true
+        settings:
+          url: "{{ healthchecks_dms_ping_url }}"
+          httpMethod: POST
+{% endif %}

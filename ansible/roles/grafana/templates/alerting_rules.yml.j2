@@ -714,6 +714,74 @@ groups:
           severity: warning
         isPaused: false
 
+      # ---------------------------------------------------------------------
+      # Dead-man's-switch — always-firing meta alert. Routed exclusively to
+      # the healthchecks.io webhook (see policies + contact_points). If
+      # healthchecks stops getting pings, the alert pipeline is broken
+      # (Grafana down, network out, or the rule eval engine itself wedged)
+      # and healthchecks pages out-of-band. Gated on healthchecks_dms_ping_url
+      # so the rule disappears entirely when the URL isn't configured —
+      # avoids a non-routed alert spamming HA/email every 5m.
+      # ---------------------------------------------------------------------
+{% if healthchecks_dms_ping_url is defined and healthchecks_dms_ping_url %}
+      - uid: dead_mans_switch
+        title: Dead man's switch
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "1"
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+              type: math
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        # noDataState moot (constant expression never produces NoData).
+        # execErrState=Error so an expression-engine failure stops pings —
+        # that's the whole point of a DMS, never mask a real outage.
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Alert pipeline alive (dead man's switch)"
+          description: "If healthchecks.io stops receiving these pings, Grafana / rule-eval / network is broken — page out-of-band."
+        labels:
+          severity: meta
+          dms: "true"
+        isPaused: false
+
+{% endif %}
       - uid: log_postgres_fatal
         title: Postgres FATAL/PANIC
         condition: C
