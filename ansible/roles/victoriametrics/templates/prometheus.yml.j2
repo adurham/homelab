@@ -28,6 +28,17 @@ scrape_configs:
         replacement: '$1'
 
   # ---------------------------------------------------------------------
+  # Loki's own metrics. Loki exposes /metrics on the same port (3100) it
+  # uses for the push API. Lets us alert on Loki's internal health
+  # (ingestion errors, write failures) before logs stop flowing.
+  # ---------------------------------------------------------------------
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['127.0.0.1:3100']
+        labels:
+          instance: 'vm-01'
+
+  # ---------------------------------------------------------------------
   # Blackbox-driven probes (Tanium postgres reachability + cert expiry)
   # blackbox_exporter runs alongside victoria-metrics-prod on this host.
   # ---------------------------------------------------------------------

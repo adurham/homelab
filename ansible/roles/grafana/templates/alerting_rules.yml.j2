@@ -329,6 +329,63 @@ groups:
           severity: warning
         isPaused: false
 
+      - uid: loki_write_errors
+        title: Loki rejecting writes
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # Rate of 5xx responses on Loki's push API. >0 means Promtail
+              # somewhere is failing to ship logs, and we lose log_* alert
+              # substrate. Different failure mode than disk pressure (which
+              # would also surface here, but earlier than that fires).
+              expr: sum(rate(loki_request_duration_seconds_count{job="loki",route="loki_api_v1_push",status_code=~"5.."}[5m]))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Loki rejecting push requests on vm-01"
+          description: "Loki's /loki/api/v1/push endpoint is returning 5xx responses for 5+ minutes — Promtails somewhere are failing to ship logs. Check `loki_panic_total`, `loki_distributor_ingester_append_failures_total`, and the loki.service journal."
+        labels:
+          severity: critical
+        isPaused: false
+
       - uid: loki_disk_pressure
         title: Loki disk pressure on vm-01
         condition: C
