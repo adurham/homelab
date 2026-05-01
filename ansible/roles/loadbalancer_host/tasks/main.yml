@@ -39,10 +39,16 @@
   register: lxc_create
 
 - name: Start Load Balancer LXC
+  # Only start right after creation (matches the lxc_create gate). After
+  # that, HA (or the operator) owns the running-state. The "already
+  # running" tolerance is defensive for the edge where create reports
+  # changed but something else started the CT first.
   delegate_to: "{{ target_node }}"
-  ansible.builtin.shell: "pct start {{ lxc_id }}"
-  when: lxc_create.changed or (lxc_check.rc == 0 and "running" not in lxc_check.stdout)
-  ignore_errors: true
+  ansible.builtin.command: "pct start {{ lxc_id }}"
+  register: lxc_start
+  failed_when: lxc_start.rc != 0 and "already running" not in lxc_start.stderr
+  changed_when: lxc_start.rc == 0
+  when: lxc_check.rc != 0
 
 - name: Check if Net1 exists
   delegate_to: "{{ target_node }}"
@@ -57,20 +63,6 @@
   delegate_to: "{{ target_node }}"
   ansible.builtin.shell: "pct set {{ lxc_id }} -net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1"
   when: lxc_check.rc == 0 and net1_check.rc != 0
-
-- name: Ensure Proxy Firewall Configuration
-  ansible.builtin.copy:
-    dest: "/etc/pve/firewall/{{ lxc_id }}.fw"
-    content: |
-      [OPTIONS]
-      enable: 1
-
-      [RULES]
-      IN ACCEPT -p tcp -dport 3128
-    owner: root
-    group: www-data
-    mode: '0640'
-  delegate_to: "{{ proxmox_host }}"
 
 - name: Ensure SSH Service is Running
   delegate_to: "{{ target_node }}"
