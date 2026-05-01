@@ -27,7 +27,7 @@
     --cores {{ lxc_cores }}
     --memory {{ lxc_memory }}
     --swap {{ lxc_swap }}
-    --net0 name=eth0,bridge=private,ip={{ lxc_net_ip }},gw={{ lxc_net_gw }},firewall=1
+    --net0 name=eth0,bridge=private,ip={{ lxc_net_ip }},firewall=1
     --net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1
     --password {{ lb_01_root_pass }}
     --features nesting=1
