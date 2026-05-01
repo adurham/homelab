@@ -1,4 +1,15 @@
 ---
+- name: Remove orphan apt-packaged prometheus-node-exporter
+  # pre-existing on pve hosts from before the role-managed install
+  # attempts. With pve now on Alloy (which serves :9100-shape metrics
+  # via prometheus.exporter.unix), this apt package is dead weight that
+  # used to silently fight roles/common_monitoring/'s installer for the
+  # :9100 port. Purge it so the pve host has a single agent identity.
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: absent
+    purge: true
+
 - name: Render /etc/network/interfaces.d/private-monitoring
   ansible.builtin.template:
     src: private-monitoring.j2

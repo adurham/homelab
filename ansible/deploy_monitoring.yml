@@ -26,36 +26,26 @@
   # by default — without an IP on the bridge, Alloy push to vm-01:8428
   # routes via the LAN gateway and times out. This play assigns each pve
   # host a private-subnet IP (172.16.0.{2,3,4}) and hardens inbound on
-  # that interface via pve-firewall. Must run before the Install
+  # that interface via plain iptables. Must run before the Install
   # Telemetry Agents play so alloy has a working push path.
   hosts: proxmox_nodes
   gather_facts: false
   roles:
     - pve_private_ip
 
-- name: Install Telemetry Agents (private_subnet + tanium_clients)
+- name: Install Telemetry Agents
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster
   gather_facts: true
-  # alloy_cutover hosts run alloy (push to VM + Loki). Non-cutover hosts
-  # (tanium_clients — mixed RHEL/SUSE/Debian, alloy role is .deb-only) stay
-  # on legacy node_exporter+promtail. See docs/promtail-to-alloy-plan.md.
+  # All hosts in scope are now on Alloy (logs + metrics in one agent).
+  # The legacy promtail + node_exporter cleanup tasks are kept as
+  # idempotent defensive cleanup — no-op on freshly-deployed hosts but
+  # safe if any are reintroduced. See docs/promtail-to-alloy-plan.md.
   tasks:
-    - name: Install node_exporter (legacy — skipped on alloy_cutover hosts)
-      ansible.builtin.include_role:
-        name: common_monitoring
-      when: inventory_hostname not in groups.get('alloy_cutover', [])
-
-    - name: Install promtail (legacy — skipped on alloy_cutover hosts)
-      ansible.builtin.include_role:
-        name: promtail
-      when: inventory_hostname not in groups.get('alloy_cutover', [])
-
     - name: Install alloy
       ansible.builtin.include_role:
         name: alloy
-      when: inventory_hostname in groups.get('alloy_cutover', [])
 
-    - name: Stop+disable legacy agents on alloy_cutover hosts
+    - name: Stop+disable any leftover legacy agents
       ansible.builtin.systemd:
         name: "{{ item }}"
         state: stopped
@@ -63,10 +53,9 @@
       loop:
         - promtail
         - node_exporter
-      when: inventory_hostname in groups.get('alloy_cutover', [])
       failed_when: false
 
-    - name: Remove legacy unit files + binaries + state on alloy_cutover hosts
+    - name: Remove leftover legacy unit files + binaries + state
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
@@ -77,25 +66,17 @@
         - /usr/local/bin/node_exporter
         - /etc/promtail
         - /var/lib/promtail
-      when: inventory_hostname in groups.get('alloy_cutover', [])
-      register: legacy_removal
+      notify: Reload systemd
 
-    - name: Reload systemd if legacy unit files were removed
+  handlers:
+    - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: true
-      when:
-        - inventory_hostname in groups.get('alloy_cutover', [])
-        - legacy_removal is changed
 
 - name: Configure VictoriaMetrics
   hosts: victoriametrics
   gather_facts: true
   tasks:
-    - name: Install node_exporter (legacy — skipped on alloy_cutover hosts)
-      ansible.builtin.include_role:
-        name: common_monitoring
-      when: inventory_hostname not in groups.get('alloy_cutover', [])
-
     - name: Install victoriametrics
       ansible.builtin.include_role:
         name: victoriametrics
@@ -108,106 +89,25 @@
       ansible.builtin.include_role:
         name: loki
 
-    - name: Install promtail (legacy — skipped on alloy_cutover hosts)
-      ansible.builtin.include_role:
-        name: promtail
-      when: inventory_hostname not in groups.get('alloy_cutover', [])
-
     - name: Install alloy
       ansible.builtin.include_role:
         name: alloy
-      when: inventory_hostname in groups.get('alloy_cutover', [])
-
-    - name: Stop+disable legacy agents on alloy_cutover hosts
-      ansible.builtin.systemd:
-        name: "{{ item }}"
-        state: stopped
-        enabled: false
-      loop:
-        - promtail
-        - node_exporter
-      when: inventory_hostname in groups.get('alloy_cutover', [])
-      failed_when: false
-
-    - name: Remove legacy unit files + binaries + state on alloy_cutover hosts
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /etc/systemd/system/promtail.service
-        - /etc/systemd/system/node_exporter.service
-        - /usr/local/bin/promtail
-        - /usr/local/bin/node_exporter
-        - /etc/promtail
-        - /var/lib/promtail
-      when: inventory_hostname in groups.get('alloy_cutover', [])
-      register: legacy_removal
-
-    - name: Reload systemd if legacy unit files were removed
-      ansible.builtin.systemd:
-        daemon_reload: true
-      when:
-        - inventory_hostname in groups.get('alloy_cutover', [])
-        - legacy_removal is changed
 
 - name: Configure Grafana
   hosts: grafana
   gather_facts: true
   # Secrets loaded from group_vars/all.yml.
   tasks:
-    - name: Install node_exporter (legacy — skipped on alloy_cutover hosts)
-      ansible.builtin.include_role:
-        name: common_monitoring
-      when: inventory_hostname not in groups.get('alloy_cutover', [])
-
     - name: Install grafana
       ansible.builtin.include_role:
         name: grafana
 
-    - name: Install promtail (legacy — skipped on alloy_cutover hosts)
-      ansible.builtin.include_role:
-        name: promtail
-      when: inventory_hostname not in groups.get('alloy_cutover', [])
-
     - name: Install alloy
       ansible.builtin.include_role:
         name: alloy
-      when: inventory_hostname in groups.get('alloy_cutover', [])
 
-    - name: Stop+disable legacy agents on alloy_cutover hosts
-      ansible.builtin.systemd:
-        name: "{{ item }}"
-        state: stopped
-        enabled: false
-      loop:
-        - promtail
-        - node_exporter
-      when: inventory_hostname in groups.get('alloy_cutover', [])
-      failed_when: false
-
-    - name: Remove legacy unit files + binaries + state on alloy_cutover hosts
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /etc/systemd/system/promtail.service
-        - /etc/systemd/system/node_exporter.service
-        - /usr/local/bin/promtail
-        - /usr/local/bin/node_exporter
-        - /etc/promtail
-        - /var/lib/promtail
-      when: inventory_hostname in groups.get('alloy_cutover', [])
-      register: legacy_removal
-
-    - name: Reload systemd if legacy unit files were removed
-      ansible.builtin.systemd:
-        daemon_reload: true
-      when:
-        - inventory_hostname in groups.get('alloy_cutover', [])
-        - legacy_removal is changed
-
-# Tanium appliances need a different role — common_monitoring's RHEL path
-# does `nft flush ruleset` which would wipe TanOS's hardened firewall.
+# Tanium appliances need a different role — common_monitoring's old RHEL
+# path did `nft flush ruleset` which would wipe TanOS's hardened firewall.
 # tanium_node_exporter installs node_exporter with a single targeted
 # iptables INPUT rule (allow vm-01 to scrape :9100), nothing else.
 - name: Install Node Exporter on Tanium appliances

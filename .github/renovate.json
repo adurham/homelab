@@ -8,12 +8,6 @@
   "prConcurrentLimit": 6,
   "packageRules": [
     {
-      "description": "Promtail was removed from Loki releases at v3.7.0 — Grafana is deprecating Promtail for Alloy. Renovate would 404 on every Promtail bump from now on. Disable tracking until we migrate. See docs/promtail-to-alloy-plan.md.",
-      "matchManagers": ["custom.regex"],
-      "matchFileNames": ["ansible/roles/promtail/defaults/main.yml"],
-      "enabled": false
-    },
-    {
       "description": "Default reviewer / assignee for all renovate PRs",
       "matchManagers": ["custom.regex"],
       "assignees": ["adurham"]
@@ -33,9 +27,9 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "/^ansible/roles/common_monitoring/defaults/main\\.yml$/"
+        "/^ansible/roles/tanium_node_exporter/defaults/main\\.yml$/"
       ],
-      "matchStrings": ["node_exporter_version:\\s*\"(?<currentValue>[^\"]+)\""],
+      "matchStrings": ["tanium_node_exporter_version:\\s*\"(?<currentValue>[^\"]+)\""],
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "prometheus/node_exporter",
       "extractVersionTemplate": "^v(?<version>.+)$"
@@ -56,16 +50,6 @@
         "/^ansible/roles/loki/defaults/main\\.yml$/"
       ],
       "matchStrings": ["loki_version:\\s*\"(?<currentValue>[^\"]+)\""],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "grafana/loki",
-      "extractVersionTemplate": "^v(?<version>.+)$"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/^ansible/roles/promtail/defaults/main\\.yml$/"
-      ],
-      "matchStrings": ["promtail_version:\\s*\"(?<currentValue>[^\"]+)\""],
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "grafana/loki",
       "extractVersionTemplate": "^v(?<version>.+)$"
