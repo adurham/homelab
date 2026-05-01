@@ -1,0 +1,29 @@
+name: Renovate
+
+on:
+  schedule:
+    # Mondays 08:00 UTC = 03:00 CT — Renovate filters its own actions via
+    # the `schedule` field in renovate.json, so this just gives it a chance
+    # to wake up; it'll only open PRs in the configured window.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Renovate
+        uses: renovatebot/github-action@v40.3.6
+        with:
+          configurationFile: .github/renovate.json
+          # PAT must have repo + workflow scopes so Renovate can open PRs
+          # that touch .github/workflows/. Configure as a repo secret named
+          # RENOVATE_TOKEN. The default GITHUB_TOKEN won't work for
+          # renovatebot/github-action.
+          token: ${{ secrets.RENOVATE_TOKEN }}

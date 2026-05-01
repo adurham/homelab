@@ -1,4 +1,6 @@
 ---
+victoriametrics_version: "1.97.1"
+
 # homeassistant_token comes from inventory/group_vars/all.yml (vault-encrypted)
 
 # Public-facing HTTPS endpoints we probe for cert expiry + reachability.

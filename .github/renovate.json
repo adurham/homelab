@@ -1,0 +1,63 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard"],
+  "labels": ["dependencies"],
+  "schedule": ["before 9am on monday"],
+  "timezone": "America/Chicago",
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 6,
+  "packageRules": [
+    {
+      "description": "Group loki + promtail since they ship from the same release",
+      "matchPackageNames": ["grafana/loki"],
+      "groupName": "loki + promtail"
+    },
+    {
+      "description": "Default reviewer / assignee for all renovate PRs",
+      "matchManagers": ["custom.regex"],
+      "assignees": ["adurham"]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["^ansible/roles/blackbox_exporter/defaults/main\\.yml$"],
+      "matchStrings": ["blackbox_exporter_version:\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "prometheus/blackbox_exporter",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^ansible/roles/common_monitoring/defaults/main\\.yml$"],
+      "matchStrings": ["node_exporter_version:\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "prometheus/node_exporter",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^ansible/roles/victoriametrics/defaults/main\\.yml$"],
+      "matchStrings": ["victoriametrics_version:\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "VictoriaMetrics/VictoriaMetrics",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^ansible/roles/(loki|promtail)/defaults/main\\.yml$"],
+      "matchStrings": ["(loki|promtail)_version:\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "grafana/loki",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^ansible/roles/grafana/defaults/main\\.yml$"],
+      "matchStrings": ["go_version:\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "golang/go",
+      "extractVersionTemplate": "^go(?<version>.+)$"
+    }
+  ]
+}
