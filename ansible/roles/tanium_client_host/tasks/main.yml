@@ -50,7 +50,7 @@
         --net0 name=eth0,bridge={{ hostvars[item].vm_bridge }},ip={{ hostvars[item].ansible_host }}/24,gw={{ hostvars[item].vm_gw }}
         --storage {{ hostvars[item].vm_storage }}
         --rootfs {{ hostvars[item].vm_storage }}:{{ hostvars[item].vm_disk }}
-        --nameserver 172.16.0.10
+        --nameserver {{ ip_dns_primary }}
         --searchdomain chi.lab.amd-e.com
         --unprivileged 1
         --features nesting=1

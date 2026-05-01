@@ -22,7 +22,7 @@
 
       [Service]
       Type=oneshot
-      ExecStart=/usr/bin/arping -A -c 5 -I eth0 172.16.0.12
+      ExecStart=/usr/bin/arping -A -c 5 -I eth0 {{ ip_proxy }}
       RemainAfterExit=yes
 
       [Install]

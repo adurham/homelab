@@ -55,4 +55,4 @@ refresh_pattern -i (/cgi-bin/|\?) 0	0%	0
 refresh_pattern .		0	20%	4320
 
 # DNS Servers (Use internal DNS)
-dns_nameservers 172.16.0.10
+dns_nameservers {{ ip_dns_primary }}

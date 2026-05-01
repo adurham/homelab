@@ -6,38 +6,45 @@ $TTL    604800
                         2419200         ; Expire
                          604800 )       ; Negative Cache TTL
 ;
+; All A-record IPs come from group_vars/all/vars.yml (ip_* vars). Keep this
+; file as a pure projection of those — never inline a literal IP. When a
+; service moves, the ip_* var changes once and DNS picks it up on the next
+; deploy. Past lesson: vm-01/mail-01 IP collision bit because inventory
+; drifted from vars.yml; same class of risk applies here.
 @       IN      NS      dns.chi.lab.amd-e.com.
-@       IN      A       172.16.0.10  ; Private IP
+@       IN      A       {{ ip_dns_primary }}  ; Private IP
 
 ; Name Servers
-dns     IN      A       172.16.0.10
+dns     IN      A       {{ ip_dns_primary }}
 
-; Proxmox Nodes (LAN IPs)
+; Proxmox Nodes (LAN IPs — defined inline in inventory/proxmox.yml; not
+; on the private subnet so no ip_* var)
 pve01   IN      A       192.168.86.11
 pve02   IN      A       192.168.86.12
 pve03   IN      A       192.168.86.13
 
-; Configure Tanium Cluster
+; Configure Tanium Cluster (private-subnet hardcoded IPs in
+; inventory/proxmox.yml — see ipam.md for why those aren't in vars.yml)
 ts-01   IN      A       172.16.0.51
 ts-02   IN      A       172.16.0.52
 tms-01  IN      A       172.16.0.53
 tms-02  IN      A       172.16.0.54
 tzs-01  IN      A       172.16.0.55
 tzs-02  IN      A       172.16.0.56
-ntp-01  IN      A       172.16.0.11
+ntp-01  IN      A       {{ ip_ntp_server }}
 
 ; Tanium VIP (Load Balancer)
-tanium  IN      A       172.16.0.30
+tanium  IN      A       {{ ip_loadbalancer }}
 
 ; Authentik (Private IP - requires route/Tailscale)
-auth    IN      A       172.16.0.30 ; Load Balancer VIP
-authentik IN    A       172.16.0.20 ; Container Direct IP
-proxmox IN      A       172.16.0.30
-whoami  IN      A       172.16.0.30
+auth    IN      A       {{ ip_loadbalancer }} ; Load Balancer VIP
+authentik IN    A       {{ ip_authentik }} ; Container Direct IP
+proxmox IN      A       {{ ip_loadbalancer }}
+whoami  IN      A       {{ ip_loadbalancer }}
 
-; Observability
-grafana         IN      A       172.16.0.30
-victoriametrics IN      A       172.16.0.30
+; Observability (front by lb-01 — internal-only ACL in nginx)
+grafana         IN      A       {{ ip_loadbalancer }}
+victoriametrics IN      A       {{ ip_loadbalancer }}
 
 ; Wildcard (Optional - helps with subdomains)
 ; Wildcard (Optional - helps with subdomains)
