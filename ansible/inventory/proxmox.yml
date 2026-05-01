@@ -53,7 +53,12 @@ all:
     tailscale:
       hosts:
         tailscale-gw:
-          ansible_host: 172.16.0.101
+          # Use the LAN IP, not the private-subnet IP (172.16.0.101). Reaching
+          # the gateway via 172.16.0.x is circular — Tailscale won't route to
+          # its own subnet-router host through itself. The Tailscale IP
+          # (100.86.168.35) gets intercepted by Tailscale SSH and requires
+          # browser auth, which breaks automation.
+          ansible_host: 192.168.86.32
           vmid: 101
           target_node: pve01
       vars:
@@ -76,6 +81,22 @@ all:
           target_node: pve03
       vars:
         ansible_user: root
+
+    # Parent group for all CTs on the 172.16.0.0/24 private subnet that need
+    # to be reached through the personal MacBook (Tailscale jump host) when
+    # ansible is invoked from the work MacBook. The actual ProxyCommand lives
+    # in inventory/group_vars/private_subnet.yml. monitoring has its own
+    # group_vars/monitoring.yml that overrides this for vm-01/graf-01 (same
+    # ProxyCommand value, kept distinct because monitoring predated this group).
+    private_subnet:
+      children:
+        loadbalancer:
+        authentik_server:
+        dns_server:
+        proxy_server:
+        tailscale:
+        mail_server:
+        ntp_server:
 
     # Tanium Cluster
     tanium_cluster:
