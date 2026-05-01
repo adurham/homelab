@@ -12,12 +12,23 @@
     cache_valid_time: 3600
   when: ansible_facts['os_family'] == 'Debian'
 
-- name: Install dependencies (RedHat)
+- name: Install dependencies (RedHat 9+)
   ansible.builtin.dnf:
     name:
       - ca-certificates
     state: present
-  when: ansible_facts['os_family'] == 'RedHat'
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - ansible_facts['distribution_major_version'] != '8'
+
+# EL8 ships python3.9 without python3-dnf bindings, so the dnf module errors.
+# Match the shell-fallback pattern in roles/tanium_client.
+- name: Install dependencies (RedHat 8 shell override)
+  ansible.builtin.shell: dnf install -y ca-certificates
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - ansible_facts['distribution_major_version'] == '8'
+  changed_when: false
 
 - name: Install dependencies (Suse)
   ansible.builtin.shell: zypper install -y ca-certificates
@@ -74,15 +85,27 @@
     - alloy_needs_install
   notify: Restart alloy
 
-- name: Install alloy package (RedHat)
+- name: Install alloy package (RedHat 9+)
   ansible.builtin.dnf:
     name: "/tmp/alloy-{{ alloy_version }}.rpm"
     state: present
     disable_gpg_check: true
   when:
     - ansible_facts['os_family'] == 'RedHat'
+    - ansible_facts['distribution_major_version'] != '8'
     - alloy_needs_install
   notify: Restart alloy
+
+- name: Install alloy package (RedHat 8 shell override)
+  ansible.builtin.shell: >
+    dnf install -y --nogpgcheck
+    /tmp/alloy-{{ alloy_version }}.rpm
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - ansible_facts['distribution_major_version'] == '8'
+    - alloy_needs_install
+  notify: Restart alloy
+  changed_when: true
 
 - name: Install alloy package (Suse)
   ansible.builtin.shell: >
