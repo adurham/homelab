@@ -256,17 +256,25 @@ Net change: roughly equal or slightly lower per host. Not a concern.
 
 **Total ~90 min focused.** Should be one session, not split.
 
-## Status as of 2026-05-01 (later, after Phase 3b)
+## Status as of 2026-05-01 (after Phase 3c — fully landed)
 
 - Loki: 3.7.1 (current)
-- Promtail: 3.0.0 (still installed on **pve01–03 only** — see blockers below)
-- node_exporter: 1.11.1 (still installed on **pve01–03 + tanium_cluster**;
-  pve hosts also have the Debian-packaged `prometheus-node-exporter` —
-  surprise discovery during the abortive 3a attempt)
-- Alloy: 1.16.0
-- Alloy migration: **complete on 22 of 25 hosts** — all 9 core LXCs +
-  all 13 tc-* tanium_clients (Debian, Ubuntu, Rocky, Alma, Oracle, RHEL,
-  SUSE). Outstanding: pve01/02/03 only.
+- Promtail: **gone** — `roles/promtail/` deleted, all hosts on Alloy.
+- node_exporter: 1.11.1 — installed only on `tanium_cluster` (TanOS
+  appliances), via the dedicated `roles/tanium_node_exporter/` role
+  with its own targeted firewall rule. Renovate now tracks the version
+  from `roles/tanium_node_exporter/defaults/main.yml`. The general
+  `roles/common_monitoring/` role is **deleted**.
+- Alloy: 1.16.0 — running on **all 25 manageable hosts**:
+  - 9 core LXCs (vm-01, graf-01, lb-01, authentik, dns-01, proxy-01,
+    tailscale-gw, mail-01, ntp-01)
+  - 13 tc-* tanium_clients (Debian/Ubuntu/Rocky/Alma/Oracle/RHEL/SUSE)
+  - pve01/02/03 (with new `roles/pve_private_ip/` providing a
+    private-subnet source IP for outbound push, hardened against
+    inbound via a plain-iptables rule in user chain)
+- Renovate: Promtail packageRule + manager **removed**. Alloy manager
+  active. node_exporter manager redirected to the
+  `roles/tanium_node_exporter/` file/var.
 
 ### What actually landed (vs. plan)
 
@@ -310,22 +318,26 @@ Net change: roughly equal or slightly lower per host. Not a concern.
   entries flow normally afterward. Promtail had the same property; we
   just hadn't observed it with positions files persisted.
 
-### What did NOT land
+### Final notes
 
-- `roles/common_monitoring/` not deleted — still installs node_exporter
-  on pve01-03 (with a footgun: it port-conflicts on `:9100` with the
-  apt-packaged `prometheus-node-exporter` already running on those
-  hosts, so the role's install has been silently failing on pve forever
-  — apt is the actual source of pve metrics).
-- `roles/promtail/` not deleted — still installs promtail on pve01-03.
-- `node_exporter_version` and `promtail_version` defaults not removed.
-- `docs/ipam.md` not edited (no IP changes).
-- **pve01/02/03 — blocked on routing.** pve hosts host the `private`
-  bridge but have no IP on it, so Alloy push to `vm-01:8428` (172.16.0.42)
-  routes via the LAN gateway and times out. Resolution requires assigning
-  pve hosts IPs on the private subnet (e.g., `.2/.3/.4`) via
-  `/etc/network/interfaces.d/sdn-private` or a Proxmox SDN Subnet config.
-  Tracked in memory `project_alloy_phase3_pve_blocker.md`.
-- **tc-debian11** had no IPv4 on `eth0` (CT 306 networking was wedged);
-  resolved with `ifdown && ifup eth0` inside the CT during 3b. Watch for
-  recurrence on next reboot.
+- **pve hosts now have an IP on `172.16.0.0/24`.** They host the
+  `private` SDN bridge but had no L3 endpoint there by default — Alloy
+  push to vm-01 routed via the LAN gateway and timed out. Fixed by
+  `roles/pve_private_ip/` which renders an `inet static` block in
+  `/etc/network/interfaces.d/private-monitoring` (.2/.3/.4) and
+  installs a plain-iptables INPUT rule in a `PRIVATE-MONITORING-IN`
+  user chain to block new inbound on that interface. The first attempt
+  used `pve-firewall host.fw enable: 1`, which broke cross-host VXLAN
+  forwarding for CTs — the user-chain approach doesn't trigger that
+  interaction.
+- **Surprise on pve hosts**: an apt-packaged `prometheus-node-exporter`
+  had been silently serving `:9100` and was the actual scrape target
+  all along. `roles/common_monitoring/`'s install had been failing on
+  the port conflict since forever. The pve_private_ip role now purges
+  the apt package as part of pve setup.
+- **tc-debian11** had no IPv4 on `eth0` (CT 306 networking was wedged
+  during 3b); resolved with `ifdown && ifup eth0` inside the CT. Watch
+  for recurrence on next reboot.
+- **`docs/ipam.md`** still untouched — IP allocation drift since the
+  original plan: pve01-03 now consume `.2/.3/.4`. Worth a sweep
+  separately.
