@@ -328,3 +328,114 @@ groups:
         labels:
           severity: warning
         isPaused: false
+
+      # ---------------------------------------------------------------------
+      # Loki-backed log alerts. These query the systemd-journal stream that
+      # Promtail ships from every host. Use noDataState=OK so a Promtail
+      # outage doesn't fire the alert (host_down would catch the underlying
+      # cause anyway). Use `for:` to dampen single-event noise.
+      # ---------------------------------------------------------------------
+
+      - uid: log_oom_kill
+        title: OOM kill detected
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              expr: 'sum by (host) (count_over_time({job="systemd-journal"} |~ "Out of memory|invoked oom-killer" [5m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "OOM killer ran on {{ '{{' }} $labels.host {{ '}}' }}"
+          description: "Kernel OOM killer or systemd-oomd terminated a process on {{ '{{' }} $labels.host {{ '}}' }} in the last 5 minutes — host is under memory pressure"
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: log_service_restart_loop
+        title: Systemd service restart loop
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "{{ '{{' }} $labels.unit {{ '}}' }} on {{ '{{' }} $labels.host {{ '}}' }} is restart-looping"
+          description: "More than 5 systemd 'Failed to start' / 'Start request repeated too quickly' messages for {{ '{{' }} $labels.unit {{ '}}' }} on {{ '{{' }} $labels.host {{ '}}' }} in the last 10 minutes"
+        labels:
+          severity: warning
+        isPaused: false
