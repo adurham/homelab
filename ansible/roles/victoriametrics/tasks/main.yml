@@ -12,12 +12,33 @@
     shell: /sbin/nologin
     system: true
 
+# Detect installed VictoriaMetrics version. `-version` prints to stderr
+# but exits 0 when the binary exists. Format: `victoria-metrics-<build>-tags-v1.X.Y-...`
+- name: Detect installed VictoriaMetrics version
+  ansible.builtin.command: /usr/local/bin/victoria-metrics-prod -version
+  register: current_vm
+  failed_when: false
+  changed_when: false
+
+# If the installed version doesn't match what we want, remove the binary
+# so the unarchive below isn't no-op'd by `creates:`. Same pattern as
+# roles/grafana's Go install — version bumps need a way to evict the
+# previous artifact.
+- name: Remove old VictoriaMetrics binary if version mismatched
+  ansible.builtin.file:
+    path: /usr/local/bin/victoria-metrics-prod
+    state: absent
+  when:
+    - current_vm.rc == 0
+    - ('v' + victoriametrics_version) not in (current_vm.stdout + current_vm.stderr)
+
 - name: Download VictoriaMetrics
   ansible.builtin.unarchive:
     src: "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v{{ victoriametrics_version }}/victoria-metrics-linux-amd64-v{{ victoriametrics_version }}.tar.gz"
     dest: /usr/local/bin/
     remote_src: true
     creates: /usr/local/bin/victoria-metrics-prod
+  notify: Restart VictoriaMetrics
 
 - name: Set permissions on binary
   ansible.builtin.file:
