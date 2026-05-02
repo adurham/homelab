@@ -289,14 +289,38 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 {{ security_headers }}
 
-    # IP source-of-truth: ip_vm in group_vars/all/vars.yml. Was hardcoded
-    # to 172.16.0.40 (mail-01) before the 2026-05-01 IP move and stuck
-    # there because this template wasn't templated.
+    # Authentik forward-auth (matches the whoami pattern). VM has no
+    # built-in auth and the FQDN is the only path that goes through
+    # lb-01 — Grafana datasource + Alloy remote_write hit vm-01:8428
+    # directly via the private subnet, so they bypass this gate.
+    # Provider/application provisioned by roles/authentik_provider/.
     location / {
+        auth_request /outpost.goauthentik.io/auth/nginx;
+        error_page 401 = @goauthentik_proxy_signin;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
+
         proxy_pass http://{{ ip_vm }}:8428;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /outpost.goauthentik.io {
+        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
+        proxy_set_header Host auth.chi.lab.amd-e.com;
+        proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
+    }
+
+    location @goauthentik_proxy_signin {
+        internal;
+        add_header Set-Cookie $auth_cookie;
+        return 302 /outpost.goauthentik.io/start?rd=$request_uri;
     }
 }
