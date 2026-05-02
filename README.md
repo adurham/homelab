@@ -77,12 +77,21 @@ Single-host metrics + logs stack on `vm-01` and `graf-01`:
   hosts. 14-day retention, filesystem storage. Loki is also a Grafana
   datasource — query logs in the same UI as metrics.
 - **Alerts** — Grafana unified alerting. Rules live in
-  `roles/grafana/templates/alerting_rules.yml.j2`. Includes metric-backed
-  alerts (host_down, disk_full, cert/probe alerts), log-backed alerts
-  (`log_oom_kill`, `log_service_restart_loop`, `log_ssh_brute_force`,
-  `log_kernel_io_error`, `log_postgres_fatal`), and a `dead_mans_switch`
-  meta-alert routed exclusively to a healthchecks.io webhook (so an
-  outage of Grafana / mail-01 / the LAN doesn't leave you blind).
+  `roles/grafana/templates/alerting_rules.yml.j2`. Categories:
+  - **Reachability**: `host_down`, `https_endpoint_unreachable`,
+    `tanium_postgres_unreachable`, `tanium_console_unreachable`.
+  - **Capacity / health**: `disk_full`, `loki_disk_pressure`,
+    `loki_write_errors`.
+  - **Cert lifecycle**: `cert_renewer_wedged` (warning at <30 days
+    runway — acme.sh's renewal cadence), `cert_expiring_soon`
+    (critical at <14 days; backstop).
+  - **Cluster**: `log_pve_replication_failed`, `log_pve_quorum_lost`.
+  - **Log-backed events**: `log_oom_kill`, `log_service_restart_loop`,
+    `log_ssh_brute_force`, `log_kernel_io_error`, `log_postgres_fatal`,
+    `log_postfix_relay_failure`.
+  - **Meta**: `dead_mans_switch` — always-firing rule routed exclusively
+    to a healthchecks.io webhook so an outage of Grafana / mail-01 /
+    the LAN doesn't leave you blind.
 - **Delivery** — Three contact points:
   1. Home Assistant webhook → iOS critical push (`severity=critical`
      overrides Do Not Disturb; warnings come in as normal pushes).
@@ -94,11 +103,39 @@ Single-host metrics + logs stack on `vm-01` and `graf-01`:
 ### Dependency tracking
 
 Self-hosted Renovate runs weekly via GitHub Actions
-(`.github/workflows/renovate.yml`). Tracks the version pins in role
-`defaults/main.yml` files (alloy, blackbox_exporter,
-tanium_node_exporter, victoriametrics, loki, golang/go,
-grafana_image_renderer) and opens PRs for upstream releases. Dashboard:
-GitHub issue #1 in this repo.
+(`.github/workflows/renovate.yml`). Tracks version pins in role
+`defaults/main.yml` files plus a few Docker image tags:
+
+- Binaries from GitHub releases: `alloy`, `blackbox_exporter`,
+  `tanium_node_exporter` (node_exporter), `victoriametrics`, `loki`,
+  `golang/go`, `grafana/grafana-image-renderer`.
+- Docker images: `ghcr.io/goauthentik/server`, `docker.io/library/postgres`,
+  `docker.io/library/redis` (all consumed by `roles/authentik_service/`).
+
+A second weekly Action (`.github/workflows/renovate-backlog.yml`) fails
+the run if more than 5 dependency-labeled PRs accumulate, so the
+dashboard issue #1 doesn't get ignored silently.
+
+### Security & access
+
+- **Login auth** — every operator-facing UI flows through Authentik:
+  Proxmox WebUI (OIDC), Grafana (OAuth2), Tanium console (SAML),
+  VictoriaMetrics + whoami (nginx forward-auth via the Authentik
+  embedded outpost). Grafana also has a local `admin` password as
+  documented emergency-access fallback.
+- **DNS** — `dns-01` (bind9) forwards upstream to AdGuard Home on the
+  homeassistant host, which handles the encrypted DoT/DoH egress to
+  Cloudflare and applies adblock lists. Lab queries fail closed if
+  AdGuard is down (`forward only;`).
+- **Per-CT firewalls** — authentik, mail-01, proxy-01, and all 6 Tanium
+  CTs have allow-listed inbound rules. Other service CTs (tailscale-gw,
+  dns-01, lb-01, ntp-01, vm-01, graf-01) live in the trusted-SDN zone.
+  See `docs/network-security.md` for the full threat model.
+- **pve hosts** — management plane (SSH, web UI, corosync) on `vmbr0`
+  LAN only. The `private` SDN endpoint added by `roles/pve_private_ip/`
+  is outbound-only via a `PRIVATE-MONITORING-IN` iptables drop chain.
+- **Secrets** — Ansible Vault for everything; `gitleaks` runs in CI
+  for accidental commits beyond pre-commit's PEM-only check.
 
 ## Repository Layout
 
@@ -130,8 +167,10 @@ Home Assistant configuration deployed to the HA host. Notable subsystems:
 ### `scripts/` — utilities
 
 - `bootstrap.sh` — restore terminal/shell setup on a fresh machine (macOS, Debian/Ubuntu, RHEL family, Arch).
+- `install_dev_tools.sh` — install the lint/test toolchain (pre-commit + ansible-lint + collections from `ansible/requirements.yml`). macOS via Homebrew.
 - `yubikey_vpn_connect.sh` — YubiKey-based VPN connection.
 - `patch_binary.sh` — binary patching helper.
+- `grafana_auth.py` + `grafana_curl.sh` — JWT-token extractor for browser-based Grafana SSO + curl wrapper that injects the token (see `README_GRAFANA_AUTH.md`).
 - `tanium/` — Tanium platform tooling (client API, TDS, performance testing, sensors, etc.).
 
 ## Operational Procedures

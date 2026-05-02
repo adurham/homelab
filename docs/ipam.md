@@ -74,7 +74,10 @@ VMIDs 300-313, IPs `172.16.0.60–73`. See `inventory/proxmox.yml` under `tanium
    source for the 9 core service CTs:
    `ip_dns_primary`, `ip_ntp_server`, `ip_proxy`, `ip_authentik`,
    `ip_loadbalancer`, `ip_mail_server`, `ip_grafana`, `ip_vm`,
-   `ip_tailscale_gw`.
+   `ip_tailscale_gw`. Plus `ip_homeassistant` (the off-cluster HA host
+   on the LAN that hosts AdGuard for DoT upstream + iOS push). Same
+   file also defines `net_private_*` (SDN: range/gw/bridge/mtu) and
+   `net_lan_*` (range, gateway).
 2. **`ansible/inventory/proxmox.yml`** — every host's `ansible_host:`.
    For the 9 core CTs, this is templated as `"{{ ip_<name> }}"`, so
    `vars.yml` and inventory can't drift. Tanium hosts (cluster +
