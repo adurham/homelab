@@ -1,6 +1,6 @@
 ---
 - name: Provision Mail Container
-  hosts: pve-01
+  hosts: pve01
   gather_facts: false
   roles:
     - mail_host

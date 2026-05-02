@@ -36,3 +36,25 @@
       - curl
       - zsh
     state: present
+
+# ----- pve fleet hardening -----
+
+- name: Purge unused squid from pve hosts
+  # Was running on pve02 with zero access.log entries — leftover from
+  # an earlier experiment, listening on 0.0.0.0:3128 unprotected. The
+  # supported squid lives in CT 108 (roles/squid_proxy/) on :3129.
+  ansible.builtin.apt:
+    name: squid
+    state: absent
+    purge: true
+
+- name: Disable + mask rpcbind (NFS portmap; we don't use NFS)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+    masked: true
+  loop:
+    - rpcbind.service
+    - rpcbind.socket
+  failed_when: false  # idempotent: already-masked / not-installed both ok

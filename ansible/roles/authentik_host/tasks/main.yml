@@ -40,7 +40,7 @@
     pct create 100 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
     --hostname authentik
     --cores 2 --memory 2048 --swap 512
-    --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_authentik }}/24,gw={{ net_private_gw }}
+    --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_authentik }}/24,gw={{ net_private_gw }},firewall=1
     --storage nvme-data
     --unprivileged 1
     --features nesting=1,keyctl=1
@@ -60,6 +60,27 @@
 - name: Ensure SSH is enabled and running
   ansible.builtin.command: pct exec 100 -- systemctl enable --now ssh
   changed_when: false
+
+# Per-CT firewall — Authentik HTTP ports (80/443/9000/9443) reachable
+# only from lb-01. pmxcfs rejects ansible's atomic template-then-rename;
+# render to /tmp then cp (same pattern as apply_tanium_firewall.yml).
+- name: Render authentik per-CT firewall to /tmp
+  ansible.builtin.template:
+    src: firewall.fw.j2
+    dest: /tmp/100.fw
+    mode: '0640'
+  delegate_to: pve01
+
+- name: Move authentik per-CT firewall into pmxcfs
+  ansible.builtin.command: cp /tmp/100.fw /etc/pve/firewall/100.fw
+  changed_when: true
+  delegate_to: pve01
+
+- name: Cleanup tmp .fw
+  ansible.builtin.file:
+    path: /tmp/100.fw
+    state: absent
+  delegate_to: pve01
 
 - name: Wait for Container Network (via Gateway)
   ansible.builtin.shell: pct exec 101 -- timeout 1 bash -c "cat < /dev/null > /dev/tcp/{{ ip_authentik }}/22"
