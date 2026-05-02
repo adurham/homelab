@@ -27,8 +27,16 @@ private SDN + Tailscale). Runs on dns-01.
 
 ## Upstream forwarders
 
-Plaintext DNS to Cloudflare (1.1.1.1, 1.0.0.1). DoT-in-forwarders
-syntax was attempted but is bind 9.19+; we're on Ubuntu 22.04's 9.18.
+bind forwards to AdGuard Home on the homeassistant host
+(`{{ ip_homeassistant }}`), which handles the encrypted DoT upstream
+to Cloudflare and applies the ad-block lists. `forward only;` ensures
+we never bypass AdGuard and recurse to public roots ourselves on an
+AdGuard outage — DNS fails closed instead of silently degrading to
+plaintext.
+
+Tried stubby briefly as a self-contained DoT proxy on dns-01 itself
+before discovering AdGuard already provided this — purging stubby
+was simpler than running a duplicate.
 
 ## Where it's invoked
 

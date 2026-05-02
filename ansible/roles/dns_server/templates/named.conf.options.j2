@@ -17,14 +17,18 @@ options {
         recursion yes;
         allow-query { trusted; };
 
-        # Upstream Cloudflare via standard plaintext DNS. DoT-in-forwarders
-        # syntax (`port 853 tls <name>`) was added in Bind 9.19; the LTS
-        # 9.18 we're on doesn't accept it. Revisit once Ubuntu ships a 9.19
-        # build, or front bind with stubby/unbound for DoT upstream.
+        # Upstream resolution via AdGuard Home on the homeassistant host.
+        # AdGuard already does DoT upstream to Cloudflare; forwarding to
+        # it gives us encrypted egress + the ad-block lists, and avoids
+        # running a duplicate DoT proxy (stubby) on dns-01.
+        # bind ↔ AdGuard is plaintext-on-LAN — accepted, since the
+        # encrypted boundary is at the WAN egress.
+        # forward-only fails closed if AdGuard is down: lab DNS breaks
+        # but no plaintext fallback to public root resolvers.
         forwarders {
-                1.1.1.1;
-                1.0.0.1;
+                {{ ip_homeassistant }};
         };
+        forward only;
 
         # Don't fingerprint bind by version string. Default behavior is to
         # respond with the full build string for `version.bind` / `hostname.bind`
