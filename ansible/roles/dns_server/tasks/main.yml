@@ -1,5 +1,5 @@
 ---
-- name: Install Bind9 and Utils
+- name: Install Bind9
   ansible.builtin.apt:
     name:
       - bind9
@@ -8,6 +8,15 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+# Was briefly running stubby on this host as a DoT-upstream proxy.
+# Replaced by forwarding to AdGuard Home on homeassistant
+# ({{ ip_homeassistant }}) which already handles DoT upstream + adblock.
+- name: Purge stubby (replaced by AdGuard upstream forwarding)
+  ansible.builtin.apt:
+    name: stubby
+    state: absent
+    purge: true
 
 - name: Fix SSL Directory Permissions
   ansible.builtin.file:
