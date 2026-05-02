@@ -238,3 +238,108 @@
       meta_launch_url: "https://grafana.chi.lab.amd-e.com"
     status_code: [200, 201]
   when: get_grafana_app.status == 404
+
+# -------------------------------------------------------------------------
+# VictoriaMetrics — Forward Auth Provider
+#
+# VM has no built-in auth; lb-01's nginx server block uses
+# `auth_request /outpost.goauthentik.io/auth/nginx;` to gate the operator
+# UI behind Authentik. This provisions the matching proxy provider +
+# application + binds it to the embedded outpost (the same outpost that
+# already serves the WhoAmI Provider). After this runs, the nginx
+# forward-auth block on lb-01 starts working.
+#
+# Internal traffic (Grafana datasource → vm-01:8428 directly, Alloy
+# remote_write → vm-01:8428 directly) bypasses lb-01 entirely, so this
+# only affects browser visits to victoriametrics.chi.lab.amd-e.com.
+# -------------------------------------------------------------------------
+
+- name: Get VictoriaMetrics Proxy Providers
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/proxy/?search=VictoriaMetrics"
+    method: GET
+    headers: "{{ headers }}"
+  register: vm_providers_found
+
+- name: Create VictoriaMetrics Proxy Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/proxy/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "VictoriaMetrics Provider"
+      mode: "forward_single"
+      external_host: "https://victoriametrics.chi.lab.amd-e.com"
+      internal_host: "http://{{ ip_vm }}:8428"
+      internal_host_ssl_validation: false
+      intercept_header_auth: true
+      authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
+      invalidation_flow: "{{ (grafana_invalid_flow.json.results[0].pk if (not grafana_invalid_flow.failed and grafana_invalid_flow.json.results | length > 0) else grafana_auth_flow.json.results[0].pk) }}"
+    status_code: [200, 201]
+  when: vm_providers_found.json.results | length == 0
+  register: new_vm_provider
+
+- name: Capture VictoriaMetrics Provider ID (just-created)
+  ansible.builtin.set_fact:
+    vm_provider_id: "{{ new_vm_provider.json.pk }}"
+  when:
+    - new_vm_provider.json is defined
+    - new_vm_provider.json.pk is defined
+
+- name: Capture VictoriaMetrics Provider ID (already-exists)
+  ansible.builtin.set_fact:
+    vm_provider_id: "{{ vm_providers_found.json.results[0].pk }}"
+  when:
+    - vm_providers_found.json.results | length > 0
+    - vm_provider_id is not defined
+
+- name: Get VictoriaMetrics Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/victoriametrics/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: get_vm_app
+
+- name: Create VictoriaMetrics Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "VictoriaMetrics"
+      slug: "victoriametrics"
+      provider: "{{ vm_provider_id }}"
+      meta_launch_url: "https://victoriametrics.chi.lab.amd-e.com"
+    status_code: [200, 201]
+  when: get_vm_app.status == 404
+
+# -------------------------------------------------------------------------
+# Bind both proxy providers to the embedded outpost. PATCH replaces the
+# entire `providers` list, so we always send the union (existing + ours)
+# rather than just appending. Sorted to keep the diff stable across runs.
+# -------------------------------------------------------------------------
+
+- name: Get the embedded outpost
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/outposts/instances/?managed=goauthentik.io%2Foutposts%2Fembedded"
+    method: GET
+    headers: "{{ headers }}"
+  register: embedded_outpost
+
+- name: Compute desired provider list for the embedded outpost
+  ansible.builtin.set_fact:
+    desired_outpost_providers: "{{ ((embedded_outpost.json.results[0].providers | default([])) + [vm_provider_id | int]) | unique | sort }}"
+
+- name: Bind VictoriaMetrics provider to the embedded outpost
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/outposts/instances/{{ embedded_outpost.json.results[0].pk }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      providers: "{{ desired_outpost_providers }}"
+    status_code: [200]
+  when: vm_provider_id | int not in (embedded_outpost.json.results[0].providers | default([]))
