@@ -1,0 +1,24 @@
+[OPTIONS]
+enable: 1
+
+[RULES]
+
+# Allow ICMP for diagnostics
+IN ACCEPT -p icmp
+
+# SSH from the private SDN and Tailscale (for ansible/operator access)
+IN ACCEPT -source {{ net_private_range }} -p tcp -dport 22
+IN ACCEPT -source 100.64.0.0/10 -p tcp -dport 22
+
+# Authentik's HTTP listeners (server / worker / nginx-tls) are reachable
+# only from lb-01. The CT was previously exposing :80, :443, :9000,
+# :9443 to anything on the SDN — a CT compromise meant direct API
+# access. With this gate, only the load balancer (which already enforces
+# Authentik's own auth via OIDC/forward-auth) reaches Authentik.
+IN ACCEPT -source {{ ip_loadbalancer }} -p tcp -dport 80
+IN ACCEPT -source {{ ip_loadbalancer }} -p tcp -dport 443
+IN ACCEPT -source {{ ip_loadbalancer }} -p tcp -dport 9000
+IN ACCEPT -source {{ ip_loadbalancer }} -p tcp -dport 9443
+
+# pve-firewall's default INPUT policy drops unmatched, so anything not
+# whitelisted above is denied implicitly.

@@ -1,0 +1,24 @@
+[OPTIONS]
+enable: 1
+
+[RULES]
+
+# Allow ICMP for diagnostics
+IN ACCEPT -p icmp
+
+# SSH from the private SDN and Tailscale (for ansible/operator access)
+IN ACCEPT -source {{ net_private_range }} -p tcp -dport 22
+IN ACCEPT -source 100.64.0.0/10 -p tcp -dport 22
+
+# SMTP (:25) inbound is restricted to known internal senders. The CT
+# was previously listening on 0.0.0.0:25 with `mynetworks` only
+# restricting *relay* — anything on the SDN could still inject a
+# message and trigger an outbound delivery via iCloud SMTP, burning
+# the SASL credentials. With this gate, only graf-01 (alert email
+# fallback) and authentik (user notifications: invitations, password
+# reset, etc.) can submit mail.
+IN ACCEPT -source {{ ip_grafana }} -p tcp -dport 25
+IN ACCEPT -source {{ ip_authentik }} -p tcp -dport 25
+
+# pve-firewall's default INPUT policy drops unmatched, so anything not
+# whitelisted above is denied implicitly.
