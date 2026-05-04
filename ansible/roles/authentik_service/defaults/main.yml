@@ -13,4 +13,4 @@ authentik_postgres_tag: "16.11-alpine"
 
 # Redis is more loosely coupled (Authentik uses it as a cache/queue).
 authentik_redis_image: "docker.io/library/redis"
-authentik_redis_tag: "8.4.0-alpine"
+authentik_redis_tag: "8.6.2-alpine"
