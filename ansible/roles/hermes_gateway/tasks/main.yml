@@ -203,6 +203,35 @@
     creates: /etc/systemd/system/hermes-gateway.service
   notify: Restart Hermes Gateway
 
+# Systemd drop-in to override WorkingDirectory. The unit installer
+# (`hermes gateway install`) sets WorkingDirectory=/opt/hermes-agent,
+# which is where the CLI source lives — not where the bot operates on
+# user code. /home/hermes is the natural cwd: it owns the user's
+# .hermes/, .claude/, .ssh/, and repos/, so "cd hermes-agent" from a
+# bot tool call resolves to repos/hermes-agent without a discovery hop.
+# A drop-in survives `hermes gateway install --force` regenerations
+# (the installer overwrites the main unit but leaves overrides alone).
+- name: Ensure Systemd Override Dir for Hermes Gateway
+  ansible.builtin.file:
+    path: /etc/systemd/system/hermes-gateway.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Override Hermes Gateway WorkingDirectory to /home/hermes
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible — do not edit by hand.
+      # Source: roles/hermes_gateway/tasks/main.yml
+      [Service]
+      WorkingDirectory=/home/hermes
+    dest: /etc/systemd/system/hermes-gateway.service.d/override.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Hermes Gateway
+
 - name: Enable & Start Hermes Gateway
   ansible.builtin.systemd:
     name: hermes-gateway.service
