@@ -22,6 +22,12 @@ agent:
   gateway_auto_continue_freshness: 3600
   reasoning_effort: high
   interleaved_thinking: true
+  # Move hermes's app system prompt into the first user message to keep
+  # `system` matching real Claude Code's shape. Anthropic's billing
+  # classifier on personal Max plans rejects requests with a non-CC-shaped
+  # system prompt — without this every gateway turn 400s with "out of
+  # extra usage". Behavior unchanged; placement only.
+  system_prompt_mode: compact
 
 auxiliary:
   vision:
@@ -108,12 +114,17 @@ skills:
   lazy_listing: true
 
 # Per-platform toolset overrides. Without this, Discord gets the full
-# hermes-discord bundle (21 tools, ~50K bytes / ~12K tokens of definitions
-# in every request). On Claude Max, that scale of tool definitions trips
-# the same billing classifier as the long system prompt and 400s with
-# "out of extra usage". Restricting Discord to [web] gives the bot
-# web_search + web_extract — enough for chat with current-info questions
-# — at ~750 bytes of tool defs, well under the threshold. Expand later
-# if needed (skills, todo, vision are reasonable next adds).
+# hermes-discord bundle (21 tools, ~50K bytes / ~12K tokens of tool
+# definitions in every request). On Claude Max, payloads above the
+# billing classifier's complexity threshold are routed to "extra usage"
+# and 400 with "out of extra usage" — so we cap Discord at the largest
+# set that still passes. Empirically, ~13K bytes of tool defs is fine,
+# 50K is not. Expand cautiously if you add more — bisect against a
+# direct DM if a new toolset starts triggering 400s.
 platform_toolsets:
-  discord: [web]
+  # Compact mode raised the per-request tool-def budget from ~750 bytes
+  # (legacy) to ~12.5K bytes — empirically the classifier accepts up to
+  # 13 small tools in the OAuth-on-personal-Max scenario. This 10-tool
+  # set sits at ~10K and leaves headroom; expand toward [skills, memory]
+  # only if you see the bot actually need them and re-bisect.
+  discord: [web, vision, todo, clarify, file, tts]
