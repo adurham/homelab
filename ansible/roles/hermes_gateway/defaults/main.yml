@@ -27,6 +27,7 @@ hermes_gateway_repos:
     description: "Pulls air-quality readings off Ecobee thermostat."
   - name: habitica-homelab
     url: git@github.com:adurham/habitica-homelab.git
+    branch: self-host-local  # default branch on GitHub for this repo
     description: "Self-hosted Habitica deployment."
 
 # Git identity for hermes user. Commits authored on the gateway carry

@@ -140,7 +140,7 @@
   ansible.builtin.git:
     repo: "{{ item.url }}"
     dest: "/home/hermes/repos/{{ item.name }}"
-    version: main
+    version: "{{ item.branch | default('main') }}"
     update: false
     accept_newhostkey: true
   become: true
