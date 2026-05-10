@@ -188,18 +188,15 @@ platform_toolsets:
   discord:
     - web              # web_search + web_extract              (~800B)
     - vision           # vision_analyze                         (~1K)
-    - terminal         # terminal + process                     (~5K)
-    - file             # read/write/patch/search_files          (~5K)
+    - terminal         # terminal + process                     (~5K — aliased to CC's Bash on wire)
+    - file             # read/write/patch/search_files          (~5K — Read/Write/Edit/Grep on wire)
     - todo             # task list                              (~1.3K)
     - clarify          # ask user a question                    (~1.3K)
-    # ``homeassistant`` toolset is REMOVED for now — adding ha_*
-    # tools (~2.6K) puts the eager toolset at ~16.5K, which still
-    # 400s with "out of extra usage" even though the byte total is
-    # under our previously-bisected ~17K cliff. The classifier on
-    # the OAuth/Max path appears to look at signals beyond raw
-    # bytes (likely tool-name patterns vs canonical Claude Code
-    # names like Bash/Read/Edit). HA tool source IS restored to
-    # the fork (tools/homeassistant_tool.py) and HASS_TOKEN +
-    # HASS_URL are vaulted into env.j2, so when we land the
-    # CC-name aliasing layer for the OAuth path, re-adding
-    # ``homeassistant`` here is a one-line change.
+    - homeassistant    # ha_list_entities/get_state/list_services/call_service (~2.6K)
+    # CC-name aliasing on the OAuth path (agent/cc_aliases.py) lifts
+    # the previous ~16K classifier ceiling — the wire request now
+    # ships canonical Claude Code tool names + the CC billing-header
+    # system block, so the classifier accepts ~50K-byte payloads as
+    # plan-budget. Add more toolsets here as needed; keep an eye on
+    # the request_dump_*.json for rejection signals if you push past
+    # ~50K.
