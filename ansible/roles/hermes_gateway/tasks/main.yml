@@ -245,3 +245,10 @@
 # don't wait on it during cold-start; idempotent on re-apply.
 - name: Provision Bot Repos & gh Auth
   ansible.builtin.import_tasks: repos.yml
+
+# Outbound SSH config for hosts the bot is expected to reach
+# (Mac Studios in the exo cluster, etc.). Sets up ~/.ssh/config and
+# pre-trusts known_hosts; pubkey distribution to each target is a
+# separate one-time step (see defaults/main.yml).
+- name: Provision Bot SSH Targets (Mac Studios etc.)
+  ansible.builtin.import_tasks: ssh_targets.yml
