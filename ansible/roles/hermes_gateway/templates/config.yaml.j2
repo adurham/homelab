@@ -95,3 +95,25 @@ memory:
   # on a headless gateway; auto_commit_session_end stays false (above) so
   # extracted entries land in proposals only, never silently committed.
   auto_extract: true
+
+skills:
+  # Skip the bulky <available_skills> index in the system prompt; the model
+  # discovers skills on demand via the skills_list tool. Without this, the
+  # full skill catalogue (~9K chars / 5K tokens for ~148 skills) lands in
+  # the system prompt, and Anthropic's billing classifier on the personal
+  # Max plan rejects the resulting payload as "non-Claude-Code" — every
+  # gateway request 400s with "out of extra usage". Lazy-loading drops the
+  # system prompt below the classifier threshold; same just-in-time pattern
+  # tool_search uses for tools.
+  lazy_listing: true
+
+# Per-platform toolset overrides. Without this, Discord gets the full
+# hermes-discord bundle (21 tools, ~50K bytes / ~12K tokens of definitions
+# in every request). On Claude Max, that scale of tool definitions trips
+# the same billing classifier as the long system prompt and 400s with
+# "out of extra usage". Restricting Discord to [web] gives the bot
+# web_search + web_extract — enough for chat with current-info questions
+# — at ~750 bytes of tool defs, well under the threshold. Expand later
+# if needed (skills, todo, vision are reasonable next adds).
+platform_toolsets:
+  discord: [web]
