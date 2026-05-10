@@ -105,7 +105,18 @@ auxiliary:
     max_tokens_per_turn: 1024
     max_tokens_session_end: 2048
     include_pre_compress: true
-    auto_commit_session_end: false
+    # Auto-commit at session end. The gateway is headless so there's no
+    # confirm UI to surface proposals — without this, every session-end
+    # extraction stashes its facts back into the buffer and they never
+    # reach the warm tier. With auto_commit on:
+    #   - NEW facts auto-write
+    #   - DUPLICATE bumps recall-count instead of writing a duplicate
+    #   - REFINEMENT merges into the matched entry
+    #   - CONTRADICTION still stays uncommitted (apply_verdict's inner
+    #     auto_commit=False; the user resolves manually via memory tool)
+    # So cross-session learnings accumulate; the only thing left for
+    # human review is genuinely conflicting facts.
+    auto_commit_session_end: true
   approval:
     provider: auto
     model: ''

@@ -1,0 +1,16 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/token_check.timer.j2
+#
+# Once a day, with a small randomized delay so cluster-wide deploys
+# don't all hammer the system at the exact same second.
+[Unit]
+Description=Hermes Gateway — daily token expiry check timer
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30min
+Persistent=true
+Unit=hermes-token-check.service
+
+[Install]
+WantedBy=timers.target
