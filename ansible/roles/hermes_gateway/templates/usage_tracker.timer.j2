@@ -1,0 +1,17 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/usage_tracker.timer.j2
+#
+# Fires hermes-usage-tracker.service every 5 minutes. Persistent=true
+# so a missed run during downtime triggers immediately on next boot —
+# but only one catch-up, not the full backlog.
+[Unit]
+Description=Hermes Gateway — usage tracker periodic timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=hermes-usage-tracker.service
+
+[Install]
+WantedBy=timers.target

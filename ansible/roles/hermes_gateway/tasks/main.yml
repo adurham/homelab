@@ -300,3 +300,31 @@
 # separate one-time step (see defaults/main.yml).
 - name: Provision Bot SSH Targets (Mac Studios etc.)
   ansible.builtin.import_tasks: ssh_targets.yml
+
+# Periodic usage tracker — systemd timer fires the bot's local
+# scripts/hermes_usage_tracker.py every 5 minutes. Logs token spend
+# (5h / 24h / total) to /home/hermes/.hermes/usage.csv.
+- name: Render Hermes Usage Tracker Service Unit
+  ansible.builtin.template:
+    src: usage_tracker.service.j2
+    dest: /etc/systemd/system/hermes-usage-tracker.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Hermes Usage Tracker Timer Unit
+  ansible.builtin.template:
+    src: usage_tracker.timer.j2
+    dest: /etc/systemd/system/hermes-usage-tracker.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Hermes Usage Tracker Timer
+  ansible.builtin.systemd:
+    name: hermes-usage-tracker.timer
+    enabled: true
+    state: started
+    daemon_reload: true
