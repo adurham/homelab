@@ -1,0 +1,18 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/usage_tracker.service.j2
+#
+# Oneshot service unit invoked by the matching .timer every 5 minutes.
+# Reads bot session data and appends a CSV row to ~/.hermes/usage.csv.
+[Unit]
+Description=Hermes Gateway — append one usage tracker row
+After=hermes-gateway.service
+
+[Service]
+Type=oneshot
+User=hermes
+Group=hermes
+WorkingDirectory=/home/hermes
+Environment=HERMES_HOME=/home/hermes/.hermes
+ExecStart=/opt/hermes-agent/venv/bin/python /opt/hermes-agent/scripts/hermes_usage_tracker.py append
+StandardOutput=journal
+StandardError=journal
