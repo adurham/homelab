@@ -29,55 +29,26 @@ agent:
   # extra usage". Behavior unchanged; placement only.
   system_prompt_mode: compact
 
-# Anthropic server-side tool_search. Mirrors real Claude Code's deferred-tool
-# pattern: the eager tool set (read/write/patch/search/terminal/todo/clarify
-# /discord) ships full schemas in every request, while everything else is
-# deferred — only its name + ``defer_loading: true`` flag is sent. The model
-# discovers deferred tools on demand by calling ``tool_search`` with a regex.
+# Anthropic server-side tool_search is disabled here. The mechanism saves
+# prompt-context tokens (deferred tools are excluded from the model's
+# context window) but does NOT save wire bytes — ``defer_loading: true``
+# tools still ship their full schemas in the HTTPS request body. Since
+# our blocking constraint is Anthropic's billing classifier on personal
+# Max (which scores wire payload bytes), tool_search makes things worse:
+# every deferred tool's full 1-9K schema lands in the request anyway,
+# plus the tool_search_tool_regex_20251119 server tool entry on top.
+# Confirmed empirically — enabling tool_search with a wide deferred set
+# produced a 43K-byte tool block and a 400 from the classifier.
 #
-# Why this matters here: Anthropic's billing classifier on personal Max plans
-# rejects payloads with too much non-Claude-Code-shaped content (system prompt
-# bytes, tool-def bytes, etc.) by routing them to extra-usage billing — which
-# 400s on a Max plan that has no extra-usage budget. Compact mode + lazy
-# skills already drop the system prompt under the threshold; tool_search does
-# the same for tools, raising the practical tool count from ~13 to "as many
-# as you want" while keeping the eager-schema budget around 10K bytes.
+# The real budget control is ``platform_toolsets.discord`` below: pick a
+# toolset that totals under ~12K bytes of tool-def JSON. Per-tool sizes
+# (measured on a live build):
+#   terminal      4811   (file)        4926  (read+write+patch+search)
+#   todo          1340   clarify       1258
+#   vision        937    web           797   (web_search + web_extract)
+#   image_generate ~     text_to_speech ~
 tool_search:
-  enabled: true
-  variant: regex
-  defer_mcp_tools: true
-  # Eager set: high-frequency coding core that the bot reaches for every
-  # turn. Mirrors Claude Code's eager set (Bash/Read/Write/Edit/Grep/
-  # TodoWrite/Task) — adapted to hermes tool names. ``discord`` stays
-  # eager because the bot literally needs it to reply.
-  additional_eager:
-    - terminal
-    - read_file
-    - write_file
-    - patch
-    - search_files
-    - todo
-    - clarify
-    - discord
-  # Deferred set: everything else. Hydrated via the ``tool_search`` server
-  # tool when the model needs it. ~50 bytes each instead of 1-3KB, so we
-  # can ship a much larger toolset without busting the classifier ceiling.
-  additional_deferred:
-    - web_search
-    - web_extract
-    - vision_analyze
-    - image_generate
-    - skills_list
-    - skill_view
-    - skill_manage
-    - memory
-    - session_search
-    - process
-    - delegate_task
-    - swarm_run
-    - execute_code
-    - discord_admin
-    - text_to_speech
+  enabled: false
 
 # Subagent (delegate_task / swarm_run) defaults. Mirrors Claude Code's
 # Task tool behavior — orchestrator-style delegation with high reasoning
@@ -181,30 +152,29 @@ skills:
   # tool_search uses for tools.
   lazy_listing: true
 
-# Per-platform toolset overrides. With ``tool_search.enabled: true`` (above)
-# the count-of-tools is no longer the bottleneck — only the eager set's
-# combined schema bytes count toward the classifier ceiling, and that's
-# tightly controlled by ``tool_search.additional_eager``. So Discord gets
-# the full coding-agent capability surface here; the heavy ones get
-# deferred via tool_search rather than being chopped from the toolset.
+# Per-platform toolset overrides. Curated to fit under Anthropic's billing
+# classifier ceiling on personal Max accounts via the OAuth path. Bisected
+# empirically (using `hermes -z` with each toolset list and inspecting the
+# resulting request_dump_*.json):
 #
-# Mirrors Claude Code's CLI feel: the bot can run shells, edit files,
-# search code, spawn subagents, browse, search the web, generate images,
-# look at attachments, manage skills/memory/sessions. ``tts`` intentionally
-# dropped — useless in DM workflow.
+#   ~14K (this config)                  — passes
+#   ~15K (+ image_gen)                  — passes
+#   ~17K (+ session_search)             — fails: "out of extra usage"
+#   ~22K (+ skills + session_search)    — fails: "out of extra usage"
+#
+# Per-tool sizes (live build):
+#   terminal      4811   file          4926
+#   todo          1340   clarify       1258
+#   vision        937    web           797
+#
+# Total: ~14K (797 + 937 + 4811 + 4926 + 1340 + 1258).
+# tts/image_gen/skills/memory/delegation/session_search/code_execution are
+# all available but DROPPED for byte budget. Re-bisect before adding.
 platform_toolsets:
   discord:
-    - web              # web_search, web_extract
-    - vision           # vision_analyze
-    - image_gen        # image_generate
-    - file             # read_file, write_file, patch, search_files
-    - terminal         # terminal, process
-    - code_execution   # execute_code (sandboxed)
-    - delegation       # delegate_task, swarm_run (subagent spawning)
-    - skills           # skills_list, skill_view, skill_manage
-    - memory           # memory tool
-    - session_search   # search past sessions
-    - todo             # task list
-    - clarify          # ask user a question
-    - discord          # built-in: react/embed/etc.
-    - discord_admin    # built-in: admin actions
+    - web              # web_search + web_extract       (~800B)
+    - vision           # vision_analyze                  (~1K)
+    - terminal         # terminal + process              (~5K)
+    - file             # read/write/patch/search_files   (~5K)
+    - todo             # task list                       (~1.3K)
+    - clarify          # ask user a question             (~1.3K)
