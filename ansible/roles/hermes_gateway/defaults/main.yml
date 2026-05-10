@@ -1,0 +1,35 @@
+---
+# Repos cloned onto the gateway under /home/hermes/repos/<name>. The bot
+# operates inside these clones — runs git/build/test, edits files, opens
+# PRs back to GitHub via the SSH key + gh CLI auth set up by repos.yml.
+#
+# Each entry: name (also clone-dir name), url (SSH form so git push uses
+# /home/hermes/.ssh/id_ed25519), description for the bot's overview at
+# /home/hermes/repos/README.md.
+hermes_gateway_repos:
+  - name: hermes-agent
+    url: git@github.com:adurham/hermes-agent.git
+    description: "Adam's hermes-agent fork (the engine running on this LXC). Mirrors NousResearch/hermes-agent with personal patches."
+  - name: homelab
+    url: git@github.com:adurham/homelab.git
+    description: "Proxmox cluster + Ansible automation (the repo that deploys this CT)."
+  - name: exo
+    url: git@github.com:adurham/exo.git
+    description: "Adam's exo fork — distributed local LLM inference."
+  - name: hermes-swarm
+    url: git@github.com:adurham/hermes-swarm.git
+    description: "Multi-agent swarm orchestration on top of hermes-agent."
+  - name: opencode
+    url: git@github.com:adurham/opencode.git
+    description: "Adam's opencode fork."
+  - name: ecobee-air-quality
+    url: git@github.com:adurham/ecobee-air-quality.git
+    description: "Pulls air-quality readings off Ecobee thermostat."
+  - name: habitica-homelab
+    url: git@github.com:adurham/habitica-homelab.git
+    description: "Self-hosted Habitica deployment."
+
+# Git identity for hermes user. Commits authored on the gateway carry
+# this name/email; rotate together if you change author identity.
+hermes_gateway_git_user_name: "Adam Durham (hermes-gw)"
+hermes_gateway_git_user_email: "amdnative@gmail.com"

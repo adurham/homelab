@@ -1,0 +1,196 @@
+---
+# Repos the bot operates on. Cloned under /home/hermes/repos/<name>.
+# Auth: SSH key for git push (generated locally, registered with GitHub
+# in a one-time manual step), gh CLI for PR/issue operations (logged in
+# interactively from the LXC, also one-time). No long-lived secret
+# lives in vault — Ansible only sets up the local primitives, the user
+# completes the GitHub-side wiring once.
+#
+# Idempotent — safe to re-run. The clone task uses ``update: false`` so
+# rerunning never yanks the bot's in-progress branches.
+
+# gh CLI from GitHub's apt repo. Needed for `gh auth login`, `gh pr
+# create`, `gh issue list`, etc. Ubuntu 22.04 doesn't ship gh by default.
+- name: Add GitHub CLI Apt Key
+  ansible.builtin.get_url:
+    url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+    dest: /usr/share/keyrings/githubcli-archive-keyring.gpg
+    mode: '0644'
+
+- name: Add GitHub CLI Apt Repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+    state: present
+    filename: github-cli
+    update_cache: true
+
+- name: Install gh CLI
+  ansible.builtin.apt:
+    name: gh
+    state: present
+
+# Configure git for the hermes user. Sets author identity, default
+# branch, pull strategy, etc. Idempotent via community.general.git_config
+# (no creates: gate, so re-applies catch any drift).
+- name: Configure Git for Hermes User
+  community.general.git_config:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    scope: global
+  become: true
+  become_user: hermes
+  loop:
+    - { key: "user.name", value: "{{ hermes_gateway_git_user_name }}" }
+    - { key: "user.email", value: "{{ hermes_gateway_git_user_email }}" }
+    - { key: "init.defaultBranch", value: "main" }
+    - { key: "pull.rebase", value: "true" }
+    - { key: "advice.detachedHead", value: "false" }
+  loop_control:
+    label: "{{ item.key }}"
+
+# SSH home for the hermes user — the LXC bootstrap puts root's
+# authorized_keys in /root/.ssh, but hermes is a separate user and gets
+# its own dotfiles. mode 0700 / 0600 are required by sshd or it'll
+# silently ignore the key.
+- name: Ensure Hermes SSH Directory
+  ansible.builtin.file:
+    path: /home/hermes/.ssh
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: '0700'
+
+# Ed25519 keypair for git push to github.com. Idempotent — `creates:`
+# leaves an existing key in place on re-apply. Generated WITHOUT a
+# passphrase so git push doesn't prompt mid-tool-call. The risk is that
+# anyone with shell access on the LXC as the hermes user can use the
+# key — acceptable for a single-tenant CT, escalate to a passphrase +
+# ssh-agent if that changes.
+- name: Generate Hermes SSH Keypair
+  ansible.builtin.command:
+    cmd: >
+      ssh-keygen -t ed25519
+      -C "hermes-gw-01@{{ inventory_hostname }} (auto-generated)"
+      -f /home/hermes/.ssh/id_ed25519
+      -N ""
+  args:
+    creates: /home/hermes/.ssh/id_ed25519
+  become: true
+  become_user: hermes
+
+# Pre-trust github.com host keys so the first git push doesn't prompt
+# for "yes/no/fingerprint" (which would hang the playbook + the bot).
+# ssh-keyscan returns the current set of github.com host keys; we
+# append rather than overwrite so any existing entries (e.g. for the
+# proxmox node) survive.
+- name: Pre-Trust GitHub Host Keys
+  ansible.builtin.shell: |
+    set -o pipefail
+    touch /home/hermes/.ssh/known_hosts
+    chmod 644 /home/hermes/.ssh/known_hosts
+    chown hermes:hermes /home/hermes/.ssh/known_hosts
+    if ! grep -q '^github.com ' /home/hermes/.ssh/known_hosts; then
+      ssh-keyscan -t ed25519,rsa github.com >> /home/hermes/.ssh/known_hosts
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+# Print the public key so the user can register it. Two paths:
+#   (a) Run on the LXC (after `gh auth login`):
+#         gh ssh-key add /home/hermes/.ssh/id_ed25519.pub --title hermes-gw-01
+#   (b) Or paste manually at https://github.com/settings/keys
+#
+# Until one of those is done, git clone over SSH will fail. The clone
+# task below tolerates that (failed_when filters Permission denied
+# and just leaves the clone empty) so the playbook stays idempotent —
+# rerun after key registration and the clones complete.
+- name: Read Hermes SSH Public Key
+  ansible.builtin.slurp:
+    src: /home/hermes/.ssh/id_ed25519.pub
+  register: hermes_ssh_pubkey
+
+- name: Show Hermes SSH Public Key (register on GitHub before first clone works)
+  ansible.builtin.debug:
+    msg:
+      - "==================================================================="
+      - "Add this key to https://github.com/settings/keys (or run:"
+      - "  gh ssh-key add ~/.ssh/id_ed25519.pub --title hermes-gw-01"
+      - "from the hermes user shell after `gh auth login`):"
+      - ""
+      - "{{ hermes_ssh_pubkey.content | b64decode | trim }}"
+      - "==================================================================="
+
+# Repos parent dir, owned by hermes so clones don't need root.
+- name: Ensure Hermes Repos Parent Dir
+  ansible.builtin.file:
+    path: /home/hermes/repos
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: '0755'
+
+# Clone each repo over SSH. update:false avoids resetting bot work in
+# progress on re-apply. ignore_errors:true so the playbook completes on
+# first deploy before the SSH key is registered on GitHub — the user
+# sees the pubkey in the debug output above, registers it, and reruns
+# this same playbook to finish the clones. Subsequent runs no-op for
+# already-cloned repos.
+- name: Clone Hermes Gateway Repos
+  ansible.builtin.git:
+    repo: "{{ item.url }}"
+    dest: "/home/hermes/repos/{{ item.name }}"
+    version: main
+    update: false
+    accept_newhostkey: true
+  become: true
+  become_user: hermes
+  loop: "{{ hermes_gateway_repos }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: clone_result
+  ignore_errors: true
+
+- name: Summarize Clone Results
+  ansible.builtin.debug:
+    msg: |
+      Clone results:
+      {% for r in clone_result.results %}
+      - {{ r.item.name }}: {{ 'OK' if not (r.failed | default(false)) else 'FAILED — ' + (r.msg | default('unknown') | truncate(200)) }}
+      {% endfor %}
+      {% if clone_result.results | selectattr('failed', 'defined') | selectattr('failed') | list | length > 0 %}
+
+      Some repos didn't clone. If this is the first run, register the SSH
+      pubkey shown above on GitHub (https://github.com/settings/keys), then
+      re-run this playbook. Auth: git push uses the SSH key only — gh CLI
+      auth is a separate one-time step (`gh auth login` from a hermes shell).
+      {% endif %}
+
+# Per-repo overview the bot reads when it needs to pick a target. Cheap
+# context — saves a round-trip of "what repos do I have?" tool calls.
+- name: Render Repos README
+  ansible.builtin.copy:
+    content: |
+      # Hermes Gateway — Available Repos
+
+      Clones live under /home/hermes/repos/. Each is on `main` by default.
+      Push to feature branches and open PRs via `gh pr create` rather than
+      committing to main.
+
+      Auth:
+      - git push uses /home/hermes/.ssh/id_ed25519 (registered with GitHub).
+      - gh ops use the OAuth token in /home/hermes/.config/gh/hosts.yml
+        (set up via `gh auth login` from a hermes shell).
+
+      {% for repo in hermes_gateway_repos %}
+      ## {{ repo.name }}
+
+      - Path: `/home/hermes/repos/{{ repo.name }}`
+      - Origin: `{{ repo.url }}`
+      - {{ repo.description }}
+
+      {% endfor %}
+    dest: /home/hermes/repos/README.md
+    owner: hermes
+    group: hermes
+    mode: '0644'
