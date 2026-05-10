@@ -1,0 +1,97 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/config.yaml.j2
+#
+# Mirrors the personal-MacBook config (provider=anthropic, memory features
+# from the post-2026-05-09 pull, auxiliary providers routed through the
+# Claude Code OAuth path). Local-LLM aux endpoints are intentionally
+# omitted — this VM has no exo/LM-Studio reachability.
+---
+model:
+  default: claude-opus-4-7
+  provider: anthropic
+
+agent:
+  max_turns: 90
+  gateway_timeout: 1800
+  restart_drain_timeout: 60
+  api_max_retries: 3
+  service_tier: ''
+  tool_use_enforcement: auto
+  gateway_timeout_warning: 900
+  gateway_notify_interval: 600
+  gateway_auto_continue_freshness: 3600
+  reasoning_effort: high
+  interleaved_thinking: true
+
+auxiliary:
+  vision:
+    provider: auto
+    model: ''
+    timeout: 120
+    extra_body: {}
+    download_timeout: 30
+  web_extract:
+    provider: auto
+    model: ''
+    timeout: 360
+    extra_body: {}
+  compression:
+    provider: auto
+    model: claude-sonnet-4-6
+    timeout: 120
+    extra_body: {}
+  session_search:
+    provider: auto
+    model: claude-haiku-4-5
+    timeout: 30
+    extra_body: {}
+    max_concurrency: 3
+  skills_hub:
+    provider: auto
+    model: claude-haiku-4-5
+    timeout: 30
+    extra_body: {}
+  memory_extraction:
+    provider: auto
+    model: claude-haiku-4-5
+    timeout: 30
+    extra_body: {}
+    # Phase 2 controls — only consumed by tools/memory_extraction
+    max_tokens_per_turn: 1024
+    max_tokens_session_end: 2048
+    include_pre_compress: true
+    auto_commit_session_end: false
+  approval:
+    provider: auto
+    model: ''
+    timeout: 30
+    extra_body: {}
+  mcp:
+    provider: auto
+    model: ''
+    timeout: 30
+    extra_body: {}
+  title_generation:
+    provider: auto
+    model: ''
+    timeout: 30
+    extra_body: {}
+  curator:
+    provider: auto
+    model: ''
+    timeout: 600
+    extra_body: {}
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 4500
+  user_char_limit: 5200
+  provider: ''
+  nudge_interval: 10
+  flush_min_turns: 6
+  # Phase 2 auto-extraction: watch turns + compression + session-end and
+  # propose new warm-tier entries via Haiku. The CLI confirm prompt is N/A
+  # on a headless gateway; auto_commit_session_end stays false (above) so
+  # extracted entries land in proposals only, never silently committed.
+  auto_extract: true
