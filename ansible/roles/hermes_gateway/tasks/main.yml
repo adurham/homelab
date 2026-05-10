@@ -209,3 +209,10 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# Bot's working repos — cloned under /home/hermes/repos/<name> with gh
+# CLI + credential helper wired up so the bot can push branches and open
+# PRs via the vaulted PAT. Runs after the gateway service is up so we
+# don't wait on it during cold-start; idempotent on re-apply.
+- name: Provision Bot Repos & gh Auth
+  ansible.builtin.import_tasks: repos.yml

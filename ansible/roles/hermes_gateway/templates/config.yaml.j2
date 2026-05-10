@@ -29,6 +29,74 @@ agent:
   # extra usage". Behavior unchanged; placement only.
   system_prompt_mode: compact
 
+# Anthropic server-side tool_search. Mirrors real Claude Code's deferred-tool
+# pattern: the eager tool set (read/write/patch/search/terminal/todo/clarify
+# /discord) ships full schemas in every request, while everything else is
+# deferred — only its name + ``defer_loading: true`` flag is sent. The model
+# discovers deferred tools on demand by calling ``tool_search`` with a regex.
+#
+# Why this matters here: Anthropic's billing classifier on personal Max plans
+# rejects payloads with too much non-Claude-Code-shaped content (system prompt
+# bytes, tool-def bytes, etc.) by routing them to extra-usage billing — which
+# 400s on a Max plan that has no extra-usage budget. Compact mode + lazy
+# skills already drop the system prompt under the threshold; tool_search does
+# the same for tools, raising the practical tool count from ~13 to "as many
+# as you want" while keeping the eager-schema budget around 10K bytes.
+tool_search:
+  enabled: true
+  variant: regex
+  defer_mcp_tools: true
+  # Eager set: high-frequency coding core that the bot reaches for every
+  # turn. Mirrors Claude Code's eager set (Bash/Read/Write/Edit/Grep/
+  # TodoWrite/Task) — adapted to hermes tool names. ``discord`` stays
+  # eager because the bot literally needs it to reply.
+  additional_eager:
+    - terminal
+    - read_file
+    - write_file
+    - patch
+    - search_files
+    - todo
+    - clarify
+    - discord
+  # Deferred set: everything else. Hydrated via the ``tool_search`` server
+  # tool when the model needs it. ~50 bytes each instead of 1-3KB, so we
+  # can ship a much larger toolset without busting the classifier ceiling.
+  additional_deferred:
+    - web_search
+    - web_extract
+    - vision_analyze
+    - image_generate
+    - skills_list
+    - skill_view
+    - skill_manage
+    - memory
+    - session_search
+    - process
+    - delegate_task
+    - swarm_run
+    - execute_code
+    - discord_admin
+    - text_to_speech
+
+# Subagent (delegate_task / swarm_run) defaults. Mirrors Claude Code's
+# Task tool behavior — orchestrator-style delegation with high reasoning
+# inherited from the parent.
+delegation:
+  reasoning_effort: high
+  # Two-level delegation: orchestrator can spawn leaf subagents but those
+  # leaves can't spawn their own subagents. Matches Claude Code's
+  # Plan → leaf-research-agent flow without runaway recursion.
+  max_spawn_depth: 2
+  max_concurrent_children: 3
+  child_timeout_seconds: 600
+  # Auto-approve dangerous-cmd prompts inside subagents. The Discord bot
+  # has no human-in-the-loop UI to resolve approvals, so the choice is
+  # auto-deny (children silently skip the cmd) or auto-approve (children
+  # run it). Bot operates in cloned repos via gh PR workflow — worst case
+  # is a bad commit on a feature branch you'd reject in review anyway.
+  subagent_auto_approve: true
+
 auxiliary:
   vision:
     provider: auto
@@ -113,18 +181,30 @@ skills:
   # tool_search uses for tools.
   lazy_listing: true
 
-# Per-platform toolset overrides. Without this, Discord gets the full
-# hermes-discord bundle (21 tools, ~50K bytes / ~12K tokens of tool
-# definitions in every request). On Claude Max, payloads above the
-# billing classifier's complexity threshold are routed to "extra usage"
-# and 400 with "out of extra usage" — so we cap Discord at the largest
-# set that still passes. Empirically, ~13K bytes of tool defs is fine,
-# 50K is not. Expand cautiously if you add more — bisect against a
-# direct DM if a new toolset starts triggering 400s.
+# Per-platform toolset overrides. With ``tool_search.enabled: true`` (above)
+# the count-of-tools is no longer the bottleneck — only the eager set's
+# combined schema bytes count toward the classifier ceiling, and that's
+# tightly controlled by ``tool_search.additional_eager``. So Discord gets
+# the full coding-agent capability surface here; the heavy ones get
+# deferred via tool_search rather than being chopped from the toolset.
+#
+# Mirrors Claude Code's CLI feel: the bot can run shells, edit files,
+# search code, spawn subagents, browse, search the web, generate images,
+# look at attachments, manage skills/memory/sessions. ``tts`` intentionally
+# dropped — useless in DM workflow.
 platform_toolsets:
-  # Compact mode raised the per-request tool-def budget from ~750 bytes
-  # (legacy) to ~12.5K bytes — empirically the classifier accepts up to
-  # 13 small tools in the OAuth-on-personal-Max scenario. This 10-tool
-  # set sits at ~10K and leaves headroom; expand toward [skills, memory]
-  # only if you see the bot actually need them and re-bisect.
-  discord: [web, vision, todo, clarify, file, tts]
+  discord:
+    - web              # web_search, web_extract
+    - vision           # vision_analyze
+    - image_gen        # image_generate
+    - file             # read_file, write_file, patch, search_files
+    - terminal         # terminal, process
+    - code_execution   # execute_code (sandboxed)
+    - delegation       # delegate_task, swarm_run (subagent spawning)
+    - skills           # skills_list, skill_view, skill_manage
+    - memory           # memory tool
+    - session_search   # search past sessions
+    - todo             # task list
+    - clarify          # ask user a question
+    - discord          # built-in: react/embed/etc.
+    - discord_admin    # built-in: admin actions
