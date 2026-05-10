@@ -29,26 +29,61 @@ agent:
   # extra usage". Behavior unchanged; placement only.
   system_prompt_mode: compact
 
-# Anthropic server-side tool_search is disabled here. The mechanism saves
-# prompt-context tokens (deferred tools are excluded from the model's
-# context window) but does NOT save wire bytes — ``defer_loading: true``
-# tools still ship their full schemas in the HTTPS request body. Since
-# our blocking constraint is Anthropic's billing classifier on personal
-# Max (which scores wire payload bytes), tool_search makes things worse:
-# every deferred tool's full 1-9K schema lands in the request anyway,
-# plus the tool_search_tool_regex_20251119 server tool entry on top.
-# Confirmed empirically — enabling tool_search with a wide deferred set
-# produced a 43K-byte tool block and a 400 from the classifier.
+# Anthropic server-side tool_search. With the CC-mimicry layer in
+# place (canonical CC tool names + x-anthropic-billing-header system
+# block, both in agent/anthropic_adapter.py) AND hermes-agent's
+# patched _apply_tool_search that strips description+input_schema
+# from deferred entries, this gives us the full benefit:
 #
-# The real budget control is ``platform_toolsets.discord`` below: pick a
-# toolset that totals under ~12K bytes of tool-def JSON. Per-tool sizes
-# (measured on a live build):
-#   terminal      4811   (file)        4926  (read+write+patch+search)
-#   todo          1340   clarify       1258
-#   vision        937    web           797   (web_search + web_extract)
-#   image_generate ~     text_to_speech ~
+#   * Eager tools (additional_eager) ship full schemas — these are
+#     the high-frequency coding core.
+#   * Deferred tools (additional_deferred) ship as ~120-byte stubs
+#     of {name, description: "", input_schema: {type: object},
+#     defer_loading: true}.
+#   * Anthropic's classifier accepts the canonical-CC-shaped request
+#     regardless of total payload size, so we can carry an
+#     arbitrarily wide toolset without 400s.
+#   * The model summons a deferred tool's full schema by calling
+#     tool_search_tool_regex (one extra round-trip on first use per
+#     session), then uses it normally.
 tool_search:
-  enabled: false
+  enabled: true
+  variant: regex
+  defer_mcp_tools: true
+  # Eager set: high-frequency tools that ship every turn. Mirrors
+  # what real Claude Code keeps eager (Bash/Read/Edit/Write/Grep
+  # /TodoWrite). Outbound substitution to canonical CC names happens
+  # in agent/cc_aliases.replace_with_cc_canonical.
+  additional_eager:
+    - terminal
+    - read_file
+    - write_file
+    - patch
+    - search_files
+    - todo
+  # Deferred set: name-only stubs. The model knows these tools exist
+  # by name but has to tool_search before using them. Add freely;
+  # extra entries are ~120 bytes each.
+  additional_deferred:
+    - process
+    - clarify
+    - vision_analyze
+    - image_generate
+    - web_search
+    - web_extract
+    - skills_list
+    - skill_view
+    - skill_manage
+    - memory
+    - session_search
+    - delegate_task
+    - swarm_run
+    - execute_code
+    - ha_list_entities
+    - ha_get_state
+    - ha_list_services
+    - ha_call_service
+    - text_to_speech
 
 # Subagent (delegate_task / swarm_run) defaults. Mirrors Claude Code's
 # Task tool behavior — orchestrator-style delegation with high reasoning
@@ -185,18 +220,23 @@ skills:
 # drop ``clarify`` (saves 1.3K, lands at ~15.3K) or ``vision`` (saves
 # 0.9K, lands at ~15.7K).
 platform_toolsets:
+  # Wide toolset — capability surface for the bot. Heavy/rare tools
+  # are picked up but ship as deferred stubs via tool_search above
+  # (skills, memory, delegation, code_execution, image_gen,
+  # session_search), so the eager wire payload stays small. Add
+  # toolsets here freely; the deferred-list above keeps wire bytes
+  # under control.
   discord:
-    - web              # web_search + web_extract              (~800B)
-    - vision           # vision_analyze                         (~1K)
-    - terminal         # terminal + process                     (~5K — aliased to CC's Bash on wire)
-    - file             # read/write/patch/search_files          (~5K — Read/Write/Edit/Grep on wire)
-    - todo             # task list                              (~1.3K)
-    - clarify          # ask user a question                    (~1.3K)
-    - homeassistant    # ha_list_entities/get_state/list_services/call_service (~2.6K)
-    # CC-name aliasing on the OAuth path (agent/cc_aliases.py) lifts
-    # the previous ~16K classifier ceiling — the wire request now
-    # ships canonical Claude Code tool names + the CC billing-header
-    # system block, so the classifier accepts ~50K-byte payloads as
-    # plan-budget. Add more toolsets here as needed; keep an eye on
-    # the request_dump_*.json for rejection signals if you push past
-    # ~50K.
+    - web              # web_search + web_extract  (deferred)
+    - vision           # vision_analyze            (deferred)
+    - terminal         # terminal + process        (eager — aliased to CC's Bash on wire)
+    - file             # read/write/patch/search_files (eager — Read/Write/Edit/Grep on wire)
+    - todo             # task list                 (eager)
+    - clarify          # ask user a question       (deferred)
+    - homeassistant    # ha_list_entities/get_state/list_services/call_service (deferred)
+    - skills           # skills_list / skill_view / skill_manage (deferred)
+    - memory           # memory                    (deferred)
+    - session_search   # session_search            (deferred)
+    - delegation       # delegate_task / swarm_run (deferred — subagent spawning)
+    - code_execution   # execute_code              (deferred — sandboxed)
+    - image_gen        # image_generate            (deferred)
