@@ -212,6 +212,36 @@
     mode: '0600'
   notify: Restart Hermes Gateway
 
+# Seed DISCORD_HOME_CHANNEL with the vaulted default ONLY if no line
+# beginning with that key exists yet. The default lands OUTSIDE the
+# Ansible-managed block so /sethome runtime updates (via
+# hermes_cli.config.save_env_value) take precedence and survive
+# subsequent ansible re-applies. On a fresh install the seed lands;
+# on a re-apply with any DISCORD_HOME_CHANNEL value already present
+# (vault default or /sethome update), this is a no-op.
+#
+# Without this, a wiped or hand-edited .env loses the home channel
+# until the next /sethome, and the bot greets every new DM with the
+# "no home channel set" prompt instead of just working.
+- name: Probe DISCORD_HOME_CHANNEL Presence
+  ansible.builtin.command:
+    cmd: grep -q '^DISCORD_HOME_CHANNEL=' /home/hermes/.hermes/.env
+  register: discord_home_probe
+  changed_when: false
+  failed_when: false
+
+- name: Seed DISCORD_HOME_CHANNEL Default (One-Shot)
+  ansible.builtin.lineinfile:
+    path: /home/hermes/.hermes/.env
+    line: "DISCORD_HOME_CHANNEL={{ vault_hermes_gw_discord_home_channel }}"
+    insertafter: EOF
+    owner: hermes
+    group: hermes
+    mode: '0600'
+    state: present
+  no_log: true
+  when: discord_home_probe.rc != 0
+
 - name: Bootstrap Anthropic Claude Code Credentials (no overwrite)
   # Source-of-truth for Anthropic creds is whatever lives in the file on the
   # CT itself — `claude setup-token` (run interactively against this CT)
