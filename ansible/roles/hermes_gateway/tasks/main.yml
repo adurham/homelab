@@ -1,0 +1,174 @@
+---
+# Installs the Hermes messaging gateway inside the hermes-gw-01 LXC.
+# Runs against the CT directly (after hermes_gateway_host has provisioned
+# it). Pattern: apt deps -> dedicated user -> clone repo -> venv install ->
+# render config + drop creds -> register hermes-gateway.service via the
+# built-in `hermes gateway install --system` flow.
+
+- name: Install Base OS Packages
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-pip
+      - git
+      - build-essential
+      - ca-certificates
+      - curl
+      - software-properties-common
+      - gnupg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Hermes requires Python ≥3.11; Ubuntu 22.04 ships only 3.10. Pull 3.11 from
+# the deadsnakes PPA (the standard upstream-maintained source) rather than
+# pyenv/conda, to keep the install footprint comparable to the dns/lb LXCs.
+- name: Add Deadsnakes PPA for Python 3.11
+  ansible.builtin.apt_repository:
+    repo: ppa:deadsnakes/ppa
+    state: present
+    update_cache: true
+
+- name: Install Python 3.11
+  ansible.builtin.apt:
+    name:
+      - python3.11
+      - python3.11-venv
+      - python3.11-dev
+    state: present
+
+- name: Create Hermes System User
+  ansible.builtin.user:
+    name: hermes
+    system: true
+    shell: /bin/bash
+    home: /home/hermes
+    create_home: true
+    state: present
+
+# Pre-create /opt/hermes-agent owned by hermes so the subsequent `git clone`
+# (which runs as the hermes user, not root) can write into it. Without this
+# step git fails with "could not create work tree dir: Permission denied"
+# because /opt is root-only by default.
+- name: Ensure /opt/hermes-agent Directory Exists
+  ansible.builtin.file:
+    path: /opt/hermes-agent
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: '0755'
+
+- name: Clone Hermes Agent Repository
+  ansible.builtin.git:
+    repo: https://github.com/adurham/hermes-agent.git
+    dest: /opt/hermes-agent
+    version: main
+    update: true
+    force: false
+  become: true
+  become_user: hermes
+  notify: Restart Hermes Gateway
+
+- name: Create Hermes Virtualenv (Python 3.11)
+  ansible.builtin.command: python3.11 -m venv /opt/hermes-agent/venv
+  args:
+    creates: /opt/hermes-agent/venv/bin/python
+  become: true
+  become_user: hermes
+
+- name: Install Hermes (Editable) and Pip
+  ansible.builtin.pip:
+    name:
+      - pip
+      - setuptools
+      - wheel
+    state: latest  # noqa: package-latest
+    virtualenv: /opt/hermes-agent/venv
+  become: true
+  become_user: hermes
+
+- name: Install Hermes Agent Editable (with messaging extras)
+  ansible.builtin.pip:
+    # Editable install of the local clone, with the [messaging] extras —
+    # pulls in discord.py, python-telegram-bot, slack-bolt/sdk, aiohttp,
+    # qrcode. Without these the gateway logs "discord.py not installed"
+    # and exits 1 because no platform adapter loads.
+    name: file:///opt/hermes-agent#egg=hermes-agent[messaging]
+    extra_args: -e
+    virtualenv: /opt/hermes-agent/venv
+  become: true
+  become_user: hermes
+  notify: Restart Hermes Gateway
+
+# Hermes home: /home/hermes/.hermes for env/config/auth, /home/hermes/.claude
+# for the Claude Code OAuth credentials file (which the adapter reads via the
+# same code path the macOS keychain uses).
+- name: Ensure Hermes Home Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: '0700'
+  loop:
+    - /home/hermes/.hermes
+    - /home/hermes/.hermes/auth
+    - /home/hermes/.hermes/logs
+    - /home/hermes/.claude
+
+- name: Render Hermes .env
+  ansible.builtin.template:
+    src: env.j2
+    dest: /home/hermes/.hermes/.env
+    owner: hermes
+    group: hermes
+    mode: '0600'
+  no_log: true
+  notify: Restart Hermes Gateway
+
+- name: Render Hermes config.yaml
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /home/hermes/.hermes/config.yaml
+    owner: hermes
+    group: hermes
+    mode: '0600'
+  notify: Restart Hermes Gateway
+
+- name: Drop Anthropic Claude Code Credentials
+  ansible.builtin.copy:
+    content: "{{ vault_hermes_gw_anthropic_creds_json }}"
+    dest: /home/hermes/.claude/.credentials.json
+    owner: hermes
+    group: hermes
+    mode: '0600'
+  no_log: true
+  notify: Restart Hermes Gateway
+
+- name: Drop Gemini OAuth Credentials
+  ansible.builtin.copy:
+    content: "{{ vault_hermes_gw_gemini_oauth_json }}"
+    dest: /home/hermes/.hermes/auth/google_oauth.json
+    owner: hermes
+    group: hermes
+    mode: '0600'
+  no_log: true
+  notify: Restart Hermes Gateway
+
+# Use hermes's own systemd installer rather than templating a unit file
+# ourselves — keeps us aligned with the upstream PATH/working-dir/exec
+# logic, which evolves with the CLI. --run-as-user binds the unit to the
+# hermes account; --system writes to /etc/systemd/system.
+- name: Install Hermes Gateway Systemd Unit
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes gateway install --system --run-as-user hermes --force
+  args:
+    creates: /etc/systemd/system/hermes-gateway.service
+  notify: Restart Hermes Gateway
+
+- name: Enable & Start Hermes Gateway
+  ansible.builtin.systemd:
+    name: hermes-gateway.service
+    enabled: true
+    state: started
+    daemon_reload: true

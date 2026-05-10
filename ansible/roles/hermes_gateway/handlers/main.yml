@@ -1,0 +1,6 @@
+---
+- name: Restart Hermes Gateway
+  ansible.builtin.systemd:
+    name: hermes-gateway.service
+    state: restarted
+    daemon_reload: true

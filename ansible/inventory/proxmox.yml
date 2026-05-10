@@ -87,6 +87,15 @@ all:
       vars:
         ansible_user: root
 
+    hermes_gateway:
+      hosts:
+        hermes-gw-01:
+          ansible_host: "{{ ip_hermes_gateway }}"
+          vmid: 113
+          target_node: pve02
+      vars:
+        ansible_user: root
+
     # Parent group for all CTs on the 172.16.0.0/24 private subnet that need
     # to be reached through the personal MacBook (Tailscale jump host) when
     # ansible is invoked from the work MacBook. The actual ProxyCommand lives
@@ -103,6 +112,7 @@ all:
         mail_server:
         ntp_server:
         tanium_clients:
+        hermes_gateway:
 
     # Tanium Cluster
     tanium_cluster:

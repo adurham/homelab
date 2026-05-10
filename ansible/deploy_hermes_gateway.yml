@@ -1,0 +1,18 @@
+---
+# Two-stage deploy of the Hermes messaging gateway:
+#   1. hermes_gateway_host runs on pve02 to create the LXC (vmid 109,
+#      ip_hermes_gateway, hostname hermes-gw-01) and inject SSH keys.
+#   2. hermes_gateway runs against the new CT to install the agent, drop
+#      vault-encrypted creds, and bring up the systemd unit.
+
+- name: Provision Hermes Gateway Container
+  hosts: pve02
+  gather_facts: false
+  roles:
+    - hermes_gateway_host
+
+- name: Deploy Hermes Gateway Service
+  hosts: hermes_gateway
+  gather_facts: true
+  roles:
+    - hermes_gateway
