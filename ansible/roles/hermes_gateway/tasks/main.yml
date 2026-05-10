@@ -145,13 +145,61 @@
     - /home/hermes/.hermes/logs
     - /home/hermes/.claude
 
-- name: Render Hermes .env
-  ansible.builtin.template:
-    src: env.j2
-    dest: /home/hermes/.hermes/.env
+# Manage only a delimited block in /home/hermes/.hermes/.env so that values
+# the running gateway writes itself (e.g. DISCORD_HOME_CHANNEL set via the
+# `/sethome` slash command, anything `hermes setup` persists) survive
+# re-applies. A previous `template:` task overwrote the entire file each
+# run and silently wiped those user-set keys, which then took the in-memory
+# value with them on the notify-driven gateway restart.
+
+- name: Probe Hermes .env State
+  ansible.builtin.stat:
+    path: /home/hermes/.hermes/.env
+  register: hermes_env_stat
+
+- name: Detect Pre-blockinfile .env (legacy fully-managed file)
+  # Run-once migration: hosts deployed before the blockinfile refactor have
+  # a `.env` whose entire contents are Ansible-rendered, with no managed
+  # markers. blockinfile would otherwise *append* a second copy of the
+  # block on first apply, producing duplicate keys. Rip the file off so
+  # blockinfile recreates it fresh; the only thing we lose is content
+  # Ansible already controls anyway.
+  ansible.builtin.command:
+    cmd: grep -q "ANSIBLE MANAGED BLOCK — hermes_gateway role" /home/hermes/.hermes/.env
+  register: hermes_env_marker_check
+  changed_when: false
+  failed_when: false
+  when: hermes_env_stat.stat.exists
+
+- name: Migrate Legacy Hermes .env (one-shot — pre-blockinfile)
+  ansible.builtin.file:
+    path: /home/hermes/.hermes/.env
+    state: absent
+  when:
+    - hermes_env_stat.stat.exists
+    - hermes_env_marker_check.rc | default(0) != 0
+
+- name: Ensure Hermes .env Exists
+  ansible.builtin.file:
+    path: /home/hermes/.hermes/.env
+    state: touch
     owner: hermes
     group: hermes
     mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Render Hermes .env (Ansible-managed block only)
+  ansible.builtin.blockinfile:
+    path: /home/hermes/.hermes/.env
+    owner: hermes
+    group: hermes
+    mode: '0600'
+    marker: "# {mark} ANSIBLE MANAGED BLOCK — hermes_gateway role (env.j2)"
+    marker_begin: BEGIN
+    marker_end: END
+    block: "{{ lookup('ansible.builtin.template', 'env.j2') }}"
+    insertbefore: BOF
   no_log: true
   notify: Restart Hermes Gateway
 
