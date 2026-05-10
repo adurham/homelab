@@ -328,3 +328,32 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# Daily check on the OAuth setup-token's expiry. Surfaces via
+# `systemctl --failed` when the token has <30 days remaining; without
+# this the long-lived token expires silently a year after generation
+# and the bot starts 401'ing on inference.
+- name: Render Hermes Token Check Service Unit
+  ansible.builtin.template:
+    src: token_check.service.j2
+    dest: /etc/systemd/system/hermes-token-check.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Hermes Token Check Timer Unit
+  ansible.builtin.template:
+    src: token_check.timer.j2
+    dest: /etc/systemd/system/hermes-token-check.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Hermes Token Check Timer
+  ansible.builtin.systemd:
+    name: hermes-token-check.timer
+    enabled: true
+    state: started
+    daemon_reload: true

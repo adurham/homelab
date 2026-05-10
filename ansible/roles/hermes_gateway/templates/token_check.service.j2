@@ -1,0 +1,18 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/token_check.service.j2
+#
+# Daily oneshot — exits non-zero when the OAuth token returns 401
+# from a live /v1/models check. systemctl --failed + journal surface
+# the issue so the user can rotate the setup-token before users see
+# the 401 themselves.
+[Unit]
+Description=Hermes Gateway — daily Claude OAuth token expiry check
+
+[Service]
+Type=oneshot
+User=hermes
+Group=hermes
+WorkingDirectory=/home/hermes
+ExecStart=/opt/hermes-agent/venv/bin/python /opt/hermes-agent/scripts/hermes_token_check.py
+StandardOutput=journal
+StandardError=journal
