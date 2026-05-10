@@ -1,0 +1,34 @@
+---
+# SSH config for hosts the bot is expected to reach (Mac Studios, etc.).
+# Pushing the bot's pubkey to each target's authorized_keys is a separate
+# one-time step — see comment in defaults/main.yml.
+#
+# Host key trust is handled per-config-stanza via
+# ``StrictHostKeyChecking accept-new`` — first connection auto-accepts
+# (and persists to ~/.ssh/known_hosts), subsequent connections validate.
+# This avoids the comma-list / keyscan dance and stays idempotent.
+
+- name: Render Hermes SSH Config
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible — do not edit by hand.
+      # Source: roles/hermes_gateway/tasks/ssh_targets.yml
+      #
+      # Hermes user's outbound SSH config. The single id_ed25519 below is
+      # the same key registered with GitHub (for git push) and with each
+      # SSH target's authorized_keys file. ``IdentitiesOnly yes`` keeps
+      # ssh from offering other keys (the bot has none, but defensive).
+
+      {% for t in hermes_gateway_ssh_targets %}
+      # {{ t.description | default('') }}
+      Host {{ t.host }}
+          HostName {{ t.hostname }}
+          User {{ t.user }}
+          IdentityFile ~/.ssh/id_ed25519
+          IdentitiesOnly yes
+          StrictHostKeyChecking accept-new
+      {% endfor %}
+    dest: /home/hermes/.ssh/config
+    owner: hermes
+    group: hermes
+    mode: '0600'
