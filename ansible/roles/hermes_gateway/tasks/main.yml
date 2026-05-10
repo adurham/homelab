@@ -37,6 +37,35 @@
       - python3.11-dev
     state: present
 
+# Hermes spoofs Claude Code identity for OAuth requests, including a
+# user-agent string with the locally-detected Claude Code version. Anthropic
+# rejects requests whose version is too far behind the actual release —
+# they return a misleading "out of extra usage" 400. Without the `claude`
+# CLI on the box, hermes falls back to a hard-coded version constant which
+# rapidly goes stale. Installing Claude Code via the upstream npm package
+# keeps detection accurate; node is also handy for any future skill that
+# wants it.
+- name: Add NodeSource Apt Repository (Node 20 LTS)
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  args:
+    creates: /etc/apt/sources.list.d/nodesource.list
+    executable: /bin/bash
+
+- name: Install Node.js
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
+
+- name: Install Claude Code CLI Globally
+  community.general.npm:
+    name: '@anthropic-ai/claude-code'
+    global: true
+    state: latest  # noqa: package-latest
+  notify: Restart Hermes Gateway
+
 - name: Create Hermes System User
   ansible.builtin.user:
     name: hermes
