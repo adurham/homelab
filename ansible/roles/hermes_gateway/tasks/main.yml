@@ -164,13 +164,21 @@
     mode: '0600'
   notify: Restart Hermes Gateway
 
-- name: Drop Anthropic Claude Code Credentials
+- name: Bootstrap Anthropic Claude Code Credentials (no overwrite)
+  # Source-of-truth for Anthropic creds is whatever lives in the file on the
+  # CT itself — `claude setup-token` (run interactively against this CT)
+  # writes there and rotates its own refresh tokens. Ansible only seeds the
+  # initial value from vault so the first turn works; thereafter `force: no`
+  # protects the live file from being clobbered on re-applies. The vault
+  # value will go stale fast (laptop's keychain rotates), so do not rely on
+  # it past the first deploy.
   ansible.builtin.copy:
     content: "{{ vault_hermes_gw_anthropic_creds_json }}"
     dest: /home/hermes/.claude/.credentials.json
     owner: hermes
     group: hermes
     mode: '0600'
+    force: false
   no_log: true
   notify: Restart Hermes Gateway
 
