@@ -1,7 +1,7 @@
 ---
 # Grafana Alloy — unified telemetry agent replacing promtail (logs) and
 # node_exporter (metrics). See docs/promtail-to-alloy-plan.md.
-alloy_version: "1.16.0"
+alloy_version: "1.16.1"
 
 # Alloy's built-in HTTP server (UI + own metrics, NOT node-exporter metrics).
 # We don't expose this externally; VM scrapes vm-01:8428 push receiver, not
