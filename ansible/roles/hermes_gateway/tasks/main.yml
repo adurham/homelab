@@ -484,3 +484,81 @@
     comment: "hermes_gateway: deny api_server"
     state: present
   notify: Save iptables rules
+
+# ─── Tailscale + TLS via `tailscale serve` ────────────────────────────────
+#
+# Run a Tailscale daemon inside the LXC so the api_server's bearer-token
+# Authorization header gets TLS protection end-to-end (laptop → LXC over
+# WireGuard, plus TLS on top from `tailscale serve` so the cleartext
+# segment between the subnet router and the LXC also goes away).
+# `tailscale cert` provisions a real Let's Encrypt cert via DNS-01 against
+# tail19c543.ts.net (the user's tailnet). Auto-renews via tailscaled.
+#
+# api_server itself moves back to 127.0.0.1:8642 (env.j2 sets
+# API_SERVER_HOST=127.0.0.1) — `tailscale serve` proxies HTTPS:443 →
+# http://127.0.0.1:8642 internally. The Phase-5 iptables rules for
+# tcp/8642 then match nothing in practice (cheap defense-in-depth in
+# case API_SERVER_HOST ever flips back to a routable IP).
+#
+# Auth: tailscale up requires an interactive browser auth step the first
+# time. The role detects the un-authed state and fails with a clear
+# message; the user runs `pct exec 113 -- tailscale up` once on pve02,
+# then re-runs the playbook to continue.
+
+- name: Install Tailscale on Hermes Gateway
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://tailscale.com/install.sh | sh
+  args:
+    creates: /usr/bin/tailscale
+    executable: /bin/bash
+
+- name: Check Tailscale auth state on Hermes Gateway
+  ansible.builtin.command: tailscale status --self --peers=false
+  register: hermes_tailscale_status
+  failed_when: false
+  changed_when: false
+
+- name: Fail with manual-step instructions if Tailscale is not authed
+  ansible.builtin.fail:
+    msg: |
+      Tailscale on hermes-gw-01 is installed but not authed. Run the
+      following on pve02 to authorize the CT (browser link will print):
+
+          ssh root@pve02 'pct exec 113 -- tailscale up --hostname=hermes-gw-01'
+
+      Then re-run this playbook. After auth, the role provisions the
+      LE cert, configures `tailscale serve`, and re-binds api_server
+      to 127.0.0.1.
+  when: hermes_tailscale_status.rc != 0 or 'Logged out' in hermes_tailscale_status.stdout
+
+- name: Ensure Tailscale cert directory exists
+  ansible.builtin.file:
+    path: /var/lib/tailscale/certs
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Provision Let's Encrypt cert for hermes-gw-01.tail19c543.ts.net
+  ansible.builtin.command: tailscale cert hermes-gw-01.tail19c543.ts.net
+  args:
+    chdir: /var/lib/tailscale/certs
+    creates: /var/lib/tailscale/certs/hermes-gw-01.tail19c543.ts.net.crt
+
+- name: Configure tailscale serve to front api_server on https
+  ansible.builtin.shell: |
+    set -o pipefail
+    # Serve config is JSON-stored in tailscaled; check current state to
+    # stay idempotent. `tailscale serve status --json` returns {} when
+    # nothing is configured.
+    current=$(tailscale serve status --json 2>/dev/null || echo '{}')
+    if echo "$current" | grep -q '"http://127.0.0.1:8642"'; then
+      echo "ALREADY_CONFIGURED"
+      exit 0
+    fi
+    tailscale serve --bg --https=443 http://127.0.0.1:8642
+  args:
+    executable: /bin/bash
+  register: hermes_tailscale_serve
+  changed_when: "'ALREADY_CONFIGURED' not in hermes_tailscale_serve.stdout"
