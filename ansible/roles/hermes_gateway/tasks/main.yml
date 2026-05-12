@@ -546,6 +546,41 @@
     chdir: /var/lib/tailscale/certs
     creates: /var/lib/tailscale/certs/hermes-gw-01.tail19c543.ts.net.crt
 
+# ─── Phase 7: per-principal auth keys file + audit log ─────────────────────
+
+- name: Ensure /etc/hermes-gateway exists for the keys file
+  ansible.builtin.file:
+    path: /etc/hermes-gateway
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: '0750'
+
+- name: Render per-principal api_keys.yaml
+  ansible.builtin.template:
+    src: api_keys.yaml.j2
+    dest: /etc/hermes-gateway/api_keys.yaml
+    owner: hermes
+    group: hermes
+    mode: '0640'
+  notify: Restart Hermes Gateway
+
+- name: Ensure /var/log/hermes-gateway exists for the audit log
+  ansible.builtin.file:
+    path: /var/log/hermes-gateway
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: '0750'
+
+- name: Install logrotate config for the api_server audit log
+  ansible.builtin.template:
+    src: audit_logrotate.j2
+    dest: /etc/logrotate.d/hermes-gateway
+    owner: root
+    group: root
+    mode: '0644'
+
 - name: Configure tailscale serve to front api_server on https
   ansible.builtin.shell: |
     set -o pipefail

@@ -1,0 +1,22 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/api_keys.yaml.j2
+#
+# Per-principal Bearer tokens for the api_server adapter. Resolved at
+# request time by APIServerAdapter._check_auth — the matched key's name
+# becomes the audit-log principal for that request.
+#
+# Add a principal:
+#   1) Generate a token:  openssl rand -hex 32
+#   2) Stash in vault:    vault_hermes_gw_api_key_<short_name>: "<token>"
+#   3) Append a line here following the pattern below
+#   4) ansible-playbook deploy_hermes_gateway.yml
+#
+# Revoke a principal: delete the line below + rotate (or just remove) the
+# vault entry. The api_server reloads the map on restart, which the role's
+# `Restart Hermes Gateway` handler triggers on any template change.
+#
+# The legacy single-key path stays active in parallel: a Bearer matching
+# vault_hermes_gw_api_server_key auths as principal ``default``. Useful
+# while we migrate clients to principal-specific keys.
+---
+discord-adapter: "{{ vault_hermes_gw_api_key_discord_adapter }}"
