@@ -35,3 +35,28 @@
 - name: Save IPTables
   ansible.builtin.command: netfilter-persistent save
   changed_when: false
+
+# Disable subnet-route SNAT so hosts on 172.16.0.0/24 see the original
+# Tailnet source IPs (100.x) instead of this router's IP (172.16.0.1).
+# With SNAT on (Tailscale's default), anything routed in from Tailnet
+# looks like local-gateway traffic at the destination — which means
+# iptables/audit on each host can't distinguish Tailnet from any other
+# off-subnet origin. Disabling it makes per-host firewalls honest:
+# hermes-gw can ACCEPT 100.64.0.0/10, drop everything else, and that's
+# actually what happens at the wire.
+#
+# Return path is unaffected: hosts on 172.16.0.0/24 route 100.x via
+# their default gateway (172.16.0.1 = this host), which knows the
+# Tailscale interface — same path as before, just no source rewrite
+# on the way in.
+
+- name: Check current Tailscale SNAT setting
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs | python3 -c 'import json,sys; print(json.load(sys.stdin).get("NoSNAT", False))'
+  register: tailscale_snat_check
+  changed_when: false
+
+- name: Disable Tailscale subnet-route SNAT (preserve Tailnet source IPs)
+  ansible.builtin.command: tailscale set --snat-subnet-routes=false
+  when: tailscale_snat_check.stdout.strip() != "True"
