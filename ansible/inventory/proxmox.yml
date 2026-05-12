@@ -90,7 +90,14 @@ all:
     hermes_gateway:
       hosts:
         hermes-gw-01:
-          ansible_host: "{{ ip_hermes_gateway }}"
+          # Reach via Tailscale, not the homelab subnet IP. Once the LXC
+          # joined Tailnet directly (Phase 6 / `tailscale up` inside the CT),
+          # the subnet-routed path via tailscale-gw → 172.16.0.50 stopped
+          # working — Tailscale prefers the direct WireGuard path to
+          # 100.119.249.49 but doesn't accept return traffic for 172.16.0.50
+          # on that interface. ip_hermes_gateway (172.16.0.50) is still
+          # used for templating LXC static-IP and iptables-self rules.
+          ansible_host: hermes-gw-01.tail19c543.ts.net
           vmid: 113
           target_node: pve02
       vars:

@@ -83,9 +83,56 @@
   ansible.builtin.command: pct exec 113 -- systemctl enable --now ssh
   changed_when: false
 
+# TUN device passthrough so Tailscale can run inside the unprivileged CT.
+# Mirrors the tailscale-gw CT's config (tailscale_gw_host role). Without
+# these two lines, /dev/net/tun isn't visible inside the container and
+# `tailscale up` fails with "device or resource busy" / "no such device".
+#
+# Both edits are idempotent via lineinfile; the LXC must be restarted
+# for them to take effect (handled by the `Restart Hermes Gateway Container
+# for TUN access` task below, which only fires when the conf actually
+# changed).
+
+- name: Allow tun device cgroup in Hermes Gateway LXC config
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/113.conf
+    line: 'lxc.cgroup2.devices.allow: c 10:200 rwm'
+    state: present
+    create: false
+  register: hermes_tun_cgroup
+
+- name: Mount tun device in Hermes Gateway LXC config
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/113.conf
+    line: 'lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file'
+    state: present
+    create: false
+  register: hermes_tun_mount
+
+- name: Restart Hermes Gateway Container for TUN access
+  ansible.builtin.command: pct reboot 113
+  when: hermes_tun_cgroup.changed or hermes_tun_mount.changed
+  changed_when: true
+
+- name: Wait for Hermes Gateway Container SSH after TUN restart
+  # The wait_for runs from the localhost (controller). After Phase 6 the
+  # SSH target moved off ip_hermes_gateway (subnet-routed path is broken
+  # post-tailscale-on-LXC) onto the Tailscale hostname. Use the runtime
+  # `ansible_host` for the in-memory hermes-gw-01 entry so this stays
+  # in sync with whatever the inventory points at.
+  ansible.builtin.wait_for:
+    host: "{{ hostvars['hermes-gw-01'].ansible_host | default(ip_hermes_gateway) }}"
+    port: 22
+    timeout: 60
+  when: hermes_tun_cgroup.changed or hermes_tun_mount.changed
+  delegate_to: localhost
+
 - name: Add Hermes Gateway Host to In-Memory Inventory
+  # Reach via Tailscale (see inventory/proxmox.yml comment for hermes-gw-01).
+  # Pre-Phase-6 this used ip_hermes_gateway (172.16.0.50); the subnet-routed
+  # path stopped working when the LXC joined Tailnet directly.
   ansible.builtin.add_host:
     name: hermes-gw-01
-    ansible_host: "{{ ip_hermes_gateway }}"
+    ansible_host: hermes-gw-01.tail19c543.ts.net
     ansible_user: root
     groups: hermes_gateway
