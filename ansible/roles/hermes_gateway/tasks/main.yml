@@ -387,3 +387,100 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# ─── Firewall: restrict api_server (tcp 8642) to Tailnet only ──────────────
+#
+# api_server.py's bind_guard already requires API_SERVER_KEY when binding
+# off-localhost, so the bearer token is the auth boundary. The firewall is
+# defense-in-depth: even if the key leaks, only hosts on the tailnet (or
+# the LXC itself) can reach the listener at all. Removes the "anyone on
+# 172.16.0.0/24 LAN can probe us" path called out in the post-deploy
+# security audit.
+#
+# Strategy:
+#   * Default INPUT policy stays ACCEPT (don't break SSH, gateway pings,
+#     etc.) — we only restrict the api_server port specifically.
+#   * Allow ACCEPTs first, then a single DROP on tcp 8642 catches everything
+#     else. Order matters; ansible.builtin.iptables appends, so the order
+#     below is the order in the chain.
+#   * Sources allowed:
+#       - lo (in case anything ever calls 127.0.0.1:8642)
+#       - ESTABLISHED,RELATED (so existing connections survive a re-apply)
+#       - 100.64.0.0/10  — Tailscale CGNAT range, transparent subnet routing
+#       - {{ ip_tailscale_gw }} — fallback for the case where the subnet
+#         router source-NATs (it usually doesn't, but cheap to cover)
+#       - {{ ip_hermes_gateway }} — the LXC's own IP, since the in-process
+#         discord adapter calls api_server via API_SERVER_HOST=this-IP
+#
+# IPv4 only — `ss -tlnp` confirms api_server isn't listening on ::1/::*,
+# so an IPv6 bypass isn't possible without first re-binding the socket.
+
+- name: Install netfilter-persistent for api_server firewall rules
+  ansible.builtin.apt:
+    name:
+      - iptables
+      - iptables-persistent
+      - netfilter-persistent
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow loopback to api_server (defense in depth)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    in_interface: lo
+    jump: ACCEPT
+    comment: "hermes_gateway: loopback"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: keep established/related connections alive"
+  ansible.builtin.iptables:
+    chain: INPUT
+    ctstate: ESTABLISHED,RELATED
+    jump: ACCEPT
+    comment: "hermes_gateway: established"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow Tailnet (100.64.0.0/10) to api_server tcp/8642"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8642"
+    source: 100.64.0.0/10
+    jump: ACCEPT
+    comment: "hermes_gateway: tailnet -> api_server"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow tailscale subnet router ({{ ip_tailscale_gw }}) to api_server tcp/8642 (covers source-NAT case)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8642"
+    source: "{{ ip_tailscale_gw }}"
+    jump: ACCEPT
+    comment: "hermes_gateway: tailscale-gw -> api_server"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow LXC self ({{ ip_hermes_gateway }}) to api_server tcp/8642 (in-process discord adapter)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8642"
+    source: "{{ ip_hermes_gateway }}"
+    jump: ACCEPT
+    comment: "hermes_gateway: self -> api_server"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: drop all other inbound to api_server tcp/8642"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8642"
+    jump: DROP
+    comment: "hermes_gateway: deny api_server"
+    state: present
+  notify: Save iptables rules

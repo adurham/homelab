@@ -8,3 +8,9 @@
 - name: Reload Systemd
   ansible.builtin.systemd:
     daemon_reload: true
+
+# Persists current iptables rules to /etc/iptables/rules.v4 so they
+# survive container reboots. Triggered by any iptables: change task.
+- name: Save iptables rules
+  ansible.builtin.command: netfilter-persistent save
+  changed_when: false
