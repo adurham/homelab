@@ -11,6 +11,7 @@
         vmid: "{{ hostvars['vm-01']['vmid'] }}"
         inventory_hostname: "vm-01"
         template: "{{ hostvars['vm-01']['template'] }}"
+        lxc_root_pass: "{{ vm_01_root_pass }}"
 
     - name: Deploy Grafana
       ansible.builtin.include_role:
@@ -20,6 +21,7 @@
         vmid: "{{ hostvars['graf-01']['vmid'] }}"
         inventory_hostname: "graf-01"
         template: "{{ hostvars['graf-01']['template'] }}"
+        lxc_root_pass: "{{ graf_01_root_pass }}"
 
 - name: Configure pve hosts for monitoring egress
   # pve hosts host the `private` SDN bridge but have no L3 endpoint there
