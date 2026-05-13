@@ -10,8 +10,7 @@ sync when adding/removing/moving CTs or VMs.
 | LAN             | `192.168.86.0/24` | `vmbr0` | Home LAN — DHCP from the Nest router       |
 | Private (VXLAN) | `172.16.0.0/24`   | `private` | SDN private subnet for service traffic   |
 
-- `172.16.0.1` is the SDN gateway (proxmox VNet); CTs on `private` use it as their default route only when they need outbound to non-LAN destinations.
-- `172.16.0.101` is `tailscale-gw` — subnet router advertising `172.16.0.0/24` over Tailscale.
+- `172.16.0.1` is `tailscale-gw` — both the SDN VNet gateway and the Tailscale subnet router advertising `172.16.0.0/24` over Tailscale. CTs on `private` use it as their default route only when they need outbound to non-LAN destinations.
 - MTU on `private` is 1450 (1500 minus VXLAN overhead — `net_private_mtu` in `ansible/group_vars/all/vars.yml`).
 
 ## Proxmox nodes (dual-homed)
@@ -35,7 +34,7 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | Hostname        | VMID | Private IP       | LAN IP (if any)    | Role                                        |
 | :-------------- | :--- | :--------------- | :----------------- | :------------------------------------------ |
 | `authentik`     | 100  | `172.16.0.20`    | -                  | SSO / OIDC provider                         |
-| `tailscale-gw`  | 101  | `172.16.0.101`   | `192.168.86.32`    | Subnet router; ingress gateway              |
+| `tailscale-gw`  | 101  | `172.16.0.1`     | `192.168.86.32`    | SDN VNet gateway + Tailscale subnet router  |
 | `dns-01`        | 102  | `172.16.0.10`    | -                  | Bind9 authority for `chi.lab.amd-e.com`     |
 | `lb-01`         | 103  | `172.16.0.30`    | DHCP (`192.168.86.x`) | Nginx L7 reverse proxy                  |
 | `mail-01`       | 104  | `172.16.0.40`    | -                  | Postfix → iCloud SMTP relay                 |
