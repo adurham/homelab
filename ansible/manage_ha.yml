@@ -20,6 +20,8 @@
         name: "vm-01"
       - id: 107
         name: "graf-01"
+      - id: 113
+        name: "hermes-gw-01"
 
     # Replication Config
     replication_targets:
@@ -52,6 +54,15 @@
       ansible.builtin.shell: >
         pvesr enable {{ item.0.id }}-{{ item.1.job_suffix }}
       loop: "{{ ha_containers | product(replication_targets) | list }}"
+      register: pvesr_enable
+      # Tolerate the same self-target case the create step skips: when
+      # a CT lives on the same node listed as its target, the create
+      # step's "Source and target must not be identical" branch leaves
+      # the job uncreated, and the enable here would otherwise fail
+      # with "no such job".  Skip silently in that case.
+      failed_when:
+        - pvesr_enable.rc != 0
+        - "'no such job' not in pvesr_enable.stderr"
       changed_when: false
 
     - name: Add Containers to HA Manager
