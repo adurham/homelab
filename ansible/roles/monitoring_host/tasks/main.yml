@@ -41,20 +41,48 @@
 # Without this, monitoring CTs inherit DHCP DNS from the LAN gateway
 # (192.168.86.2), which can't resolve chi.lab.amd-e.com — silently
 # breaking the blackbox HTTPS/iframe probes that scrape FQDNs.
-- name: Ensure CT uses internal DNS resolver
-  ansible.builtin.command: >
-    pct set {{ vmid }}
-    --nameserver {{ ip_dns_primary }}
-    --searchdomain chi.lab.amd-e.com
+#
+# pct set/exec are node-local. HA can migrate a CT to any node so the
+# config file may not exist on the play's target host. Discover the
+# owning node from pmxcfs and dispatch the resolver update there.
+- name: Find owning node for CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json, sys; print(next((r["node"] for r in json.load(sys.stdin) if r["vmid"] == {{ vmid }}), ""))'
+  args:
+    executable: /bin/bash
+  register: ct_owner
   changed_when: false
   when: ct_check.rc == 0
 
-- name: Push resolv.conf inside running CT
-  ansible.builtin.command: >
-    pct exec {{ vmid }} -- sh -c
-    "printf 'nameserver {{ ip_dns_primary }}\nsearch chi.lab.amd-e.com\n' > /etc/resolv.conf"
+- name: Ensure CT uses internal DNS resolver
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }} \
+      pct set {{ vmid }} \
+      --nameserver {{ ip_dns_primary }} \
+      --searchdomain chi.lab.amd-e.com
+  args:
+    executable: /bin/bash
   changed_when: false
-  when: ct_check.rc == 0
+  when: ct_check.rc == 0 and ct_owner.stdout | length > 0
+
+# Push resolv.conf inside the running CT so the fix takes effect immediately
+# (pct set only writes it on next boot). Using a heredoc avoids the
+# quote-mangling that breaks `pct exec ... sh -c "..."` when piped through
+# an outer ssh + ansible command quoting layer.
+- name: Push resolv.conf inside running CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }} pct exec {{ vmid }} -- tee /etc/resolv.conf >/dev/null <<'EOF'
+    nameserver {{ ip_dns_primary }}
+    search chi.lab.amd-e.com
+    EOF
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: ct_check.rc == 0 and ct_owner.stdout | length > 0
 
 # Only start right after creation. After that, HA owns the running-state of
 # managed CTs — calling `pct start` from a non-owning node would fail anyway,

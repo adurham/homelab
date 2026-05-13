@@ -37,12 +37,28 @@
     "already registered" not in loadbalancer_service_acme_reg.stdout and
     "Account already exists" not in loadbalancer_service_acme_reg.stderr
 
+# acme.sh saves the DNS-plugin env var into account.conf on every run.
+# Past runs corrupted SAVED_DEDYN_TOKEN to a literal placeholder string
+# ("SAVED_...Qr7'"), which then masked $DEDYN_TOKEN at issue time and made
+# deSEC return "invalid domain". Strip any saved token before issuing — the
+# real one is exported below from vault every time anyway.
+- name: Remove any stale SAVED_DEDYN_TOKEN from acme.sh account.conf
+  ansible.builtin.lineinfile:
+    path: /root/.acme.sh/account.conf
+    regexp: '^SAVED_DEDYN_TOKEN='
+    state: absent
+  failed_when: false  # account.conf may not exist on first run
+
+# --dnssleep 60 gives deSEC time to commit both TXT records on
+# _acme-challenge.chi.lab.amd-e.com before LE polls. Without it the second
+# challenge often races and LE returns "Incorrect TXT record".
 - name: Issue Certificate (DNS-01 Wildcard)
   ansible.builtin.shell: |
     set -o pipefail
     /root/.acme.sh/acme.sh --issue \
     --server letsencrypt \
     --dns dns_desec \
+    --dnssleep 60 \
     -d "*.chi.lab.amd-e.com" \
     -d chi.lab.amd-e.com
   environment:
