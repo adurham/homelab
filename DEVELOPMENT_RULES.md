@@ -52,3 +52,19 @@
 - Keep the inventory and roles authoritative — don't make manual
   changes to a CT and forget to backport. If you do something by hand,
   encode it in the role or note it in a follow-up.
+
+## Security headers on the load balancer
+
+- `roles/loadbalancer_service/templates/nginx.conf.j2` defines two
+  header macros: `security_headers` (strict — DENY / 'none') and
+  `security_headers_self_frame` (SAMEORIGIN / 'self'). Admin UIs that
+  iframe their own console pane same-origin (Proxmox Console tab,
+  Tanium server console) MUST use the self-frame variant — DENY/'none'
+  silently breaks the iframe with no nginx-side error.
+- The `https_iframe_self_ok` blackbox probe (job
+  `blackbox_iframe_self_ok`) catches this regression. If you add a
+  new admin UI with an in-app iframed console, add it to
+  `blackbox_iframe_self_targets` in
+  `roles/victoriametrics/defaults/main.yml`.
+- When changing either header macro, smoke-test the Proxmox Console
+  tab AND Tanium server console manually before merging.

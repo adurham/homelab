@@ -60,6 +60,31 @@
             preferred_ip_protocol: ip4
             tls_config:
               insecure_skip_verify: false
+
+        # HTTPS GET that verifies same-origin iframing is allowed. Used for
+        # admin UIs that iframe their own console (Proxmox Console tab,
+        # Tanium server console). probe_success = 0 if either:
+        #   X-Frame-Options: DENY
+        #   Content-Security-Policy: ... frame-ancestors 'none' ...
+        # is present in the response — exactly the regression that broke
+        # the Proxmox Console pane after the May-2026 security-headers
+        # sweep (commit 1dfaf19). The bad-header values are the failure
+        # signal; the good values (SAMEORIGIN / 'self') just don't match.
+        https_iframe_self_ok:
+          prober: http
+          timeout: 8s
+          http:
+            valid_status_codes: [200, 301, 302, 401, 403]
+            method: GET
+            fail_if_not_ssl: true
+            preferred_ip_protocol: ip4
+            tls_config:
+              insecure_skip_verify: false
+            fail_if_header_matches:
+              - header: X-Frame-Options
+                regexp: '(?i)deny'
+              - header: Content-Security-Policy
+                regexp: "frame-ancestors[^;]*'none'"
     owner: root
     group: blackbox_exporter
     mode: '0640'

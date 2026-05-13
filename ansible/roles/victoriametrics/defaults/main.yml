@@ -9,3 +9,11 @@ blackbox_https_targets:
   - https://grafana.chi.lab.amd-e.com
   - https://auth.chi.lab.amd-e.com
   - https://proxmox.chi.lab.amd-e.com
+
+# Admin UIs that iframe their own console pane same-origin. Probed with the
+# https_iframe_self_ok module — fails if X-Frame-Options: DENY or
+# CSP frame-ancestors 'none' is returned, both of which silently break the
+# in-app console pane in the browser.
+blackbox_iframe_self_targets:
+  - https://proxmox.chi.lab.amd-e.com
+  - https://tanium.chi.lab.amd-e.com
