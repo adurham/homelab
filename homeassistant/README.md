@@ -1,137 +1,118 @@
-# Home Assistant Configuration Management
+# Home Assistant Configuration
 
-This directory contains the configuration files and deployment scripts for the Home Assistant setup.
+This directory holds the Home Assistant config that lives in version control.
+The source of truth is this repo; the live HA host is updated via the Ansible
+playbook at `ansible/deploy_ha_automations.yml`.
 
-## 🚀 Quick Start
+## Quick Start
 
-### 1. Initial Setup
-```bash
-# Copy the example configuration file
-cp ha_config.env.example ha_config.env
+1. Bootstrap your local API credentials (gitignored):
 
-# Edit ha_config.env with your actual Home Assistant credentials
-# Get your token from: http://homeassistant.local:8123/profile
+   ```bash
+   cp homeassistant/ha_config.env.example homeassistant/ha_config.env
+   # Edit homeassistant/ha_config.env and set HA_URL + HA_TOKEN.
+   # Get a long-lived token at http://homeassistant.local:8123/profile.
+   ```
 
-# Run the setup script to create virtual environment and install dependencies
-./setup_venv.sh
-```
+2. First-time install (writes files AND restarts HA so configuration.yaml
+   takes effect):
 
-### 2. Deploy Configuration
-```bash
-# Deploy all configuration files to Home Assistant
-./deploy_homeassistant.sh
-```
+   ```bash
+   cd ~/repos/homelab
+   ansible-playbook ansible/deploy_ha_automations.yml -e ha_restart=true
+   ```
 
-## 📁 Directory Structure
+3. Day-to-day automation edits (no restart, hot-reload via REST API):
+
+   ```bash
+   ansible-playbook ansible/deploy_ha_automations.yml
+   ```
+
+Use `-e ha_restart=true` whenever `configuration.yaml`, `templates.yaml`,
+`sensors.yaml`, or any `input_*.yaml` changes — those cannot be hot-reloaded.
+
+## Directory Structure
 
 ```
 homeassistant/
-├── automations.yaml          # Main automation include file
-├── scripts.yaml             # Main script include file
-├── configuration.yaml       # Main HA configuration
-├── automations/             # Automation files
-│   └── vent_control/
-│       ├── smart_vent_control_system.yaml
-│       ├── manual_vent_control.yaml
-│       └── README.md
-├── scripts/                 # Script files
-│   └── vent_control/
-│       ├── control_all_room_vents.yaml
-│       ├── control_room_vent.yaml
-│       └── README.md
-├── venv/                    # Python virtual environment (gitignored)
-├── requirements.txt         # Python dependencies
-├── .yamllint               # YAML linting configuration
-├── .gitignore              # Git ignore rules
-├── ha_config.env.example   # Example configuration file
-├── deploy_homeassistant.sh  # Deployment script
-├── setup_venv.sh           # Setup script
-└── README.md               # This file
+├── configuration.yaml         # Top-level HA config; loads everything below.
+├── automations.yaml           # UI-managed automations (HA owns this file).
+├── automations/               # Repo-managed automations (one file per system).
+│   └── entertainment/         # Sub-package for media-room automations.
+├── apps/apps.yaml             # Placeholder for future AppDaemon apps.
+├── docs/                      # Reference docs / device inventories.
+├── input_datetime.yaml        # input_datetime helpers.
+├── input_number.yaml          # input_number helpers.
+├── scripts.yaml               # UI-managed scripts (HA owns this file).
+├── sensors.yaml               # Custom sensors.
+├── templates.yaml             # Template entities.
+├── secrets.yaml.example       # Template for secrets.yaml (HA-host only).
+├── ha_config.env.example      # Template for ha_config.env (gitignored).
+├── reload_ha_automations.py   # Helper used by the deploy playbook.
+└── prune_orphan_entities.py   # Lists / removes stale automation entities.
 ```
 
-## 🔧 Current Systems
+`automations/` is wired into HA via `!include_dir_merge_list` inside the
+`homeassistant.packages.manual_automations` block in `configuration.yaml`.
+That packaging is what lets repo-managed automations coexist with the
+UI-managed `automations.yaml` HA edits in place.
 
-### Vent Control System
-- **Purpose**: Intelligent vent control based on occupancy and temperature
-- **Coverage**: 8 rooms with 10 total vents
-- **Logic**: Occupied rooms get priority, unoccupied rooms can drift ±3°F
-- **Automation**: `automations/vent_control/smart_vent_control_system.yaml`
-- **Scripts**: `scripts/vent_control/control_all_room_vents.yaml`, `scripts/vent_control/control_room_vent.yaml`
+## Live Systems
 
-### Basement Climate Control
-- **Purpose**: Maintain basement temperature around 70°F using HomeKit sensor data
-- **Virtual Thermostat**: Create via UI (see `create_basement_climate_helper.sh` for instructions) - shows on dashboards, voice assistant compatible
-- **Sensor**: `sensor.7wq7_temperature` (Basement Temperature)
-- **Setpoint Helpers**: `input_number.basement_virtual_setpoint`, `input_select.basement_virtual_mode`
-- **Actuation**: Template switches drive `climate.basement_heatpump_basement_office_ac` in heat/cool with max output and vertical swing
-- **Automation**: `automations/basement_virtual_thermostat.yaml` orchestrates heating/cooling logic
-- **Setup**: After deployment, run `./create_basement_climate_helper.sh` for UI setup instructions
-- **Configuration**: See `configuration.yaml` `template` (switches), `input_number`, and `input_select` sections
+Brief tour of what is actually running. See the matching files under
+`automations/` for the gory details.
 
-## 🛡️ Security Features
+- Safety — `automations/emergency_safety.yaml`,
+  `automations/circulation_safety.yaml`. Smoke / CO emergency response and
+  HVAC circulation watchdog.
+- Infrastructure alerting — `automations/adguard_watchdog.yaml`,
+  `automations/grafana_alert_webhook.yaml`. AdGuard Home liveness monitor
+  and Grafana → iPhone push bridge.
+- Lights — `cat_room_main_lights_{on,off}.yaml`,
+  `front_porch_sconces_{on,off}.yaml`,
+  `stairs_main_lights_{on,off}.yaml`,
+  `garage_lights_door_motion_control.yaml`. Schedule- and motion-driven
+  lighting for the recurring rooms.
+- Climate / exhaust — `basement_exhaust_fan.yaml`. CO2-driven baseline and
+  burst exhaust for the basement office.
+- Hot water — `hot_water_recovery.yaml`, `smart_circulation.yaml`. Recovery
+  manager and (currently disabled) smart recirculation pump control.
+- Laundry — `laundry_monitor.yaml`. Notifies when the washer cycle ends.
+- Entertainment — `automations/entertainment/ps5_hue_sync.yaml`. Drives
+  Hue sync box behavior off PS5 power state.
 
-### Deployment Safety
-- **Change Detection**: Aborts if `configuration.yaml` modified externally
-- **Backup System**: Creates HA CLI backup + file backups with rotation
-- **Validation**: Multiple validation layers (yamllint + ha core check)
-- **Auto-Restore**: Automatically restores backup if deployment fails
-- **Error Handling**: Comprehensive error checking and reporting
+If something in the live HA registry shows `state: unavailable`, it is a
+stale entity left behind from a deleted automation. Use
+`python3 homeassistant/prune_orphan_entities.py --list-all` to inspect, and
+the same script with `--apply --i-know-what-im-doing` to remove.
 
-### File Security
-- **Sensitive files**: `ha_config.env` and `secrets.yaml` are gitignored
-- **Example configs**: `ha_config.env.example` and `secrets.yaml.example` provided for setup
-- **Virtual environment**: `venv/` directory is gitignored
-- **Secrets management**: Home Assistant uses `secrets.yaml` for sensitive configuration values
+## Secrets
 
-## 🔄 Deployment Process
+`secrets.yaml` lives only on the Home Assistant host (`/config/secrets.yaml`)
+and is never copied by the deploy playbook — bootstrap it manually from
+`secrets.yaml.example`. It currently holds:
 
-### What the deployment script does:
-1. **Safety Checks**: Verifies `configuration.yaml` hasn't been modified externally
-2. **Local Validation**: Runs `yamllint` on local files
-3. **Backup Creation**: Creates HA CLI backup + file backups with rotation
-4. **Deploy Files**: Copies files safely to Home Assistant
-5. **Remote Validation**: Runs `ha core check` on deployed configuration
-6. **Auto-Restore**: If validation fails, automatically restores from backup
-7. **Restart**: Only restarts Home Assistant if validation passed
-8. **Verification**: Confirms Home Assistant is running
+- `sony_tv_psk` — pairing key for the Sony Bravia integration.
+- `grafana_alert_webhook_id` — shared secret in the Grafana → HA webhook URL.
 
-## 📋 Requirements
+`ha_config.env` is the local credentials file the helper Python scripts
+read (HA_URL, HA_TOKEN). Also gitignored. Bootstrap from
+`ha_config.env.example`.
 
-- Python 3.x
-- SSH access to Home Assistant box
-- Home Assistant CLI (`ha`) installed on target system
-- Long-lived access token for Home Assistant API
+## Troubleshooting
 
-## 🔧 Configuration
+```bash
+# Validate the live HA config.
+ssh -p 2222 root@homeassistant.local "ha core check"
 
-### Environment Setup
-1. Copy `ha_config.env.example` to `ha_config.env`
-2. Edit `ha_config.env` with your Home Assistant credentials
-3. Copy `secrets.yaml.example` to `secrets.yaml`
-4. Edit `secrets.yaml` with your InfluxDB credentials and other secrets
-5. Run `./setup_venv.sh` to install dependencies
+# Tail the HA log.
+ssh -p 2222 root@homeassistant.local "ha core log"
 
+# Restore from a HA-CLI backup (the deploy playbook takes one before each push).
+ssh -p 2222 root@homeassistant.local "ha core backup restore <slug>"
+```
 
-
-### Adding New Systems
-1. Create new directories in `automations/` and `scripts/`
-2. Add your automation and script files
-3. Deploy with `./deploy_homeassistant.sh`
-
-## 🚨 Troubleshooting
-
-### Deployment Fails
-- Check `ha_config.env` has correct credentials
-- Verify SSH access to Home Assistant box
-- Run `./setup_venv.sh` if virtual environment issues
-
-### Configuration Issues
-- Check logs: `ssh -p 2222 root@homeassistant.local "ha core log"`
-- Validate config: `ssh -p 2222 root@homeassistant.local "ha core check"`
-- Restore backup: `ssh -p 2222 root@homeassistant.local "ha core backup restore <backup_name>"`
-
-## 📚 Documentation
-
-- **Vent Control**: See `automations/vent_control/README.md` and `scripts/vent_control/README.md`
-- **Deployment**: See `deploy_homeassistant.sh` for detailed deployment logic
-- **YAML Linting**: See `.yamllint` for linting rules
+The deploy playbook runs `yamllint homeassistant/` locally before any scp,
+takes a `ha core backup` on the host, copies files, runs `ha core check`,
+then either reloads automations via REST or restarts core depending on
+`ha_restart`.
