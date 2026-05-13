@@ -47,10 +47,14 @@ map $http_upgrade $connection_upgrade {
     ''      "";
 }
 
+# least_conn (not ip_hash): Tailscale subnet router does SNAT, so every
+# Tailscale peer arrives at lb-01 with source {{ net_private_gw }}. With
+# ip_hash that pinned every Tailscale user to the same upstream node,
+# starving the other two. Proxmox uses ticket cookies + OIDC tokens for
+# session state, so per-request load-balancing across cluster members is
+# safe — there's no in-memory session affinity to break.
 upstream proxmox_cluster {
-    ip_hash;
-    # Sticky sessions based on IP. Note: with Tailscale Gateway (SNAT),
-    # all traffic might appear as {{ net_private_gw }}.
+    least_conn;
 {% for node in groups['proxmox_nodes'] | sort %}
     server {{ hostvars[node].ansible_host }}:8006;
 {% endfor %}
@@ -58,6 +62,10 @@ upstream proxmox_cluster {
     keepalive 32;
 }
 
+# Tanium servers DO require sticky sessions (in-memory session state on
+# each appliance); ip_hash is correct here. Tanium consoles are accessed
+# only from LAN / a small set of internal hosts, not Tailscale, so the
+# SNAT collapse doesn't apply.
 upstream tanium_servers {
     ip_hash;
 {% for node in groups['tanium_servers'] | sort %}
