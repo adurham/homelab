@@ -33,7 +33,7 @@
     --storage nvme-data
     --unprivileged 1
     --features nesting=1
-    --password "{{ lxc_root_pass | default('ChangeMe123!') }}"
+    --password "{{ lxc_root_pass }}"
     --ssh-public-keys /root/.ssh/authorized_keys
   when: ct_check.rc != 0
 
