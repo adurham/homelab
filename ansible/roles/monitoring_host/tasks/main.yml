@@ -28,12 +28,33 @@
     --cores {{ vm_cores | default(2) }} --memory {{ vm_memory | default(4096) }} --swap 512
     --net0 name=eth0,bridge=vmbr0,ip=dhcp
     --net1 name=eth1,bridge=private,ip={{ net_private_ip }}
+    --nameserver {{ ip_dns_primary }}
+    --searchdomain chi.lab.amd-e.com
     --storage nvme-data
     --unprivileged 1
     --features nesting=1
     --password "{{ lxc_root_pass | default('ChangeMe123!') }}"
     --ssh-public-keys /root/.ssh/authorized_keys
   when: ct_check.rc != 0
+
+# Idempotent re-apply of resolver settings for already-existing CTs.
+# Without this, monitoring CTs inherit DHCP DNS from the LAN gateway
+# (192.168.86.2), which can't resolve chi.lab.amd-e.com — silently
+# breaking the blackbox HTTPS/iframe probes that scrape FQDNs.
+- name: Ensure CT uses internal DNS resolver
+  ansible.builtin.command: >
+    pct set {{ vmid }}
+    --nameserver {{ ip_dns_primary }}
+    --searchdomain chi.lab.amd-e.com
+  changed_when: false
+  when: ct_check.rc == 0
+
+- name: Push resolv.conf inside running CT
+  ansible.builtin.command: >
+    pct exec {{ vmid }} -- sh -c
+    "printf 'nameserver {{ ip_dns_primary }}\nsearch chi.lab.amd-e.com\n' > /etc/resolv.conf"
+  changed_when: false
+  when: ct_check.rc == 0
 
 # Only start right after creation. After that, HA owns the running-state of
 # managed CTs — calling `pct start` from a non-owning node would fail anyway,
