@@ -3,9 +3,14 @@
 # host and reloads automations via the REST API. Pass `-e ha_restart=true`
 # to do a full `ha core restart` instead of just automation reload — needed
 # when configuration.yaml changes (everything else can be hot-reloaded).
+#
+# This playbook is destructive: it overwrites files on the HA host and can
+# trigger a core restart. `--check` mode is not meaningful here; for safe
+# rehearsal pass `-e ha_restart=false` (the default) so the slow path is
+# skipped and only an automation reload happens.
 - name: Deploy Home Assistant Automations
   hosts: homeassistant
-  gather_facts: false  # No python on HA OS usually
+  gather_facts: true  # Need ansible_date_time for the backup name
   vars:
     ha_root: "{{ playbook_dir }}/../homeassistant"
     ha_restart: false
@@ -21,6 +26,23 @@
       - input_number.yaml
 
   tasks:
+    # homeassistant inventory is a single host, this lint is local-only,
+    # free-strategy concerns don't apply.
+    - name: Lint local YAML before touching the host  # noqa: run-once[task]
+      ansible.builtin.command: yamllint homeassistant/
+      args:
+        chdir: "{{ ha_root }}/.."
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+
+    - name: Take pre-deploy backup on the HA host
+      ansible.builtin.raw: >-
+        ha core backup --name pre-deploy-{{ ansible_date_time.iso8601_basic_short }}
+      register: ha_backup
+      changed_when: ha_backup.rc == 0
+      failed_when: ha_backup.rc != 0
+
     - name: Ensure target directories exist
       ansible.builtin.raw: "mkdir -p /config/automations /config/apps"
       register: mkdir_result
@@ -58,8 +80,20 @@
       ansible.builtin.raw: "ha core check"
       register: config_check
       changed_when: false
-      failed_when: "'Command completed successfully' not in config_check.stdout and config_check.rc != 0"
+      failed_when: config_check.rc != 0
 
+    - name: Surface ha core check failure
+      ansible.builtin.fail:
+        msg: |
+          ha core check failed on the HA host. stdout/stderr below.
+          ----- stdout -----
+          {{ config_check.stdout | default('') }}
+          ----- stderr -----
+          {{ config_check.stderr | default('') }}
+      when: config_check.rc | default(0) != 0
+
+    # changed_when: rc == 0 always reports "changed" — intentional, this is a
+    # one-shot REST POST with no idempotency signal from HA.
     - name: Reload Automations via API (fast path — no restart)
       ansible.builtin.command: "python3 {{ ha_root }}/reload_ha_automations.py"
       delegate_to: localhost
