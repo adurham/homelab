@@ -163,6 +163,17 @@
   ignore_errors: true
   register: grafana_invalid_flow
 
+# Authentik prefers a dedicated invalidation flow but older installs lack it.
+# Fall back to the auth flow so older deployments don't break. Hoisted here
+# so the 3 downstream providers (oauth2 create/update + proxy create) can
+# reference it as a short name instead of repeating the ternary inline.
+- name: Resolve invalidation flow PK (with fallback)
+  ansible.builtin.set_fact:
+    grafana_invalidation_pk: >-
+      {{ grafana_invalid_flow.json.results[0].pk
+         if (not grafana_invalid_flow.failed and grafana_invalid_flow.json.results | length > 0)
+         else grafana_auth_flow.json.results[0].pk }}
+
 - name: Create Grafana Provider
   ansible.builtin.uri:
     url: "{{ authentik_url }}/api/v3/providers/oauth2/"
@@ -175,7 +186,7 @@
       client_secret: "{{ grafana_client_secret | default('grafana_secret_placeholder') }}"
       authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
       authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
-      invalidation_flow: "{{ (grafana_invalid_flow.json.results[0].pk if (not grafana_invalid_flow.failed and grafana_invalid_flow.json.results | length > 0) else grafana_auth_flow.json.results[0].pk) }}"
+      invalidation_flow: "{{ grafana_invalidation_pk }}"
       redirect_uris:
         - url: "https://grafana.chi.lab.amd-e.com/login/generic_oauth"
           matching_mode: "strict"
@@ -188,7 +199,10 @@
 
 - name: Capture Grafana Provider ID (Original)
   ansible.builtin.set_fact:
-    grafana_provider_id: "{{ (new_grafana_provider.json.pk if new_grafana_provider is defined and new_grafana_provider.changed else grafana_providers_found.json.results[0].pk) }}"
+    grafana_provider_id: >-
+      {{ new_grafana_provider.json.pk
+         if (new_grafana_provider is defined and new_grafana_provider.changed)
+         else grafana_providers_found.json.results[0].pk }}
 
 - name: Get Email Scope Mapping
   ansible.builtin.uri:
@@ -209,10 +223,14 @@
         - url: "https://grafana.chi.lab.amd-e.com/login/generic_oauth"
           matching_mode: "strict"
       client_id: "{{ grafana_client_id | default('grafana') }}"
-      property_mappings: "{{ scope_mappings.json.results | selectattr('managed', 'defined') | selectattr('name', 'search', 'email|profile|openid') | map(attribute='pk') | list }}"
+      property_mappings: >-
+        {{ scope_mappings.json.results
+           | selectattr('managed', 'defined')
+           | selectattr('name', 'search', 'email|profile|openid')
+           | map(attribute='pk') | list }}
       authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
       authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
-      invalidation_flow: "{{ (grafana_invalid_flow.json.results[0].pk if (not grafana_invalid_flow.failed and grafana_invalid_flow.json.results | length > 0) else grafana_auth_flow.json.results[0].pk) }}"
+      invalidation_flow: "{{ grafana_invalidation_pk }}"
     status_code: [200]
   when: grafana_provider_id is defined
   no_log: true
@@ -275,7 +293,7 @@
       internal_host_ssl_validation: false
       intercept_header_auth: true
       authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
-      invalidation_flow: "{{ (grafana_invalid_flow.json.results[0].pk if (not grafana_invalid_flow.failed and grafana_invalid_flow.json.results | length > 0) else grafana_auth_flow.json.results[0].pk) }}"
+      invalidation_flow: "{{ grafana_invalidation_pk }}"
     status_code: [200, 201]
   when: vm_providers_found.json.results | length == 0
   register: new_vm_provider

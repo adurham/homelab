@@ -1,4 +1,10 @@
-# Promtail + node_exporter → Grafana Alloy migration plan
+# Promtail + node_exporter → Grafana Alloy migration plan (HISTORICAL — completed)
+
+> **Status (2026-05-13):** This migration has landed across the full
+> fleet. Promtail and the legacy node_exporter installs have been
+> retired; every managed host now runs Grafana Alloy via
+> `roles/alloy/`. The body below is kept as a reference for
+> future Alloy config changes and as a post-mortem of the cutover.
 
 Replace **two agents** on every host (Promtail for logs, node_exporter
 for metrics) with **one** unified agent (Grafana Alloy). Reduces

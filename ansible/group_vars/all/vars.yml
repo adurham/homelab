@@ -31,7 +31,10 @@ ip_loadbalancer: "172.16.0.30"
 ip_mail_server: "172.16.0.40"
 ip_grafana: "172.16.0.41"
 ip_vm: "172.16.0.42"
-ip_tailscale_gw: "172.16.0.101"
+# tailscale-gw is the SDN VNet gateway itself — there is no separate
+# 172.16.0.101 device. Kept as ip_tailscale_gw for callers; equals
+# net_private_gw.
+ip_tailscale_gw: "172.16.0.1"
 ip_hermes_gateway: "172.16.0.50"
 
 # Email destination for the Grafana fallback contact point. Routes through

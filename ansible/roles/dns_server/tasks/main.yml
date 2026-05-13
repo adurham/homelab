@@ -25,7 +25,7 @@
     owner: root
     group: bind
     mode: '0750'
-    recurse: yes
+    recurse: true
 
 - name: Configure Named Options
   ansible.builtin.template:

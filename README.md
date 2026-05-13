@@ -11,7 +11,7 @@ This repository manages a hyper-converged private cloud built on Proxmox VE. The
 - **Networking**:
   - **Physical**: LAN (`vmbr0`, `192.168.86.0/24`).
   - **SDN**: VXLAN-based private network (`172.16.0.0/24`) for isolated service communication.
-  - **Ingress**: Tailscale Gateway (`172.16.0.101`) for secure remote access and NAT.
+  - **Ingress**: Tailscale Gateway (`172.16.0.1`) for secure remote access and NAT — also acts as the SDN VNet gateway.
 - **Identity**: Authentik (`auth.chi.lab.amd-e.com`) with OIDC integration for Proxmox SSO.
 - **Storage**: ZFS (NVMe) with automated replication for High Availability.
 
@@ -19,7 +19,6 @@ This repository manages a hyper-converged private cloud built on Proxmox VE. The
 
 | Service           | Hostname           | Private IP     | Public/LAN         | Description                                       |
 | :---------------- | :----------------- | :------------- | :----------------- | :------------------------------------------------ |
-| Gateway           | `proxmox` (VNet)   | `172.16.0.1`   | -                  | SDN gateway for the private network               |
 | DNS               | `dns-01`           | `172.16.0.10`  | -                  | Internal Bind9 authority (`chi.lab.amd-e.com`)    |
 | NTP               | `ntp-01`           | `172.16.0.11`  | -                  | Chrony, syncs against `time.nist.gov`             |
 | Squid Proxy       | `proxy-01`         | `172.16.0.12`  | -                  | Outbound caching proxy                            |
@@ -28,7 +27,7 @@ This repository manages a hyper-converged private cloud built on Proxmox VE. The
 | Mail Forwarder    | `mail-01`          | `172.16.0.40`  | -                  | Postfix → iCloud SMTP relay for alert email       |
 | VictoriaMetrics   | `vm-01`            | `172.16.0.42`  | -                  | TSDB + blackbox_exporter + Loki                   |
 | Grafana           | `graf-01`          | `172.16.0.41`  | -                  | Dashboards + unified alerting + image renderer    |
-| Tailscale GW      | `tailscale-gw`     | `172.16.0.101` | LAN + `100.x.y.z`  | Subnet router; ingress / NAT gateway              |
+| Tailscale GW      | `tailscale-gw`     | `172.16.0.1`   | LAN + `100.x.y.z`  | SDN VNet gateway + Tailscale subnet router        |
 
 External access URL: `https://proxmox.chi.lab.amd-e.com` → `lb-01`.
 

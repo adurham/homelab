@@ -407,8 +407,9 @@
 #       - lo (in case anything ever calls 127.0.0.1:8642)
 #       - ESTABLISHED,RELATED (so existing connections survive a re-apply)
 #       - 100.64.0.0/10  — Tailscale CGNAT range, transparent subnet routing
-#       - {{ ip_tailscale_gw }} — fallback for the case where the subnet
-#         router source-NATs (it usually doesn't, but cheap to cover)
+#       - {{ ip_tailscale_gw }} — covers the source-NAT case (the
+#         tailscale-gw subnet router has --snat-subnet-routes=true, so
+#         every Tailscale peer arrives with source 172.16.0.1)
 #       - {{ ip_hermes_gateway }} — the LXC's own IP, since the in-process
 #         discord adapter calls api_server via API_SERVER_HOST=this-IP
 #
