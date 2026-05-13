@@ -45,7 +45,10 @@
     - service: notify.mobile_app_adams_iphone_16
       data:
         title: "EMERGENCY: {{ 'Smoke' if trigger.id == 'smoke' else 'Carbon Monoxide' }} Detected!"
-        message: "The Nest Protect in the {{ state_attr(trigger.entity_id, 'friendly_name') }} has detected a life-safety emergency. HVAC has been disabled and lights turned on."
+        message: >-
+          The Nest Protect in the {{ state_attr(trigger.entity_id, 'friendly_name') }}
+          has detected a life-safety emergency.
+          HVAC has been disabled and lights turned on.
         data:
           push:
             sound:
