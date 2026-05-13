@@ -125,3 +125,25 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: 127.0.0.1:9115
+
+  # HTTPS probes that fail if the vhost returns X-Frame-Options: DENY or
+  # CSP frame-ancestors 'none'. Catches the May-2026 regression class where
+  # over-broad security headers silently break admin UIs whose console pane
+  # is an iframed sub-resource (Proxmox Console tab, Tanium server console).
+  # Targets come from blackbox_iframe_self_targets (roles/victoriametrics/defaults).
+  - job_name: 'blackbox_iframe_self_ok'
+    metrics_path: /probe
+    params:
+      module: [https_iframe_self_ok]
+    static_configs:
+      - targets:
+{% for url in blackbox_iframe_self_targets | default([]) %}
+          - {{ url }}
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115

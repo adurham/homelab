@@ -5,11 +5,31 @@ server_tokens off;
 # CSP is intentionally narrow — only frame-ancestors, since stricter CSPs
 # break the proxied apps' inline scripts/styles (Tanium console, Grafana,
 # Authentik, Proxmox WebUI all use them).
+#
+# Two flavours:
+#   security_headers            — strict DENY / 'none'. Use for apps that
+#                                  do NOT iframe their own UI (whoami, auth,
+#                                  grafana, victoriametrics).
+#   security_headers_self_frame — SAMEORIGIN / 'self'. Use for apps whose own
+#                                  UI uses a same-origin iframe sub-pane
+#                                  (Proxmox Console tab, Tanium console).
+#                                  Still blocks cross-origin clickjacking.
+#
+# If you change the default, smoke-test the Proxmox Console tab and the
+# Tanium server console — header regressions there fail silently in the
+# browser (white pane, 200 OK in nginx logs).
 {% set security_headers %}
     add_header X-Frame-Options                "DENY" always;
     add_header X-Content-Type-Options         "nosniff" always;
     add_header Referrer-Policy                "strict-origin-when-cross-origin" always;
     add_header Content-Security-Policy        "frame-ancestors 'none'" always;
+{% endset %}
+
+{% set security_headers_self_frame %}
+    add_header X-Frame-Options                "SAMEORIGIN" always;
+    add_header X-Content-Type-Options         "nosniff" always;
+    add_header Referrer-Policy                "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy        "frame-ancestors 'self'" always;
 {% endset %}
 
 # ACL: Define Internal Networks
@@ -67,7 +87,8 @@ server {
 
     # HSTS
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-{{ security_headers }}
+    # Tanium's UI iframes its own console pane same-origin, so DENY/'none' breaks it.
+{{ security_headers_self_frame }}
 
     location / {
         proxy_pass https://tanium_servers;
@@ -111,7 +132,8 @@ server {
     ssl_buffer_size 4k;
 
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-{{ security_headers }}
+    # Proxmox WebUI iframes its noVNC/xtermjs Console pane same-origin, so DENY/'none' breaks it.
+{{ security_headers_self_frame }}
 
     # Allow large uploads (ISOs)
     client_max_body_size 0;
