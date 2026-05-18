@@ -9,7 +9,7 @@ authentik_tag: "2025.8.1"
 # Postgres major version is coupled to Authentik's supported range; bump
 # the major only after confirming Authentik release notes support it.
 authentik_postgres_image: "docker.io/library/postgres"
-authentik_postgres_tag: "16.11-alpine"
+authentik_postgres_tag: "16.13-alpine"
 
 # Redis is more loosely coupled (Authentik uses it as a cache/queue).
 authentik_redis_image: "docker.io/library/redis"
