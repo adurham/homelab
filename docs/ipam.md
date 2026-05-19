@@ -9,9 +9,11 @@ sync when adding/removing/moving CTs or VMs.
 | :-------------- | :---------------- | :------ | :----------------------------------------- |
 | LAN             | `192.168.86.0/24` | `vmbr0` | Home LAN — DHCP from the Nest router       |
 | Private (VXLAN) | `172.16.0.0/24`   | `private` | SDN private subnet for service traffic   |
+| BWT Lab (VXLAN) | `10.99.0.0/24`    | `bwt`     | Isolated subnet for Tanium bandwidth-throttle repro (NEC 00271560 et al) |
 
 - `172.16.0.1` is `tailscale-gw` — both the SDN VNet gateway and the Tailscale subnet router advertising `172.16.0.0/24` over Tailscale. CTs on `private` use it as their default route only when they need outbound to non-LAN destinations.
-- MTU on `private` is 1450 (1500 minus VXLAN overhead — `net_private_mtu` in `ansible/group_vars/all/vars.yml`).
+- `10.99.0.3` is `tailscale-gw` eth2 on the `bwt` bridge — same CT (101) carries the BWT-lab subnet router, advertising `10.99.0.0/24` over Tailscale.
+- MTU on `private` and `bwt` is 1450 (1500 minus VXLAN overhead — `net_private_mtu` / `net_bwt_mtu` in `ansible/group_vars/all/vars.yml`).
 
 ## Proxmox nodes (dual-homed)
 
@@ -56,16 +58,58 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | `tzs-01`  | 204  | `172.16.0.55`    | Tanium Zone Server    |
 | `tzs-02`  | 205  | `172.16.0.56`    | Tanium Zone Server    |
 
+## BWT lab (bandwidth-throttle repro)
+
+Separate from the existing `tanium_cluster` — uses TanOS appliance VMs on the
+isolated `bwt` SDN VNet (`10.99.0.0/24`, VLAN 200). 1× TS + 4× ZS for the
+server side; LXC clients for the load drivers. See
+`inventory/proxmox.yml` under `bwt_lab` and the `tanium-bandwidth-throttle`
+skill for context. Pre-staged Tanium RPMs land in `files/tanium-<version>/`
+(gitignored) via `scripts/tanium/fetch_artifactory_bundle.sh`.
+
+Network isolation: the `bwt` subnet is intentionally walled off from the
+`private` subnet (172.16.0.0/24) by pve01's `PRIVATE-MONITORING-IN` firewall.
+BWT hosts can reach the internet via SNAT through pve01 (10.99.0.1) but
+cannot reach `dns-01`, `vm-01`, etc. — BWT uses Cloudflare/Google DNS pushed
+by `bwt-dhcp`. Ansible reaches BWT VMs via ProxyJump through pve01.
+
+| Hostname     | VMID | BWT IP                  | Role                              |
+| :----------- | :--- | :---------------------- | :-------------------------------- |
+| `bwt-dhcp`   | 114  | `10.99.0.2` (static)    | dnsmasq DHCP server (Debian LXC)  |
+| `bwt-ts`     | 220  | `10.99.0.10` (static)   | Tanium Server (TanOS)             |
+| `bwt-zs-01`  | 221  | `10.99.0.11` (static)   | Tanium Zone Server (TanOS)        |
+| `bwt-zs-02`  | 222  | `10.99.0.12` (static)   | Tanium Zone Server (TanOS)        |
+| `bwt-zs-03`  | 223  | `10.99.0.13` (static)   | Tanium Zone Server (TanOS)        |
+| `bwt-zs-04`  | 224  | `10.99.0.14` (static)   | Tanium Zone Server (TanOS)        |
+| `bwt-tc-01`  | 320  | `10.99.0.50-250` (DHCP) | BWT test client (LXC)             |
+| `bwt-tc-02`  | 321  | `10.99.0.50-250` (DHCP) | BWT test client (LXC)             |
+| `bwt-tc-03`  | 322  | `10.99.0.50-250` (DHCP) | BWT test client (LXC)             |
+| `bwt-tc-04`  | 323  | `10.99.0.50-250` (DHCP) | BWT test client (LXC)             |
+| `bwt-tc-05`  | 324  | `10.99.0.50-250` (DHCP) | BWT test client (LXC)             |
+| `bwt-tc-06`  | 325  | `10.99.0.50-250` (DHCP) | BWT test client (LXC)             |
+| `bwt-tc-07`  | 326  | `10.99.0.50-250` (DHCP) | BWT test client (LXC)             |
+| `bwt-tc-08`  | 327  | `10.99.0.50-250` (DHCP) | BWT test client (LXC)             |
+
+DHCP pool: 10.99.0.50–250 (12h lease). 10.99.0.1 is the gateway (pve01),
+10.99.0.2 is `bwt-dhcp` (this server), 10.99.0.10–14 are reserved for the
+five TanOS servers (excluded from DHCP because TanOS sets static IP at
+install time via kickstart).
+
 ## Tanium clients (test endpoints)
 
 VMIDs 300-313, IPs `172.16.0.60–73`. See `inventory/proxmox.yml` under `tanium_clients`.
 
 ## VMID conventions
 
-- **100–199** — core service CTs
-- **200–299** — Tanium server/module/zone CTs
-- **300–399** — Tanium client test endpoints
-- **400+** — reserved / unused
+- **100–113** — core service CTs (authentik, dns-01, ntp-01, etc.)
+- **114** — BWT lab service CTs (`bwt-dhcp`)
+- **200–219** — existing `tanium_cluster` placeholders (ts-01/02, tms-01/02, tzs-01/02)
+- **220–249** — BWT lab TanOS VMs (`bwt-ts`, `bwt-zs-01..04`)
+- **250–253** — Windows test VMs (win-sql-01, win-ts-01, win-tms-01, win-tzs-01)
+- **300–319** — existing `tanium_clients` LXC endpoints
+- **320–339** — BWT lab LXC clients (`bwt-tc-01..NN`)
+- **400+** — reserved / ad-hoc test VMs (e.g. 400 = Some-Other-ECF-Testing)
+- **9000-9999** — Proxmox templates (9000=Windows Server 2022, 9001=TanOS 1.8.6 fresh-install, 9002=TanOS 1.8.6 BWT-ready)
 
 ## Where IPs are defined (in order of authority)
 

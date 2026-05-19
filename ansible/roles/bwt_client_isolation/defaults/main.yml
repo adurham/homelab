@@ -1,0 +1,28 @@
+---
+# Hosts BWT clients are allowed to talk to on the 10.99/24 lab subnet.
+# Everything else on 10.99/24 (i.e. peer clients) is blocked, which
+# disables Tanium peer-to-peer file distribution and forces every client
+# to be a "leader" pulling direct from its zone server. This is the
+# precondition for the bandwidth-throttle measurement rig: peer-cached
+# bytes never traverse the ZS wire and would mask the counter we're
+# trying to measure.
+#
+# IPs:
+#   10.99.0.1   = bwt gateway (pve01 SDN gw, needed for SNAT egress)
+#   10.99.0.2   = bwt-dhcp (dnsmasq)
+#   10.99.0.3   = tailscale-gw eth2 (subnet router into the tailnet)
+#   10.99.0.10  = bwt-ts
+#   10.99.0.11..14 = bwt-zs-01..04
+bwt_isolation_allowed_servers:
+  - "10.99.0.1"
+  - "10.99.0.2"
+  - "10.99.0.3"
+  - "10.99.0.10"
+  - "10.99.0.11"
+  - "10.99.0.12"
+  - "10.99.0.13"
+  - "10.99.0.14"
+
+# Name of the cluster ipset that holds the allow-list. Referenced from
+# each per-CT firewall as `+bwt_servers` (proxmox-fw ipset syntax).
+bwt_isolation_ipset_name: bwt_servers

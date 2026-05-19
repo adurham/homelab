@@ -11,7 +11,7 @@
       ansible.builtin.command: "pveam download local {{ hostvars[item].template }}"
       args:
         creates: "/var/lib/vz/template/cache/{{ hostvars[item].template }}"
-      loop: "{{ groups['tanium_clients'] }}"
+      loop: "{{ groups[tanium_client_host_group] }}"
       delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
       when: hostvars[item].template_url is not defined
 
@@ -20,7 +20,7 @@
         url: "{{ hostvars[item].template_url }}"
         dest: "/var/lib/vz/template/cache/{{ hostvars[item].template }}"
         mode: '0644'
-      loop: "{{ groups['tanium_clients'] }}"
+      loop: "{{ groups[tanium_client_host_group] }}"
       delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
       when: hostvars[item].template_url is defined
 
@@ -35,7 +35,7 @@
       register: pct_check
       failed_when: false
       changed_when: false
-      loop: "{{ groups['tanium_clients'] }}"
+      loop: "{{ groups[tanium_client_host_group] }}"
       # The cluster query is the same from any node, so don't bother
       # delegating to target_node — pve01 always works.
       delegate_to: pve01
@@ -50,14 +50,14 @@
         --net0 name=eth0,bridge={{ hostvars[item].vm_bridge }},ip={{ hostvars[item].ansible_host }}/24,gw={{ hostvars[item].vm_gw }}
         --storage {{ hostvars[item].vm_storage }}
         --rootfs {{ hostvars[item].vm_storage }}:{{ hostvars[item].vm_disk }}
-        --nameserver {{ ip_dns_primary }}
-        --searchdomain chi.lab.amd-e.com
+        --nameserver {{ tanium_client_host_nameserver }}
+        --searchdomain {{ tanium_client_host_searchdomain }}
         --unprivileged 1
         --features nesting=1
         --start 1
         --onboot 1
         --ssh-public-keys /root/.ssh/authorized_keys
-      loop: "{{ groups['tanium_clients'] }}"
+      loop: "{{ groups[tanium_client_host_group] }}"
       loop_control:
         index_var: idx
       delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
@@ -73,17 +73,17 @@
       delay: 3
       changed_when: false
       failed_when: false
-      loop: "{{ groups['tanium_clients'] }}"
+      loop: "{{ groups[tanium_client_host_group] }}"
       delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
 
     - name: Enforce DNS Settings
       ansible.builtin.shell: |
         set -o pipefail
-        pct set {{ hostvars[item].vmid }} --nameserver 172.16.0.10 --searchdomain chi.lab.amd-e.com
+        pct set {{ hostvars[item].vmid }} --nameserver {{ tanium_client_host_nameserver }} --searchdomain {{ tanium_client_host_searchdomain }}
         if pct status {{ hostvars[item].vmid }} | grep -q running; then
-           pct exec {{ hostvars[item].vmid }} -- sh -c "echo 'nameserver 172.16.0.10' > /etc/resolv.conf && echo 'search chi.lab.amd-e.com' >> /etc/resolv.conf"
+           pct exec {{ hostvars[item].vmid }} -- sh -c "echo 'nameserver {{ tanium_client_host_nameserver }}' > /etc/resolv.conf && echo 'search {{ tanium_client_host_searchdomain }}' >> /etc/resolv.conf"
         fi
-      loop: "{{ groups['tanium_clients'] }}"
+      loop: "{{ groups[tanium_client_host_group] }}"
       delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"
       changed_when: false
 
@@ -101,7 +101,7 @@
         elif pct exec {{ hostvars[item].vmid }} -- test -x /usr/bin/dnf; then
           # Fix for RHEL 10 / Alma 10 DNS issues? Ensure resolv.conf is valid BEFORE dnf
           # Use Internal DNS (dns-01) 172.16.0.10 to resolve both internal and external
-          pct exec {{ hostvars[item].vmid }} -- sh -c "echo 'nameserver 172.16.0.10' > /etc/resolv.conf"
+          pct exec {{ hostvars[item].vmid }} -- sh -c "echo 'nameserver {{ tanium_client_host_nameserver }}' > /etc/resolv.conf"
 
           # Install Python 3.9 on Rocky 8 (EL8) explicitly
           if pct exec {{ hostvars[item].vmid }} -- grep -q "Rocky Linux" /etc/os-release && pct exec {{ hostvars[item].vmid }} -- grep -q "release 8" /etc/redhat-release; then
@@ -126,5 +126,5 @@
           echo "Unknown package manager for {{ item }}"
           exit 1
         fi
-      loop: "{{ groups['tanium_clients'] }}"
+      loop: "{{ groups[tanium_client_host_group] }}"
       delegate_to: "{{ hostvars[item].target_node | default('pve01') }}"

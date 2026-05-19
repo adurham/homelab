@@ -1,0 +1,49 @@
+---
+- name: Render /etc/network/interfaces.d/bwt-gateway (pve01 only)
+  ansible.builtin.template:
+    src: bwt-gateway.j2
+    dest: /etc/network/interfaces.d/bwt-gateway
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload network
+
+- name: Render BWT SNAT script
+  ansible.builtin.template:
+    src: bwt-snat.j2
+    dest: /usr/local/sbin/pve-bwt-snat
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Re-apply BWT SNAT
+
+- name: Render BWT SNAT systemd unit
+  ansible.builtin.template:
+    src: bwt-snat.service.j2
+    dest: /etc/systemd/system/pve-bwt-snat.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd unit files
+
+- name: Flush handlers so IP + SNAT apply now
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable + start BWT SNAT service
+  ansible.builtin.systemd:
+    name: pve-bwt-snat.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Verify pve01 has the BWT gateway IP
+  ansible.builtin.shell: |
+    set -o pipefail
+    ip -4 -br addr show {{ pve_bwt_gateway_iface }} | grep -qw {{ pve_bwt_gateway_ip }}/{{ pve_bwt_gateway_cidr }}
+  changed_when: false
+
+- name: Verify SNAT rule is installed
+  ansible.builtin.shell: |
+    set -o pipefail
+    /usr/sbin/iptables -t nat -C POSTROUTING -s {{ pve_bwt_gateway_subnet }} -o {{ pve_bwt_gateway_uplink }} -j MASQUERADE
+  changed_when: false

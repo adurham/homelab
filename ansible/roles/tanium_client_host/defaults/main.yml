@@ -1,0 +1,12 @@
+---
+# Which inventory group of CTs this role provisions. Defaults to the
+# existing 'tanium_clients' group so existing plays continue working.
+# Override to 'bwt_clients' (or anything else) when provisioning the
+# BWT lab CTs without touching the main lab.
+tanium_client_host_group: "tanium_clients"
+
+# DNS / domain pushed into the CT at creation and in the bootstrap.
+# Default matches the existing tanium_clients pattern (dns-01 + chi.lab.amd-e.com).
+# Override for BWT clients which can't reach dns-01.
+tanium_client_host_nameserver: "{{ ip_dns_primary }}"
+tanium_client_host_searchdomain: "chi.lab.amd-e.com"

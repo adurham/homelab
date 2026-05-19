@@ -1,0 +1,24 @@
+---
+# How long to sample (seconds). The actual run is gated by saved-action
+# completion, but we cap the sampling loop in case the action stalls.
+bwt_measurement_max_duration: 9000
+
+# Sample interval in seconds. 1s gives plenty of resolution against an
+# 8 Mbps throttle (1 MB/s = ~1 MB-deltas per sample).
+bwt_measurement_interval: 1
+
+# Where artifacts get dumped on the Mac (orchestrator-side). The
+# `<run_id>` placeholder is filled in by the run playbook with a UTC
+# timestamp. Resolves under OneDrive per Adam's case-artifact policy.
+bwt_measurement_outdir_base: "{{ lookup('env', 'HOME') }}/Library/CloudStorage/OneDrive-TaniumInc/Customer Issues/NEC/00271560/bwt-runs"
+
+# Hosts to sample. Defaults to the 2 active ZSes + the TS itself.
+# Override per-run if you pair ZS-03/04.
+bwt_measurement_zone_servers:
+  - bwt-zs-01.bwt.local
+  - bwt-zs-02.bwt.local
+
+# Tanium API endpoint and token. Token comes from the vault entry
+# created by the throttle config role.
+bwt_ts_url: "https://10.99.0.10"
+bwt_api_token: "{{ vault_bwt_api_token }}"

@@ -1,0 +1,8 @@
+---
+# BWT lab service CTs (DHCP, future additions). Same ProxyJump pattern as
+# bwt_servers/bwt_clients.
+ansible_user: root
+ansible_ssh_common_args: >-
+  -o ProxyJump=root@192.168.86.11
+  -o StrictHostKeyChecking=accept-new
+  -o LogLevel=ERROR

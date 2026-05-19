@@ -1,0 +1,24 @@
+---
+# Isolate BWT clients from each other on 10.99/24. Each client can only
+# talk to the Tanium servers + lab infra; peer-to-peer Tanium traffic is
+# REJECTed. Run this before any throttle-measurement experiment so the
+# peer protocol can't mask bytes that the throttle counter would
+# otherwise see.
+#
+# Usage:
+#   ansible-playbook -i inventory/proxmox.yml isolate_bwt_clients.yml
+#
+# To remove isolation later (e.g. for a different experiment that needs
+# peering), delete /etc/pve/firewall/3*.fw on the home node + unset
+# firewall=1 on each net0 — for now we don't bother automating the
+# tear-down because the lab is dedicated to this workstream.
+
+- name: Isolate BWT clients from each other
+  hosts: bwt_clients
+  gather_facts: false
+  # Run host actions in parallel up to the default forks; cluster-fw
+  # update is gated by `run_once: true` inside the role.
+  vars:
+    pve_controller: pve01
+  roles:
+    - role: bwt_client_isolation

@@ -1,0 +1,12 @@
+---
+- name: Reload network
+  ansible.builtin.command: ifreload -a
+  changed_when: true
+
+- name: Re-apply BWT SNAT
+  ansible.builtin.command: /usr/local/sbin/pve-bwt-snat
+  changed_when: true
+
+- name: Reload systemd unit files
+  ansible.builtin.systemd:
+    daemon_reload: true

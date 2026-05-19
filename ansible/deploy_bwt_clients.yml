@@ -1,0 +1,31 @@
+---
+# Provision the 8 BWT LXC clients on the bwt SDN bridge and install the
+# Tanium client pointing at bwt-ts.
+#
+# Phase 1: provision CTs via the existing tanium_client_host role,
+#          parameterized to target the bwt_clients group with bwt-specific
+#          DNS settings.
+# Phase 2: install Tanium client via the BWT-specific bwt_tanium_client
+#          role, which ships a local .deb (the BWT TS doesn't yet have
+#          the client-management plugin installed, so its bundle-download
+#          endpoint 404s).
+
+- name: Provision BWT Client Containers
+  hosts: pve01
+  gather_facts: false
+  vars:
+    tanium_client_host_group: bwt_clients
+    tanium_client_host_nameserver: "1.1.1.1"
+    tanium_client_host_searchdomain: "bwt.local"
+  roles:
+    - role: tanium_client_host
+  tags: [provision]
+
+- name: Install Tanium Client on BWT containers
+  hosts: bwt_clients
+  gather_facts: true
+  vars_files:
+    - group_vars/all/tanium_secrets.yml
+  roles:
+    - role: bwt_tanium_client
+  tags: [install]
