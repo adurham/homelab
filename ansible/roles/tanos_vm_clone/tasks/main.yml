@@ -1,0 +1,79 @@
+---
+# Clone a TanOS template, retarget to bwt bridge, start, wait for SSH.
+# See README.md for the one-time template-prep prerequisite.
+#
+# All tasks delegate to {{ tanos_clone_target_node }} because qm runs only
+# on a pve host. The play invoking this role targets the BWT VM directly.
+
+- name: "Check if VM {{ tanos_clone_vmid }} already exists"
+  delegate_to: "{{ tanos_clone_target_node }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]=={{ tanos_clone_vmid }} for r in json.load(sys.stdin)) else 1)'
+  args:
+    executable: /bin/bash
+  register: vm_exists_check
+  failed_when: false
+  changed_when: false
+
+- name: "Clone template {{ tanos_template_vmid }} -> {{ tanos_clone_vmid }}"
+  delegate_to: "{{ tanos_clone_target_node }}"
+  ansible.builtin.command: >
+    qm clone {{ tanos_template_vmid }} {{ tanos_clone_vmid }}
+    --name {{ tanos_clone_name }}
+    --full
+    --target {{ tanos_clone_target_node }}
+    --storage {{ tanos_clone_storage }}
+  when: vm_exists_check.rc != 0
+
+- name: "Resize clone {{ tanos_clone_vmid }} resources"
+  delegate_to: "{{ tanos_clone_target_node }}"
+  ansible.builtin.command: >
+    qm set {{ tanos_clone_vmid }}
+    --cores {{ vm_cores }}
+    --memory {{ vm_memory }}
+  when: vm_exists_check.rc != 0
+
+- name: "Move clone {{ tanos_clone_vmid }} to bwt bridge"
+  delegate_to: "{{ tanos_clone_target_node }}"
+  ansible.builtin.command: >
+    qm set {{ tanos_clone_vmid }}
+    --net0 virtio,bridge={{ net_bwt_bridge }},firewall=1
+    --serial0 socket
+  when: vm_exists_check.rc != 0
+
+- name: "Start clone {{ tanos_clone_vmid }}"
+  delegate_to: "{{ tanos_clone_target_node }}"
+  ansible.builtin.command: "qm start {{ tanos_clone_vmid }}"
+  register: start_result
+  failed_when: start_result.rc != 0 and 'already running' not in (start_result.stderr | default(''))
+  changed_when: start_result.rc == 0
+
+# Idempotency: if the clone has already been reconfigured to its target
+# IP (e.g. re-running the play after a successful first run), skip the
+# wait-at-template-IP because the template IP no longer answers.
+- name: "Check if {{ inventory_hostname }} is already at target IP {{ ansible_host }}"
+  delegate_to: "{{ tanos_clone_target_node }}"
+  ansible.builtin.shell: "timeout 3 nc -z {{ ansible_host }} 22"
+  register: target_already_check
+  failed_when: false
+  changed_when: false
+
+- name: "Set target_already_provisioned fact"
+  ansible.builtin.set_fact:
+    target_already_provisioned: "{{ target_already_check.rc == 0 }}"
+
+# Wait at the template's baked-in IP, NOT the inventory ansible_host.
+# Every clone of template 9002 boots at 10.99.0.99 — the per-clone IP
+# change happens in the tanos_post_clone_config role that runs after.
+- name: "Wait for SSH on {{ inventory_hostname }} (template IP {{ tanos_template_boot_ip }})"
+  delegate_to: "{{ tanos_clone_target_node }}"
+  ansible.builtin.wait_for:
+    host: "{{ tanos_template_boot_ip }}"
+    port: 22
+    timeout: 300
+    delay: 10
+  # Skip this wait if the clone has already been reconfigured to its
+  # target IP (idempotent re-runs).
+  when: not target_already_provisioned | default(false)

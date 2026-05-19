@@ -1,0 +1,13 @@
+---
+# Defaults for cloning a TanOS appliance VM from the BWT-ready template.
+# See README.md for the prerequisite template-prep workflow.
+tanos_template_vmid: 9002  # template-tanos-1.8.6-bwt
+tanos_clone_vmid: "{{ vmid }}"
+tanos_clone_name: "{{ inventory_hostname }}"
+tanos_clone_storage: "{{ vm_storage | default('nvme-data') }}"
+tanos_clone_target_node: "{{ target_node }}"
+
+# IP that every freshly-cloned BWT-ready TanOS appliance boots at (the
+# template's static IP). The tanos_post_clone_config role overrides this
+# to the per-clone target after first boot.
+tanos_template_boot_ip: "10.99.0.99"

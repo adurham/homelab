@@ -1,0 +1,7 @@
+# Managed by ansible — see roles/pve_bwt_gateway/.
+# pve01 holds the bwt SDN VNet gateway IP so BWT lab VMs/CTs have somewhere
+# to send default-route traffic. The Proxmox-managed `iface bwt` block in
+# /etc/network/interfaces.d/sdn handles the bridge L2 config; this file
+# stacks on the static gateway IPv4 address.
+iface {{ pve_bwt_gateway_iface }} inet static
+        address {{ pve_bwt_gateway_ip }}/{{ pve_bwt_gateway_cidr }}

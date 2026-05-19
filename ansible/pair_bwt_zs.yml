@@ -1,0 +1,18 @@
+---
+# Pair BWT Zone Servers with the Hub on bwt-ts via /api/v2.
+#
+# Prerequisites (one-time, manual unless coded later):
+#   1. `add hub` run on bwt-ts (TZS RPM in /incoming first).
+#   2. Each ZS has had tanium-init.dat imported via TanOS menu 2→I.
+#   3. Each ZS has AllowedHubs set via TanOS menu 2→2→9→A.
+#   4. taniumzoneserver service restarted on each ZS.
+#
+# This play handles the API side: approves the Hub, POSTs each ZS to the
+# Hub, approves each ZS that registers. Idempotent — safe to re-run.
+- name: Pair BWT ZSes with Hub
+  hosts: bwt-ts
+  gather_facts: false
+  vars_files:
+    - group_vars/all/tanium_secrets.yml
+  roles:
+    - role: bwt_zs_pairing

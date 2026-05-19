@@ -1,0 +1,38 @@
+---
+# BWT-specific Tanium client install.
+
+- name: "Download tanium-init.dat from BWT TS"
+  ansible.builtin.shell: |
+    curl -fk -X POST "{{ bwt_client_ts_url }}/api/v2/keys/315" \
+      -H "session: {{ bwt_client_api_token }}" \
+      -H "Content-Type: application/json" \
+      -d '{ "settings": [ { "name": "ServerNameList", "value": "{{ bwt_client_server_name_list }}" } ] }' \
+      -o /tmp/tanium-init.dat
+  args:
+    creates: /tmp/tanium-init.dat
+  no_log: true
+
+- name: "Ship local tanium client .deb to {{ inventory_hostname }}"
+  ansible.builtin.copy:
+    src: "{{ bwt_client_local_deb }}"
+    dest: "/tmp/taniumclient.deb"
+    mode: '0644'
+
+- name: "Install Tanium client (.deb)"
+  ansible.builtin.apt:
+    deb: /tmp/taniumclient.deb
+    state: present
+
+- name: "Deploy tanium-init.dat"
+  ansible.builtin.copy:
+    src: /tmp/tanium-init.dat
+    dest: /opt/Tanium/TaniumClient/tanium-init.dat
+    remote_src: true
+    mode: '0600'
+  notify: Restart Tanium Client
+
+- name: "Enable + start tanium client service"
+  ansible.builtin.service:
+    name: taniumclient
+    state: started
+    enabled: true

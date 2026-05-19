@@ -1,0 +1,79 @@
+---
+# Stand up the bwt-dhcp CT and configure dnsmasq to serve the BWT lab
+# subnet. Two phases:
+#
+#   PHASE 1 — create the CT on pve01 via pct (delegate_to). The play
+#             "runs against" bwt-dhcp but actually does its work on the
+#             target_node thanks to delegate_to in the role tasks.
+#   PHASE 2 — refresh the inventory cache + reach the CT directly and
+#             install/configure dnsmasq inside it.
+#
+# Why split? The role would otherwise try to install dnsmasq on the pve
+# host (which is what delegate_to + apt would do). Splitting makes the
+# target of each play explicit.
+
+- name: Phase 1 — create bwt-dhcp CT
+  hosts: bwt-dhcp
+  gather_facts: false
+  tasks:
+    - name: "Create bwt-dhcp CT on {{ target_node }}"
+      delegate_to: "{{ target_node }}"
+      block:
+        - name: Check if CT exists
+          ansible.builtin.shell: |
+            set -o pipefail
+            pvesh get /cluster/resources --type vm --output-format json |
+              python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]=={{ vmid }} for r in json.load(sys.stdin)) else 1)'
+          register: ct_check
+          failed_when: false
+          changed_when: false
+
+        - name: Ensure LXC template is downloaded
+          ansible.builtin.command: "pveam download local {{ template }}"
+          args:
+            creates: "/var/lib/vz/template/cache/{{ template }}"
+          when: ct_check.rc != 0
+
+        - name: Create CT
+          ansible.builtin.command: >
+            pct create {{ vmid }} /var/lib/vz/template/cache/{{ template }}
+            --hostname {{ inventory_hostname }}
+            --cores {{ vm_cores }}
+            --memory {{ vm_memory }}
+            --swap {{ vm_swap }}
+            --net0 name=eth0,bridge={{ vm_bridge }},ip={{ ansible_host }}/24,gw={{ vm_gw }}
+            --storage {{ vm_storage }}
+            --rootfs {{ vm_storage }}:{{ vm_disk }}
+            --nameserver {{ ip_dns_primary }}
+            --searchdomain chi.lab.amd-e.com
+            --unprivileged 1
+            --features nesting=1
+            --start 1
+            --onboot 1
+            --ssh-public-keys /root/.ssh/authorized_keys
+          when: ct_check.rc != 0
+
+        - name: Wait for CT to have an IP
+          ansible.builtin.shell: |
+            set -o pipefail
+            pct exec {{ vmid }} -- ip a show eth0 | grep -q 'inet {{ ansible_host }}'
+          register: ip_check
+          until: ip_check.rc == 0
+          retries: 20
+          delay: 3
+          changed_when: false
+          when: ct_check.rc != 0
+
+        - name: Bootstrap python3 + openssh inside the CT
+          ansible.builtin.shell: |
+            pct exec {{ vmid }} -- apt-get update
+            pct exec {{ vmid }} -- apt-get install -y python3 openssh-server
+            pct exec {{ vmid }} -- systemctl enable --now ssh
+          when: ct_check.rc != 0
+          changed_when: false
+
+- name: Phase 2 — install + configure dnsmasq inside bwt-dhcp
+  hosts: bwt-dhcp
+  gather_facts: true
+  roles:
+    - role: bwt_dhcp_host

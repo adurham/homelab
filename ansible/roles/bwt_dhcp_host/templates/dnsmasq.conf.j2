@@ -1,0 +1,49 @@
+# Managed by ansible — roles/bwt_dhcp_host/.
+# DHCP-only dnsmasq for the BWT lab SDN VNet (10.99.0.0/24).
+#
+# Intentionally NOT a DNS resolver — we forward DNS to dns-01 via the
+# `dhcp-option` push below. dnsmasq only listens for DHCP packets on the
+# bwt interface.
+
+# Restrict to a single interface so we don't accidentally serve DHCP on
+# any other bridge if the CT ever gets multi-homed.
+interface={{ bwt_dhcp_iface }}
+bind-interfaces
+
+# DNS server functionality off — pure DHCP.
+port=0
+
+# Don't read /etc/hosts or /etc/resolv.conf — we're not resolving.
+no-hosts
+no-resolv
+
+# Log all DHCP transactions so the lab is debuggable. Stored in journal via
+# systemd (default unit logs to stderr).
+log-dhcp
+log-facility=-
+
+# Lease database — survives restart, recovered on boot.
+dhcp-leasefile=/var/lib/misc/dnsmasq.leases
+
+# Dynamic range for clients
+dhcp-range={{ bwt_dhcp_pool_start }},{{ bwt_dhcp_pool_end }},{{ bwt_dhcp_lease_time }}
+
+# Push standard options to leases
+# option:router (3)   → default gateway
+dhcp-option=option:router,{{ bwt_dhcp_gateway }}
+# option:dns-server (6)  → DNS servers (comma-separated)
+dhcp-option=option:dns-server,{{ bwt_dhcp_dns_servers | join(',') }}
+# option:netmask (1) is automatic from dhcp-range CIDR
+# option:domain-name (15) — chi.lab.amd-e.com so guests get the search domain
+dhcp-option=option:domain-name,chi.lab.amd-e.com
+dhcp-option=option:domain-search,chi.lab.amd-e.com
+
+{% if bwt_dhcp_static_hosts %}
+# ─── Static reservations ─────────────────────────────────────────────────
+# Map specific MACs to specific IPs so LXC clients keep stable addresses
+# across rebuilds. Maintained by the bwt_dhcp_host role; edit the
+# bwt_dhcp_static_hosts list in vars (not this generated file).
+{% for h in bwt_dhcp_static_hosts %}
+dhcp-host={{ h.mac | upper }},{{ h.ip }},{{ h.hostname }},infinite
+{% endfor %}
+{% endif %}

@@ -22,12 +22,48 @@
     --cores 1 --memory 512 --swap 512
     --net0 name=eth0,bridge=vmbr0,ip=dhcp
     --net1 name=eth1,bridge=private,ip={{ net_private_gw }}/24
+    --net2 name=eth2,bridge={{ net_bwt_bridge }},ip={{ ip_tailscale_gw_bwt }}/24,mtu={{ net_bwt_mtu }}
     --storage nvme-data
     --unprivileged 0
     --features nesting=1
     --password "{{ tailscale_gw_root_pass }}"
   no_log: true
   when: gw_check.rc != 0
+
+# CT may have been created before the BWT VNet existed (originally only had
+# net0+net1). Discover where the CT lives in the cluster and ensure a net2 on
+# the `bwt` bridge is present. `pvesh` is cluster-aware so this task runs
+# from any node — `pct set` itself is node-local and would fail if the CT
+# migrated. Idempotent: `pvesh set ... -netN` no-ops when the value matches.
+- name: Look up the node currently hosting CT 101
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; print(next(r["node"] for r in json.load(sys.stdin) if r["vmid"]==101))'
+  register: gw_node
+  changed_when: false
+  when: gw_check.rc == 0
+
+- name: Read current CT 101 net2 config (cluster-API, node-agnostic)
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /nodes/{{ gw_node.stdout }}/lxc/101/config --output-format json |
+      python3 -c 'import json,sys; print(json.load(sys.stdin).get("net2",""))'
+  register: gw_net2
+  changed_when: false
+  when: gw_check.rc == 0
+
+- name: Ensure CT 101 has net2 on the BWT bridge
+  # `pvesh set ... -netN` issues a hotplug — no restart required. The
+  # existing `Restart Gateway` handler is also node-local (uses `pct`) and
+  # would fail when CT 101 lives on a non-controller node, so we explicitly
+  # do not notify it here.
+  ansible.builtin.command: >
+    pvesh set /nodes/{{ gw_node.stdout }}/lxc/101/config
+    -net2 name=eth2,bridge={{ net_bwt_bridge }},ip={{ ip_tailscale_gw_bwt }}/24,mtu={{ net_bwt_mtu }},type=veth
+  when:
+    - gw_check.rc == 0
+    - "'bridge=' + net_bwt_bridge not in gw_net2.stdout"
 - name: Check LXC Config for Tun Access
   ansible.builtin.command: 'grep -q "lxc.mount.entry: /dev/net/tun" /etc/pve/lxc/101.conf'
   register: tun_check

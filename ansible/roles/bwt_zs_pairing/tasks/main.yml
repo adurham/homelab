@@ -1,0 +1,132 @@
+---
+# Pair ZSes with the Hub on the TS via /api/v2.
+# All API calls go through pve01 since the Mac can't route 10.99.0.0/24.
+
+- name: "Log in to Tanium API"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/session/login"
+    method: POST
+    body_format: json
+    body:
+      username: "{{ bwt_ts_user }}"
+      password: "{{ bwt_ts_password }}"
+    validate_certs: false
+    return_content: true
+  register: login_resp
+  no_log: true
+  changed_when: false
+
+- name: "Set session_token fact"
+  ansible.builtin.set_fact:
+    bwt_session_token: "{{ login_resp.json.data.session }}"
+  no_log: true
+
+- name: "Find Hub registration_id"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/server_registration_requests"
+    method: GET
+    headers:
+      session: "{{ bwt_session_token }}"
+    validate_certs: false
+    return_content: true
+  register: regs
+  changed_when: false
+
+- name: "Pluck Hub registration_id"
+  ansible.builtin.set_fact:
+    bwt_hub_id: "{{ (regs.json.data | selectattr('type', 'equalto', 'HUB') | list | first).id }}"
+
+- name: "Approve Hub trust (idempotent)"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/server_registration_requests/{{ bwt_hub_id }}"
+    method: PATCH
+    headers:
+      session: "{{ bwt_session_token }}"
+    body_format: json
+    body:
+      approved_flag: true
+    validate_certs: false
+    status_code: [200]
+
+- name: "List existing Hub→ZS mappings"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/hubs/{{ bwt_hub_id }}/zone_servers"
+    method: GET
+    headers:
+      session: "{{ bwt_session_token }}"
+    validate_certs: false
+    return_content: true
+  register: existing_mappings
+  changed_when: false
+
+- name: "Build map of existing addresses"
+  ansible.builtin.set_fact:
+    bwt_existing_zs_addrs: "{{ existing_mappings.json.data | map(attribute='address') | list }}"
+
+- name: "POST each active ZS to the Hub (only if missing)"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/hubs/{{ bwt_hub_id }}/zone_servers"
+    method: POST
+    headers:
+      session: "{{ bwt_session_token }}"
+    body_format: json
+    body:
+      address: "{{ item }}"
+    validate_certs: false
+    status_code: [200, 201]
+    return_content: true
+  loop: "{{ bwt_active_zs_addresses }}"
+  when: item not in bwt_existing_zs_addrs
+
+- name: "Re-list registrations after POSTing ZSes"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/server_registration_requests"
+    method: GET
+    headers:
+      session: "{{ bwt_session_token }}"
+    validate_certs: false
+    return_content: true
+  register: regs_after
+  changed_when: false
+
+- name: "Approve each ZS that's registered (idempotent)"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/server_registration_requests/{{ item.id }}"
+    method: PATCH
+    headers:
+      session: "{{ bwt_session_token }}"
+    body_format: json
+    body:
+      approved_flag: true
+    validate_certs: false
+    status_code: [200]
+    return_content: true
+  loop: "{{ regs_after.json.data
+            | selectattr('type', 'equalto', 'ZONE_SERVER')
+            | rejectattr('approved_flag')
+            | list }}"
+  loop_control:
+    label: "{{ item.fqdn }} ({{ item.source_address }})"
+
+- name: "Display final state"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/system_status"
+    method: GET
+    headers:
+      session: "{{ bwt_session_token }}"
+    validate_certs: false
+    return_content: true
+  register: sys_status
+  changed_when: false
+
+- name: "Summarize ZS distribution"
+  ansible.builtin.debug:
+    msg: "{{ sys_status.json.data | selectattr('zone_servers', 'defined') | map(attribute='zone_servers') | list }}"

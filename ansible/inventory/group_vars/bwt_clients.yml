@@ -1,0 +1,10 @@
+---
+# BWT lab client LXC overrides. Reach via ProxyJump through pve01 since
+# the 10.99.0.0/24 subnet isn't advertised over Tailscale (and probably
+# doesn't need to be — BWT VMs are deliberately walled off from the rest
+# of the lab).
+ansible_user: root
+ansible_ssh_common_args: >-
+  -o ProxyJump=root@192.168.86.11
+  -o StrictHostKeyChecking=accept-new
+  -o LogLevel=ERROR

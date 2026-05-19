@@ -1,0 +1,17 @@
+#!/bin/bash
+# Managed by ansible — see roles/pve_bwt_gateway/.
+# SNAT outbound from BWT lab through pve01's uplink. Idempotent — runs at
+# boot via systemd. Skips quietly if iptables already has the rule.
+set -e
+RULE=(
+  POSTROUTING
+  -s "{{ pve_bwt_gateway_subnet }}"
+  -o "{{ pve_bwt_gateway_uplink }}"
+  -j MASQUERADE
+)
+if ! /usr/sbin/iptables -t nat -C "${RULE[@]}" 2>/dev/null; then
+  /usr/sbin/iptables -t nat -A "${RULE[@]}"
+fi
+
+# Enable IP forwarding (likely already on for proxmox but be defensive)
+echo 1 > /proc/sys/net/ipv4/ip_forward

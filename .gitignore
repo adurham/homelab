@@ -128,3 +128,8 @@ gha-creds-*.json
 /*.json
 /*.txt
 !DEVICES.md
+
+# BWT lab — Tanium binaries staged locally for ansible to ship to TanOS
+# appliances. Pulled from artifactory via scripts/tanium/fetch_artifactory_bundle.sh
+# (corp-only via SOCKS5 proxy). Never commit RPMs/licenses.
+/files/tanium-*/

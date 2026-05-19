@@ -1,0 +1,15 @@
+---
+# Single-node BWT lab gateway. The `bwt` SDN VNet gives us L2 (VXLAN) between
+# VMs/CTs across pve nodes for free, but VMs need a default gateway IP to
+# reach anything outside the VNet — including the Tailscale jump host for
+# ansible. We park that gateway on pve01 only; nothing in the lab requires
+# pve02/pve03 to also hold the IP.
+#
+# Inbound on the bwt bridge is open (this isn't a service subnet — it's a
+# repro lab). Outbound goes via SNAT through pve01's default route.
+pve_bwt_gateway_iface: "{{ net_bwt_bridge }}"
+pve_bwt_gateway_ip: "{{ net_bwt_gw }}"
+pve_bwt_gateway_cidr: "24"
+pve_bwt_gateway_subnet: "{{ net_bwt_range }}"
+# The interface that pve01 NATs through. eno1/enp* — discover with `ip route`.
+pve_bwt_gateway_uplink: "vmbr0"

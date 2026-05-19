@@ -31,6 +31,22 @@
     out_interface: eth0
     jump: MASQUERADE
     action: append
+  notify: Save IPTables
+
+# BWT lab traffic egresses the tailnet → CT 101 eth2 (10.99.0.3) → in to
+# 10.99/24. Replies need to be SNATed if any 10.99 host happens to reply
+# direct to the work Mac's 100.x tailscale IP rather than 10.99.0.3. We
+# mirror the 172.16 pattern (MASQUERADE eth0). Inbound from the tailnet
+# already routes correctly through eth2 because the route is on-link.
+- name: Configure NAT (Masquerade for BWT Lab Network)
+  ansible.builtin.iptables:
+    table: nat
+    chain: POSTROUTING
+    source: "{{ net_bwt_range }}"
+    out_interface: eth0
+    jump: MASQUERADE
+    action: append
+  notify: Save IPTables
 
 - name: Save IPTables
   ansible.builtin.command: netfilter-persistent save
@@ -60,3 +76,19 @@
 - name: Disable Tailscale subnet-route SNAT (preserve Tailnet source IPs)
   ansible.builtin.command: tailscale set --snat-subnet-routes=false
   when: tailscale_snat_check.stdout.strip() != "True"
+
+# Tailscale subnet advertisement. `tailscale set` is idempotent and does
+# NOT require re-authentication (unlike `tailscale up`), so we drive it
+# from a single source of truth in group_vars/all/vars.yml. New routes
+# must still be approved manually in the Tailscale admin UI the first
+# time they appear — this task just declares the gateway's intent.
+- name: Advertise tailnet subnet routes
+  ansible.builtin.command: >
+    tailscale set --advertise-routes={{ tailscale_advertised_routes | join(',') }}
+  register: ts_set
+  changed_when: ts_set.rc == 0
+  failed_when: ts_set.rc != 0
+  # Skip when tailscale isn't enrolled yet (initial install needs manual
+  # `tailscale up` with auth key; routes are configured on first
+  # enrollment too).
+  when: tailscale_advertised_routes is defined

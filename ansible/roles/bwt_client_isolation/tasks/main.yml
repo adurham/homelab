@@ -1,0 +1,145 @@
+---
+# Isolate each BWT client CT so it can only talk to the Tanium servers
+# + lab infra (gateway/DHCP/Tailscale). Peer-to-peer Tanium traffic on
+# 10.99/24 is REJECTed, forcing every client to be a download leader
+# pulling direct from its zone server. Precondition for the
+# bandwidth-throttle measurement rig (channels 1/2/3 from
+# docs/bwt/next-session.md only line up when peer offload is disabled).
+#
+# All file mutations target pmxcfs (/etc/pve/) which rejects atomic
+# template-then-rename — we render to /tmp on the home node then cp,
+# matching the convention from roles/authentik_host/.
+
+# -----------------------------------------------------------------
+# 1. Cluster ipset: declare which IPs clients ARE allowed to talk to.
+# -----------------------------------------------------------------
+
+- name: Read current cluster.fw
+  ansible.builtin.slurp:
+    src: /etc/pve/firewall/cluster.fw
+  register: cluster_fw_slurp
+  delegate_to: "{{ pve_controller | default('pve01') }}"
+  run_once: true
+
+- name: Render BWT ipset stanza to /tmp
+  ansible.builtin.template:
+    src: cluster-fw-ipset.j2
+    dest: /tmp/bwt-isolation-ipset.txt
+    mode: '0640'
+  delegate_to: "{{ pve_controller | default('pve01') }}"
+  run_once: true
+
+- name: Read rendered ipset stanza
+  ansible.builtin.slurp:
+    src: /tmp/bwt-isolation-ipset.txt
+  register: bwt_ipset_slurp
+  delegate_to: "{{ pve_controller | default('pve01') }}"
+  run_once: true
+
+# Inject between BEGIN/END markers so we own only our block. blockinfile
+# would be cleaner but the pmxcfs write quirk means we have to detour
+# through /tmp. We do the marker handling in shell instead.
+- name: Build new cluster.fw with BWT ipset injected (idempotent)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    SRC=/etc/pve/firewall/cluster.fw
+    TMP=/tmp/cluster.fw.new
+    MARKER_START="# BEGIN ANSIBLE bwt_client_isolation"
+    MARKER_END="# END ANSIBLE bwt_client_isolation"
+    # Strip any previous managed block first.
+    awk -v s="$MARKER_START" -v e="$MARKER_END" '
+      $0 == s {skip=1; next}
+      $0 == e {skip=0; next}
+      !skip {print}
+    ' "$SRC" > "$TMP"
+    # Append the new block.
+    {
+      echo ""
+      echo "$MARKER_START"
+      cat /tmp/bwt-isolation-ipset.txt
+      echo "$MARKER_END"
+    } >> "$TMP"
+    # Atomic-ish replace via cp (pmxcfs rejects rename across fs).
+    if ! cmp -s "$TMP" "$SRC"; then
+      cp "$TMP" "$SRC"
+      echo changed
+    else
+      echo unchanged
+    fi
+    rm -f "$TMP"
+  register: cluster_fw_update
+  changed_when: "'changed' in cluster_fw_update.stdout"
+  delegate_to: "{{ pve_controller | default('pve01') }}"
+  run_once: true
+
+- name: Cleanup tmp rendered ipset
+  ansible.builtin.file:
+    path: /tmp/bwt-isolation-ipset.txt
+    state: absent
+  delegate_to: "{{ pve_controller | default('pve01') }}"
+  run_once: true
+
+# -----------------------------------------------------------------
+# 2. Per-CT firewall file. Runs once per host in the play (each BWT
+#    client) but the file mutations happen on the CT's home node.
+# -----------------------------------------------------------------
+
+- name: Find node currently hosting this CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys,os; v=int(os.environ["VMID"]); print(next(r["node"] for r in json.load(sys.stdin) if r["vmid"]==v))'
+  environment:
+    VMID: "{{ vmid }}"
+  register: ct_node
+  changed_when: false
+  delegate_to: "{{ pve_controller | default('pve01') }}"
+
+- name: Render per-CT firewall to /tmp on the CT's home node
+  ansible.builtin.template:
+    src: client.fw.j2
+    dest: "/tmp/{{ vmid }}.fw"
+    mode: '0640'
+  delegate_to: "{{ ct_node.stdout }}"
+
+- name: Move per-CT firewall into pmxcfs
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if ! cmp -s /tmp/{{ vmid }}.fw /etc/pve/firewall/{{ vmid }}.fw 2>/dev/null; then
+      cp /tmp/{{ vmid }}.fw /etc/pve/firewall/{{ vmid }}.fw
+      echo changed
+    else
+      echo unchanged
+    fi
+  register: ct_fw_move
+  changed_when: "'changed' in ct_fw_move.stdout"
+  delegate_to: "{{ ct_node.stdout }}"
+
+- name: Cleanup tmp per-CT firewall
+  ansible.builtin.file:
+    path: "/tmp/{{ vmid }}.fw"
+    state: absent
+  delegate_to: "{{ ct_node.stdout }}"
+
+# -----------------------------------------------------------------
+# 3. Ensure firewall=1 on the CT's bwt-bridge NIC. pve-firewall does
+#    NOT read the per-CT .fw unless this flag is set on the veth.
+# -----------------------------------------------------------------
+
+- name: Read current CT config
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /nodes/{{ ct_node.stdout }}/lxc/{{ vmid }}/config --output-format json |
+      python3 -c 'import json,sys; print(json.load(sys.stdin).get("net0",""))'
+  register: ct_net0
+  changed_when: false
+  delegate_to: "{{ pve_controller | default('pve01') }}"
+
+- name: Ensure firewall=1 on CT's net0
+  # pvesh set is idempotent with respect to the net0 keys it does
+  # NOT mention — we only need to add firewall=1.
+  ansible.builtin.command: >
+    pvesh set /nodes/{{ ct_node.stdout }}/lxc/{{ vmid }}/config
+    -net0 {{ ct_net0.stdout }},firewall=1
+  when: "',firewall=1' not in ct_net0.stdout and 'firewall=1,' not in ct_net0.stdout"
+  delegate_to: "{{ pve_controller | default('pve01') }}"

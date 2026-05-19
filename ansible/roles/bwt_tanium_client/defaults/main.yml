@@ -1,0 +1,21 @@
+---
+# BWT-specific Tanium client install. Differs from the main `tanium_client`
+# role because:
+#   - The BWT TS doesn't have the client-management plugin installed yet,
+#     so the `/plugin/products/client-management/v2/downloads/download-bundle/linux`
+#     endpoint returns 404. We ship a pre-fetched local .deb instead.
+#   - The /api/v2/keys/315 endpoint DOES work for tanium-init.dat (no
+#     plugin dependency), so we still fetch that from the TS.
+#
+# The local .deb comes from scripts/tanium/fetch_artifactory_bundle.sh
+# which puts it at files/tanium-<version>/ubuntu24-x64/.
+
+# Tanium TS to fetch init.dat from
+bwt_client_ts_url: "https://10.99.0.10"
+bwt_client_api_token: "{{ vault_bwt_api_token }}"
+bwt_client_server_name_list: "10.99.0.11,10.99.0.12,10.99.0.13,10.99.0.14"
+
+# Local file path (on the ansible controller — the Mac) to the
+# pre-fetched client .deb. Default: ubuntu24 client matching the LXC
+# template used for BWT clients.
+bwt_client_local_deb: "{{ playbook_dir }}/../files/tanium-7.8.5.1308/ubuntu24-x64/taniumclient_7.8.5.1308-ubuntu24_amd64.deb"

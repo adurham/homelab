@@ -1,0 +1,18 @@
+---
+# Provision the 5 BWT TanOS server VMs (bwt-ts + bwt-zs-01..04):
+#   1. Clone template 9002 (template-tanos-1.8.6-bwt) per VMID.
+#   2. Reconfigure each clone's IP + FQDN from template defaults
+#      (10.99.0.99 / bwt-tanos-template.bwt.local) to the per-host
+#      inventory values.
+#
+# Why `serial: 1`: every clone boots at 10.99.0.99 (the template's IP).
+# If two clones boot simultaneously they collide on that IP. We MUST
+# reconfigure one at a time so the previous clone has moved off .99
+# before the next starts.
+- name: Provision BWT TanOS servers
+  hosts: bwt_servers
+  gather_facts: false
+  serial: 1
+  roles:
+    - role: tanos_vm_clone
+    - role: tanos_post_clone_config

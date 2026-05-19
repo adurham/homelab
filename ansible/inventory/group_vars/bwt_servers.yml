@@ -1,0 +1,34 @@
+---
+# BWT lab TanOS server overrides.
+#
+# Use `tanadmin` user (NOT `tandev`) because the BWT template (VMID 9002,
+# template-tanos-1.8.6-bwt) is a *finished* TanOS appliance — initial
+# config wizard already run, EULA accepted. On finished appliances,
+# `tandev` doesn't exist; only `tanadmin` (privileged CLI dispatcher) and
+# `tancopy` (SFTP-only) remain. The existing `tanium_cluster` group still
+# uses `tandev` because those slots are configured for DEV-image
+# appliances where `tandev` is the full-sudo user, which is a different
+# operational pattern.
+ansible_user: tanadmin
+
+# Reach BWT lab VMs via ProxyJump through pve01. pve01 holds the bwt
+# bridge gateway IP (10.99.0.1) so it can route into the SDN VNet
+# directly. The Mac uses 1Password's SSH agent (forwarded over ProxyJump)
+# to authenticate; the personal_macbook.pub key is baked into the BWT
+# template's tanadmin authorized_keys.
+ansible_ssh_common_args: >-
+  -o ProxyJump=root@192.168.86.11
+  -o StrictHostKeyChecking=accept-new
+  -o LogLevel=ERROR
+
+# Don't pin a specific identity file — let ssh use 1Password agent on Mac.
+ansible_ssh_private_key_file: null
+
+# TanOS publickey + keyboard-interactive auth (publickey is sufficient
+# once tandev has authorized_keys populated, but the server still
+# advertises both methods).
+ansible_ssh_args: >-
+  -o ControlMaster=auto
+  -o ControlPersist=60s
+  -o KbdInteractiveAuthentication=yes
+  -o PreferredAuthentications=publickey,keyboard-interactive

@@ -1,0 +1,13 @@
+{# Cluster-level firewall configuration for the BWT lab. Ships an
+   ipset named `bwt_servers` listing the hosts BWT clients are allowed
+   to talk to inside 10.99/24. Per-CT firewalls (320-327) reference
+   this ipset via `+bwt_servers`.
+
+   NOTE: This template is merged into the existing cluster.fw on the
+   target — we don't own the whole file. The role uses lineinfile /
+   blockinfile semantics to inject our [IPSET ...] block idempotently
+   between two marker lines. #}
+[IPSET {{ bwt_isolation_ipset_name }}]
+{% for ip in bwt_isolation_allowed_servers %}
+{{ ip }}
+{% endfor %}
