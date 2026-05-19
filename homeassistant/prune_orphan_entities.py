@@ -92,7 +92,7 @@ def emit_removal_commands(orphans: list[dict]) -> None:
     for o in orphans:
         eid = o["entity_id"]
         print(
-            f'    ssh -p 2222 root@homeassistant.local '
+            f"    ssh -p 2222 root@homeassistant.local "
             f'"ha service call homeassistant.remove_entity entity_id={eid}"'
         )
     print()
@@ -126,8 +126,7 @@ def main() -> int:
 
     if args.apply and not args.i_know_what_im_doing:
         print(
-            "Refusing to emit removal commands without "
-            "--apply AND --i-know-what-im-doing.",
+            "Refusing to emit removal commands without " "--apply AND --i-know-what-im-doing.",
             file=sys.stderr,
         )
         return 2
