@@ -1,10 +1,10 @@
 ---
 - name: Download Tanium Init Dat
   ansible.builtin.shell: |
-    curl -k -X POST "https://tanium.chi.lab.amd-e.com/api/v2/keys/315" \
-    -H "session: {{ vault_tanium_api_token }}" \
+    curl -k -X POST "{{ tanium_client_server_url }}/api/v2/keys/315" \
+    -H "session: {{ tanium_client_api_token }}" \
     -H "Content-Type: application/json" \
-    -d '{ "settings": [ { "name": "ServerNameList", "value": "tzs-01.chi.lab.amd-e.com,tzs-02.chi.lab.amd-e.com" } ] }' \
+    -d '{ "settings": [ { "name": "ServerNameList", "value": "{{ tanium_client_server_name_list }}" } ] }' \
     -o /tmp/tanium-init.dat
   args:
     creates: /tmp/tanium-init.dat
@@ -12,8 +12,8 @@
 
 - name: Download Tanium Client Bundle Direct (Curl)
   ansible.builtin.shell: |
-    curl -k -L "https://tanium.chi.lab.amd-e.com/plugin/products/client-management/v2/downloads/download-bundle/linux" \
-    -H "session: {{ vault_tanium_api_token }}" \
+    curl -k -L "{{ tanium_client_server_url }}/plugin/products/client-management/v2/downloads/download-bundle/linux" \
+    -H "session: {{ tanium_client_api_token }}" \
     -o /tmp/tanium-client-bundle.zip
   args:
     creates: /tmp/tanium-client-bundle.zip

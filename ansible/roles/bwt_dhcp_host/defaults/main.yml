@@ -1,0 +1,34 @@
+---
+# bwt-dhcp CT — runs dnsmasq for the BWT lab subnet. Standalone DHCP server
+# because Proxmox SDN's built-in DHCP plugin (PVE 9.1) is restricted to
+# Simple zones, and BWT is a VXLAN zone so its VMs can land on any pve node.
+#
+# Address layout (lines up with docs/ipam.md):
+#   10.99.0.1            pve01 BWT bridge IP (gateway + SNAT to internet)
+#   10.99.0.2            bwt-dhcp CT
+#   10.99.0.10-14        Reserved for TanOS servers (DHCP exclusions)
+#   10.99.0.50-250       DHCP dynamic pool (for clients + opportunistic use)
+#
+# Network isolation: BWT subnet CANNOT reach the homelab `private` subnet
+# (172.16.0.0/24) — pve01's `PRIVATE-MONITORING-IN` chain drops new
+# inbound from non-trusted sources. So BWT DHCP clients get a PUBLIC DNS
+# resolver, not dns-01. The BWT lab is intentionally walled off from
+# everything else except the internet (via pve01 SNAT).
+bwt_dhcp_iface: eth0
+bwt_dhcp_listen_addr: "10.99.0.2"
+bwt_dhcp_pool_start: "10.99.0.50"
+bwt_dhcp_pool_end: "10.99.0.250"
+bwt_dhcp_lease_time: "12h"
+
+# Pushed to DHCP clients
+bwt_dhcp_gateway: "{{ net_bwt_gw }}"
+bwt_dhcp_dns_servers:
+  - "1.1.1.1"   # Cloudflare
+  - "8.8.8.8"   # Google
+
+# Static MAC reservations for the BWT LXC clients so they get predictable
+# IPs that match the inventory ansible_host. MAC addresses are stable
+# Proxmox-assigned (e.g. BC:24:11:XX:XX:XX); we'll populate this map
+# AFTER the CTs are created (initial pass uses dynamic pool, then we
+# read MACs back and write static reservations). Empty by default.
+bwt_dhcp_static_hosts: []

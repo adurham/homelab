@@ -1,0 +1,12 @@
+---
+# Bring pve01 up as the BWT lab gateway. Single-node by design — the bwt
+# VNet is reachable across all 3 pve hosts via VXLAN, but only pve01 holds
+# the gateway IP and SNAT rule. See:
+#   - roles/pve_bwt_gateway/        (the role itself)
+#   - group_vars/all/vars.yml       (net_bwt_*)
+#   - docs/ipam.md                  (allocation table)
+- name: Configure BWT lab gateway on pve01
+  hosts: pve01
+  gather_facts: false
+  roles:
+    - role: pve_bwt_gateway

@@ -260,6 +260,142 @@ all:
           ansible_python_interpreter: /usr/bin/python3.11
           target_node: pve03
 
+
+    # ─────────────────────────────────────────────────────────────────
+    # BWT Lab (Bandwidth Throttle repro)
+    #
+    # Isolated 5-VM + N-LXC environment for reproducing Tanium platform
+    # bandwidth-throttle enforcement issues (NEC 00271560 et al). Lives
+    # on the `bwt` SDN VNet (10.99.0.0/24, VLAN 200) so load tests don't
+    # perturb the `private` subnet. See:
+    #   - group_vars/all/vars.yml      (net_bwt_*)
+    #   - ansible/roles/proxmox_sdn/   (VNet definition)
+    #   - docs/ipam.md                 (allocation table)
+    #
+    # VMIDs:
+    #   220-229  BWT TanOS servers (TS + ZSes)
+    #   320-339  BWT LXC clients
+    #
+    # NOTE: TS/ZSes are full Proxmox VMs (TanOS appliance ISO), not LXC
+    # containers. Clients reuse the existing `tanium_client` role with
+    # bridge/IP overrides.
+    bwt_lab:
+      children:
+        bwt_services:
+          hosts:
+            bwt-dhcp:
+              vmid: 114
+              ansible_host: 10.99.0.2
+              template: debian-12-standard_12.12-1_amd64.tar.zst
+              target_node: pve01
+          vars:
+            vm_cores: 1
+            vm_memory: 256
+            vm_swap: 256
+            vm_disk: 4
+            vm_bridge: "{{ net_bwt_bridge }}"
+            vm_gw: "{{ net_bwt_gw }}"
+            vm_storage: nvme-data
+        bwt_servers:
+          hosts:
+            bwt-ts:
+              vmid: 220
+              vm_cores: 8
+              vm_memory: 32768
+              vm_disk: 500
+              ansible_host: 10.99.0.10
+              tanium_role: ts
+            bwt-zs-01:
+              vmid: 221
+              vm_cores: 4
+              vm_memory: 16384
+              vm_disk: 200
+              ansible_host: 10.99.0.11
+              tanium_role: tzs
+            bwt-zs-02:
+              vmid: 222
+              vm_cores: 4
+              vm_memory: 16384
+              vm_disk: 200
+              ansible_host: 10.99.0.12
+              tanium_role: tzs
+            bwt-zs-03:
+              vmid: 223
+              vm_cores: 4
+              vm_memory: 16384
+              vm_disk: 200
+              ansible_host: 10.99.0.13
+              tanium_role: tzs
+            bwt-zs-04:
+              vmid: 224
+              vm_cores: 4
+              vm_memory: 16384
+              vm_disk: 200
+              ansible_host: 10.99.0.14
+              tanium_role: tzs
+          vars:
+            target_node: pve01
+            vm_storage: nvme-data
+            vm_bridge: "{{ net_bwt_bridge }}"
+            vm_gw: "{{ net_bwt_gw }}"
+            vm_iso: "local:iso/TanOS.1.8.6.0134-DEV.iso"
+            ansible_user: tanadmin
+            # ssh args (ProxyCommand etc) live in
+            # inventory/group_vars/bwt_lab.yml — same Tailscale-jump
+            # pattern as private_subnet hosts.
+
+        bwt_clients:
+          hosts:
+            bwt-tc-01:
+              ansible_host: 10.99.0.100
+              vmid: 320
+              template: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+              target_node: pve01
+            bwt-tc-02:
+              ansible_host: 10.99.0.101
+              vmid: 321
+              template: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+              target_node: pve01
+            bwt-tc-03:
+              ansible_host: 10.99.0.102
+              vmid: 322
+              template: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+              target_node: pve02
+            bwt-tc-04:
+              ansible_host: 10.99.0.103
+              vmid: 323
+              template: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+              target_node: pve02
+            bwt-tc-05:
+              ansible_host: 10.99.0.104
+              vmid: 324
+              template: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+              target_node: pve03
+            bwt-tc-06:
+              ansible_host: 10.99.0.105
+              vmid: 325
+              template: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+              target_node: pve03
+            bwt-tc-07:
+              ansible_host: 10.99.0.106
+              vmid: 326
+              template: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+              target_node: pve01
+            bwt-tc-08:
+              ansible_host: 10.99.0.107
+              vmid: 327
+              template: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+              target_node: pve02
+          vars:
+            ansible_user: root
+            vm_cores: 1
+            vm_memory: 1024
+            vm_swap: 512
+            vm_disk: 8
+            vm_bridge: "{{ net_bwt_bridge }}"
+            vm_storage: nvme-data
+            vm_gw: "{{ net_bwt_gw }}"
+
     # Monitoring Infrastructure
     monitoring:
       children:

@@ -1,0 +1,28 @@
+[OPTIONS]
+enable: 1
+
+[RULES]
+
+# ICMP for diagnostics (us pinging clients during a run).
+IN ACCEPT -p icmp
+OUT ACCEPT -p icmp
+
+# Allow the Tanium servers + lab infra (DHCP/DNS/Tailscale gw).
+IN ACCEPT -source +{{ bwt_isolation_ipset_name }}
+OUT ACCEPT -dest +{{ bwt_isolation_ipset_name }}
+
+# Allow ansible / operator SSH from the LAN-side jump (pve01 itself).
+# pve01 reaches the client through the bwt bridge as 10.99.0.1, which
+# is already in the ipset, so this rule is technically redundant —
+# left here for documentation clarity.
+
+# Block peer-to-peer Tanium traffic. Any 10.99/24 not in the ipset
+# gets REJECTed so the Tanium peer protocol fails fast instead of
+# timing out at 17472. Important: the REJECT must come BEFORE the
+# default DROP so we get the RST.
+IN REJECT -source 10.99.0.0/24
+OUT REJECT -dest 10.99.0.0/24
+
+# Egress to non-lab destinations (DNS, NTP, package downloads from
+# internet, etc.) is allowed by default — these REJECT rules above
+# only match 10.99/24.

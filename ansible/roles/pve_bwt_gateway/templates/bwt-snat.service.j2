@@ -1,0 +1,12 @@
+[Unit]
+Description=BWT lab SDN SNAT
+After=pve-cluster.service networking.service
+Wants=pve-cluster.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pve-bwt-snat
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

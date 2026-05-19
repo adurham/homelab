@@ -1,0 +1,134 @@
+---
+# Configure BWT-TS for the bandwidth-throttle repro scenario via Tanium
+# REST API. ALL writes go through /api/v2 — never direct psql.
+# (See warm memory fact 600 + tanium-bandwidth-throttle skill.)
+
+- name: "Log in to Tanium API and get session"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/session/login"
+    method: POST
+    body_format: json
+    body:
+      username: "{{ bwt_ts_user }}"
+      password: "{{ bwt_ts_password }}"
+    validate_certs: false
+    return_content: true
+  register: login_resp
+  no_log: true
+  changed_when: false
+
+- name: "Set session_token fact"
+  ansible.builtin.set_fact:
+    bwt_session_token: "{{ login_resp.json.data.session }}"
+  no_log: true
+
+# --- Global settings ---------------------------------------------------------
+
+- name: "PATCH global setting {{ item.key }} = {{ item.value }}"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/system_settings/by-name/{{ item.key }}"
+    method: PATCH
+    headers:
+      session: "{{ bwt_session_token }}"
+    body_format: json
+    body:
+      value: "{{ item.value | string }}"
+    validate_certs: false
+    status_code: [200]
+    return_content: true
+  loop: "{{ bwt_globals | dict2items }}"
+  register: setting_results
+  changed_when: setting_results.json.data.value | int != item.value | int
+  # Above is a heuristic — the API returns the new value; we compare. Not
+  # perfect but good enough for idempotency reporting.
+
+# --- Site throttles ----------------------------------------------------------
+
+- name: "Read existing site_throttles"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/site_throttles"
+    method: GET
+    headers:
+      session: "{{ bwt_session_token }}"
+    validate_certs: false
+    return_content: true
+  register: existing_sites
+  changed_when: false
+
+- name: "Find {{ bwt_site_name }} in existing sites"
+  ansible.builtin.set_fact:
+    bwt_site_existing: "{{ existing_sites.json.data
+                          | selectattr('name', 'equalto', bwt_site_name)
+                          | list }}"
+
+- name: "POST {{ bwt_site_name }} site_throttle (only if missing)"
+  delegate_to: pve01
+  when: bwt_site_existing | length == 0
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/site_throttles"
+    method: POST
+    headers:
+      session: "{{ bwt_session_token }}"
+    body_format: json
+    body:
+      name: "{{ bwt_site_name }}"
+      bandwidth_bytes_limit: "{{ bwt_site_overall_limit_bytes_sec }}"
+      download_bandwidth_bytes_limit: "{{ bwt_site_download_limit_bytes_sec }}"
+      sensor_bandwidth_bytes_limit: "{{ bwt_site_sensor_limit_bytes_sec }}"
+      all_subnets_flag: 0
+      subnets:
+        - range: "{{ bwt_site_subnet }}"
+    validate_certs: false
+    status_code: [200, 201]
+    return_content: true
+  register: site_post
+
+- name: "PATCH {{ bwt_site_name }} site_throttle to current limits (if exists, may differ)"
+  delegate_to: pve01
+  when: bwt_site_existing | length > 0
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/site_throttles/{{ bwt_site_existing[0].id }}"
+    method: PATCH
+    headers:
+      session: "{{ bwt_session_token }}"
+    body_format: json
+    body:
+      name: "{{ bwt_site_name }}"
+      bandwidth_bytes_limit: "{{ bwt_site_overall_limit_bytes_sec }}"
+      download_bandwidth_bytes_limit: "{{ bwt_site_download_limit_bytes_sec }}"
+      sensor_bandwidth_bytes_limit: "{{ bwt_site_sensor_limit_bytes_sec }}"
+    validate_certs: false
+    return_content: true
+  register: site_patch
+  changed_when: >
+    (site_patch.json.data.bandwidth_bytes_limit | int) != (bwt_site_overall_limit_bytes_sec | int)
+    or (site_patch.json.data.download_bandwidth_bytes_limit | int) != (bwt_site_download_limit_bytes_sec | int)
+    or (site_patch.json.data.sensor_bandwidth_bytes_limit | int) != (bwt_site_sensor_limit_bytes_sec | int)
+
+# --- Verify ------------------------------------------------------------------
+
+- name: "Verify final state"
+  delegate_to: pve01
+  ansible.builtin.uri:
+    url: "https://{{ bwt_ts_host }}/api/v2/site_throttles"
+    method: GET
+    headers:
+      session: "{{ bwt_session_token }}"
+    validate_certs: false
+    return_content: true
+  register: final_state
+  changed_when: false
+
+- name: "Display BWT throttle config"
+  ansible.builtin.debug:
+    msg: |
+      BWT repro lab configured:
+        site_throttles_use_local_ip = 1
+        client_cdn_state = 0 (CDN off — peer protocol only)
+        Site: {{ bwt_site_name }} ({{ bwt_site_subnet }})
+          overall:  {{ (bwt_site_overall_limit_bytes_sec | int * 8 / 1000000) | round(2) }} Mbps
+          download: {{ (bwt_site_download_limit_bytes_sec | int * 8 / 1000000) | round(2) }} Mbps
+          sensor:   {{ (bwt_site_sensor_limit_bytes_sec | int * 8 / 1000000) | round(2) }} Mbps

@@ -1,0 +1,28 @@
+---
+# After tanos_vm_clone provisions ZSes and tanium_zone_server_install runs,
+# this role pairs them with the Hub on the TS via /api/v2.
+#
+# Prerequisite: Hub must be installed on the TS (TanOS CLI `add hub`).
+# We don't install the Hub from ansible yet — that's a one-time manual
+# step documented in docs/bwt/build-tanium.md.
+#
+# IMPORTANT: This role assumes the ZS appliances already have:
+#   1. tanium-init.dat imported (via TanOS menu 2→I; QMP-driven manually)
+#   2. AllowedHubs config set to the TS IP (via TanOS menu 2→2→9→A; QMP-driven)
+#   3. taniumzoneserver service restarted
+#
+# Without those manual steps, the ZS won't even attempt registration and
+# the POST to /api/v2/hubs/<id>/zone_servers will succeed but the
+# resulting server_registration_request will never appear.
+
+bwt_ts_host: "10.99.0.10"
+bwt_ts_user: "tanium"
+bwt_ts_password: "{{ vault_bwt_console_password }}"
+
+# Which ZSes should be active (paired with the Hub). The default mirrors
+# NEC's prod topology: one active pair, one cold reserve pair.
+bwt_active_zs_addresses:
+  - "10.99.0.11"  # bwt-zs-01
+  - "10.99.0.12"  # bwt-zs-02
+# bwt-zs-03 (10.99.0.13) and bwt-zs-04 (10.99.0.14) remain installed but
+# unpaired — the "AWS-side unused but ready" equivalent.

@@ -1,0 +1,6 @@
+---
+# Persist iptables rules across reboots. Triggered after MASQUERADE rules
+# change. `netfilter-persistent save` is idempotent (writes /etc/iptables/rules.v{4,6}).
+- name: Save IPTables
+  ansible.builtin.command: netfilter-persistent save
+  changed_when: false

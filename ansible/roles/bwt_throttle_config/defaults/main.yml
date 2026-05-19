@@ -1,0 +1,29 @@
+---
+# Configure the BWT-TS for the bandwidth-throttle repro scenario:
+# - CDN disabled (force ALL client traffic onto peer protocol)
+# - site_throttles_use_local_ip enabled (match NEC's prod config)
+# - One test site defined with a tight bandwidth limit
+#
+# All writes go through /api/v2 — NEVER psql for Tanium config changes
+# (per `tanium-bandwidth-throttle` skill discipline; ref warm fact 600).
+
+# Tanium console auth (vault values)
+bwt_ts_host: "10.99.0.10"
+bwt_ts_user: "tanium"
+bwt_ts_password: "{{ vault_bwt_console_password }}"
+
+# Test site definition
+bwt_site_name: "BWTTestSite"
+# 10 Mbps overall — easy to overshoot at lab scale
+bwt_site_overall_limit_bytes_sec: 1250000
+# 8 Mbps download — tighter, makes accounting bugs more visible
+bwt_site_download_limit_bytes_sec: 1000000
+# 1.5 Mbps sensor — proportional
+bwt_site_sensor_limit_bytes_sec: 192500
+# Client subnet (the LXC clients live on 10.99.0.0/24)
+bwt_site_subnet: "10.99.0.0/24"
+
+# Global settings overrides
+bwt_globals:
+  client_cdn_state: 0           # CDN off — peer protocol only
+  site_throttles_use_local_ip: 1  # match NEC's setting

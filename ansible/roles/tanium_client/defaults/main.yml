@@ -1,0 +1,10 @@
+---
+# Tanium client install role — parameterized so it can target either the
+# main lab TS (tanium.chi.lab.amd-e.com) or the BWT lab TS (bwt-ts at
+# 10.99.0.10). Defaults preserve the original behavior so existing
+# deploy_tanium_clients.yml plays continue to work without changes.
+tanium_client_server_url: "https://tanium.chi.lab.amd-e.com"
+tanium_client_api_token: "{{ vault_tanium_api_token }}"
+# ServerNameList — the list of ZSes (or TS hostnames) that the client
+# should connect to. Comma-separated.
+tanium_client_server_name_list: "tzs-01.chi.lab.amd-e.com,tzs-02.chi.lab.amd-e.com"

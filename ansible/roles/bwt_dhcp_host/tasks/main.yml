@@ -1,0 +1,43 @@
+---
+# This role runs INSIDE the bwt-dhcp CT (not on the pve host). CT creation
+# happens in deploy_bwt_dhcp.yml's first play (which delegates pct calls to
+# the target_node).
+- name: Install dnsmasq
+  ansible.builtin.apt:
+    name: dnsmasq
+    state: present
+    update_cache: true
+
+# Stop the default systemd unit so our config can take over cleanly.
+# Debian's dnsmasq package starts at install time using /etc/dnsmasq.conf
+# (which we replace below).
+- name: Stop default dnsmasq before reconfiguring
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: stopped
+  changed_when: false
+  failed_when: false
+
+- name: Render dnsmasq.conf
+  ansible.builtin.template:
+    src: dnsmasq.conf.j2
+    dest: /etc/dnsmasq.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: 'dnsmasq --test --conf-file=%s'
+  notify: Restart dnsmasq
+
+- name: Ensure dnsmasq is enabled + running
+  ansible.builtin.systemd:
+    name: dnsmasq
+    enabled: true
+    state: started
+
+- name: Verify dnsmasq is listening on the bwt interface
+  ansible.builtin.shell: |
+    set -o pipefail
+    ss -ulnp | grep -E ':67\s' | grep -q dnsmasq
+  args:
+    executable: /bin/bash
+  changed_when: false

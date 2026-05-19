@@ -35,7 +35,16 @@ ip_vm: "172.16.0.42"
 # 172.16.0.101 device. Kept as ip_tailscale_gw for callers; equals
 # net_private_gw.
 ip_tailscale_gw: "172.16.0.1"
+ip_tailscale_gw_bwt: "10.99.0.3"  # tailscale-gw eth2 on `bwt` SDN bridge — subnet router into 10.99.0.0/24
 ip_hermes_gateway: "172.16.0.50"
+
+# Subnets the tailscale-gw advertises to the tailnet. Both 172.16/24 (private
+# SDN) and 10.99/24 (BWT lab) flow through CT 101. The same CT carries an IP
+# on each bridge (eth1=private 172.16.0.1, eth2=bwt 10.99.0.3) plus
+# MASQUERADE for outbound egress on eth0.
+tailscale_advertised_routes:
+  - "{{ net_private_range }}"
+  - "{{ net_bwt_range }}"
 
 # Email destination for the Grafana fallback contact point. Routes through
 # mail-01's postfix relay -> iCloud SMTP. Used as a backup channel when the
@@ -45,3 +54,13 @@ alert_email_to: "amdnative@icloud.com"
 # Cluster Nodes (Physical LAN)
 # Used for SDN Peering and Corosync
 proxmox_cluster_peers: "192.168.86.11,192.168.86.12,192.168.86.13"
+
+# BWT Lab (Bandwidth Throttle reproduction lab) — isolated SDN VNet
+# for reproducing Tanium platform bandwidth-throttle enforcement issues
+# (NEC 00271560 and similar). Disjoint from `private` so the main lab is
+# undisturbed by load tests. See docs/ipam.md and ansible/roles/proxmox_sdn/.
+net_bwt_range: "10.99.0.0/24"
+net_bwt_gw: "10.99.0.1"
+net_bwt_bridge: "bwt"
+net_bwt_vlan_tag: 200
+net_bwt_mtu: 1450  # VXLAN overhead, same as `private`

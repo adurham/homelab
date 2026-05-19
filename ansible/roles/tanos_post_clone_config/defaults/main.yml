@@ -1,0 +1,22 @@
+---
+# Per-clone TanOS reconfiguration after tanos_vm_clone creates the VM.
+#
+# Two changes needed:
+#   1. FQDN — via SSH "set fqdn" command (fast, idempotent)
+#   2. IP   — via QMP keystrokes through Appliance Config → Networking →
+#             Network Interface → Manage IP address. TanOS has no SSH CLI
+#             command to reconfigure network — only the menu path works.
+#
+# Source IP (where the clone boots up — template's baked-in IP):
+tanos_template_ip: "10.99.0.99"
+tanos_template_gw: "10.99.0.1"
+
+# Target values come from inventory:
+#   ansible_host       = target IP after reconfig
+#   inventory_hostname = target hostname (FQDN = <hostname>.bwt.local)
+tanos_target_ip: "{{ ansible_host }}"
+tanos_target_cidr: 24
+tanos_target_fqdn: "{{ inventory_hostname }}.bwt.local"
+tanos_target_gw: "{{ net_bwt_gw }}"
+
+tanos_tanadmin_password: "{{ vault_bwt_tanadmin_password }}"

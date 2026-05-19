@@ -1,0 +1,14 @@
+---
+# Configure the BWT TS for the bandwidth-throttle repro scenario:
+# CDN off, use_local_ip on, one test site at tight limits.
+#
+# The API calls run on pve01 (delegate_to inside the role) because the
+# Mac doesn't have a route to 10.99.0.10 — only pve01 does (it holds the
+# BWT subnet gateway IP).
+- name: Configure BWT throttle scenario
+  hosts: bwt-ts
+  gather_facts: false
+  vars_files:
+    - group_vars/all/tanium_secrets.yml
+  roles:
+    - role: bwt_throttle_config

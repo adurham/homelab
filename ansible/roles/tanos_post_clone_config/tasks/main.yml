@@ -1,0 +1,199 @@
+---
+# Per-clone post-clone reconfig: change IP from template default to target,
+# change FQDN to per-VM value.
+#
+# Order matters:
+#   1. FQDN first via SSH at the template IP (10.99.0.99 — what the clone
+#      boots up with). FQDN change doesn't break SSH connectivity.
+#   2. IP via QMP keystrokes — this changes the IP and immediately breaks
+#      the connection-at-template-IP. After this we wait for SSH at the
+#      target IP.
+#
+# Skip both if the VM is already at the target IP (idempotency).
+
+- name: "Check if {{ inventory_hostname }} is already at target IP {{ tanos_target_ip }}"
+  delegate_to: "{{ tanos_clone_target_node | default(target_node) }}"
+  ansible.builtin.shell: |
+    timeout 3 nc -z {{ tanos_target_ip }} 22
+  register: target_reachable
+  failed_when: false
+  changed_when: false
+
+- name: Reconfigure clone — block
+  when: target_reachable.rc != 0
+  block:
+    - name: "Wait for SSH at template IP {{ tanos_template_ip }}"
+      delegate_to: "{{ tanos_clone_target_node | default(target_node) }}"
+      ansible.builtin.wait_for:
+        host: "{{ tanos_template_ip }}"
+        port: 22
+        timeout: 180
+        delay: 5
+
+    - name: "Set FQDN to {{ tanos_target_fqdn }} via TanOS CLI"
+      # Run from the Mac (not delegated). Inventory ansible_ssh_common_args
+      # (ProxyJump=root@192.168.86.11) handles the lab-side routing, and the
+      # Mac has the personal_macbook key in 1Password agent which IS
+      # authorized in the template's tanadmin authorized_keys.
+      delegate_to: localhost
+      ansible.builtin.command: >
+        ssh -o StrictHostKeyChecking=accept-new
+        -o UserKnownHostsFile=/dev/null
+        -o ProxyJump=root@192.168.86.11
+        -o ConnectTimeout=10
+        tanadmin@{{ tanos_template_ip }}
+        set fqdn {{ tanos_target_fqdn }}
+      register: set_fqdn_result
+      changed_when: "'is now' in (set_fqdn_result.stdout | default(''))
+                     or set_fqdn_result.rc == 0"
+
+    - name: "Ensure qmp_keystroke.py is present on {{ tanos_clone_target_node | default(target_node) }}"
+      delegate_to: "{{ tanos_clone_target_node | default(target_node) }}"
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/proxmox/qmp_keystroke.py"
+        dest: /usr/local/bin/qmp_keystroke.py
+        mode: '0755'
+
+    - name: "Drive QMP keystrokes to change IP to {{ tanos_target_ip }}/{{ tanos_target_cidr }}"
+      delegate_to: "{{ tanos_clone_target_node | default(target_node) }}"
+      # NB: each `type` argument is a SINGLE shell token, so we use single-quote
+      # safe values. The newline embedded via the trailing literal \n inside the
+      # quoted string is interpreted by qmp_keystroke.py as a return keypress.
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/qmp_keystroke.py
+          - "{{ vmid }}"
+          - type
+          - "tanadmin\n"
+          - sleep
+          - "3"
+          - type
+          - "{{ tanos_tanadmin_password }}\n"
+          - sleep
+          - "5"
+          - key
+          - ret           # dismiss banner
+          - sleep
+          - "3"
+          - type
+          - "A"
+          - key
+          - ret           # main menu → Appliance Config
+          - sleep
+          - "2"
+          - type
+          - "2"
+          - key
+          - ret           # → Networking
+          - sleep
+          - "2"
+          - type
+          - "1"
+          - key
+          - ret           # → Network Interfaces
+          - sleep
+          - "2"
+          - type
+          - "1"
+          - key
+          - ret           # → Interface 1 (enp6s18)
+          - sleep
+          - "2"
+          - type
+          - "I"
+          - key
+          - ret           # → Manage IP address
+          - sleep
+          - "3"
+          # Clear pre-filled IP (e.g. "10.99.0.99/24" = 13 chars) via backspaces.
+          # Send 20 to be safe — over-deleting at start of input is a no-op.
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - key
+          - backspace
+          - sleep
+          - "1"
+          - type
+          - "{{ tanos_target_ip }}/{{ tanos_target_cidr }}\n"
+          - sleep
+          - "2"
+          - key
+          - ret           # accept pre-filled gateway (matches template; both = 10.99.0.1)
+          - sleep
+          - "3"
+          - type
+          - "Y"
+          - key
+          - ret           # accept default IPv6
+          - sleep
+          - "3"
+          - type
+          - "y"
+          - key
+          - ret           # confirm new settings
+          - sleep
+          - "12"          # network restart takes ~10s
+      register: ip_change_keystrokes
+      changed_when: true
+
+    - name: "Wait for SSH at new IP {{ tanos_target_ip }}"
+      delegate_to: "{{ tanos_clone_target_node | default(target_node) }}"
+      ansible.builtin.wait_for:
+        host: "{{ tanos_target_ip }}"
+        port: 22
+        timeout: 120
+        delay: 5
+
+    - name: "Verify FQDN + IP via TanOS CLI on new IP"
+      delegate_to: localhost
+      ansible.builtin.command: >
+        ssh -o StrictHostKeyChecking=accept-new
+        -o UserKnownHostsFile=/dev/null
+        -o ProxyJump=root@192.168.86.11
+        -o ConnectTimeout=10
+        tanadmin@{{ tanos_target_ip }}
+        report info
+      register: verify_info
+      changed_when: false
+
+    - name: "Assert verify shows our hostname"
+      ansible.builtin.assert:
+        that:
+          - "inventory_hostname in verify_info.stdout"
+        fail_msg: "Post-reconfig report info did not show {{ inventory_hostname }}:\n{{ verify_info.stdout }}"
