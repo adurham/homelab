@@ -9,9 +9,13 @@
 # rehearsal pass `-e ha_restart=false` (the default) so the slow path is
 # skipped and only an automation reload happens.
 - name: Deploy Home Assistant Automations
+  # gather_facts must stay false: Home Assistant OS ships no Python
+  # interpreter, so the setup module cannot run on this host. We derive the
+  # backup timestamp from a local `date` lookup instead of ansible_date_time.
   hosts: homeassistant
-  gather_facts: true  # Need ansible_date_time for the backup name
+  gather_facts: false
   vars:
+    deploy_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
     ha_root: "{{ playbook_dir }}/../homeassistant"
     ha_restart: false
     ssh_opts: "-o StrictHostKeyChecking=accept-new"
@@ -37,8 +41,10 @@
       changed_when: false
 
     - name: Take pre-deploy backup on the HA host
+      # NOTE: this HAOS uses `ha backups new`, not `ha core backup`
+      # (the latter has no `backup` subcommand on current Supervisor).
       ansible.builtin.raw: >-
-        ha core backup --name pre-deploy-{{ ansible_date_time.iso8601_basic_short }}
+        ha backups new --name pre-deploy-{{ deploy_ts }}
       register: ha_backup
       changed_when: ha_backup.rc == 0
       failed_when: ha_backup.rc != 0
@@ -49,9 +55,12 @@
       changed_when: mkdir_result.rc == 0
 
     - name: Copy automations directory
+      # Copy the directory *contents* (automations/.) not the directory
+      # itself: `scp -r src/ dest/` nests as dest/src when dest exists,
+      # which silently lands files in /config/automations/automations/.
       ansible.builtin.shell: >-
         scp -P {{ ansible_port }} -r {{ ssh_opts }}
-        {{ ha_root }}/automations/
+        {{ ha_root }}/automations/.
         {{ ansible_user }}@{{ ansible_host }}:/config/automations/
       delegate_to: localhost
       register: scp_automations
