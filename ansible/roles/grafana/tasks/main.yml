@@ -295,6 +295,15 @@
     mode: '0644'
   notify: Restart Grafana
 
+- name: Deploy Smart Vent Controller Dashboard
+  ansible.builtin.copy:
+    src: smart_vent_controller.json
+    dest: /var/lib/grafana/dashboards/smart_vent_controller.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
 - name: Create Alerting Provisioning Directory
   ansible.builtin.file:
     path: /etc/grafana/provisioning/alerting
