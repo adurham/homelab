@@ -1,0 +1,347 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "id": null,
+  "uid": "smart-vent-control",
+  "title": "Smart Vent Controller",
+  "tags": ["homeassistant", "hvac", "flair"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Room Temperatures by Floor",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 19 },
+              { "color": "yellow", "value": 22 },
+              { "color": "red", "value": 25 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Cool setpoint" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "dark-blue" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_sensor_temperature_celsius{entity=~\"sensor.guest_bedroom_1_temperature|sensor.guest_bedroom_2_temperature|sensor.game_room_temperature|sensor.cat_room_temperature|sensor.guest_bathroom_temperature\"}",
+          "legendFormat": "2F: {{friendly_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "homeassistant_sensor_temperature_celsius{entity=~\"sensor.main_bedroom_temperature|sensor.main_bathroom_temperature|sensor.hallway_temperature|sensor.living_room_temperature|sensor.kitchen_temperature|sensor.dining_room_temperature|sensor.laundry_room_temperature\"}",
+          "legendFormat": "1F: {{friendly_name}}",
+          "refId": "B"
+        },
+        {
+          "expr": "homeassistant_sensor_temperature_celsius{entity=\"sensor.7wq7_temperature\"}",
+          "legendFormat": "Basement",
+          "refId": "C"
+        },
+        {
+          "expr": "homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"}",
+          "legendFormat": "Cool setpoint",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Vent Positions - 2nd Floor (Upstairs)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "spanNulls": true,
+            "stacking": { "mode": "none" }
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.guest_bedroom_1_8d6d_vent_position|sensor.guest_bedroom_1_8136_vent_position|sensor.guest_bedroom_2_1ec7_vent_position|sensor.game_room_889a_vent_position|sensor.game_room_89ae_vent_position|sensor.game_room_0c83_vent_position|sensor.cat_room_b58e_vent_position|sensor.cat_room_3075_vent_position|sensor.guest_bathroom_e5a3_vent_position\"}",
+          "legendFormat": "{{friendly_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Vent Positions - 1st Floor (Downstairs)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "spanNulls": true
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.main_bedroom_883f_vent_position|sensor.main_bedroom_a96d_vent_position|sensor.main_bedroom_5c2b_vent_position|sensor.main_bathroom_f586_vent_position|sensor.hallway_907e_vent_position|sensor.living_room_fc56_vent_position|sensor.living_room_5d8e_vent_position|sensor.kitchen_d124_vent_position|sensor.dining_room_7a28_vent_position|sensor.laundry_room_d189_vent_position|sensor.basement_4d79_vent_position\"}",
+          "legendFormat": "{{friendly_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Duct Temperatures (Supply Air)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": true
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_sensor_temperature_celsius{entity=~\"sensor.guest_bedroom_1_8d6d_duct_temperature|sensor.guest_bedroom_1_8136_duct_temperature|sensor.game_room_889a_duct_temperature|sensor.game_room_89ae_duct_temperature|sensor.game_room_0c83_duct_temperature|sensor.cat_room_b58e_duct_temperature|sensor.cat_room_3075_duct_temperature|sensor.guest_bathroom_e5a3_duct_temperature\"}",
+          "legendFormat": "2F: {{friendly_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "homeassistant_sensor_temperature_celsius{entity=~\"sensor.main_bedroom_883f_duct_temperature_2|sensor.main_bedroom_a96d_duct_temperature_2|sensor.main_bedroom_5c2b_duct_temperature_2|sensor.main_bathroom_f586_duct_temperature_2|sensor.hallway_907e_duct_temperature_2|sensor.living_room_fc56_duct_temperature_2|sensor.living_room_5d8e_duct_temperature_2|sensor.kitchen_d124_duct_temperature_2|sensor.dining_room_7a28_duct_temperature_2|sensor.laundry_room_d189_duct_temperature_2\"}",
+          "legendFormat": "1F: {{friendly_name}}",
+          "refId": "B"
+        },
+        {
+          "expr": "homeassistant_sensor_temperature_celsius{entity=\"sensor.basement_4d79_duct_temperature\"}",
+          "legendFormat": "Basement duct",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "HVAC Action",
+      "type": "timeseries",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 26 },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 30,
+            "spanNulls": true,
+            "stacking": { "mode": "normal" }
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "cooling" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "heating" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "fan" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "idle" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "semi-dark-green" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_climate_action{entity=\"climate.ecobee_thermostat\", action=\"cooling\"}",
+          "legendFormat": "cooling",
+          "refId": "A"
+        },
+        {
+          "expr": "homeassistant_climate_action{entity=\"climate.ecobee_thermostat\", action=\"heating\"}",
+          "legendFormat": "heating",
+          "refId": "B"
+        },
+        {
+          "expr": "homeassistant_climate_action{entity=\"climate.ecobee_thermostat\", action=\"fan\"}",
+          "legendFormat": "fan",
+          "refId": "C"
+        },
+        {
+          "expr": "homeassistant_climate_action{entity=\"climate.ecobee_thermostat\", action=\"idle\"}",
+          "legendFormat": "idle",
+          "refId": "D"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right" },
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Zone Avg Temperature vs Setpoint",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 3,
+            "fillOpacity": 15,
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Cool setpoint" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "dark-blue" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "2F Avg" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "1F Avg" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Basement" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "avg(homeassistant_sensor_temperature_celsius{entity=~\"sensor.guest_bedroom_1_temperature|sensor.guest_bedroom_2_temperature|sensor.game_room_temperature|sensor.cat_room_temperature|sensor.guest_bathroom_temperature\"})",
+          "legendFormat": "2F Avg",
+          "refId": "A"
+        },
+        {
+          "expr": "avg(homeassistant_sensor_temperature_celsius{entity=~\"sensor.main_bedroom_temperature|sensor.main_bathroom_temperature|sensor.hallway_temperature|sensor.living_room_temperature|sensor.kitchen_temperature|sensor.dining_room_temperature|sensor.laundry_room_temperature\"})",
+          "legendFormat": "1F Avg",
+          "refId": "B"
+        },
+        {
+          "expr": "homeassistant_sensor_temperature_celsius{entity=\"sensor.7wq7_temperature\"}",
+          "legendFormat": "Basement",
+          "refId": "C"
+        },
+        {
+          "expr": "homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"}",
+          "legendFormat": "Cool setpoint",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Vent Battery Voltages",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 38 },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 2.3 },
+              { "color": "green", "value": 2.6 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_sensor_voltage_v{entity=~\"sensor.*(4d79|3075|b58e|7a28|0c83|889a|89ae|e5a3|8136|8d6d|1ec7|907e|d124|d189|5d8e|fc56|f586|5c2b|883f|a96d)_voltage.*\"}",
+          "legendFormat": "{{friendly_name}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}
