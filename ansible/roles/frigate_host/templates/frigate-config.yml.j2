@@ -1,0 +1,63 @@
+# {{ ansible_managed }}
+# Frigate config — single camera (cat_room), CPU detection.
+#
+# Stream path: HA go2rtc add-on (Nest WebRTC->RTSP) -> Frigate's OWN bundled
+# go2rtc restream (127.0.0.1) -> camera. The indirection is REQUIRED: the HA
+# go2rtc RTSP output for a Nest WebRTC source advertises no resolution/SPS in
+# its SDP, so a direct Frigate ffmpeg input dies with "Could not find codec
+# parameters ... unspecified size". Restreaming through Frigate's bundled
+# go2rtc normalizes the stream so ffmpeg gets proper codec params. Verified
+# working 2026-05-31 (camera_fps 5.1, CPU inference ~18ms).
+
+mqtt:
+{% if frigate_mqtt_enabled %}
+  enabled: true
+  host: {{ frigate_mqtt_host }}
+  port: {{ frigate_mqtt_port }}
+{% if frigate_mqtt_user %}
+  user: {{ frigate_mqtt_user }}
+  password: {{ frigate_mqtt_password }}
+{% endif %}
+{% else %}
+  # No broker confirmed in the repo; see roles/frigate_host/defaults/main.yml.
+  enabled: false
+{% endif %}
+
+go2rtc:
+  streams:
+    cat_room:
+      - "{{ frigate_rtsp_source }}"
+
+detectors:
+  cpu1:
+    type: cpu
+
+cameras:
+  cat_room:
+    ffmpeg:
+      inputs:
+        # Read from Frigate's bundled go2rtc (localhost), NOT the HA go2rtc
+        # directly — see header note. ?video=copy avoids a needless re-decode.
+        - path: rtsp://127.0.0.1:8554/cat_room?video=copy
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+            - record
+    detect:
+      enabled: true
+      width: {{ frigate_detect_width }}
+      height: {{ frigate_detect_height }}
+      fps: {{ frigate_detect_fps }}
+    objects:
+      track:
+{% for obj in frigate_track_objects %}
+        - {{ obj }}
+{% endfor %}
+    record:
+      enabled: true
+      continuous:
+        days: {{ frigate_record_retain_days }}
+      motion:
+        days: 0
+
+version: 0.17-0

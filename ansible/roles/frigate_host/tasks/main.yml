@@ -1,0 +1,179 @@
+---
+# Provisions the Frigate NVR LXC and deploys Frigate (Docker) inside it.
+# LXC creation mirrors roles/monitoring_host exactly (pveam fetch ->
+# cluster-wide existence check -> pct create -> resolver fix -> start).
+# The second half installs Docker in the CT and brings up Frigate via
+# docker compose. Runs against the proxmox node hosting the CT (pve01).
+
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  changed_when: false
+
+# Cluster-wide existence check. `pct config` is node-local; HA can migrate
+# a CT to any node, so we ask pmxcfs for the full cluster resource list and
+# look for the vmid anywhere. rc=0 means it exists somewhere in the cluster.
+- name: Check if Container exists in cluster
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]=={{ vmid }} for r in json.load(sys.stdin)) else 1)'
+  register: ct_check
+  failed_when: false
+  changed_when: false
+
+- name: Download Template
+  ansible.builtin.command: pveam download local {{ template }}
+  args:
+    creates: /var/lib/vz/template/cache/{{ template }}
+  when: ct_check.rc != 0
+
+# A 60G rootfs (via --rootfs nvme-data:{{ vm_disk }}) gives Frigate room for
+# 2 days of recordings. Docker needs an unprivileged CT with nesting=1.
+- name: Create Container
+  ansible.builtin.command: >
+    pct create {{ vmid }} /var/lib/vz/template/cache/{{ template }}
+    --hostname {{ inventory_hostname }}
+    --cores {{ vm_cores | default(2) }} --memory {{ vm_memory | default(4096) }} --swap {{ vm_swap | default(512) }}
+    --net0 name=eth0,bridge=vmbr0,ip=dhcp
+    --net1 name=eth1,bridge=private,ip={{ net_private_ip }}
+    --nameserver {{ ip_dns_primary }}
+    --searchdomain chi.lab.amd-e.com
+    --rootfs nvme-data:{{ vm_disk }}
+    --unprivileged 1
+    --features nesting=1
+    --password "{{ lxc_root_pass }}"
+    --ssh-public-keys /root/.ssh/authorized_keys
+  no_log: true
+  when: ct_check.rc != 0
+
+# Idempotent re-apply of resolver settings for already-existing CTs.
+# Without this, the CT inherits DHCP DNS from the LAN gateway (192.168.86.2),
+# which can't resolve chi.lab.amd-e.com. pct set/exec are node-local — HA can
+# migrate the CT, so discover the owning node from pmxcfs and dispatch there.
+- name: Find owning node for CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json, sys; print(next((r["node"] for r in json.load(sys.stdin) if r["vmid"] == {{ vmid }}), ""))'
+  args:
+    executable: /bin/bash
+  register: ct_owner
+  changed_when: false
+  when: ct_check.rc == 0
+
+- name: Ensure CT uses internal DNS resolver
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }} \
+      pct set {{ vmid }} \
+      --nameserver {{ ip_dns_primary }} \
+      --searchdomain chi.lab.amd-e.com
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: ct_check.rc == 0 and ct_owner.stdout | length > 0
+
+# Push resolv.conf inside the running CT so the fix takes effect immediately
+# (pct set only writes it on next boot). Heredoc avoids the quote-mangling
+# that breaks `pct exec ... sh -c "..."` through the ssh + ansible layers.
+- name: Push resolv.conf inside running CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }} pct exec {{ vmid }} -- tee /etc/resolv.conf >/dev/null <<'EOF'
+    nameserver {{ ip_dns_primary }}
+    search chi.lab.amd-e.com
+    EOF
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: ct_check.rc == 0 and ct_owner.stdout | length > 0
+
+# Only start right after creation. After that, HA owns the running-state of
+# managed CTs — calling `pct start` from a non-owning node would fail anyway.
+- name: Start Container (post-create only)
+  ansible.builtin.command: pct start {{ vmid }}
+  register: ct_start
+  failed_when: ct_start.rc != 0 and ("already running" not in ct_start.stderr)
+  changed_when: ct_start.rc == 0
+  when: ct_check.rc != 0
+
+- name: Wait for Container IP
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec {{ vmid }} -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  register: frigate_ip_check
+  until: frigate_ip_check.rc == 0
+  retries: 20
+  delay: 3
+  changed_when: false
+  when: ct_check.rc != 0
+
+# ── Docker + Frigate, deployed via `pct exec` from the proxmox host ──────────
+# Done through pct exec (not a separate SSH play) so the whole stand-up is a
+# single role run against the pve node, matching hermes_gateway_host's pattern.
+
+- name: Install prerequisites in CT
+  ansible.builtin.command: >
+    pct exec {{ vmid }} -- bash -c
+    "apt-get update && apt-get install -y ca-certificates curl gnupg"
+  changed_when: true
+
+- name: Install Docker via convenience script in CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec {{ vmid }} -- bash -c "command -v docker >/dev/null 2>&1 || (curl -fsSL https://get.docker.com | sh)"
+  args:
+    executable: /bin/bash
+  register: docker_install
+  changed_when: "'command not found' not in docker_install.stderr"
+
+- name: Ensure docker service is enabled and running in CT
+  ansible.builtin.command: pct exec {{ vmid }} -- systemctl enable --now docker
+  changed_when: false
+
+- name: Create Frigate directories in CT
+  ansible.builtin.command: pct exec {{ vmid }} -- mkdir -p {{ frigate_base_dir }}/config {{ frigate_base_dir }}/media
+  changed_when: false
+
+# Render templates locally then push the bytes into the CT via a heredoc,
+# matching the resolv.conf push pattern above (avoids needing direct SSH to
+# the CT, which may not yet have a known-good route at first deploy).
+- name: Render Frigate config locally
+  ansible.builtin.set_fact:
+    frigate_config_rendered: "{{ lookup('ansible.builtin.template', 'frigate-config.yml.j2') }}"
+  no_log: true
+
+- name: Render docker-compose locally
+  ansible.builtin.set_fact:
+    frigate_compose_rendered: "{{ lookup('ansible.builtin.template', 'docker-compose.yml.j2') }}"
+
+- name: Deploy Frigate config.yml into CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec {{ vmid }} -- tee {{ frigate_base_dir }}/config/config.yml >/dev/null <<'FRIGATE_EOF'
+    {{ frigate_config_rendered }}
+    FRIGATE_EOF
+  args:
+    executable: /bin/bash
+  no_log: true
+  changed_when: true
+
+- name: Deploy docker-compose.yml into CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec {{ vmid }} -- tee {{ frigate_base_dir }}/docker-compose.yml >/dev/null <<'COMPOSE_EOF'
+    {{ frigate_compose_rendered }}
+    COMPOSE_EOF
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Bring up Frigate (docker compose up -d)
+  ansible.builtin.command: pct exec {{ vmid }} -- docker compose -f {{ frigate_base_dir }}/docker-compose.yml up -d
+  changed_when: true
+
+- name: Add Host to Inventory
+  ansible.builtin.add_host:
+    name: "{{ inventory_hostname }}"
+    ansible_host: "{{ net_private_ip.split('/')[0] }}"
+    ansible_user: "root"

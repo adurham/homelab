@@ -1,0 +1,62 @@
+---
+# Frigate NVR LXC defaults.
+#
+# This role mirrors roles/monitoring_host for LXC creation (pveam fetch ->
+# cluster-wide existence check -> pct create), then installs Docker inside the
+# CT and runs Frigate via docker compose. Docker requires an unprivileged CT
+# with nesting=1 (already in the create flags).
+
+# Proxmox placement. VMID 170 sits outside the populated 100-114 core-service
+# block (full: gaps at 109-112 are treated as reserved) — see the VMID note
+# in defaults below and docs/ipam.md. Override per-host in inventory if needed.
+vmid: 170
+target_node: pve01
+template: debian-12-standard_12.12-1_amd64.tar.zst
+
+# Resources. CPU object detection is the workload; no Coral/iGPU passthrough
+# yet, so size CPU/RAM generously and give the rootfs room for recordings.
+vm_cores: 4
+vm_memory: 8192
+vm_swap: 512
+vm_disk: 60  # GiB rootfs on nvme-data (--rootfs nvme-data:{{ vm_disk }})
+
+# Private-subnet address (eth1 on the `private` bridge). eth0 stays on vmbr0
+# via DHCP so Frigate can reach the go2rtc RTSP source and HA's MQTT on the
+# LAN (both live at ip_homeassistant / 192.168.86.2).
+net_private_ip: "{{ ip_frigate }}/24"
+
+# Frigate container.
+frigate_image: "ghcr.io/blakeblackshear/frigate:stable"
+frigate_shm_size: "256mb"
+frigate_web_port: 5000   # legacy/unauthenticated UI + API
+frigate_auth_port: 8971  # authenticated UI (Frigate >= 0.14)
+frigate_base_dir: /opt/frigate
+
+# Camera / detection.
+# Fed into Frigate's bundled go2rtc as a restream source (see the config
+# template header for why the indirection is required).
+frigate_rtsp_source: "rtsp://192.168.86.2:8554/cat_room"
+# Detect resolution matches the Nest stream's native 1080p (the go2rtc SDP
+# omits dimensions; the stream itself is H264 1920x1080@30).
+frigate_detect_width: 1920
+frigate_detect_height: 1080
+frigate_detect_fps: 5
+frigate_track_objects:
+  - person
+  - cat
+frigate_record_retain_days: 2
+
+# MQTT (Home Assistant integration).
+#
+# DISABLED by default: the repo has no committed MQTT broker config and no
+# vault var for broker credentials, so we cannot confirm the Mosquitto add-on
+# is running on the HA host or what auth it requires. Frigate runs fine without
+# MQTT (events still record + show in its own UI). To enable HA event
+# integration: set frigate_mqtt_enabled: true, confirm the Mosquitto add-on is
+# installed on {{ ip_homeassistant }}, and add frigate_mqtt_user /
+# frigate_mqtt_password as vault vars (do NOT inline plaintext).
+frigate_mqtt_enabled: false
+frigate_mqtt_host: "{{ ip_homeassistant }}"
+frigate_mqtt_port: 1883
+frigate_mqtt_user: ""
+frigate_mqtt_password: ""
