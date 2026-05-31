@@ -63,7 +63,9 @@ nest_camera_ids:
 # omits dimensions; the stream itself is H264 1920x1080@30).
 frigate_detect_width: 1920
 frigate_detect_height: 1080
-frigate_detect_fps: 5
+# 3 fps is plenty for person/cat detection and roughly halves decode+detect
+# load vs 5 — smoother, fewer synchronized fps dips on the CPU detector.
+frigate_detect_fps: 3
 frigate_track_objects:
   - person
   - cat
