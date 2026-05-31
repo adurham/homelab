@@ -9,6 +9,15 @@ streams:
   {{ name }}: nest:?client_id={{ nest_client_id }}&client_secret={{ nest_client_secret }}&refresh_token={{ nest_refresh_token }}&project_id={{ nest_project_id }}&device_id={{ nest_camera_ids[name] }}
 {% endfor %}
 
+# Keep every camera's Nest WebRTC producer warm on go2rtc start, so Frigate's
+# (re)connects get a frame immediately instead of waiting on a cold WebRTC
+# negotiation — which is what tripped Frigate's 20s no-frames watchdog into a
+# restart loop (esp. on cat_room). Preload video only (detection needs no audio).
+preload:
+{% for name in frigate_cameras.keys() %}
+  {{ name }}: "video"
+{% endfor %}
+
 api:
   listen: ":1984"
 
