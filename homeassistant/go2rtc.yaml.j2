@@ -9,14 +9,17 @@
 #
 # Architecture: cameras + Nest auth stay on HA. The go2rtc add-on runs on
 # the HA host with host_network, exposing RTSP on the HA LAN IP. Frigate on
-# the cluster CONSUMES these RTSP feeds. HA never depends on Frigate.
+# the cluster CONSUMES these feeds (via MP4-over-HTTP — see frigate role).
+# HA never depends on Frigate.
 #
-# Cameras are Nest WebRTC-only (H264/OPUS); go2rtc converts WebRTC -> RTSP.
-# Add more cameras by adding nest: sources keyed by device_id.
+# Cameras are Nest WebRTC-only (H264/OPUS); go2rtc converts WebRTC -> stream.
+# Camera list is the `nest_cameras` var (defined in the go2rtc deploy vars):
+# a map of stream_name -> SDM device_id. Add a camera by adding an entry.
 
 streams:
-  # Cat Room (Nest Cam battery, wired). device_id from SDM /devices list.
-  cat_room: nest:?client_id={{ nest_client_id }}&client_secret={{ nest_client_secret }}&refresh_token={{ nest_refresh_token }}&project_id={{ nest_project_id }}&device_id=AVPHwEugLnM10nHJPNtx9QPddhEtup_wvq3nZVErtRs50C29zePNzFbFQqY20_k5hhz72csTDSYhFO_8YQPel1alW9rM9w
+{% for name, device_id in nest_cameras.items() %}
+  {{ name }}: nest:?client_id={{ nest_client_id }}&client_secret={{ nest_client_secret }}&refresh_token={{ nest_refresh_token }}&project_id={{ nest_project_id }}&device_id={{ device_id }}
+{% endfor %}
 
 api:
   listen: ":1984"
