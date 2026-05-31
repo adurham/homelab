@@ -33,9 +33,19 @@ frigate_auth_port: 8971  # authenticated UI (Frigate >= 0.14)
 frigate_base_dir: /opt/frigate
 
 # Camera / detection.
-# Fed into Frigate's bundled go2rtc as a restream source (see the config
-# template header for why the indirection is required).
-frigate_rtsp_source: "rtsp://192.168.86.2:8554/cat_room"
+# HA host running the go2rtc add-on (the upstream Nest->stream bridge).
+frigate_go2rtc_host: "192.168.86.2"
+# Camera stream names — MUST match the keys in deploy_go2rtc.yml's
+# nest_cameras map (Frigate's bundled go2rtc restreams each from
+# rtsp://{{ frigate_go2rtc_host }}:8554/<name>, camera consumes its MP4 out).
+frigate_cameras:
+  - cat_room
+  - foyer
+  - basement
+  - driveway
+  - backyard
+  - front_porch
+  - kitchen_display
 # Detect resolution matches the Nest stream's native 1080p (the go2rtc SDP
 # omits dimensions; the stream itself is H264 1920x1080@30).
 frigate_detect_width: 1920
