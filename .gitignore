@@ -133,3 +133,7 @@ gha-creds-*.json
 # appliances. Pulled from artifactory via scripts/tanium/fetch_artifactory_bundle.sh
 # (corp-only via SOCKS5 proxy). Never commit RPMs/licenses.
 /files/tanium-*/
+
+# go2rtc rendered config (contains Nest creds, host-only)
+ansible/go2rtc.rendered.yaml
+/tmp/go2rtc.rendered.yaml

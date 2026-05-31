@@ -1,0 +1,31 @@
+# go2rtc configuration — DEPLOYED, do not hand-edit on the host.
+#
+# Source of truth: this template in the homelab repo. Rendered by the
+# deploy playbook with Nest OAuth creds pulled from HA's own storage
+# (the same credentials the Nest integration already holds — ONE Google
+# auth, no second OAuth consent). Rendered file lands at /config/go2rtc.yaml
+# on the HA host, which is where the go2rtc add-on (slug a889bffc_go2rtc)
+# reads its config from (NOT /addon_configs/ — that path is ignored).
+#
+# Architecture: cameras + Nest auth stay on HA. The go2rtc add-on runs on
+# the HA host with host_network, exposing RTSP on the HA LAN IP. Frigate on
+# the cluster CONSUMES these RTSP feeds. HA never depends on Frigate.
+#
+# Cameras are Nest WebRTC-only (H264/OPUS); go2rtc converts WebRTC -> RTSP.
+# Add more cameras by adding nest: sources keyed by device_id.
+
+streams:
+  # Cat Room (Nest Cam battery, wired). device_id from SDM /devices list.
+  cat_room: nest:?client_id={{ nest_client_id }}&client_secret={{ nest_client_secret }}&refresh_token={{ nest_refresh_token }}&project_id={{ nest_project_id }}&device_id=AVPHwEugLnM10nHJPNtx9QPddhEtup_wvq3nZVErtRs50C29zePNzFbFQqY20_k5hhz72csTDSYhFO_8YQPel1alW9rM9w
+
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+webrtc:
+  listen: ":8555"
+
+log:
+  level: info
