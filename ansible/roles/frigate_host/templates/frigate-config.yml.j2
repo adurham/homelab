@@ -1,18 +1,17 @@
 # {{ ansible_managed }}
 # Frigate config — all Nest cameras, CPU detection.
 #
-# Stream path per camera: HA go2rtc add-on (Nest WebRTC->stream) -> Frigate's
-# bundled go2rtc holds it warm -> camera consumes the bundled go2rtc's MP4
-# HTTP output.
+# Stream path per camera: HA go2rtc add-on (Nest WebRTC->stream) -> Frigate
+# camera consumes the HA go2rtc's MP4 HTTP output DIRECTLY.
 #
-# WHY MP4-over-HTTP and not RTSP: the HA go2rtc RTSP output for a Nest WebRTC
-# source drops the H264 SPS/PPS parameter sets, so ffmpeg can't decode it
-# ("non-existing PPS 0 referenced" / "Could not find codec parameters ...
-# unspecified size"). go2rtc's MP4 muxer (avc1) inserts the parameter sets
-# inband, so ffmpeg decodes cleanly at native 1080p. Routing through Frigate's
-# OWN bundled go2rtc keeps the producer warm, which removes the >20s cold-start
-# that otherwise trips Frigate's 20s no-frames watchdog. Verified working
-# 2026-05-31 (cat_room: camera_fps 5.0, 0 restarts/110s, CPU inference ~19ms).
+# WHY MP4-over-HTTP, directly from the HA go2rtc (no Frigate-side go2rtc hop):
+# the go2rtc RTSP output for a Nest WebRTC source drops the H264 SPS/PPS
+# parameter sets, so ffmpeg can't decode it ("non-existing PPS" /
+# "decode_slice_header error" / "unspecified size"). go2rtc's MP4 muxer (avc1)
+# inserts the parameter sets inband, so ffmpeg decodes cleanly at native
+# 1080p. An intermediate Frigate-side go2rtc RTSP restream RE-INTRODUCES the
+# corruption (RTSP transport drops the params again) — so consume the HA MP4
+# endpoint straight. Verified 2026-05-31.
 
 mqtt:
 {% if frigate_mqtt_enabled %}
@@ -28,25 +27,19 @@ mqtt:
   enabled: false
 {% endif %}
 
-go2rtc:
-  streams:
-{% for name in frigate_cameras %}
-    {{ name }}:
-      - "rtsp://{{ frigate_go2rtc_host }}:8554/{{ name }}"
-{% endfor %}
-
 detectors:
   cpu1:
     type: cpu
 
 cameras:
-{% for name in frigate_cameras %}
+{% for name, label in frigate_cameras.items() %}
   {{ name }}:
+    friendly_name: "{{ label }}"
     ffmpeg:
       inputs:
-        # MP4-over-HTTP from the bundled go2rtc (localhost) — carries inband
+        # MP4-over-HTTP straight from the HA go2rtc add-on — carries inband
         # SPS/PPS that the RTSP output drops. See header note.
-        - path: "http://127.0.0.1:1984/api/stream.mp4?src={{ name }}"
+        - path: "http://{{ frigate_go2rtc_host }}:1984/api/stream.mp4?src={{ name }}"
           input_args:
             - -f
             - mp4
