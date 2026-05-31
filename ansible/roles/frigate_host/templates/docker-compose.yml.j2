@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+# Frigate NVR. Runs inside the LXC (unprivileged + nesting=1).
+# CPU detection only — no Coral/iGPU device passthrough yet.
+
+services:
+  frigate:
+    container_name: frigate
+    image: {{ frigate_image }}
+    restart: unless-stopped
+    shm_size: "{{ frigate_shm_size }}"
+    volumes:
+      - {{ frigate_base_dir }}/config:/config
+      - {{ frigate_base_dir }}/media:/media/frigate
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    ports:
+      - "{{ frigate_web_port }}:5000"
+      - "{{ frigate_auth_port }}:8971"

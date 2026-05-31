@@ -1,0 +1,29 @@
+---
+# Provisions the Frigate NVR LXC on pve01 and deploys Frigate (Docker inside
+# the CT). Mirrors deploy_monitoring.yml's first play: run against the pve
+# node, include the *_host role with the target CT's vars pulled from
+# hostvars. LXC creation + Docker install + Frigate stand-up all happen via
+# `pct exec` from the proxmox host, so this single play does everything.
+#
+# go2rtc (the RTSP source at rtsp://192.168.86.2:8554/cat_room) is NOT managed
+# here — it's assumed already running on the HA host.
+#
+# Deploy:
+#   cd ansible
+#   ansible-playbook deploy_frigate.yml
+- name: Provision Frigate NVR Container
+  hosts: pve01
+  gather_facts: true
+  tasks:
+    - name: Deploy Frigate host
+      ansible.builtin.include_role:
+        name: frigate_host
+      vars:
+        net_private_ip: "{{ hostvars['frigate-01']['net_private_ip'] }}"
+        vmid: "{{ hostvars['frigate-01']['vmid'] }}"
+        inventory_hostname: "frigate-01"
+        template: "{{ hostvars['frigate-01']['template'] }}"
+        vm_cores: "{{ hostvars['frigate-01']['vm_cores'] }}"
+        vm_memory: "{{ hostvars['frigate-01']['vm_memory'] }}"
+        vm_disk: "{{ hostvars['frigate-01']['vm_disk'] }}"
+        lxc_root_pass: "{{ frigate_01_root_pass }}"

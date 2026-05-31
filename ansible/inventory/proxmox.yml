@@ -55,6 +55,23 @@ all:
       vars:
         ansible_user: root
 
+    # Frigate NVR (Docker-in-LXC, CPU object detection). eth0 on vmbr0 (DHCP)
+    # so it can reach the go2rtc RTSP source + HA on the LAN; eth1 on the
+    # `private` SDN at ip_frigate. See roles/frigate_host + deploy_frigate.yml.
+    frigate_server:
+      hosts:
+        frigate-01:
+          ansible_host: "{{ ip_frigate }}"
+          vmid: 170
+          target_node: pve01
+          template: debian-12-standard_12.12-1_amd64.tar.zst
+          net_private_ip: "{{ ip_frigate }}/24"
+          vm_cores: 4
+          vm_memory: 8192
+          vm_disk: 60
+      vars:
+        ansible_user: root
+
     tailscale:
       hosts:
         tailscale-gw:
@@ -116,6 +133,7 @@ all:
         authentik_server:
         dns_server:
         proxy_server:
+        frigate_server:
         tailscale:
         mail_server:
         ntp_server:
