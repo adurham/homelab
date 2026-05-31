@@ -21,6 +21,17 @@
     ha_root: "{{ playbook_dir }}/../homeassistant"
     go2rtc_addon_slug: a889bffc_go2rtc
     ssh_opts: "-o StrictHostKeyChecking=accept-new"
+    # stream_name -> SDM device_id. SDM device IDs from
+    # GET enterprises/<project>/devices. All 7 Nest cams as of 2026-05-31
+    # (the duplicate "Backyard" ghost was purged by Google support).
+    nest_cameras:
+      cat_room: "AVPHwEugLnM10nHJPNtx9QPddhEtup_wvq3nZVErtRs50C29zePNzFbFQqY20_k5hhz72csTDSYhFO_8YQPel1alW9rM9w"
+      foyer: "AVPHwEsGM0hB41axR-p69a60d-LYX0collMapER0UQcBCc6wXio4nIpkiuX_jl_7RVD6JLjrBJq--BHVyn-HukDsJWJfPQ"
+      basement: "AVPHwEv8tTe1tp5fvy80mel9qHuE_1BblWFwmvVPC4SbtgNBjV1ZUeqPW7vYbNZdw1eEsKYteg49Tgv5irjteGtBoIkKIQ"
+      driveway: "AVPHwEuxNIjGGIdwKW3buFkVWNAKIxAz5y1Z69eqY2Y63tKxpNfNiJ6tvRg9KtkntZOCE2ynMFc5SOgNBW3UjCePJJIZUg"
+      backyard: "AVPHwEs59aGy1dGAhZoKHrGpun_T51Jwqu8U4-F_h0NSC-nlW5NrtKwirWfT6oq4Tr_1xJ3UO-BuygEY3IAQyP_OlPSNlQ"
+      front_porch: "AVPHwEsTue5ui87_i87e52KKkA3e6jpqP0Zui3bs9hReC2xKveNywOxXALgz-HYomecDUgE_Q7scUsT5d5Y2zHydyvBnIA"
+      kitchen_display: "AVPHwEuBitFl-aKPpzpyV5AZN82-gv--DUl_zYKfuWX6QndeMpU5ofZGL6Xx-xPOFp__A4QebEkCkXEyRoI_SblU2zwC1w"
 
   tasks:
     - name: Pull Nest OAuth creds from HA storage on the host

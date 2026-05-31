@@ -1,8 +1,9 @@
 # {{ ansible_managed }}
-# Frigate config — single camera (cat_room), CPU detection.
+# Frigate config — all Nest cameras, CPU detection.
 #
-# Stream path: HA go2rtc add-on (Nest WebRTC->RTSP) -> Frigate's bundled go2rtc
-# holds it warm -> camera consumes the bundled go2rtc's MP4 HTTP output.
+# Stream path per camera: HA go2rtc add-on (Nest WebRTC->stream) -> Frigate's
+# bundled go2rtc holds it warm -> camera consumes the bundled go2rtc's MP4
+# HTTP output.
 #
 # WHY MP4-over-HTTP and not RTSP: the HA go2rtc RTSP output for a Nest WebRTC
 # source drops the H264 SPS/PPS parameter sets, so ffmpeg can't decode it
@@ -11,7 +12,7 @@
 # inband, so ffmpeg decodes cleanly at native 1080p. Routing through Frigate's
 # OWN bundled go2rtc keeps the producer warm, which removes the >20s cold-start
 # that otherwise trips Frigate's 20s no-frames watchdog. Verified working
-# 2026-05-31: camera_fps 5.0 sustained, 0 restarts/110s, CPU inference ~19ms.
+# 2026-05-31 (cat_room: camera_fps 5.0, 0 restarts/110s, CPU inference ~19ms).
 
 mqtt:
 {% if frigate_mqtt_enabled %}
@@ -29,20 +30,23 @@ mqtt:
 
 go2rtc:
   streams:
-    cat_room:
-      - "{{ frigate_rtsp_source }}"
+{% for name in frigate_cameras %}
+    {{ name }}:
+      - "rtsp://{{ frigate_go2rtc_host }}:8554/{{ name }}"
+{% endfor %}
 
 detectors:
   cpu1:
     type: cpu
 
 cameras:
-  cat_room:
+{% for name in frigate_cameras %}
+  {{ name }}:
     ffmpeg:
       inputs:
         # MP4-over-HTTP from the bundled go2rtc (localhost) — carries inband
         # SPS/PPS that the RTSP output drops. See header note.
-        - path: "http://127.0.0.1:1984/api/stream.mp4?src=cat_room"
+        - path: "http://127.0.0.1:1984/api/stream.mp4?src={{ name }}"
           input_args:
             - -f
             - mp4
@@ -65,5 +69,6 @@ cameras:
         days: {{ frigate_record_retain_days }}
       motion:
         days: 0
+{% endfor %}
 
 version: 0.17-0
