@@ -1,13 +1,31 @@
 # {{ ansible_managed }}
-# Frigate NVR. Runs inside the LXC (unprivileged + nesting=1).
+# Frigate NVR + go2rtc, both in the LXC (unprivileged + nesting=1).
 # CPU detection only — no Coral/iGPU device passthrough yet.
+#
+# go2rtc runs as its OWN container here (the same AlexxIT image used by the
+# HA add-on) rather than on the HA Green box — offloads the 7 Nest WebRTC
+# bridges from the weak 4-core/4GB ARM HA host onto the 16-core pve node, and
+# shortens the path (Nest -> LXC go2rtc -> Frigate over localhost). Frigate's
+# OWN bundled go2rtc does NOT reliably handle the Nest source module, so we
+# run the standalone go2rtc binary that's known-good. ONE Google auth still
+# (same token, rendered into go2rtc.yaml here instead of on HA).
 
 services:
+  go2rtc:
+    container_name: go2rtc
+    image: {{ go2rtc_image }}
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - {{ frigate_base_dir }}/go2rtc:/config
+
   frigate:
     container_name: frigate
     image: {{ frigate_image }}
     restart: unless-stopped
     shm_size: "{{ frigate_shm_size }}"
+    depends_on:
+      - go2rtc
     volumes:
       - {{ frigate_base_dir }}/config:/config
       - {{ frigate_base_dir }}/media:/media/frigate

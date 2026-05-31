@@ -25,21 +25,23 @@ vm_disk: 60  # GiB rootfs on nvme-data (--rootfs nvme-data:{{ vm_disk }})
 # LAN (both live at ip_homeassistant / 192.168.86.2).
 net_private_ip: "{{ ip_frigate }}/24"
 
-# Frigate container.
+# Containers (both run in the LXC; go2rtc bridges Nest, Frigate consumes it).
 frigate_image: "ghcr.io/blakeblackshear/frigate:stable"
+go2rtc_image: "alexxit/go2rtc:latest"
 frigate_shm_size: "256mb"
 frigate_web_port: 5000   # legacy/unauthenticated UI + API
 frigate_auth_port: 8971  # authenticated UI (Frigate >= 0.14)
 frigate_base_dir: /opt/frigate
 
 # Camera / detection.
-# HA host running the go2rtc add-on (the upstream Nest->stream bridge).
-frigate_go2rtc_host: "192.168.86.2"
-# Cameras: stream name (MUST match deploy_go2rtc.yml's nest_cameras keys) ->
-# friendly display name. The camera consumes MP4-over-HTTP directly from the
-# HA go2rtc add-on (no Frigate-side go2rtc hop — an RTSP intermediate re-drops
-# the H264 SPS/PPS and corrupts decode: "decode_slice_header error /
-# reference picture missing").
+# go2rtc runs IN the LXC as a host-network container. Frigate is on a docker
+# bridge, so it reaches go2rtc via the bridge GATEWAY IP (docker0 = 172.17.0.1),
+# NOT 127.0.0.1 (which would hit Frigate's own empty bundled go2rtc on 1984).
+frigate_go2rtc_host: "172.17.0.1"
+# Cameras: stream name -> friendly display name. The camera consumes
+# MP4-over-HTTP from the LXC's go2rtc container (carries inband H264 SPS/PPS;
+# do NOT add a Frigate-side go2rtc RTSP restream hop — RTSP re-drops the
+# params: "decode_slice_header error / reference picture missing").
 frigate_cameras:
   cat_room: "Cat Room"
   foyer: "Foyer"
@@ -48,6 +50,15 @@ frigate_cameras:
   backyard: "Backyard"
   front_porch: "Front Porch"
   kitchen_display: "Kitchen Display"
+# SDM device IDs per stream name (from GET enterprises/<project>/devices).
+nest_camera_ids:
+  cat_room: "AVPHwEugLnM10nHJPNtx9QPddhEtup_wvq3nZVErtRs50C29zePNzFbFQqY20_k5hhz72csTDSYhFO_8YQPel1alW9rM9w"
+  foyer: "AVPHwEsGM0hB41axR-p69a60d-LYX0collMapER0UQcBCc6wXio4nIpkiuX_jl_7RVD6JLjrBJq--BHVyn-HukDsJWJfPQ"
+  basement: "AVPHwEv8tTe1tp5fvy80mel9qHuE_1BblWFwmvVPC4SbtgNBjV1ZUeqPW7vYbNZdw1eEsKYteg49Tgv5irjteGtBoIkKIQ"
+  driveway: "AVPHwEuxNIjGGIdwKW3buFkVWNAKIxAz5y1Z69eqY2Y63tKxpNfNiJ6tvRg9KtkntZOCE2ynMFc5SOgNBW3UjCePJJIZUg"
+  backyard: "AVPHwEs59aGy1dGAhZoKHrGpun_T51Jwqu8U4-F_h0NSC-nlW5NrtKwirWfT6oq4Tr_1xJ3UO-BuygEY3IAQyP_OlPSNlQ"
+  front_porch: "AVPHwEsTue5ui87_i87e52KKkA3e6jpqP0Zui3bs9hReC2xKveNywOxXALgz-HYomecDUgE_Q7scUsT5d5Y2zHydyvBnIA"
+  kitchen_display: "AVPHwEuBitFl-aKPpzpyV5AZN82-gv--DUl_zYKfuWX6QndeMpU5ofZGL6Xx-xPOFp__A4QebEkCkXEyRoI_SblU2zwC1w"
 # Detect resolution matches the Nest stream's native 1080p (the go2rtc SDP
 # omits dimensions; the stream itself is H264 1920x1080@30).
 frigate_detect_width: 1920
