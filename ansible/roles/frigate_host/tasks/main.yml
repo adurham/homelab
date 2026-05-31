@@ -131,9 +131,36 @@
   ansible.builtin.command: pct exec {{ vmid }} -- systemctl enable --now docker
   changed_when: false
 
-- name: Create Frigate directories in CT
-  ansible.builtin.command: pct exec {{ vmid }} -- mkdir -p {{ frigate_base_dir }}/config {{ frigate_base_dir }}/media
+- name: Create Frigate + go2rtc directories in CT
+  ansible.builtin.command: pct exec {{ vmid }} -- mkdir -p {{ frigate_base_dir }}/config {{ frigate_base_dir }}/media {{ frigate_base_dir }}/go2rtc
   changed_when: false
+
+# Pull Nest OAuth creds LIVE from HA storage so go2rtc.yaml is never committed
+# with secrets (ONE Google auth — same token the HA Nest integration holds).
+- name: Fetch Nest creds from HA host
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -p 2222 -o StrictHostKeyChecking=accept-new root@{{ ip_homeassistant }} '
+      PID=$(jq -r ".data.entries[] | select(.domain==\"nest\") | .data.project_id" /config/.storage/core.config_entries)
+      RT=$(jq -r ".data.entries[] | select(.domain==\"nest\") | .data.token.refresh_token" /config/.storage/core.config_entries)
+      CID=$(jq -r ".data.items[]? | select(.domain==\"nest\") | .client_id" /config/.storage/application_credentials)
+      CSEC=$(jq -r ".data.items[]? | select(.domain==\"nest\") | .client_secret" /config/.storage/application_credentials)
+      printf "%s\n%s\n%s\n%s\n" "$PID" "$RT" "$CID" "$CSEC"
+    '
+  args:
+    executable: /bin/bash
+  delegate_to: localhost
+  register: nest_creds
+  changed_when: false
+  no_log: true
+
+- name: Parse Nest creds into facts
+  ansible.builtin.set_fact:
+    nest_project_id: "{{ (nest_creds.stdout_lines | reject('match', '^\\s*$') | list)[0] }}"
+    nest_refresh_token: "{{ (nest_creds.stdout_lines | reject('match', '^\\s*$') | list)[1] }}"
+    nest_client_id: "{{ (nest_creds.stdout_lines | reject('match', '^\\s*$') | list)[2] }}"
+    nest_client_secret: "{{ (nest_creds.stdout_lines | reject('match', '^\\s*$') | list)[3] }}"
+  no_log: true
 
 # Render templates locally then push the bytes into the CT via a heredoc,
 # matching the resolv.conf push pattern above (avoids needing direct SSH to
@@ -143,9 +170,25 @@
     frigate_config_rendered: "{{ lookup('ansible.builtin.template', 'frigate-config.yml.j2') }}"
   no_log: true
 
+- name: Render go2rtc config locally
+  ansible.builtin.set_fact:
+    go2rtc_config_rendered: "{{ lookup('ansible.builtin.template', 'go2rtc.yaml.j2') }}"
+  no_log: true
+
 - name: Render docker-compose locally
   ansible.builtin.set_fact:
     frigate_compose_rendered: "{{ lookup('ansible.builtin.template', 'docker-compose.yml.j2') }}"
+
+- name: Deploy go2rtc.yaml into CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec {{ vmid }} -- tee {{ frigate_base_dir }}/go2rtc/go2rtc.yaml >/dev/null <<'GO2RTC_EOF'
+    {{ go2rtc_config_rendered }}
+    GO2RTC_EOF
+  args:
+    executable: /bin/bash
+  no_log: true
+  changed_when: true
 
 - name: Deploy Frigate config.yml into CT
   ansible.builtin.shell: |

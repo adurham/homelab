@@ -1,0 +1,22 @@
+# {{ ansible_managed }}
+# go2rtc config for the standalone go2rtc container in the Frigate LXC.
+# Bridges Nest WebRTC cameras -> stream, consumed by Frigate (localhost MP4).
+# Nest creds rendered at deploy time from HA storage (ONE Google auth, no
+# second OAuth). Camera map = frigate_cameras (stream name -> label) joined
+# with nest_camera_ids (stream name -> SDM device_id).
+streams:
+{% for name in frigate_cameras.keys() %}
+  {{ name }}: nest:?client_id={{ nest_client_id }}&client_secret={{ nest_client_secret }}&refresh_token={{ nest_refresh_token }}&project_id={{ nest_project_id }}&device_id={{ nest_camera_ids[name] }}
+{% endfor %}
+
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+webrtc:
+  listen: ":8555"
+
+log:
+  level: info
