@@ -175,6 +175,10 @@
     go2rtc_config_rendered: "{{ lookup('ansible.builtin.template', 'go2rtc.yaml.j2') }}"
   no_log: true
 
+- name: Render keepalive script locally
+  ansible.builtin.set_fact:
+    keepalive_rendered: "{{ lookup('ansible.builtin.template', 'keepalive.sh.j2') }}"
+
 - name: Render docker-compose locally
   ansible.builtin.set_fact:
     frigate_compose_rendered: "{{ lookup('ansible.builtin.template', 'docker-compose.yml.j2') }}"
@@ -188,6 +192,17 @@
   args:
     executable: /bin/bash
   no_log: true
+  changed_when: true
+
+- name: Deploy keepalive.sh into CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec {{ vmid }} -- tee {{ frigate_base_dir }}/go2rtc/keepalive.sh >/dev/null <<'KEEPALIVE_EOF'
+    {{ keepalive_rendered }}
+    KEEPALIVE_EOF
+    pct exec {{ vmid }} -- chmod +x {{ frigate_base_dir }}/go2rtc/keepalive.sh
+  args:
+    executable: /bin/bash
   changed_when: true
 
 - name: Deploy Frigate config.yml into CT
