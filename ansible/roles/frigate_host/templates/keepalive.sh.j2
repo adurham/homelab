@@ -1,0 +1,40 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# Per-camera keepalive: holds one persistent MP4 consumer open on each Nest
+# stream so go2rtc never tears the producer down. Without this, Frigate's
+# detect ffmpeg trips its 20s "no frames" watchdog on slower cameras, drops
+# its consumer, go2rtc stops the producer (no consumers left), then a
+# reconnect regenerates the Nest WebRTC session — which Nest periodically
+# rejects with "400 Bad Request", causing the ~90s freeze cycle.
+#
+# Each camera gets its own backgrounded loop. ffmpeg copies the MP4 stream to
+# /dev/null (decode-free, ~nil CPU) and auto-restarts if it ever exits.
+# Runs inside the go2rtc container (has ffmpeg). Started by docker-compose.
+
+CAMS="{% for name in frigate_cameras.keys() %}{{ name }} {% endfor %}"
+
+# Each camera gets its own loop. On a clean exit we reconnect quickly (2s).
+# On a FAST failure (camera offline/unplugged, e.g. basement), we back off up
+# to 60s so an offline camera doesn't hammer Nest's GenerateWebRtcStream and
+# spam "400 Bad Request". A healthy stream runs for minutes, resetting backoff.
+for cam in $CAMS; do
+  (
+    backoff=2
+    while true; do
+      start=$(date +%s)
+      ffmpeg -nostdin -loglevel quiet \
+        -f mp4 -i "http://127.0.0.1:1984/api/stream.mp4?src=${cam}&video=h264" \
+        -c copy -f null - >/dev/null 2>&1
+      ran=$(( $(date +%s) - start ))
+      if [ "$ran" -ge 30 ]; then
+        backoff=2
+      else
+        backoff=$(( backoff * 2 ))
+        [ "$backoff" -gt 60 ] && backoff=60
+      fi
+      sleep "$backoff"
+    done
+  ) &
+done
+
+wait

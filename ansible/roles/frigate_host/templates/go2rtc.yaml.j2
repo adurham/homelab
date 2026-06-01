@@ -9,14 +9,11 @@ streams:
   {{ name }}: nest:?client_id={{ nest_client_id }}&client_secret={{ nest_client_secret }}&refresh_token={{ nest_refresh_token }}&project_id={{ nest_project_id }}&device_id={{ nest_camera_ids[name] }}
 {% endfor %}
 
-# Keep every camera's Nest WebRTC producer warm on go2rtc start, so Frigate's
-# (re)connects get a frame immediately instead of waiting on a cold WebRTC
-# negotiation — which is what tripped Frigate's 20s no-frames watchdog into a
-# restart loop (esp. on cat_room). Preload video only (detection needs no audio).
-preload:
-{% for name in frigate_cameras.keys() %}
-  {{ name }}: "video"
-{% endfor %}
+# NOTE: no `preload:` block. Producers are kept warm by the go2rtc-keepalive
+# sidecar (see docker-compose + keepalive.sh) which holds ONE persistent MP4
+# consumer per camera. preload was removed because, for an offline camera
+# (e.g. basement unplugged), it retries the Nest stream and spams
+# "400 Bad Request"; the keepalive's ffmpeg fail-loop is quiet by comparison.
 
 api:
   listen: ":1984"

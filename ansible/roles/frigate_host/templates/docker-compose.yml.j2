@@ -9,6 +9,14 @@
 # OWN bundled go2rtc does NOT reliably handle the Nest source module, so we
 # run the standalone go2rtc binary that's known-good. ONE Google auth still
 # (same token, rendered into go2rtc.yaml here instead of on HA).
+#
+# PATCHED BINARY: the stock go2rtc 1.9.14 has a bug in the Nest stream-extend
+# timer (pkg/nest/api.go StartExtendStreamTimer) — it fires ONCE and never
+# re-arms, so each Nest WebRTC session dies ~5 min in, causing periodic
+# freezes / "400 Bad Request" regeneration. We build a patched go2rtc that
+# re-arms the timer in a loop (kept alive indefinitely) and mount it over the
+# image's binary. Build: docker run golang:1.24 in /opt/go2rtc-build (see the
+# frigate-host README / skill). Binary lives at {{ frigate_base_dir }}/go2rtc/go2rtc_patched.
 
 services:
   go2rtc:
@@ -18,6 +26,23 @@ services:
     network_mode: host
     volumes:
       - {{ frigate_base_dir }}/go2rtc:/config
+      - {{ frigate_base_dir }}/go2rtc/go2rtc_patched:/usr/local/bin/go2rtc:ro
+
+  # Per-camera MP4 keepalive: holds one persistent consumer open on each Nest
+  # stream so go2rtc never tears the producer down (which would trigger Frigate's
+  # 20s no-frames watchdog -> reconnect -> Nest stream regeneration -> periodic
+  # "400 Bad Request" freeze). Uses the go2rtc image (has ffmpeg). See
+  # keepalive.sh. network_mode host so it reaches go2rtc on 127.0.0.1:1984.
+  go2rtc-keepalive:
+    container_name: go2rtc-keepalive
+    image: {{ go2rtc_image }}
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - go2rtc
+    entrypoint: ["/bin/sh", "/keepalive.sh"]
+    volumes:
+      - {{ frigate_base_dir }}/go2rtc/keepalive.sh:/keepalive.sh:ro
 
   frigate:
     container_name: frigate
