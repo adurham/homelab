@@ -99,6 +99,28 @@ Monitored cameras: `basement`, `foyer`, `kitchen_display` (event-driven) and
     `ansible/inventory/group_vars/all.yml` (ansible-vault encrypted).
   - Daemon side: `FRIGATE_MQTT_PASSWORD` in `~/.hermes/.env` (local, gitignored).
   - HA core's broker password lives in HA's MQTT config entry.
+- SSH key for shipping frames to HA: `id_petaccident` (ed25519) at
+  `~/.hermes/pet-accident-detector/`. Only `id_petaccident.pub` is committed;
+  the private key is gitignored. The pubkey is in the `core_ssh` add-on's
+  `authorized_keys` option.
+
+## Why a dedicated on-disk SSH key (the image-attachment gotcha)
+
+The notification's inline image is the annotated frame, served from HA
+`/config/www`. The daemon `scp`s the frame there. **It must use a dedicated
+on-disk key (`-i id_petaccident -o IdentitiesOnly=yes`), NOT an ssh-agent key.**
+
+The daemon runs under launchd, which has **no access to the user's ssh-agent**.
+The interactive shell authenticates to HA with an agent-only key (the on-disk
+`id_*` files don't even exist), so `scp` "just works" by hand — but under
+launchd it fails with `Permission denied (publickey)`. When that happens the
+frame never reaches HA, `notify_ha` is called with no image URL, and the push
+arrives as **text-only with nothing to expand to**. The daemon log line shows
+`img=False` in that failure mode. The fix is the committed dedicated key.
+
+(To view a working alert's image on iOS: long-press / pull down the
+notification to expand it — the boxed image is an attachment, not shown in the
+collapsed banner.)
 
 ## Notification design
 

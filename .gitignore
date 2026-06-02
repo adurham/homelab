@@ -137,3 +137,6 @@ gha-creds-*.json
 # go2rtc rendered config (contains Nest creds, host-only)
 ansible/go2rtc.rendered.yaml
 /tmp/go2rtc.rendered.yaml
+
+# pet-accident-detector daemon SSH private key (never commit)
+pet-accident-detector/id_petaccident
