@@ -52,7 +52,7 @@ cameras:
       enabled: true
       width: {{ frigate_detect_width }}
       height: {{ frigate_detect_height }}
-      fps: {{ frigate_detect_fps }}
+      fps: {{ frigate_camera_fps[name] | default(frigate_detect_fps) }}
     objects:
       track:
 {% for obj in frigate_track_objects %}

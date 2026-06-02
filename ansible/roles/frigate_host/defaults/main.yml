@@ -71,6 +71,11 @@ frigate_detect_height: 1080
 # 3 fps is plenty for person/cat detection and roughly halves decode+detect
 # load vs 5 — smoother, fewer synchronized fps dips on the CPU detector.
 frigate_detect_fps: 3
+# Per-camera fps overrides. Outdoor cameras that need to catch FAST motion
+# (cars, people approaching, package drops) get 5; indoor/pet cams stay at 3.
+frigate_camera_fps:
+  driveway: 5
+  front_porch: 5
 frigate_track_objects:
   - person
   - cat
