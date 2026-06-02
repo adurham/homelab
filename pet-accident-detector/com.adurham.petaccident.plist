@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.adurham.petaccident</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/adam.durham/.hermes/pet-accident-detector/.venv/bin/python</string>
+        <string>/Users/adam.durham/.hermes/pet-accident-detector/cat_accident_daemon.py</string>
+    </array>
+
+    <!-- Start at login and keep alive (restart on crash/exit). -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Throttle restarts so a hard-failing daemon doesn't spin. -->
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/adam.durham/.hermes/logs/cat_accident_daemon.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/adam.durham/.hermes/logs/cat_accident_daemon.err.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/adam.durham/.hermes/pet-accident-detector</string>
+</dict>
+</plist>

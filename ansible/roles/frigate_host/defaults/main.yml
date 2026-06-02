@@ -87,15 +87,20 @@ frigate_record_retain_days: 7
 
 # MQTT (Home Assistant integration).
 #
-# DISABLED by default: the repo has no committed MQTT broker config and no
-# vault var for broker credentials, so we cannot confirm the Mosquitto add-on
-# is running on the HA host or what auth it requires. Frigate runs fine without
-# MQTT (events still record + show in its own UI). To enable HA event
-# integration: set frigate_mqtt_enabled: true, confirm the Mosquitto add-on is
-# installed on {{ ip_homeassistant }}, and add frigate_mqtt_user /
-# frigate_mqtt_password as vault vars (do NOT inline plaintext).
-frigate_mqtt_enabled: false
+# ENABLED 2026-06-02: Mosquitto broker add-on (core_mosquitto) is installed and
+# running on the HA host ({{ ip_homeassistant }}:1883) with a dedicated
+# `frigate` broker login. The password is the vault var frigate_mqtt_password
+# in inventory/group_vars/all.yml (do NOT inline plaintext). HA's own MQTT
+# integration is also configured against the same broker (login `homeassistant`),
+# which is what makes Frigate's events flow into HA as native entities.
+# Frigate publishes object/event lifecycle on `frigate/events` — consumed by the
+# pet-accident detector (see pet-accident-detector/) and by HA's Frigate
+# integration.
+frigate_mqtt_enabled: true
 frigate_mqtt_host: "{{ ip_homeassistant }}"
 frigate_mqtt_port: 1883
-frigate_mqtt_user: ""
+frigate_mqtt_user: "frigate"
+# Actual secret comes from the vault var of the same name in
+# inventory/group_vars/all.yml, which overrides this empty default by
+# Ansible var precedence (group_vars > role defaults).
 frigate_mqtt_password: ""
