@@ -15,7 +15,9 @@ template: debian-12-standard_12.12-1_amd64.tar.zst
 
 # Resources. CPU object detection is the workload; no Coral/iGPU passthrough
 # yet, so size CPU/RAM generously and give the rootfs room for recordings.
-vm_cores: 4
+# 8 cores: software H264 decode of 7x 1080p Nest streams + CPU object
+# detection is heavy; 4 cores ran oversubscribed (load ~5.9). pve01 has 16.
+vm_cores: 8
 vm_memory: 8192
 vm_swap: 512
 vm_disk: 60  # GiB rootfs on nvme-data (--rootfs nvme-data:{{ vm_disk }})
@@ -28,7 +30,10 @@ net_private_ip: "{{ ip_frigate }}/24"
 # Containers (both run in the LXC; go2rtc bridges Nest, Frigate consumes it).
 frigate_image: "ghcr.io/blakeblackshear/frigate:stable"
 go2rtc_image: "alexxit/go2rtc:latest"
-frigate_shm_size: "256mb"
+# 7 cameras at 1080p need more shared memory than the 256mb default — Frigate
+# warns "/dev/shm (256 MB) should be increased to at least 498 MB". 512mb gives
+# headroom and avoids shm-pressure frame drops.
+frigate_shm_size: "512mb"
 frigate_web_port: 5000   # legacy/unauthenticated UI + API
 frigate_auth_port: 8971  # authenticated UI (Frigate >= 0.14)
 frigate_base_dir: /opt/frigate
@@ -69,7 +74,11 @@ frigate_detect_fps: 3
 frigate_track_objects:
   - person
   - cat
-frigate_record_retain_days: 2
+# Motion-based recording (continuous OFF): records only segments with motion,
+# cutting disk ~70-90% vs 24/7 continuous (2-day continuous on 7x1080p already
+# filled the 60G disk to 95%). Keeps a week of the footage that actually
+# matters. See frigate-config template record: block.
+frigate_record_retain_days: 7
 
 # MQTT (Home Assistant integration).
 #

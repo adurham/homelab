@@ -44,8 +44,10 @@ cameras:
             - -f
             - mp4
           roles:
+            # detect only — NO record role. Video footage lives in Nest/Google
+            # Home (family already uses it); Frigate recording was a redundant
+            # 50G disk + CPU hog. We keep detection + event snapshots only.
             - detect
-            - record
     detect:
       enabled: true
       width: {{ frigate_detect_width }}
@@ -57,11 +59,13 @@ cameras:
         - {{ obj }}
 {% endfor %}
     record:
+      enabled: false
+    snapshots:
+      # Keep a still image per detected person/cat event (tiny) so you can see
+      # what triggered an alert. No video recording.
       enabled: true
-      continuous:
-        days: {{ frigate_record_retain_days }}
-      motion:
-        days: 0
+      retain:
+        default: {{ frigate_record_retain_days }}
 {% endfor %}
 
 version: 0.17-0
