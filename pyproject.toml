@@ -43,3 +43,10 @@ ignore = [
 "homeassistant/**" = [
     "S310",  # urlopen against config-file URL is fine
 ]
+# Local VLM pet-accident detector (runs as a Hermes cron on the Mac, talks to
+# LAN-only go2rtc/VLM/HA endpoints). The flagged patterns are intentional.
+"pet-accident-detector/**" = [
+    "S108",  # /tmp scratch frames for the annotation/scp step
+    "S110",  # try/except/pass on opportunistic frame-fetch retries
+    "S310",  # urlopen against hardcoded LAN http endpoints (go2rtc/VLM/HA)
+]
