@@ -31,6 +31,24 @@ detectors:
   cpu1:
     type: cpu
 
+# Live-view (MSE) restream. Frigate's UI prefers go2rtc MSE/WebRTC over the
+# jsmpeg fallback whenever a go2rtc stream exists whose name matches the camera.
+# jsmpeg blanks tiles intermittently; MSE is stable.
+#
+# Source = the SAME MP4-over-HTTP endpoint the detect role uses (carries inband
+# SPS/PPS). We must NOT restream the HA go2rtc RTSP output: for these Nest
+# WebRTC sources RTSP drops the H264 SPS/PPS and the MSE producer ends up with
+# recv:0 / undecodable H264. The ffmpeg source below ingests the MP4 (valid
+# inband params) and copies the H264 (#video=copy) into Frigate's bundled
+# go2rtc — verified the bundled go2rtc then serves decodable MP4/MSE
+# (ffmpeg decode exit 0, ~1.3 MB in a 12 s pull). Verified 2026-06-02.
+go2rtc:
+  streams:
+{% for name, label in frigate_cameras.items() %}
+    {{ name }}:
+      - "ffmpeg:http://{{ frigate_go2rtc_host }}:1984/api/stream.mp4?src={{ name }}#video=copy"
+{% endfor %}
+
 cameras:
 {% for name, label in frigate_cameras.items() %}
   {{ name }}:
