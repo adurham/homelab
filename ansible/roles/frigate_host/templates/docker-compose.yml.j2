@@ -28,21 +28,12 @@ services:
       - {{ frigate_base_dir }}/go2rtc:/config
       - {{ frigate_base_dir }}/go2rtc/go2rtc_patched:/usr/local/bin/go2rtc:ro
 
-  # Per-camera MP4 keepalive: holds one persistent consumer open on each Nest
-  # stream so go2rtc never tears the producer down (which would trigger Frigate's
-  # 20s no-frames watchdog -> reconnect -> Nest stream regeneration -> periodic
-  # "400 Bad Request" freeze). Uses the go2rtc image (has ffmpeg). See
-  # keepalive.sh. network_mode host so it reaches go2rtc on 127.0.0.1:1984.
-  go2rtc-keepalive:
-    container_name: go2rtc-keepalive
-    image: {{ go2rtc_image }}
-    restart: unless-stopped
-    network_mode: host
-    depends_on:
-      - go2rtc
-    entrypoint: ["/bin/sh", "/keepalive.sh"]
-    volumes:
-      - {{ frigate_base_dir }}/go2rtc/keepalive.sh:/keepalive.sh:ro
+  # NOTE: the standalone keepalive sidecar was REMOVED. Frigate's bundled
+  # go2rtc now ingests each camera ONCE from this standalone go2rtc, and
+  # Frigate's detection consumes the bundled go2rtc 24/7 — that single
+  # upstream pull keeps the producer warm on its own, so no separate
+  # keepalive is needed. One consumer per camera on the standalone go2rtc =
+  # no multi-consumer Nest regeneration.
 
   frigate:
     container_name: frigate

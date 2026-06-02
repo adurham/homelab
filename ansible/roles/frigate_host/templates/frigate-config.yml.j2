@@ -55,9 +55,15 @@ cameras:
     friendly_name: "{{ label }}"
     ffmpeg:
       inputs:
-        # MP4-over-HTTP straight from the HA go2rtc add-on — carries inband
-        # SPS/PPS that the RTSP output drops. See header note.
-        - path: "http://{{ frigate_go2rtc_host }}:1984/api/stream.mp4?src={{ name }}"
+        # Read from Frigate's OWN bundled go2rtc (127.0.0.1), which ingests each
+        # camera ONCE from the standalone go2rtc (see the go2rtc: block above).
+        # Detection AND live view both consume the bundled go2rtc, so the
+        # standalone (and thus Nest) sees only ONE consumer per camera — no
+        # multi-consumer stream regeneration / 400 storm. Because detection
+        # consumes this 24/7, the single upstream pull stays warm on its own
+        # (no separate keepalive needed). MP4-over-HTTP carries inband SPS/PPS
+        # that the RTSP output drops.
+        - path: "http://127.0.0.1:1984/api/stream.mp4?src={{ name }}"
           input_args:
             - -f
             - mp4
