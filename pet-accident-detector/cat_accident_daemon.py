@@ -42,15 +42,24 @@ import paho.mqtt.client as mqtt
 from PIL import Image, ImageDraw
 
 # ---- config ----
-# Cameras to monitor for accidents: Frigate camera name -> friendly label.
-# (Frigate names match go2rtc stream names.)
-MONITORED = {
-    "cat_room": "Cat Room",
+# Two trigger modes, because the cat room is a special case.
+#
+# EVENT_DRIVEN: visitor rooms that actually go EMPTY. We check when a cat LEAVES
+# (Frigate event type=="end"), after a settle delay so the cat clears the frame.
+# Cheap and accurate — the VLM only runs on real cat activity.
+EVENT_DRIVEN = {
     "basement": "Basement",
     "foyer": "Foyer",
     "kitchen_display": "Kitchen",
 }
-TRIGGER_LABELS = {"cat"}  # which object labels arm a check on event end
+# PERIODIC: rooms that are NEVER empty (the cat room always has cats), so the
+# "cat left" trigger would never fire / never see a clear floor. Check these on
+# a fixed timer instead, cats-in-frame and all (the VLM is told to ignore pets).
+# Map: Frigate camera name -> (friendly label, interval seconds).
+PERIODIC = {
+    "cat_room": ("Cat Room", 15 * 60),
+}
+TRIGGER_LABELS = {"cat"}  # which object labels arm an event-driven check
 
 # MQTT broker (Mosquitto add-on on the HA host).
 MQTT_HOST = "192.168.86.2"
@@ -300,16 +309,24 @@ def save_state(s):
         STATE_FILE.write_text(json.dumps(s))
 
 
-def check_camera(cam, label):
-    """Settle, grab a fresh frame, run the VLM, alert on confident accident.
-    Serialized by _vlm_lock so concurrent events don't overload the VLM."""
+def check_camera(cam, label, settle=SETTLE_SEC, reason="cat left"):
+    """Optionally settle, grab a fresh frame, run the VLM, alert on confident
+    accident. Serialized by _vlm_lock so concurrent checks don't overload the
+    single VLM server.
+
+    settle: seconds to wait before grabbing the frame. Event-driven checks pass
+    SETTLE_SEC so the departing cat clears the frame; periodic checks pass 0
+    (the room is never empty, waiting wouldn't help)."""
     # cooldown check up front (cheap) before we even settle
     st = load_state()
     if time.time() - st.get(cam, 0) < COOLDOWN_SEC:
         log(f"[{cam}] within cooldown, skipping")
         return
-    log(f"[{cam}] cat left — settling {SETTLE_SEC}s then checking")
-    time.sleep(SETTLE_SEC)
+    if settle > 0:
+        log(f"[{cam}] {reason} — settling {settle}s then checking")
+        time.sleep(settle)
+    else:
+        log(f"[{cam}] {reason} — checking now")
     with _vlm_lock:
         jpg = get_frame(cam)
         if jpg is None:
@@ -364,17 +381,36 @@ def on_message(client, userdata, msg):
     after = ev.get("after") or ev.get("before") or {}
     cam = after.get("camera")
     label = after.get("label")
-    if cam in MONITORED and label in TRIGGER_LABELS:
-        friendly = MONITORED[cam]
+    if cam in EVENT_DRIVEN and label in TRIGGER_LABELS:
+        friendly = EVENT_DRIVEN[cam]
         log(f"event: {label} ended on {cam} (score={after.get('top_score')})")
         threading.Thread(target=check_camera, args=(cam, friendly), daemon=True).start()
+
+
+def periodic_loop(cam, label, interval):
+    """Timer-based checks for a never-empty room (the cat room). Runs the same
+    check_camera path with settle=0, every `interval` seconds, forever. The
+    per-camera COOLDOWN_SEC still caps alerts; for the cat room interval and
+    cooldown are both ~1h-ish so at most one alert per cycle."""
+    log(f"[{cam}] periodic checks every {interval}s (never-empty room)")
+    # small initial offset so we don't fire the instant the daemon boots
+    time.sleep(min(60, interval))
+    while True:
+        try:
+            check_camera(cam, label, settle=0, reason="periodic check")
+        except Exception as e:
+            log(f"[{cam}] periodic check error: {e}")
+        time.sleep(interval)
 
 
 def main():
     pw = env_val("FRIGATE_MQTT_PASSWORD")
     if not pw:
         raise SystemExit("no FRIGATE_MQTT_PASSWORD in .env")
-    log("pet-accident daemon starting (event-driven via frigate/events)")
+    log(f"pet-accident daemon starting (event-driven: {sorted(EVENT_DRIVEN)} | periodic: {sorted(PERIODIC)})")
+    # Start periodic-check threads for never-empty rooms (e.g. cat room).
+    for cam, (label, interval) in PERIODIC.items():
+        threading.Thread(target=periodic_loop, args=(cam, label, interval), daemon=True).start()
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="pet-accident-detector")
     client.username_pw_set(MQTT_USER, pw)
     client.on_connect = on_connect

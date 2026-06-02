@@ -9,20 +9,33 @@ area.
 
 Nothing leaves the LAN except the final Apple push notification.
 
-## Why event-driven (and not polling)
+## Trigger model (hybrid: event-driven + periodic)
 
 The original version polled every camera every 15 minutes and ran the expensive
-VLM blindly on a schedule. That's wasteful and slow to react. The correct design
-is: **Frigate detects the activity → that triggers the VLM**.
+VLM blindly on a schedule. The correct design is: **Frigate detects the activity
+→ that triggers the VLM** — but the cat room is a special case, so there are two
+modes:
 
-Specifically, the trigger is a `cat` object event *ending* (`type == "end"`) on
-a monitored camera — i.e. "the cat just left." That is the right moment to look
-for a mess: the accident persists after the cat leaves, and while the cat is in
-frame it's usually standing on or obscuring the spot. So the daemon waits
-`SETTLE_SEC` for the cat to clear, then grabs a fresh frame and checks it.
+**Event-driven** (`EVENT_DRIVEN` in the daemon) — `basement`, `foyer`,
+`kitchen_display`. These are visitor rooms that actually go EMPTY. The trigger is
+a `cat` object event *ending* (`type == "end"`) — i.e. "the cat just left." That
+is the right moment to look for a mess: the accident persists after the cat
+leaves, and while the cat is in frame it's usually standing on or obscuring the
+spot. The daemon waits `SETTLE_SEC` (30s) for the cat to clear the frame, then
+grabs a fresh frame and checks it. The VLM only runs on real cat activity — a
+quiet night is zero VLM calls instead of 96.
 
-Result: the VLM only runs on real cat activity. A quiet night = zero VLM calls
-instead of 96.
+**Periodic** (`PERIODIC` in the daemon) — `cat_room`. The cat room ALWAYS has
+cats in it, so the "cat left" trigger would never fire and the room never shows a
+clear floor. Event-driven monitoring would effectively blind the single most
+important camera (the litter area). So the cat room is checked on a fixed timer
+instead — every 15 min, cats-in-frame and all (the VLM prompt is told to ignore
+pets), with no settle delay (waiting wouldn't empty the room). The per-camera
+1-hour cooldown still caps it to at most one alert per cycle.
+
+To change which camera is in which mode, edit the `EVENT_DRIVEN` / `PERIODIC`
+dicts at the top of `cat_accident_daemon.py`. `PERIODIC` maps
+`camera -> (label, interval_seconds)`.
 
 ## Where it runs
 
@@ -75,7 +88,8 @@ well beyond this detector.
 | Notification     | HA `notify/mobile_app_adams_iphone_16`                      | iOS rich push (`data.image`) |
 | Image hosting    | HA `/config/www/accident_<cam>.jpg` → `/local/...`          | resolves on-LAN AND remotely via Nabu Casa cloud |
 
-Monitored cameras: `cat_room`, `basement`, `foyer`, `kitchen_display`.
+Monitored cameras: `basement`, `foyer`, `kitchen_display` (event-driven) and
+`cat_room` (periodic, every 15 min).
 
 ## Secrets (none committed)
 
