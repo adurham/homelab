@@ -31,6 +31,7 @@ Process management: launched + kept alive by cat_accident_daemon_keepalive.sh
 
 import base64
 import json
+import random
 import re
 import threading
 import time
@@ -92,10 +93,27 @@ FRAME_RETRY_SLEEP = 5
 VLM_TIMEOUT = 45
 FRAME_TIMEOUT = 15
 
+# Multi-frame consensus (false-positive killer). A real accident is STABLE across
+# seconds; transient triggers (shadows, shifting glare/light pools, a cat moving
+# through, motion blur) flicker between frames. So when the first frame says
+# "accident", we grab CONSENSUS_FRAMES frames CONSENSUS_GAP_SEC apart and only
+# alert if at least CONSENSUS_NEEDED of them agree it's an accident.
+CONSENSUS_FRAMES = 3
+CONSENSUS_GAP_SEC = 4
+CONSENSUS_NEEDED = 3  # all must agree — strict, because FPs are the main problem
+
 STATE_FILE = Path.home() / ".hermes" / "logs" / "cat_accident_state.json"
 LOG_FILE = Path.home() / ".hermes" / "logs" / "cat_accident_daemon.log"
 SNAPSHOT_DIR = Path("/tmp")
 ENV_FILE = Path.home() / ".hermes" / ".env"
+
+# Evidence capture: every positive (confirmed OR rejected-by-consensus) saves its
+# frames + verdicts here, plus a sampled fraction of negatives, so the prompt can
+# be tuned against REAL frames that fooled (or nearly fooled) the model. Pruned
+# to EVIDENCE_KEEP_DAYS so it can't grow unbounded.
+EVIDENCE_DIR = Path.home() / ".hermes" / "pet-accident-detector" / "evidence"
+EVIDENCE_KEEP_DAYS = 14
+NEGATIVE_SAMPLE_RATE = 0.10  # keep ~10% of negative frames for balance/tuning
 
 PROMPT = (
     "You are inspecting a floor for genuine pet accidents (urine, feces, or vomit). "
@@ -106,11 +124,24 @@ PROMPT = (
     "on tile/hardwood/laminate floors are NOT puddles — hard floors are shiny and "
     "reflect light normally. Do NOT report a puddle just because the floor looks "
     "bright, shiny, or reflective. "
+    # First-pass FP hardening (observed 2026-06-02): the model repeatedly called a
+    # 'dark/irregular puddle near the center' on a clean floor — that pattern is
+    # almost always a SHADOW (from a cat, furniture, or the camera) or a darker
+    # floor tile/seam, not liquid. Demand positive evidence of WETNESS, not just
+    # a dark shape.
+    "A DARK or irregular SHAPE on the floor is NOT enough — dark shapes are "
+    "usually shadows, darker tiles, grout lines, or mats. Only call a puddle if "
+    "you can see actual signs of LIQUID: a wet glossy sheen with a meniscus/edge, "
+    "a specular highlight on a wet surface, or a visible spreading stain. "
+    "Shadows have soft fuzzy edges and no wet sheen — those are NOT accidents. "
     "Flag ACCIDENT: yes ONLY if you clearly see an actual liquid puddle with a "
-    "distinct irregular edge sitting ON the floor (not light), a solid pile of "
-    "feces, or vomit. When uncertain, answer no. "
-    "In WHY, explain in one sentence exactly what you see and where it is "
-    "(e.g. 'brown solid pile on tile near the left wall'). "
+    "distinct irregular edge AND a wet sheen sitting ON the floor (not light, not "
+    "a shadow), a solid pile of feces, or vomit. "
+    "If you are not confident it is genuinely wet or solid waste, answer no. "
+    "When uncertain, answer no. "
+    "In WHY, explain in one sentence exactly what you see and where it is, and "
+    "for a puddle state what makes it look WET (e.g. 'wet glossy puddle with "
+    "reflective sheen on tile near the left wall'). "
     "Respond exactly in this format: "
     "ACCIDENT: yes/no | WHY: one sentence | CONFIDENCE: high/medium/low"
 )
@@ -319,10 +350,76 @@ def save_state(s):
         STATE_FILE.write_text(json.dumps(s))
 
 
+def prune_evidence():
+    """Delete evidence files older than EVIDENCE_KEEP_DAYS so the folder can't
+    grow unbounded."""
+    try:
+        cutoff = time.time() - EVIDENCE_KEEP_DAYS * 86400
+        for p in EVIDENCE_DIR.glob("*"):
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink()
+    except Exception:
+        pass
+
+
+def save_evidence(cam, kind, frames, verdicts):
+    """Persist the triggering frame(s) + verdict text for later prompt tuning.
+    kind: 'alert' (consensus confirmed), 'rejected' (first frame yes but
+    consensus said no — the most valuable FP examples), or 'negative' (sampled).
+    Returns the saved dir path or None."""
+    try:
+        EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        stem = f"{ts}_{cam}_{kind}"
+        for i, fr in enumerate(frames):
+            if fr:
+                (EVIDENCE_DIR / f"{stem}_f{i}.jpg").write_bytes(fr)
+        (EVIDENCE_DIR / f"{stem}.txt").write_text(
+            f"camera: {cam}\nkind: {kind}\ntime: {ts}\n\n"
+            + "\n".join(f"frame {i}: {v}" for i, v in enumerate(verdicts))
+        )
+        prune_evidence()
+        return EVIDENCE_DIR / stem
+    except Exception as e:
+        log(f"[{cam}] evidence save error: {e}")
+        return None
+
+
+def consensus_check(cam):
+    """First frame already said 'accident'. Grab CONSENSUS_FRAMES frames spaced
+    CONSENSUS_GAP_SEC apart and re-run the VLM on each. A real accident is stable
+    across all of them; a transient (shadow/glare/cat/motion) won't be. Returns
+    (confirmed: bool, frames: list[bytes], verdicts: list[str], yes_count: int).
+
+    The caller already evaluated frame 0; we re-grab fresh frames here so each
+    vote is an independent look (and so we capture the evidence set)."""
+    frames, verdicts, yes = [], [], 0
+    for i in range(CONSENSUS_FRAMES):
+        if i > 0:
+            time.sleep(CONSENSUS_GAP_SEC)
+        fr = get_frame(cam)
+        if fr is None:
+            verdicts.append(f"frame {i}: no frame")
+            frames.append(None)
+            continue
+        try:
+            v = ask_vlm(fr, PROMPT)
+        except Exception as e:
+            v = f"VLM error: {e}"
+        a, what, conf = parse(v)
+        vote = bool(a and conf != "low")
+        yes += 1 if vote else 0
+        frames.append(fr)
+        verdicts.append(f"vote={'YES' if vote else 'no'} conf={conf} :: {what}")
+        log(f"[{cam}] consensus {i + 1}/{CONSENSUS_FRAMES}: {'YES' if vote else 'no'} ({conf}) :: {what}")
+    return (yes >= CONSENSUS_NEEDED, frames, verdicts, yes)
+
+
 def check_camera(cam, label, settle=SETTLE_SEC, reason="cat left"):
-    """Optionally settle, grab a fresh frame, run the VLM, alert on confident
-    accident. Serialized by _vlm_lock so concurrent checks don't overload the
-    single VLM server.
+    """Optionally settle, grab a fresh frame, run the VLM. On a candidate
+    accident, require multi-frame CONSENSUS before alerting (kills transient
+    false positives), and save evidence frames for later tuning. Serialized by
+    _vlm_lock so concurrent checks don't overload the single VLM server.
 
     settle: seconds to wait before grabbing the frame. Event-driven checks pass
     SETTLE_SEC so the departing cat clears the frame; periodic checks pass 0
@@ -350,20 +447,43 @@ def check_camera(cam, label, settle=SETTLE_SEC, reason="cat left"):
         is_accident, what, confidence = parse(verdict)
         log(f"[{cam}] verdict: accident={is_accident} conf={confidence} :: {what}")
         if not (is_accident and confidence != "low"):
+            # sample a fraction of negatives for a balanced tuning corpus
+            if random.random() < NEGATIVE_SAMPLE_RATE:
+                save_evidence(cam, "negative", [jpg], [f"frame 0: {verdict}"])
             return
+
+        # Candidate positive — demand consensus across several frames.
+        log(f"[{cam}] candidate accident — running {CONSENSUS_FRAMES}-frame consensus")
+        confirmed, frames, verdicts, yes = consensus_check(cam)
+        all_frames = [jpg] + frames
+        all_verdicts = [f"frame 0 (trigger): {verdict}"] + verdicts
+
+        if not confirmed:
+            # The single most valuable FP examples: first glance said accident,
+            # consensus disagreed. Save them all for tuning.
+            ev = save_evidence(cam, "rejected", all_frames, all_verdicts)
+            log(f"[{cam}] consensus REJECTED ({yes}/{CONSENSUS_FRAMES} agreed) — no alert. evidence: {ev}")
+            return
+
         # re-check cooldown (another thread may have alerted while we settled)
         st = load_state()
         if time.time() - st.get(cam, 0) < COOLDOWN_SEC:
-            log(f"[{cam}] cooldown hit after settle, skipping alert")
+            log(f"[{cam}] cooldown hit after consensus, skipping alert")
             return
-        box = get_bbox(jpg, what)
-        send = annotate(jpg, box) if box else jpg
+        # use the last consensus frame (freshest) for the alert image
+        best = next((f for f in reversed(frames) if f), jpg)
+        box = get_bbox(best, what)
+        send = annotate(best, box) if box else best
         image_url = IMG_URL_TMPL.format(cam=cam) if push_to_ha_www(send, cam) else None
+        save_evidence(cam, "alert", all_frames, all_verdicts)
         try:
             notify_ha(cam, label, what, confidence, image_url=image_url)
             st[cam] = time.time()
             save_state(st)
-            log(f"[{cam}] ALERT sent ({confidence}) boxed={bool(box)} img={bool(image_url)}: {what}")
+            log(
+                f"[{cam}] ALERT sent ({confidence}) consensus={yes}/{CONSENSUS_FRAMES} "
+                f"boxed={bool(box)} img={bool(image_url)}: {what}"
+            )
         except Exception as e:
             log(f"[{cam}] notify error: {e}")
 

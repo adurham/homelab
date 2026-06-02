@@ -49,4 +49,5 @@ ignore = [
     "S108",  # /tmp scratch frames for the annotation/scp step
     "S110",  # try/except/pass on opportunistic frame-fetch retries
     "S310",  # urlopen against hardcoded LAN http endpoints (go2rtc/VLM/HA)
+    "S311",  # random.random() for negative-sample selection, not crypto
 ]
