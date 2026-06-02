@@ -140,3 +140,6 @@ ansible/go2rtc.rendered.yaml
 
 # pet-accident-detector daemon SSH private key (never commit)
 pet-accident-detector/id_petaccident
+
+# pet-accident-detector captured frames (local tuning corpus, not for repo)
+pet-accident-detector/evidence/

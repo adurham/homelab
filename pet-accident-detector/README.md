@@ -137,18 +137,54 @@ the companion app resolves it at home and away.
 > static route at startup. After first creating `/config/www`, HA was restarted
 > once. Noted here for rebuilds.
 
-## Tuning
+## Tuning / false-positive control
 
-The detection prompt (`PROMPT`) ignores the common cat-room false-positive
-sources: water/food bowls, litter boxes, scattered litter, toys, beds, mats, and
-especially **light pools / glare / reflections on hard floors**. It flags only a
-liquid puddle with a distinct irregular edge, a solid feces pile, or vomit; when
-uncertain it answers no. Per-camera 1-hour cooldown (`COOLDOWN_SEC`) prevents
-repeat spam while a real accident persists.
+There are three layers, all aimed at the dominant failure mode (false positives —
+a 7B model glancing at a busy room):
 
-It is a 7B model watching a busy room — expect occasional misjudgements. Tune the
-prompt against real false/missed examples (the notification now carries the frame
-+ boxed area + reason, which is exactly what you need to tune against).
+1. **Prompt** (`PROMPT`). Ignores the common cat-room FP sources (water/food
+   bowls, litter boxes, litter, toys, beds, mats, and especially light pools /
+   glare / reflections on hard floors). Hardened 2026-06-02 against the observed
+   "dark/irregular puddle near the center" pattern, which is almost always a
+   shadow or a darker tile, not liquid: the prompt now demands positive evidence
+   of WETNESS (glossy sheen, meniscus/edge, specular highlight, spreading stain),
+   not just a dark shape, and treats soft-edged dark shapes as shadows.
+
+2. **Multi-frame consensus** (`CONSENSUS_FRAMES` / `CONSENSUS_GAP_SEC` /
+   `CONSENSUS_NEEDED`). When the first frame says "accident," the daemon grabs N
+   more frames a few seconds apart and only alerts if all agree. A real accident
+   is stable across seconds; transient triggers (shadows, shifting glare, a cat
+   moving through, motion blur) flicker between frames and get filtered out. This
+   is the structural FP killer — verified against the exact frames that flip-
+   flopped "puddle"/"clean" minutes apart in early testing. Default 3/3 (strict).
+
+3. **Evidence corpus** (`EVIDENCE_DIR`, `~/.hermes/pet-accident-detector/
+   evidence/`, gitignored). Every candidate positive saves its frames + verdicts,
+   tagged by outcome: `rejected` (first glance yes, consensus no — the most
+   valuable FP examples), `alert` (consensus confirmed), and a ~10% sample of
+   `negative` frames for balance. Auto-pruned to `EVIDENCE_KEEP_DAYS` (14) so it
+   can't grow unbounded. This is what makes *evidence-based* prompt tuning
+   possible: after a few days, look at the `rejected`/`alert` frames and tune the
+   prompt against real images that actually fooled (or nearly fooled) the model,
+   instead of guessing.
+
+Per-camera 1-hour cooldown (`COOLDOWN_SEC`) still caps repeat alerts while a real
+accident persists.
+
+The notification also carries the frame + boxed area + reason, so a live false
+alert is itself a tuning example — expand it, and tell me; I'll tune the prompt
+against that exact frame (the way the water-bowl and shadow-puddle FPs were
+killed).
+
+### Tuning workflow (after corpus builds up)
+
+```bash
+ls ~/.hermes/pet-accident-detector/evidence/        # *_rejected.* are the gold
+# eyeball the rejected/alert .jpg + .txt pairs, then adjust PROMPT in the daemon
+# (or the CONSENSUS_* knobs), re-sync, restart:
+cp pet-accident-detector/cat_accident_daemon.py ~/.hermes/pet-accident-detector/
+launchctl kickstart -k gui/$(id -u)/com.adurham.petaccident
+```
 
 ## Operate
 
