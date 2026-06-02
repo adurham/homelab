@@ -73,6 +73,12 @@ VLM_MODEL = "mlx-community/Qwen2.5-VL-7B-Instruct-4bit"
 
 HA_HOST = "homeassistant.local"
 HA_SSH_PORT = "2222"
+# Dedicated, on-disk SSH key for shipping frames to HA /config/www. MUST be a
+# file (not an ssh-agent key): the daemon runs under launchd, which has NO
+# access to the user's ssh-agent, so an agent-only key fails with
+# "Permission denied (publickey)" and the notification ships with no image.
+# This key's pubkey is in core_ssh's authorized_keys (add-on options).
+HA_SSH_KEY = str(Path.home() / ".hermes" / "pet-accident-detector" / "id_petaccident")
 HA_URL = "http://192.168.86.2:8123"
 HA_NOTIFY = "notify/mobile_app_adams_iphone_16"
 HA_WWW = "/config/www"
@@ -252,6 +258,10 @@ def push_to_ha_www(jpg_bytes, cam):
                 "scp",
                 "-P",
                 HA_SSH_PORT,
+                "-i",
+                HA_SSH_KEY,
+                "-o",
+                "IdentitiesOnly=yes",
                 "-o",
                 "ConnectTimeout=8",
                 "-o",
