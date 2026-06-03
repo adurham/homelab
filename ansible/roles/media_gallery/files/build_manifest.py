@@ -15,6 +15,7 @@ Env: TG_API_ID, TG_API_HASH, TG_SESSION, RCLONE_CONFIG, TG_RCLONE_REMOTE.
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -169,17 +170,28 @@ async def main():
     log(f"originals: {len(originals)}")
     archive_stems = {stem for _, _, stem, _ in originals}
 
-    missing = [s for s in archive_stems if s not in dates]
+    # Only real upstream source stems (<chatid>_<msgid>, all digits) get a targeted
+    # upstream source fetch. Uploaded items (up_<ms>_<rand>) have their date recorded at
+    # upload time and must NEVER be looked up in upstream source (would fail/garbage).
+    SOURCE_STEM = re.compile(r"^-?\d+_\d+$")
+    missing = [s for s in archive_stems
+               if s not in dates and SOURCE_STEM.match(s)]
     if rescan or (not dates):
+        # Preserve upload entries (up_*) — a full upstream source scan only knows about
+        # source media, so uploaded-pic dates must be carried over or they'd
+        # lose their sort date.
+        preserved_uploads = {k: v for k, v in dates.items()
+                             if not SOURCE_STEM.match(k)}
         client = SourceClient(SESSION, API_ID, API_HASH)
         await client.connect()
         if not await client.is_user_authorized():
             log("SESSION NOT AUTHORIZED"); sys.exit(2)
         log("Full upstream source scan (building date cache)...")
         dates = await date_map(client)
+        dates.update(preserved_uploads)
         await client.disconnect()
         save_datemap_cache(dates)
-        log(f"  date map: {len(dates)} items (cached)")
+        log(f"  date map: {len(dates)} items ({len(preserved_uploads)} uploads preserved)")
     elif missing:
         log(f"Incremental: {len(missing)} new items not in cache; targeted fetch...")
         client = SourceClient(SESSION, API_ID, API_HASH)

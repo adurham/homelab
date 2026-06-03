@@ -26,3 +26,8 @@ media_gallery_refresh_interval: "1h"
 # Trash service port (delete media + exclusion ledger; bound on ip_media_gallery,
 # routed by lb-01 nginx /trash/ behind Authentik).
 media_gallery_trash_port: 8091
+
+# Upload service port (add pics + create folders; routed by lb-01 /upload /mkdir
+# /status behind Authentik). Built to handle thousands (batched, coalesced).
+media_gallery_upload_port: 8092
+media_gallery_upload_max_mb: 200
