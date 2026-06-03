@@ -1,0 +1,128 @@
+---
+# Provisions the LXC for the upstream source gallery collector. Runs against the
+# proxmox node hosting the CT (pve02). Mirrors the media_gallery_host role:
+# pveam template fetch -> cluster-wide existence check -> pct create ->
+# inject SSH key -> TUN passthrough -> reboot-for-TUN -> add to in-memory
+# inventory. vmid 116, ip_media_ingest (172.16.0.47), hostname media-ingest-01.
+
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  changed_when: false
+
+- name: Download Ubuntu 22.04 Template
+  ansible.builtin.command: pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+  args:
+    creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+
+# Cluster-wide existence check (HA can migrate the CT, so query pmxcfs for
+# the full resource list rather than node-local `pct config`).
+- name: Check if Media Ingest Container Exists in cluster
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==116 for r in json.load(sys.stdin)) else 1)'
+  register: pct_check
+  failed_when: false
+  changed_when: false
+
+- name: Create Media Ingest Container
+  ansible.builtin.command: >
+    pct create 116 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+    --hostname media-ingest-01
+    --cores 1 --memory 1024 --swap 512
+    --rootfs nvme-data:8
+    --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_media_ingest }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
+    --unprivileged 1
+    --features nesting=1
+    --nameserver {{ ip_dns_primary }}
+    --searchdomain chi.lab.amd-e.com
+    --password "{{ vault_media_ingest_root_pass }}"
+    --start 1
+    --onboot 1
+  no_log: true
+  when: pct_check.rc != 0
+
+- name: Ensure Media Ingest Container is Running
+  ansible.builtin.command: pct start 116
+  register: tgs_start
+  failed_when: tgs_start.rc != 0 and ("already running" not in tgs_start.stderr and "already running" not in tgs_start.stdout)
+  changed_when: tgs_start.rc == 0
+
+- name: Wait for Media Ingest Container IP
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 116 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  register: ip_check
+  until: ip_check.rc == 0
+  retries: 20
+  delay: 3
+  changed_when: false
+
+- name: Update Apt Cache in Media Ingest Container
+  ansible.builtin.command: pct exec 116 -- apt-get update
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Install Python3 in Media Ingest Container
+  ansible.builtin.command: pct exec 116 -- apt-get install -y python3
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Inject SSH Key into Media Ingest Container (via pipe)
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 116 -- mkdir -p /root/.ssh
+    cat /root/.ssh/authorized_keys | pct exec 116 -- sh -c "cat > /root/.ssh/authorized_keys"
+    pct exec 116 -- chmod 700 /root/.ssh
+    pct exec 116 -- chmod 600 /root/.ssh/authorized_keys
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Ensure SSH is enabled and running
+  ansible.builtin.command: pct exec 116 -- systemctl enable --now ssh
+  changed_when: false
+
+# TUN device passthrough so the collector can reach upstream source over a userspace
+# tunnel if needed (matches the live setup). Without these two lines
+# /dev/net/tun isn't visible inside the unprivileged container. Both edits
+# are idempotent via lineinfile; the LXC must be rebooted for them to take
+# effect (handled by the reboot task below, which only fires on a change).
+- name: Allow tun device cgroup in Media Ingest LXC config
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/116.conf
+    line: 'lxc.cgroup2.devices.allow: c 10:200 rwm'
+    state: present
+    create: false
+  register: tgs_tun_cgroup
+
+- name: Mount tun device in Media Ingest LXC config
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/116.conf
+    line: 'lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file'
+    state: present
+    create: false
+  register: tgs_tun_mount
+
+- name: Restart Media Ingest Container for TUN access
+  ansible.builtin.command: pct reboot 116
+  when: tgs_tun_cgroup.changed or tgs_tun_mount.changed
+  changed_when: true
+
+- name: Wait for Media Ingest Container SSH after TUN restart
+  ansible.builtin.wait_for:
+    host: "{{ ip_media_ingest }}"
+    port: 22
+    timeout: 60
+  when: tgs_tun_cgroup.changed or tgs_tun_mount.changed
+  delegate_to: localhost
+
+- name: Add Media Ingest Host to In-Memory Inventory
+  # Reached over the private_subnet ProxyCommand (jump host = personal
+  # MacBook) at ip_media_ingest. The group_vars/private_subnet.yml
+  # ansible_ssh_common_args applies via the static inventory group; the
+  # in-memory entry below inherits it through the media_ingest group.
+  ansible.builtin.add_host:
+    name: media-ingest-01
+    ansible_host: "{{ ip_media_ingest }}"
+    ansible_user: root
+    groups: media_ingest

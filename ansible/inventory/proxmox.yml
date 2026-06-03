@@ -133,6 +133,18 @@ all:
       vars:
         ansible_user: root
 
+    media_ingest:
+      hosts:
+        media-ingest-01:
+          # Outbound-only CT (no inbound services) — reached over the
+          # private_subnet ProxyCommand (jump host = personal MacBook), same
+          # as dns/proxy/mail. No tailnet membership needed.
+          ansible_host: "{{ ip_media_ingest }}"
+          vmid: 116
+          target_node: pve02
+      vars:
+        ansible_user: root
+
     # Parent group for all CTs on the 172.16.0.0/24 private subnet that need
     # to be reached through the personal MacBook (Tailscale jump host) when
     # ansible is invoked from the work MacBook. The actual ProxyCommand lives
@@ -152,6 +164,7 @@ all:
         tanium_clients:
         hermes_gateway:
         media_gallery:
+        media_ingest:
 
     # Tanium Cluster
     tanium_cluster:

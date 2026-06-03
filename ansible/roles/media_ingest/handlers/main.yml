@@ -1,0 +1,23 @@
+---
+- name: Reload Systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart Collector Collector
+  ansible.builtin.systemd:
+    name: media-ingest-collector.service
+    state: restarted
+    daemon_reload: true
+  # Only restart if the session is already authorized; otherwise the unit
+  # crash-loops until the one-time login session is copied over.
+  when: collector_session_authorized | default(false)
+
+- name: Save mediaingest iptables
+  ansible.builtin.shell: "mkdir -p /etc/iptables && iptables-save > /etc/iptables/rules.v4"
+  changed_when: true
+
+- name: Reload SSH
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded
+  failed_when: false
