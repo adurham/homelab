@@ -17,7 +17,9 @@ Environment=TG_EXCLUDE_FILE={{ media_gallery_state }}/excluded.json
 Environment=UPLOAD_MAX_MB={{ media_gallery_upload_max_mb }}
 Environment=UPLOAD_STAGING={{ media_gallery_state }}/upload_staging
 Environment=REBUILD_DEBOUNCE_SEC=20
-Environment=INGEST_API_KEY={{ vault_tg_gallery_ingest_key }}
+Environment=INGEST_JWKS_URL={{ authentik_url }}/application/o/media-ingest-collector/jwks/
+Environment=INGEST_ISSUER={{ authentik_url }}/application/o/media-ingest-collector/
+Environment=INGEST_AUDIENCE=media-ingest-collector
 ExecStart={{ media_gallery_dir }}/venv/bin/python {{ media_gallery_dir }}/upload_service.py
 Restart=always
 RestartSec=5
