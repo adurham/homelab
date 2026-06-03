@@ -43,15 +43,13 @@
       when: realm_check.rc == 0
       changed_when: true
 
-    - name: Ensure Admin User Exists (Pre-provisioning)
-      ansible.builtin.shell: >
-        pveum user add {{ admin_email.split('@')[0] }}@{{ realm_name }}
-        --email {{ admin_email }}
-        --enable 1
-      register: user_add
-      changed_when: user_add.rc == 0
-      failed_when: user_add.rc != 0 and "already exists" not in user_add.stderr
-      ignore_errors: true
+    # NOTE: Proxmox access is now gated in Authentik — only members of the
+    # 'Proxmox Admins' / 'Proxmox Users' Authentik groups can authenticate to
+    # the Proxmox application (policy bindings on the app). PVE users are
+    # auto-created from the groups claim on login. We deliberately do NOT
+    # pre-provision admin@ into Proxmox_Admins anymore: admin/test.user don't
+    # need Proxmox access, and hard-coding admin here re-granted it on every run.
+    # Group membership is managed in Authentik, not here.
 
     - name: Ensure Proxmox_Admins Group Exists (Synced)
       ansible.builtin.shell: pveum group add Proxmox_Admins -comment "Synced from Authentik"
@@ -81,8 +79,6 @@
       register: acl_user
       changed_when: acl_user.rc == 0
 
-    - name: Add Admin User to Proxmox_Admins
-      ansible.builtin.shell: >
-        pveum user modify {{ admin_email.split('@')[0] }}@{{ realm_name }}
-        -groups Proxmox_Admins
-      ignore_errors: true # In case user missing
+    # (Removed) "Add Admin User to Proxmox_Admins" — admin@ no longer gets
+    # Proxmox access. Membership of Proxmox_Admins is driven by the Authentik
+    # 'Proxmox Admins' group via the groups claim on login.
