@@ -1,0 +1,114 @@
+# Pool pump safety watchdog - protects the Pentair Dynamo 1.5 HP single-speed
+# from running dead-headed (closed valve, no flow) or dry (lost prime / clogged
+# suction). A single-speed pump cooks its seal/motor within minutes when no
+# water is moving heat away, so on a real fault we force the relay OFF and alert.
+#
+# Calibrated from sensor.edgewater_road_power_minute_average_12 (24h history):
+# normal running draw is a tight ~924 W (p10 920, p90 930, max 932, transient
+# floor 824 W at start/stop). Fault signatures all draw LESS than normal:
+#   - dead relay / tripped breaker / no power : ~0 W
+#   - dead-head (no flow, valve shut)         : ~50-70% normal -> ~460-650 W
+#   - lost prime / running dry / cavitation   : ~30-50% normal -> ~280-460 W
+# Thresholds: DEAD = below 50 W; LOW = below 700 W (clears the 824 W transient
+# floor, so a normal start/stop never trips it).
+#
+# Re-arm: a forced-off pump stays off until the next 09:00 ON (or a pool_season
+# toggle) via pool_filter.yaml's schedule - intentional, so a real fault is seen
+# and cleared by a human before the pump runs again.
+
+- alias: "Pool Pump Safety - Dead (no power draw)"
+  id: pool_pump_safety_dead
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    # Pump commanded ON but never drew power (relay never closed / breaker off)
+    - platform: state
+      entity_id: switch.shelly1minig3_28372f21c5b8
+      to: "on"
+      for: "00:02:00"
+    # Pump was running, then power collapsed mid-run (breaker trip / relay fail)
+    - platform: numeric_state
+      entity_id: sensor.edgewater_road_power_minute_average_12
+      below: 50
+      for: "00:02:00"
+
+  condition:
+    - condition: state
+      entity_id: switch.shelly1minig3_28372f21c5b8
+      state: "on"
+    - condition: numeric_state
+      entity_id: sensor.edgewater_road_power_minute_average_12
+      below: 50
+
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.shelly1minig3_28372f21c5b8
+    - service: persistent_notification.create
+      data:
+        notification_id: pool_pump_fault
+        title: "Pool pump fault - forced OFF"
+        message: >
+          Pool pump was commanded ON but is drawing no power
+          ({{ states('sensor.edgewater_road_power_minute_average_12') }} W,
+          normal is ~924 W). Likely a tripped breaker or relay fault. The pump
+          has been forced OFF. Check the breaker / Shelly relay, then re-run by
+          toggling Pool Season off and back on.
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "Pool pump fault - forced OFF"
+        message: >
+          No power draw while commanded ON (tripped breaker / relay fault).
+          Pump forced OFF - check the breaker, then toggle Pool Season to re-run.
+
+- alias: "Pool Pump Safety - Low draw (dead-head / dry)"
+  id: pool_pump_safety_low_draw
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    # Running draw sagged into the fault band and stayed there
+    - platform: numeric_state
+      entity_id: sensor.edgewater_road_power_minute_average_12
+      below: 700
+      for: "00:05:00"
+    # Pump came up weak from the start (never reached normal draw)
+    - platform: state
+      entity_id: switch.shelly1minig3_28372f21c5b8
+      to: "on"
+      for: "00:05:00"
+
+  condition:
+    - condition: state
+      entity_id: switch.shelly1minig3_28372f21c5b8
+      state: "on"
+    # In the fault band, not dead-zero (dead-zero is handled by the Dead rule)
+    - condition: numeric_state
+      entity_id: sensor.edgewater_road_power_minute_average_12
+      above: 50
+      below: 700
+
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.shelly1minig3_28372f21c5b8
+    - service: persistent_notification.create
+      data:
+        notification_id: pool_pump_fault
+        title: "Pool pump fault - low flow, forced OFF"
+        message: >
+          Pool pump is drawing only
+          {{ states('sensor.edgewater_road_power_minute_average_12') }} W
+          (normal is ~924 W) - the sign of a dead-head (closed valve) or lost
+          prime / clogged suction with no water moving. The pump has been forced
+          OFF to protect the seal and motor. Check valves, water level, and the
+          pump / skimmer baskets, then re-run by toggling Pool Season.
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "Pool pump fault - low flow, forced OFF"
+        message: >
+          Drawing only
+          {{ states('sensor.edgewater_road_power_minute_average_12') }} W
+          (normal ~924) - dead-head or lost prime, no flow. Pump forced OFF.
+          Check valves / water level / baskets, then toggle Pool Season to re-run.
