@@ -471,6 +471,26 @@ server {
         proxy_read_timeout 60s;
     }
 
+    # Upload + mkdir endpoints (POST): add your own pics / create folders. Large
+    # bodies (batches of files) + long timeouts. Same Authentik gate; routed to
+    # the upload service.
+    location ~ ^/(upload|mkdir|status)(/|$) {
+        auth_request /outpost.goauthentik.io/auth/nginx;
+        error_page 401 = @goauthentik_proxy_signin;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
+
+        proxy_pass http://{{ ip_media_gallery }}:8092;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 2048m;
+        proxy_request_buffering off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+
     location / {
         auth_request /outpost.goauthentik.io/auth/nginx;
         error_page 401 = @goauthentik_proxy_signin;

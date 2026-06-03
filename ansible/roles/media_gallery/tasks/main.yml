@@ -347,6 +347,55 @@
     state: started
     daemon_reload: true
 
+# ─── Upload service (add pics + create folders) ────────────────────────────
+# Write-capable: POST /upload/<folder> (multipart, batched, EXIF date) +
+# /mkdir/<folder>. Built for thousands: batch staging + one rclone copy per
+# batch + coalesced manifest rebuild. Bound to the private IP; gated by
+# Authentik at lb-01; firewalled to lb-01 only. bulk_ingest.py is the fast lane
+# for the initial thousands (rclone direct from a workstation).
+- name: Deploy Upload Service
+  ansible.builtin.copy:
+    src: upload_service.py
+    dest: "{{ media_gallery_dir }}/upload_service.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+  notify: Restart Upload
+
+- name: Deploy Bulk Ingest Helper
+  ansible.builtin.copy:
+    src: bulk_ingest.py
+    dest: "{{ media_gallery_dir }}/bulk_ingest.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Ensure Upload Staging Dir
+  ansible.builtin.file:
+    path: "{{ media_gallery_state }}/upload_staging"
+    state: directory
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Render Upload Service Unit
+  ansible.builtin.template:
+    src: upload.service.j2
+    dest: /etc/systemd/system/media-gallery-upload.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Upload
+
+- name: Enable & Start Upload Service
+  ansible.builtin.systemd:
+    name: media-gallery-upload.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
 # ─── Gallery auto-refresh (manifest rebuild + thumb prewarm) ───────────────
 # Keeps the gallery current as the live collector captures new media. The
 # manifest rebuild is seconds; prewarm skips already-cached thumbs. NOT a hard

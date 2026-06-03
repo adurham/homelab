@@ -46,7 +46,7 @@
     background:var(--panel2);border-radius:0 0 6px 6px;border:1px solid var(--border);border-top:none;}
 
   /* photo grid */
-  #photoGrid{display:grid;gap:10px;
+  #photoGrid{display:grid;gap:10px;min-height:140px;
     grid-template-columns:repeat(auto-fill,minmax(170px,1fr));}
   .tile{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;
     cursor:pointer;background:var(--panel);border:1px solid var(--border);}
@@ -98,6 +98,42 @@
 
   .state{text-align:center;color:var(--muted);padding:60px 20px;font-size:15px;}
 
+  /* new-folder tile */
+  .folder.newfolder{display:flex;align-items:center;justify-content:center;
+    background:var(--panel2);border:1px dashed #39414c;box-shadow:none;}
+  .folder.newfolder:hover{background:#222831;border-color:var(--accent);}
+  .folder.newfolder .nf-inner{display:flex;flex-direction:column;align-items:center;
+    gap:8px;color:var(--muted);font-size:15px;font-weight:600;}
+  .folder.newfolder .nf-plus{font-size:38px;line-height:1;color:var(--accent);}
+  .folder.empty .grad{background:linear-gradient(to top,rgba(0,0,0,.6),rgba(0,0,0,.1));}
+  /* inline new-folder form (replaces the newfolder tile contents while creating) */
+  .nf-form{display:flex;flex-direction:column;gap:6px;width:84%;}
+  .nf-form input{font:inherit;background:var(--bg);color:var(--text);
+    border:1px solid var(--border);border-radius:7px;padding:7px 9px;width:100%;}
+  .nf-form .nf-row{display:flex;gap:6px;}
+  .nf-form .nf-row button{flex:1;padding:6px 0;font-size:13px;}
+  .nf-form .nf-row .nf-ok{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .nf-form .nf-row .nf-ok:hover{background:#4a7bee;}
+  .nf-err{color:#e85050;font-size:11.5px;min-height:14px;}
+
+  /* upload button + hidden input */
+  #uploadBtn{display:none;}
+  /* drag highlight on photo grid */
+  #photoGrid.dragover{outline:3px dashed var(--accent);outline-offset:-6px;
+    border-radius:12px;background:rgba(91,140,255,.06);}
+  /* upload progress bar */
+  #uploadBar{display:none;align-items:center;gap:12px;background:var(--panel);
+    border:1px solid var(--border);border-radius:10px;padding:10px 14px;
+    margin:0 0 14px;font-size:13.5px;}
+  #uploadBar.show{display:flex;}
+  #uploadBar .ub-track{flex:1;height:8px;background:var(--panel2);
+    border-radius:5px;overflow:hidden;}
+  #uploadBar .ub-fill{height:100%;width:0;background:var(--accent);
+    transition:width .25s;}
+  #uploadBar .ub-text{color:var(--muted);white-space:nowrap;}
+  #uploadBar.done .ub-fill{background:#3ba35a;}
+  #uploadBar.error .ub-fill{background:#d23b3b;}
+
   /* lightbox */
   #lb{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.92);
     display:none;align-items:center;justify-content:center;}
@@ -127,12 +163,18 @@
   <h1 id="title">Gallery</h1>
   <span class="sub" id="sub"></span>
   <span class="spacer"></span>
+  <button id="uploadBtn">&#8593; Upload</button>
   <select id="sort" style="display:none">
     <option value="new">Newest first</option>
     <option value="old">Oldest first</option>
   </select>
+  <input type="file" id="fileInput" multiple accept="image/*,video/*" style="display:none">
 </header>
 <main>
+  <div id="uploadBar">
+    <div class="ub-track"><div class="ub-fill" id="ubFill"></div></div>
+    <span class="ub-text" id="ubText"></span>
+  </div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
   <div id="state" class="state">Loading…</div>
@@ -153,6 +195,7 @@
 <script>
 (function(){
   var manifest=[], chats=[], chatMap={};
+  var emptyFolders=[];     // user-created folders not yet in manifest
   var current=null;        // null = landing; "*" all; else chat name
   var view=[];             // current folder's sorted items
   var lbIndex=-1;
@@ -166,6 +209,11 @@
   var elBack=document.getElementById('backBtn');
   var lb=document.getElementById('lb');
   var lbMedia=document.getElementById('lbMedia');
+  var elUploadBtn=document.getElementById('uploadBtn');
+  var elFileInput=document.getElementById('fileInput');
+  var elUploadBar=document.getElementById('uploadBar');
+  var elUbFill=document.getElementById('ubFill');
+  var elUbText=document.getElementById('ubText');
 
   function fmtDate(iso){
     if(!iso) return "";
@@ -181,6 +229,8 @@
       chatMap[c].push(it);
     });
     chats.sort(function(a,b){return chatMap[b].length-chatMap[a].length;});
+    // drop any user-created empty folders that now have real items
+    emptyFolders=emptyFolders.filter(function(n){return !chatMap[n];});
   }
 
   // ---- per-tile image loading with shimmer + one retry ----
@@ -255,15 +305,20 @@
     elFolder.style.display='grid';
     elBack.style.display='none';
     elSort.style.display='none';
+    elUploadBtn.style.display='none';
+    hideUploadBar();
     elTitle.textContent='Gallery';
     elSub.textContent=chats.length+' chats · '+manifest.length+' items total';
     elState.style.display='none';
 
     var frag=document.createDocumentFragment();
 
+    // "+ New folder" tile (first in grid)
+    frag.appendChild(makeNewFolderTile());
+
     function makeFolder(name,items,cover){
       var f=document.createElement('div');
-      f.className='folder'; f.dataset.chat=name;
+      f.className='folder'+(items===0?' empty':''); f.dataset.chat=name;
       var tab=document.createElement('div'); tab.className='ftab'; f.appendChild(tab);
       if(cover){
         var img=document.createElement('img'); img.className='cover';
@@ -290,13 +345,80 @@
       var items=chatMap[c];
       frag.appendChild(makeFolder(c,items.length,'/'+items[0].thumb));
     });
+    // user-created empty folders (no items yet)
+    emptyFolders.forEach(function(n){
+      frag.appendChild(makeFolder(n,0,''));
+    });
     elFolder.innerHTML=''; elFolder.appendChild(frag);
+  }
+
+  // ---- "+ New folder" tile + inline create form ----
+  function makeNewFolderTile(){
+    var f=document.createElement('div');
+    f.className='folder newfolder'; f.dataset.newfolder='1';
+    var inner=document.createElement('div'); inner.className='nf-inner';
+    inner.innerHTML='<div class="nf-plus">+</div><div>New folder</div>';
+    f.appendChild(inner);
+    return f;
+  }
+  function showNewFolderForm(tile){
+    if(tile.querySelector('.nf-form')) return;
+    tile.innerHTML='';
+    var form=document.createElement('div'); form.className='nf-form';
+    var input=document.createElement('input');
+    input.type='text'; input.placeholder='Folder name'; input.maxLength=120;
+    var row=document.createElement('div'); row.className='nf-row';
+    var ok=document.createElement('button'); ok.className='nf-ok'; ok.textContent='Create';
+    var cancel=document.createElement('button'); cancel.textContent='Cancel';
+    var err=document.createElement('div'); err.className='nf-err';
+    row.appendChild(ok); row.appendChild(cancel);
+    form.appendChild(input); form.appendChild(row); form.appendChild(err);
+    form.addEventListener('click',function(e){e.stopPropagation();});
+    tile.appendChild(form);
+    input.focus();
+    function reset(){
+      tile.className='folder newfolder'; tile.dataset.newfolder='1';
+      tile.innerHTML='';
+      var inner=document.createElement('div'); inner.className='nf-inner';
+      inner.innerHTML='<div class="nf-plus">+</div><div>New folder</div>';
+      tile.appendChild(inner);
+    }
+    cancel.addEventListener('click',function(e){e.stopPropagation(); reset();});
+    input.addEventListener('keydown',function(e){
+      if(e.key==='Enter'){e.preventDefault(); submit();}
+      else if(e.key==='Escape'){e.preventDefault(); reset();}
+    });
+    ok.addEventListener('click',function(e){e.stopPropagation(); submit();});
+    function submit(){
+      var name=input.value.trim();
+      err.textContent='';
+      if(!name){err.textContent='Enter a name.'; return;}
+      if(chatMap[name]||emptyFolders.indexOf(name)>=0){
+        err.textContent='Folder already exists.'; return;
+      }
+      ok.disabled=true; cancel.disabled=true; ok.textContent='…';
+      fetch('/mkdir/'+encodeURIComponent(name),
+        {method:'POST',credentials:'same-origin'})
+        .then(function(r){
+          if(r.status===200){
+            emptyFolders.push(name);
+            renderFolders();   // re-render landing with the new empty tile
+          }else{
+            ok.disabled=false; cancel.disabled=false; ok.textContent='Create';
+            err.textContent='Failed (HTTP '+r.status+').';
+          }
+        })
+        .catch(function(){
+          ok.disabled=false; cancel.disabled=false; ok.textContent='Create';
+          err.textContent='Network error.';
+        });
+    }
   }
 
   // ---------- FOLDER VIEW ----------
   function openFolder(chat){
     current=chat;
-    var items=(chat==='*')?manifest.slice():chatMap[chat].slice();
+    var items=(chat==='*')?manifest.slice():(chatMap[chat]?chatMap[chat].slice():[]);
     var name=(chat==='*')?'All items':chat;
     applySort(items);
     view=items;
@@ -305,6 +427,9 @@
     elPhoto.style.display='grid';
     elBack.style.display='inline-block';
     elSort.style.display='inline-block';
+    // "All items" is a virtual aggregate; can't upload into it
+    elUploadBtn.style.display=(chat==='*')?'none':'inline-block';
+    hideUploadBar();
     elTitle.textContent=name;
     elSub.textContent=items.length+' item'+(items.length===1?'':'s');
     elState.style.display=items.length?'none':'block';
@@ -395,9 +520,134 @@
     });
   }
 
+  // ---------- UPLOAD ----------
+  var BATCH_SIZE=25;
+  var uploading=false;
+
+  function hideUploadBar(){
+    elUploadBar.className=''; elUbFill.style.width='0';
+    elUbText.textContent='';
+  }
+  function setProgress(done,total,pct){
+    elUploadBar.classList.add('show');
+    elUbFill.style.width=pct+'%';
+    elUbText.textContent='Uploading '+done+'/'+total+'…';
+  }
+
+  function uploadBatch(folder,files){
+    var fd=new FormData();
+    files.forEach(function(f){fd.append('files',f,f.name);});
+    return fetch('/upload/'+encodeURIComponent(folder),
+      {method:'POST',credentials:'same-origin',body:fd})
+      .then(function(r){
+        if(r.status!==200) throw new Error('HTTP '+r.status);
+        return r.json().catch(function(){return {};});
+      });
+  }
+
+  function uploadFiles(folder,fileList){
+    if(uploading) return;
+    var files=Array.prototype.slice.call(fileList||[]);
+    if(!files.length) return;
+    if(folder==null||folder==='*') return;
+    uploading=true;
+    elUploadBtn.disabled=true;
+    var total=files.length, done=0, storedTotal=0, allErrors=[];
+    elUploadBar.className='show';
+    setProgress(0,total,0);
+
+    var batches=[];
+    for(var i=0;i<files.length;i+=BATCH_SIZE) batches.push(files.slice(i,i+BATCH_SIZE));
+
+    var chain=Promise.resolve();
+    batches.forEach(function(batch){
+      chain=chain.then(function(){
+        return uploadBatch(folder,batch).then(function(res){
+          done+=batch.length;
+          if(res&&typeof res.stored==='number') storedTotal+=res.stored;
+          else storedTotal+=batch.length;
+          if(res&&Array.isArray(res.errors)) allErrors=allErrors.concat(res.errors);
+          setProgress(done,total,Math.round(done/total*100));
+        },function(err){
+          // batch failed entirely
+          done+=batch.length;
+          allErrors.push('batch failed: '+err.message);
+          setProgress(done,total,Math.round(done/total*100));
+        });
+      });
+    });
+
+    chain.then(function(){
+      elUploadBar.classList.add('done');
+      var errTxt=allErrors.length?(' '+allErrors.length+' error(s).'):'';
+      elUbText.textContent='Uploaded '+storedTotal+'/'+total+' files.'+errTxt+' Refreshing…';
+      // re-fetch manifest now and again after server debounce (~25s)
+      reloadManifest(folder);
+      setTimeout(function(){ if(current===folder) reloadManifest(folder); },25000);
+    }).catch(function(err){
+      elUploadBar.classList.add('error');
+      elUbText.textContent='Upload failed: '+err.message;
+    }).then(function(){
+      uploading=false; elUploadBtn.disabled=false;
+      if(elFileInput) elFileInput.value='';
+    });
+  }
+
+  function reloadManifest(stayFolder){
+    return fetch('/gallery/manifest.json',{credentials:'same-origin'})
+      .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
+      .then(function(data){
+        manifest=Array.isArray(data)?data:[];
+        buildChats();
+        if(current===null){ renderFolders(); }
+        else if(stayFolder!=null && (chatMap[stayFolder]||emptyFolders.indexOf(stayFolder)>=0)){
+          openFolder(stayFolder);
+          if(!uploading){
+            elUploadBar.classList.add('show','done');
+            elUbText.textContent='Up to date. Thumbnails appear shortly after processing.';
+            setTimeout(function(){if(current===stayFolder&&!uploading)hideUploadBar();},6000);
+          }
+        }else{
+          openFolder(current);
+        }
+      })
+      .catch(function(){
+        elUbText.textContent='Uploaded, but manifest refresh failed — reload the page shortly.';
+      });
+  }
+
   // ---------- EVENTS ----------
+  elUploadBtn.addEventListener('click',function(){
+    if(current==null||current==='*'||uploading) return;
+    elFileInput.click();
+  });
+  elFileInput.addEventListener('change',function(){
+    if(current!=null) uploadFiles(current,elFileInput.files);
+  });
+  // drag-and-drop onto the photo grid
+  ['dragenter','dragover'].forEach(function(ev){
+    elPhoto.addEventListener(ev,function(e){
+      if(current==null||current==='*') return;
+      e.preventDefault(); e.stopPropagation();
+      elPhoto.classList.add('dragover');
+    });
+  });
+  ['dragleave','dragend'].forEach(function(ev){
+    elPhoto.addEventListener(ev,function(e){
+      if(e.target===elPhoto) elPhoto.classList.remove('dragover');
+    });
+  });
+  elPhoto.addEventListener('drop',function(e){
+    if(current==null||current==='*') return;
+    e.preventDefault(); e.stopPropagation();
+    elPhoto.classList.remove('dragover');
+    var dt=e.dataTransfer; if(!dt||!dt.files||!dt.files.length) return;
+    uploadFiles(current,dt.files);
+  });
+
   elFolder.addEventListener('click',function(e){
     var f=e.target.closest('.folder'); if(!f) return;
+    if(f.dataset.newfolder){ showNewFolderForm(f); return; }
     openFolder(f.dataset.chat);
   });
   elPhoto.addEventListener('click',function(e){
@@ -429,11 +679,8 @@
     .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
     .then(function(data){
       manifest=Array.isArray(data)?data:[];
-      if(!manifest.length){
-        elState.textContent='No items yet.'; return;
-      }
       buildChats();
-      renderFolders();
+      renderFolders();   // always render landing (so "+ New folder" is available)
     })
     .catch(function(err){
       elState.textContent='Failed to load gallery: '+err.message;
