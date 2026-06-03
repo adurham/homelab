@@ -142,6 +142,11 @@ THERMOSTAT = "climate.ecobee_thermostat"
 MODE_SELECT = "input_select.vent_control_mode"
 ENABLED_SWITCH = "input_boolean.vent_control_enabled"
 
+# Liveness heartbeat: the control loop stamps this sensor every cycle (even when
+# disabled). An external cron watchdog alerts if it goes stale, catching the
+# "app silently died / stopped looping" failure that originally went unnoticed.
+HEARTBEAT_ENTITY = "sensor.smart_vent_controller_heartbeat"
+
 # Backpressure: never close more than this fraction of total vents
 MAX_CLOSED_RATIO = 0.60
 
@@ -326,6 +331,10 @@ class SmartVentController(hass.Hass):
         self.log(f"Smart Vent Controller ready. {len(all_vents)} vents across "
                  f"{len(ZONES)} zones. Cycle every {CYCLE_INTERVAL}s.")
 
+        # Stamp the heartbeat immediately so the sensor exists on startup and the
+        # watchdog isn't tripped by the first-cycle delay after a restart.
+        self._heartbeat()
+
     # ── Event handlers ────────────────────────────────────────────────────────
 
     def on_vent_manual_change(self, entity, attribute, old, new, kwargs):
@@ -356,6 +365,12 @@ class SmartVentController(hass.Hass):
 
     def control_loop(self, kwargs):
         """Main control loop — runs every CYCLE_INTERVAL seconds."""
+
+        # Liveness heartbeat FIRST, before any early return, so an external
+        # watchdog can tell "the app process is alive and looping" apart from
+        # "the controller is disabled". This is the exact failure that bit us
+        # originally: the app was effectively not running and nobody knew.
+        self._heartbeat()
 
         # Check master switch
         enabled = self.get_state(ENABLED_SWITCH)
@@ -931,6 +946,32 @@ class SmartVentController(hass.Hass):
         if worst_hot < FAN_ASSIST_OVER and worst_cold < FAN_ASSIST_OVER:
             return None
         return worst_cold > worst_hot
+
+    def _heartbeat(self):
+        """Stamp the heartbeat sensor with the current time + brief status.
+
+        Written every control loop. An external watchdog reads last_changed /
+        the timestamp and alerts if it goes stale (app crashed or stopped
+        looping). Best-effort: a heartbeat failure must never break control.
+        """
+        try:
+            now = self.datetime()
+            enabled = self.get_state(ENABLED_SWITCH)
+            mode = self.get_state(MODE_SELECT)
+            self.set_state(
+                HEARTBEAT_ENTITY,
+                state=now.isoformat(),
+                attributes={
+                    "device_class": "timestamp",
+                    "friendly_name": "Smart Vent Controller Heartbeat",
+                    "icon": "mdi:heart-pulse",
+                    "enabled": enabled,
+                    "vent_mode": mode,
+                    "cycle_interval_s": CYCLE_INTERVAL,
+                },
+            )
+        except Exception as e:
+            self.log(f"heartbeat write failed (non-fatal): {e}")
 
     def _engage_fan_assist(self):
         """Turn the air handler fan to 'on', tracking that WE did it."""
