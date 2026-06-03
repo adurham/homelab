@@ -27,8 +27,7 @@
     --cores {{ lxc_cores }}
     --memory {{ lxc_memory }}
     --swap {{ lxc_swap }}
-    --net0 name=eth0,bridge=private,ip={{ lxc_net_ip }},firewall=1
-    --net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1
+    --net0 name=eth0,bridge=private,ip={{ lxc_net_ip }},gw={{ net_private_gw }},firewall=1
     --password {{ lb_01_root_pass }}
     --features nesting=1
     --ostype debian
@@ -50,19 +49,42 @@
   changed_when: lxc_start.rc == 0
   when: lxc_check.rc != 0
 
-- name: Check if Net1 exists
+# lb-01 is PRIVATE-SDN ONLY. It reaches the LAN (Proxmox UI on 192.168.86.x,
+# etc.) outbound via the tailscale-gw NAT (172.16.0.1 masquerades 172.16/24).
+# A LAN interface used to exist (net1 on vmbr0/DHCP) but was removed — its
+# flaky DHCP lease was a recurring 502 cause for proxmox.chi. These two tasks
+# ENFORCE private-only on re-apply: strip any net1, and ensure net0 carries the
+# private gateway.
+- name: Check if Net1 (legacy LAN) exists
   delegate_to: "{{ target_node }}"
   ansible.builtin.shell: |
     set -o pipefail
-    pct config {{ lxc_id }} | grep net1
+    pct config {{ lxc_id }} | grep -q '^net1'
   register: net1_check
   failed_when: false
   changed_when: false
 
-- name: Add Net1 Interface (LAN - DHCP)
+- name: Remove legacy LAN interface (net1) — enforce private-only
   delegate_to: "{{ target_node }}"
-  ansible.builtin.shell: "pct set {{ lxc_id }} -net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1"
-  when: lxc_check.rc == 0 and net1_check.rc != 0
+  ansible.builtin.command: "pct set {{ lxc_id }} --delete net1"
+  when: lxc_check.rc == 0 and net1_check.rc == 0
+  changed_when: true
+
+- name: Ensure private gateway on net0
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct config {{ lxc_id }} | grep -q '^net0:.*gw={{ net_private_gw }}'
+  register: lb_gw_check
+  failed_when: false
+  changed_when: false
+
+- name: Set private gateway on net0 if missing
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.command: >
+    pct set {{ lxc_id }} --net0 name=eth0,bridge=private,ip={{ lxc_net_ip }},gw={{ net_private_gw }},firewall=1
+  when: lxc_check.rc == 0 and lb_gw_check.rc != 0
+  changed_when: true
 
 - name: Ensure SSH Service is Running
   delegate_to: "{{ target_node }}"

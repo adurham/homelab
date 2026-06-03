@@ -1,0 +1,27 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# Serves the DECRYPTED archive as a browser photo gallery via `rclone serve
+# http`, rendering a responsive thumbnail grid (custom --template). Decryption
+# happens here on the CT. NO --user/--pass: authentication is enforced upstream
+# by Authentik forward-auth at lb-01 (gallery.chi.lab.amd-e.com). Read-only.
+# Replaces the old WebDAV + basic-auth viewer.
+[Unit]
+Description=media-gallery photo gallery (decrypted, read-only, SSO-gated at lb-01)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+Environment=RCLONE_CONFIG=/home/{{ media_gallery_user }}/.config/rclone/rclone.conf
+ExecStart=/usr/bin/rclone serve http gcrypt: \
+  --addr {{ ip_media_gallery }}:{{ media_gallery_gallery_port }} \
+  --read-only \
+  --template {{ media_gallery_dir }}/gallery.html.tmpl \
+  --dir-cache-time 1m \
+  --vfs-cache-mode off
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

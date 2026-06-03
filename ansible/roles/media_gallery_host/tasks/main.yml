@@ -1,0 +1,96 @@
+---
+# Provisions the LXC for the upstream source media collector. Runs against the
+# proxmox node hosting the CT (pve02). Mirrors the hermes_gateway_host role:
+# pveam template fetch -> cluster-wide existence check -> pct create ->
+# inject SSH key -> TUN passthrough for Tailscale -> add to in-memory
+# inventory. vmid 115, ip_media_gallery (172.16.0.51), hostname media-gallery-01.
+
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  changed_when: false
+
+- name: Download Ubuntu 22.04 Template
+  ansible.builtin.command: pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+  args:
+    creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+
+# Cluster-wide existence check (HA can migrate the CT, so query pmxcfs for
+# the full resource list rather than node-local `pct config`).
+- name: Check if TG Collector Container Exists in cluster
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==115 for r in json.load(sys.stdin)) else 1)'
+  register: pct_check
+  failed_when: false
+  changed_when: false
+
+- name: Create TG Collector Container
+  ansible.builtin.command: >
+    pct create 115 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+    --hostname media-gallery-01
+    --cores 1 --memory 1024 --swap 512
+    --rootfs nvme-data:8
+    --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_media_gallery }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
+    --unprivileged 1
+    --features nesting=1
+    --password "{{ vault_media_gallery_root_pass }}"
+    --start 1
+    --onboot 1
+  no_log: true
+  when: pct_check.rc != 0
+
+- name: Ensure TG Collector Container is Running
+  ansible.builtin.command: pct start 115
+  register: tgh_start
+  failed_when: tgh_start.rc != 0 and ("already running" not in tgh_start.stderr and "already running" not in tgh_start.stdout)
+  changed_when: tgh_start.rc == 0
+
+- name: Wait for TG Collector Container IP
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 115 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  register: ip_check
+  until: ip_check.rc == 0
+  retries: 20
+  delay: 3
+  changed_when: false
+
+- name: Update Apt Cache in TG Collector Container
+  ansible.builtin.command: pct exec 115 -- apt-get update
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Install Python3 in TG Collector Container
+  ansible.builtin.command: pct exec 115 -- apt-get install -y python3
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Inject SSH Key into TG Collector Container (via pipe)
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 115 -- mkdir -p /root/.ssh
+    cat /root/.ssh/authorized_keys | pct exec 115 -- sh -c "cat > /root/.ssh/authorized_keys"
+    pct exec 115 -- chmod 700 /root/.ssh
+    pct exec 115 -- chmod 600 /root/.ssh/authorized_keys
+  when: pct_check.rc != 0
+  changed_when: true
+
+- name: Ensure SSH is enabled and running
+  ansible.builtin.command: pct exec 115 -- systemctl enable --now ssh
+  changed_when: false
+
+# No TUN passthrough needed: this CT is outbound-only and does not run
+# Tailscale (see media_gallery role note). It reaches upstream source + Google Drive
+# via normal egress through the private subnet gateway.
+
+- name: Add TG Collector Host to In-Memory Inventory
+  # Reached over the private_subnet ProxyCommand (jump host = personal
+  # MacBook) at ip_media_gallery. The group_vars/private_subnet.yml
+  # ansible_ssh_common_args applies via the static inventory group; the
+  # in-memory entry below inherits it through the media_gallery group.
+  ansible.builtin.add_host:
+    name: media-gallery-01
+    ansible_host: "{{ ip_media_gallery }}"
+    ansible_user: root
+    groups: media_gallery

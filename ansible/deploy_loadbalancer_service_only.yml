@@ -1,0 +1,17 @@
+---
+# Service-only run of the load balancer nginx config. Skips the
+# loadbalancer_host provisioning play, which currently fails because CT 103
+# has been HA-migrated off pve02 (node drift in the host stage, unrelated to
+# the nginx config). Use this to push nginx/vhost changes (e.g. the tg-gallery
+# vhost) without touching CT provisioning. The canonical deploy_loadbalancer.yml
+# is unchanged; this is a targeted helper.
+- name: Configure Load Balancer Service (Nginx) only
+  hosts: loadbalancer
+  gather_facts: false
+  vars:
+    acme_dedyn_token_proxmox: "{{ vault_desec_token_proxmox }}"
+    noip_username: "{{ vault_noip_username }}"
+    noip_password: "{{ vault_noip_password }}"
+    noip_hostname: "chiamd-e.no-ip.biz"
+  roles:
+    - loadbalancer_service

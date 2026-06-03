@@ -1,0 +1,24 @@
+---
+# Two-stage deploy of the upstream source ephemeral media collector:
+#   1. media_gallery_host runs on pve02 to create the LXC (vmid 115,
+#      ip_media_gallery 172.16.0.51, hostname media-gallery-01) and inject
+#      SSH keys + TUN passthrough for Tailscale.
+#   2. media_gallery runs against the new CT to install source + rclone,
+#      deploy the daemon, and wire the systemd units. The source client session
+#      requires a one-time interactive login (login.py) before the listener
+#      will start — the role detects this and skips start until authorized.
+#
+# Usage:
+#   ansible-playbook deploy_media_gallery.yml --ask-vault-pass
+
+- name: Provision TG Collector Container
+  hosts: pve02
+  gather_facts: false
+  roles:
+    - media_gallery_host
+
+- name: Deploy TG Collector Service
+  hosts: media_gallery
+  gather_facts: true
+  roles:
+    - media_gallery

@@ -403,3 +403,80 @@ server {
         return 302 /outpost.goauthentik.io/start?rd=$request_uri;
     }
 }
+
+server {
+    listen 80;
+    server_name gallery.chi.lab.amd-e.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name gallery.chi.lab.amd-e.com;
+
+    # ACL: Block external access
+    if ($is_internal = 0) {
+        return 403;
+    }
+
+    ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/wildcard.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers }}
+
+    # Authentik forward-auth gate for the upstream source collector photo gallery.
+    # The gallery is an `rclone serve http` instance on the collector CT
+    # (172.16.0.51:8089) that decrypts the archive and renders a thumbnail
+    # grid. It has NO built-in auth — this FQDN through lb-01 is the only
+    # access path, so SSO is enforced here. Replaces the old WebDAV +
+    # basic-auth setup. Provider/application provisioned by
+    # roles/authentik_provider/.
+    # On-the-fly thumbnails: routed to the dedicated thumb service (port 8090),
+    # which generates+caches (encrypted, to Drive) on first request. Kept as a
+    # separate upstream so a slow thumb generation never blocks the main app.
+    location /thumb/ {
+        auth_request /outpost.goauthentik.io/auth/nginx;
+        error_page 401 = @goauthentik_proxy_signin;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
+
+        proxy_pass http://172.16.0.51:8090;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    location / {
+        auth_request /outpost.goauthentik.io/auth/nginx;
+        error_page 401 = @goauthentik_proxy_signin;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
+
+        proxy_pass http://172.16.0.51:8089;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /outpost.goauthentik.io {
+        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
+        proxy_set_header Host auth.chi.lab.amd-e.com;
+        proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
+    }
+
+    location @goauthentik_proxy_signin {
+        internal;
+        add_header Set-Cookie $auth_cookie;
+        return 302 /outpost.goauthentik.io/start?rd=$request_uri;
+    }
+}

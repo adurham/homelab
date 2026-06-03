@@ -37,6 +37,7 @@ ip_vm: "172.16.0.42"
 ip_tailscale_gw: "172.16.0.1"
 ip_tailscale_gw_bwt: "10.99.0.3"  # tailscale-gw eth2 on `bwt` SDN bridge — subnet router into 10.99.0.0/24
 ip_hermes_gateway: "172.16.0.50"
+ip_media_gallery: "172.16.0.51"
 # Frigate NVR (CT 170, pve01). Private-subnet IP for the eth1 interface; eth0
 # is DHCP on the LAN so Frigate can reach the go2rtc RTSP source + HA MQTT.
 ip_frigate: "172.16.0.45"
