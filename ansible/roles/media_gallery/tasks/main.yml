@@ -384,6 +384,81 @@
     state: started
     daemon_reload: true
 
+# ─── Security hardening ────────────────────────────────────────────────────
+# The gallery/thumb/trash services bind the private IP with NO auth of their own
+# (auth is enforced by Authentik at lb-01). Without a firewall, ANY host on the
+# private subnet or tailnet could hit them directly and bypass SSO entirely —
+# pulling decrypted originals with a plain GET. Lock the service ports to lb-01
+# (the Authentik front door) + loopback only. Mirrors the hermes_gateway
+# api_server lockdown. Default INPUT policy stays ACCEPT (don't break SSH/ping);
+# we DROP only the specific service ports for non-allowed sources.
+- name: Install iptables persistence
+  ansible.builtin.apt:
+    name:
+      - iptables
+      - iptables-persistent
+      - netfilter-persistent
+    state: present
+  notify: Save tg iptables
+
+- name: "iptables: allow loopback to service ports"
+  ansible.builtin.iptables:
+    chain: INPUT
+    in_interface: lo
+    protocol: tcp
+    destination_port: "{{ item }}"
+    jump: ACCEPT
+    comment: "media-gallery: loopback {{ item }}"
+    state: present
+  loop:
+    - "{{ media_gallery_gallery_port }}"
+    - "8090"
+    - "{{ media_gallery_trash_port }}"
+  notify: Save tg iptables
+
+- name: "iptables: allow lb-01 (Authentik front door) to service ports"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    source: "{{ ip_loadbalancer }}"
+    destination_port: "{{ item }}"
+    jump: ACCEPT
+    comment: "media-gallery: lb-01 {{ item }}"
+    state: present
+  loop:
+    - "{{ media_gallery_gallery_port }}"
+    - "8090"
+    - "{{ media_gallery_trash_port }}"
+  notify: Save tg iptables
+
+- name: "iptables: drop all other access to service ports"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "{{ item }}"
+    jump: DROP
+    comment: "media-gallery: deny {{ item }}"
+    state: present
+  loop:
+    - "{{ media_gallery_gallery_port }}"
+    - "8090"
+    - "{{ media_gallery_trash_port }}"
+  notify: Save tg iptables
+
+# SSH: key-only. mediaingest is nologin; admin is root-via-key. No password auth.
+- name: Harden SSH (key-only, no passwords)
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/99-harden.conf
+    content: |
+      # Managed by Ansible (roles/media_gallery). Key-only auth.
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload SSH
+
 - name: One-Time Login Reminder
   ansible.builtin.debug:
     msg: >-

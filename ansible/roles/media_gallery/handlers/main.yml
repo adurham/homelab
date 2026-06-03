@@ -23,3 +23,13 @@
     name: media-gallery-trash.service
     state: restarted
     daemon_reload: true
+
+- name: Save tg iptables
+  ansible.builtin.shell: "mkdir -p /etc/iptables && iptables-save > /etc/iptables/rules.v4"
+  changed_when: true
+
+- name: Reload SSH
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded
+  failed_when: false
