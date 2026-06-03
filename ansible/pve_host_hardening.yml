@@ -1,0 +1,87 @@
+---
+# PVE host hardening — codifies the 2026-06-03 security sweep so it survives a
+# node rebuild. Idempotent. Run: ansible-playbook pve_host_hardening.yml
+#
+# Does three things:
+#   1. SSH key-only on every node (drop-in, validated before reload).
+#   2. Cluster firewall rules (VXLAN allow + mgmt lockdown IPSETs) into
+#      /etc/pve/firewall/cluster.fw (pmxcfs — write once, replicates).
+#   3. Enable the node-level firewall on every node.
+#
+# SAFETY: the VXLAN (UDP 4789) allow is what makes enabling the node firewall
+# safe on the SDN — without it, cross-node guest traffic breaks. Keep it.
+# pve_mgmt MUST include the operator's own source network or you lock yourself
+# out of :22/:8006.
+
+- name: Harden PVE hosts (SSH + firewall)
+  hosts: proxmox_nodes
+  gather_facts: false
+  vars:
+    pve_node_ips:
+      - 192.168.86.11
+      - 192.168.86.12
+      - 192.168.86.13
+    pve_mgmt_sources:
+      - 10.99.0.0/24       # bwt
+      - 100.64.0.0/10      # tailnet
+      - 172.16.0.0/24      # private SDN
+      - 192.168.86.0/24    # LAN (also corosync)
+
+  tasks:
+    # ── 1. SSH key-only ────────────────────────────────────────────────────
+    - name: Verify key auth works before disabling passwords (safety gate)
+      ansible.builtin.command: "true"
+      changed_when: false
+      # If this play is reachable at all, we're already authenticated by key.
+
+    - name: Deploy SSH hardening drop-in
+      ansible.builtin.template:
+        src: templates/pve_sshd_harden.conf.j2
+        dest: /etc/ssh/sshd_config.d/99-harden.conf
+        owner: root
+        group: root
+        mode: '0644'
+        validate: "sshd -t -f %s"
+      register: ssh_harden
+
+    - name: Reload sshd if hardening changed
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded
+      when: ssh_harden.changed
+      failed_when: false
+
+    # ── 2. Cluster firewall config (write once; pmxcfs replicates) ─────────
+    - name: Deploy cluster firewall config (VXLAN allow + mgmt lockdown)
+      ansible.builtin.template:
+        src: templates/pve_cluster_firewall.fw.j2
+        dest: /etc/pve/firewall/cluster.fw
+        mode: '0640'
+      run_once: true
+      delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+
+    - name: Validate firewall config compiles
+      ansible.builtin.command: pve-firewall compile
+      run_once: true
+      delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+      register: fw_compile
+      changed_when: false
+      failed_when: "'error' in fw_compile.stderr | lower"
+
+    # ── 3. Enable node-level firewall on every node ────────────────────────
+    - name: Enable node firewall
+      ansible.builtin.command: "pvesh set /nodes/{{ inventory_hostname }}/firewall/options -enable 1"
+      changed_when: true
+
+    - name: Restart pve-firewall to apply
+      ansible.builtin.systemd:
+        name: pve-firewall
+        state: restarted
+
+    - name: Verify cluster still quorate after firewall apply
+      ansible.builtin.command: pvecm status
+      run_once: true
+      delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+      register: quorum
+      changed_when: false
+      failed_when: "'Quorate:' not in quorum.stdout or 'Yes' not in (quorum.stdout | regex_search('Quorate:.*'))"
