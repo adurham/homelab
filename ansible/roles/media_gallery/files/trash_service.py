@@ -31,7 +31,7 @@ from urllib.parse import unquote
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediaingest/.config/rclone/rclone.conf")
 PORT = int(os.environ.get("TRASH_PORT", "8091"))
-BIND = os.environ.get("TRASH_BIND", "172.16.0.51")
+BIND = os.environ.get("TRASH_BIND", "172.16.0.46")
 THUMB_CACHE = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))
 EXCLUDE_FILE = Path(os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/excluded.json"))
 SRC = REMOTE + "by-chat"
