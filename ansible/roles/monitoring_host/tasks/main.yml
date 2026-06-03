@@ -26,8 +26,7 @@
     pct create {{ vmid }} /var/lib/vz/template/cache/{{ template }}
     --hostname {{ inventory_hostname }}
     --cores {{ vm_cores | default(2) }} --memory {{ vm_memory | default(4096) }} --swap 512
-    --net0 name=eth0,bridge=vmbr0,ip=dhcp
-    --net1 name=eth1,bridge=private,ip={{ net_private_ip }}
+    --net0 name=eth0,bridge=private,ip={{ net_private_ip }},gw={{ net_private_gw }}
     --nameserver {{ ip_dns_primary }}
     --searchdomain chi.lab.amd-e.com
     --storage nvme-data
@@ -83,6 +82,34 @@
     executable: /bin/bash
   changed_when: false
   when: ct_check.rc == 0 and ct_owner.stdout | length > 0
+
+# Monitoring CTs (vm-01, graf-01) are PRIVATE-SDN ONLY. They scrape LAN
+# targets (Home Assistant 192.168.86.2:8123, etc.) OUTBOUND via the
+# tailscale-gw NAT, and Proxmox nodes — themselves on 172.16/24 — reach VM
+# directly. The legacy LAN interface (vmbr0) is removed. These tasks enforce
+# private-only on re-apply for already-existing CTs by stripping any bridge=vmbr0
+# interface. Dispatched to the owning node (HA may have migrated the CT).
+- name: Detect LAN (vmbr0) interface on existing CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }} \
+      pct config {{ vmid }} | grep -oE '^net[0-9]+' | while read -r n; do
+        ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }} pct config {{ vmid }} | grep -q "^${n}:.*bridge=vmbr0" && echo "$n"
+      done | head -1
+  args:
+    executable: /bin/bash
+  register: lan_iface
+  changed_when: false
+  when: ct_check.rc == 0 and ct_owner.stdout | length > 0
+
+- name: Remove LAN interface (enforce private-only)
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }} pct set {{ vmid }} --delete {{ lan_iface.stdout }}
+  args:
+    executable: /bin/bash
+  when: ct_check.rc == 0 and ct_owner.stdout | length > 0 and lan_iface.stdout | default('') | length > 0
+  changed_when: true
 
 # Only start right after creation. After that, HA owns the running-state of
 # managed CTs — calling `pct start` from a non-owning node would fail anyway,

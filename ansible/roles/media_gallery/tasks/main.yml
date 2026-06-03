@@ -1,0 +1,276 @@
+---
+# Installs the upstream source media collector inside the media-gallery-01 LXC.
+# Runs against the CT directly (after media_gallery_host provisions it).
+# Pattern: apt deps -> tailscale -> service user -> venv + telethon ->
+# rclone -> deploy code/units -> conditional start (only once the source client
+# session is authorized via the one-time login.py).
+
+- name: Install Base OS Packages
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-dev
+      - python3-pip
+      - build-essential
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ─── Tailscale (admin reach + cert/MagicDNS for any future direct serve) ───
+# The CT joined the tailnet to support the web gallery work. It is reached
+# directly at media-gallery-01.tail19c543.ts.net for admin (the private_subnet
+# ProxyCommand path becomes unreliable once the CT peers directly — same quirk
+# as hermes-gw-01). Requires TUN passthrough in /etc/pve/lxc/115.conf
+# (media_gallery_host role / manual: lxc.cgroup2.devices.allow c 10:200 rwm +
+# /dev/net/tun mount).
+#
+# CRITICAL: --accept-routes MUST be false. tailscale-gw advertises
+# 172.16.0.0/24; if this CT (itself ON 172.16.0.0/24) accepts that route, its
+# return traffic to other subnet hosts (e.g. lb-01 172.16.0.30) egresses via
+# the tailscale interface instead of eth0 → asymmetric routing → lb-01's
+# reverse-proxy to the gallery times out (504). Keep accept-routes off so the
+# CT routes its own subnet locally.
+- name: Install Tailscale
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://tailscale.com/install.sh | sh
+  args:
+    creates: /usr/bin/tailscale
+    executable: /bin/bash
+
+- name: Enable tailscaled
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Bring CT onto Tailnet (accept-routes OFF — see note above)
+  ansible.builtin.command:
+    cmd: tailscale up --hostname media-gallery-01 --accept-routes=false --authkey {{ vault_media_gallery_tailscale_authkey | default('') }}
+  args:
+    creates: /var/lib/tailscale/tailscaled.state
+  when: vault_media_gallery_tailscale_authkey is defined and vault_media_gallery_tailscale_authkey | length > 0
+  no_log: true
+
+- name: Ensure accept-routes stays disabled (idempotent, survives re-runs)
+  ansible.builtin.command:
+    cmd: tailscale set --accept-routes=false
+  changed_when: false
+
+# ─── rclone (encrypted upload to Google Drive) ─────────────────────────────
+- name: Install rclone
+  ansible.builtin.apt:
+    name: rclone
+    state: present
+
+# ─── Service account + directories ─────────────────────────────────────────
+- name: Create Collector System User
+  ansible.builtin.user:
+    name: "{{ media_gallery_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "/home/{{ media_gallery_user }}"
+    create_home: true
+    state: present
+
+- name: Ensure Install + State + Log Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+  loop:
+    - "{{ media_gallery_dir }}"
+    - "{{ media_gallery_state }}"
+    - "{{ media_gallery_state }}/captures"
+    - "{{ media_gallery_log_dir }}"
+    - "/home/{{ media_gallery_user }}/.config"
+    - "/home/{{ media_gallery_user }}/.config/rclone"
+
+# ─── Python venv + source ────────────────────────────────────────────────
+- name: Create Collector Virtualenv
+  ansible.builtin.command: python3 -m venv {{ media_gallery_dir }}/venv
+  args:
+    creates: "{{ media_gallery_dir }}/venv/bin/python"
+  become: true
+  become_user: "{{ media_gallery_user }}"
+
+- name: Upgrade pip/setuptools/wheel
+  ansible.builtin.pip:
+    name:
+      - pip
+      - setuptools
+      - wheel
+    state: latest  # noqa: package-latest
+    virtualenv: "{{ media_gallery_dir }}/venv"
+  become: true
+  become_user: "{{ media_gallery_user }}"
+
+- name: Install source (pinned)
+  ansible.builtin.pip:
+    name: "telethon=={{ media_gallery_telethon_version }}"
+    virtualenv: "{{ media_gallery_dir }}/venv"
+  become: true
+  become_user: "{{ media_gallery_user }}"
+
+# ─── Deploy code ───────────────────────────────────────────────────────────
+- name: Deploy Collector Daemon
+  ansible.builtin.copy:
+    src: collector.py
+    dest: "{{ media_gallery_dir }}/collector.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+  notify: Restart Collector
+
+- name: Deploy Login Helper
+  ansible.builtin.copy:
+    src: login.py
+    dest: "{{ media_gallery_dir }}/login.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Deploy Sync Script
+  ansible.builtin.copy:
+    src: sync.sh
+    dest: "{{ media_gallery_dir }}/sync.sh"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+# ─── Env file (secrets from vault) ─────────────────────────────────────────
+- name: Render Collector Env File
+  ansible.builtin.template:
+    src: collector.env.j2
+    dest: "{{ media_gallery_dir }}/collector.env"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0600'
+  no_log: true
+  notify: Restart Collector
+
+# ─── rclone config (crypt over gdrive) ─────────────────────────────────────
+# The OAuth token + crypt passwords come from vault (generated one-time via
+# the authorize flow on the Mac; see README). force:false so a token the
+# daemon refreshes itself isn't clobbered on re-apply.
+- name: Drop rclone Config
+  ansible.builtin.template:
+    src: rclone.conf.j2
+    dest: "/home/{{ media_gallery_user }}/.config/rclone/rclone.conf"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0600'
+    force: false
+  no_log: true
+
+# ─── Detect whether the source client session is already authorized ──────────────
+# The collector unit exits 2 if the .session isn't authorized yet. Gate the
+# enable/start (and the Restart handler) on this so a fresh deploy doesn't
+# crash-loop before the one-time login.py has been run.
+- name: Check for Authorized Session File
+  ansible.builtin.stat:
+    path: "{{ media_gallery_state }}/collector.session"
+  register: session_stat
+
+- name: Set Session Authorized Fact
+  ansible.builtin.set_fact:
+    collector_session_authorized: "{{ session_stat.stat.exists and session_stat.stat.size | default(0) > 0 }}"
+
+# ─── systemd units ─────────────────────────────────────────────────────────
+- name: Render Collector Service Unit
+  ansible.builtin.template:
+    src: collector.service.j2
+    dest: /etc/systemd/system/media-gallery.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Collector
+
+- name: Render Sync Service Unit
+  ansible.builtin.template:
+    src: sync.service.j2
+    dest: /etc/systemd/system/media-gallery-sync.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Sync Timer Unit
+  ansible.builtin.template:
+    src: sync.timer.j2
+    dest: /etc/systemd/system/media-gallery-sync.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Collector (only if session authorized)
+  ansible.builtin.systemd:
+    name: media-gallery.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: collector_session_authorized
+
+- name: Enable Collector Unit (session not yet authorized)
+  ansible.builtin.systemd:
+    name: media-gallery.service
+    enabled: true
+    daemon_reload: true
+  when: not collector_session_authorized
+
+- name: Enable & Start Sync Timer
+  ansible.builtin.systemd:
+    name: media-gallery-sync.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# ─── Web gallery (browser viewer, gated by Authentik at lb-01) ─────────────
+# rclone serve http with a custom thumbnail-grid template. No built-in auth:
+# access is via https://gallery.chi.lab.amd-e.com → lb-01 nginx forward-auth
+# → proxy_pass to this CT at {{ ip_media_gallery }}:{{ media_gallery_gallery_port }}.
+- name: Deploy Gallery HTML Template
+  ansible.builtin.copy:
+    src: gallery.html.tmpl
+    dest: "{{ media_gallery_dir }}/gallery.html.tmpl"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0644'
+  notify: Restart Gallery
+
+- name: Render Gallery Service Unit
+  ansible.builtin.template:
+    src: gallery.service.j2
+    dest: /etc/systemd/system/media-gallery-gallery.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Gallery
+
+- name: Enable & Start Gallery
+  ansible.builtin.systemd:
+    name: media-gallery-gallery.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: One-Time Login Reminder
+  ansible.builtin.debug:
+    msg: >-
+      Session not yet authorized. Run the one-time login on the CT:
+      sudo -u {{ media_gallery_user }} env TG_API_ID=<id> TG_API_HASH=<hash>
+      TG_SESSION={{ media_gallery_state }}/collector TG_PHONE=<phone>
+      {{ media_gallery_dir }}/venv/bin/python {{ media_gallery_dir }}/login.py
+      then: systemctl start media-gallery.service
+  when: not collector_session_authorized

@@ -335,7 +335,78 @@
   when: get_vm_app.status == 404
 
 # -------------------------------------------------------------------------
-# Bind both proxy providers to the embedded outpost. PATCH replaces the
+# TG Gallery — Forward Auth Provider
+# Gates the upstream source collector photo gallery (rclone serve http on the
+# collector CT, 172.16.0.51:8089) behind Authentik SSO. The gallery has no
+# built-in auth; lb-01 enforces the gate via forward-auth. Replaces the old
+# WebDAV + basic-auth setup. Reuses the same authz/invalidation flows as the
+# VictoriaMetrics provider above.
+# -------------------------------------------------------------------------
+
+- name: Get TG Gallery Proxy Providers
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/proxy/?search={{ 'TG Gallery' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: gallery_providers_found
+
+- name: Create TG Gallery Proxy Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/proxy/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "TG Gallery Provider"
+      mode: "forward_single"
+      external_host: "https://gallery.chi.lab.amd-e.com"
+      internal_host: "http://172.16.0.51:8089"
+      internal_host_ssl_validation: false
+      intercept_header_auth: true
+      authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
+      invalidation_flow: "{{ grafana_invalidation_pk }}"
+    status_code: [200, 201]
+  when: gallery_providers_found.json.results | length == 0
+  register: new_gallery_provider
+
+- name: Capture TG Gallery Provider ID (just-created)
+  ansible.builtin.set_fact:
+    gallery_provider_id: "{{ new_gallery_provider.json.pk }}"
+  when:
+    - new_gallery_provider.json is defined
+    - new_gallery_provider.json.pk is defined
+
+- name: Capture TG Gallery Provider ID (already-exists)
+  ansible.builtin.set_fact:
+    gallery_provider_id: "{{ gallery_providers_found.json.results[0].pk }}"
+  when:
+    - gallery_providers_found.json.results | length > 0
+    - gallery_provider_id is not defined
+
+- name: Get TG Gallery Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/tg-gallery/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: get_gallery_app
+
+- name: Create TG Gallery Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "TG Gallery"
+      slug: "tg-gallery"
+      provider: "{{ gallery_provider_id }}"
+      meta_launch_url: "https://gallery.chi.lab.amd-e.com"
+    status_code: [200, 201]
+  when: get_gallery_app.status == 404
+
+# -------------------------------------------------------------------------
+# Bind all proxy providers to the embedded outpost. PATCH replaces the
 # entire `providers` list, so we always send the union (existing + ours)
 # rather than just appending. Sorted to keep the diff stable across runs.
 # -------------------------------------------------------------------------
@@ -349,9 +420,9 @@
 
 - name: Compute desired provider list for the embedded outpost
   ansible.builtin.set_fact:
-    desired_outpost_providers: "{{ ((embedded_outpost.json.results[0].providers | default([])) + [vm_provider_id | int]) | unique | sort }}"
+    desired_outpost_providers: "{{ ((embedded_outpost.json.results[0].providers | default([])) + [vm_provider_id | int, gallery_provider_id | int]) | unique | sort }}"
 
-- name: Bind VictoriaMetrics provider to the embedded outpost
+- name: Bind proxy providers to the embedded outpost
   ansible.builtin.uri:
     url: "{{ authentik_url }}/api/v3/outposts/instances/{{ embedded_outpost.json.results[0].pk }}/"
     method: PATCH
@@ -360,4 +431,4 @@
     body:
       providers: "{{ desired_outpost_providers }}"
     status_code: [200]
-  when: vm_provider_id | int not in (embedded_outpost.json.results[0].providers | default([]))
+  when: desired_outpost_providers != ((embedded_outpost.json.results[0].providers | default([])) | unique | sort)

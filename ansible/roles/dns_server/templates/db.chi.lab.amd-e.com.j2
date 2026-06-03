@@ -45,6 +45,7 @@ whoami  IN      A       {{ ip_loadbalancer }}
 ; Observability (front by lb-01 — internal-only ACL in nginx)
 grafana         IN      A       {{ ip_loadbalancer }}
 victoriametrics IN      A       {{ ip_loadbalancer }}
+gallery         IN      A       {{ ip_loadbalancer }} ; TG collector gallery (Authentik-gated)
 
 ; Wildcard (Optional - helps with subdomains)
 ; Wildcard (Optional - helps with subdomains)

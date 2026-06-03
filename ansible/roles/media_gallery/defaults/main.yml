@@ -1,0 +1,20 @@
+---
+# Service account + install layout for the upstream source media collector.
+media_gallery_user: mediaingest
+media_gallery_dir: /opt/media-gallery        # code + venv
+media_gallery_state: /var/lib/media-gallery  # session, captures (ReadWrite)
+media_gallery_log_dir: /var/log/media-gallery
+
+# Storage / sync.
+# gcrypt: = the rclone crypt remote (client-side encryption) wrapping
+# gdrive:media-gallery. Configured one-time via the authorize flow; see README.
+media_gallery_rclone_remote: "gcrypt:"
+media_gallery_cache_days: 7          # keep this many days of captures locally
+media_gallery_sync_interval: "15min" # how often to encrypt+upload+prune
+
+# Pin source; bump deliberately.
+media_gallery_telethon_version: "1.43.2"
+
+# Web gallery: rclone serve http port (bound on ip_media_gallery, fronted by
+# lb-01 nginx + Authentik forward-auth at https://gallery.chi.lab.amd-e.com).
+media_gallery_gallery_port: 8089
