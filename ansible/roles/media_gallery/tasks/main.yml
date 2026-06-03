@@ -92,6 +92,49 @@
     - "/home/{{ media_gallery_user }}/.config"
     - "/home/{{ media_gallery_user }}/.config/rclone"
 
+# ─── Hardening: tmpfs for decrypted-media caches ───────────────────────────
+# thumbcache + captures hold DECRYPTED media. Back them with tmpfs so nothing
+# viewable ever persists to disk — a stolen disk / Proxmox backup / snapshot
+# contains only the encrypted Drive cache, not plaintext images. (Cannot defend
+# against a live root shell — that's irreducible for an auto-decrypting service
+# without a TPM — but this closes the offline-disk and backup-leak vectors.)
+# Unit filenames are systemd-escaped paths.
+- name: Compute systemd-escaped mount unit names
+  ansible.builtin.command: "systemd-escape -p --suffix=mount {{ item }}"
+  register: tg_mount_units
+  changed_when: false
+  loop:
+    - "{{ media_gallery_state }}/thumbcache"
+    - "{{ media_gallery_state }}/captures"
+
+- name: Render thumbcache tmpfs mount unit
+  ansible.builtin.template:
+    src: thumbcache.mount.j2
+    dest: "/etc/systemd/system/{{ tg_mount_units.results[0].stdout }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render captures tmpfs mount unit
+  ansible.builtin.template:
+    src: captures.mount.j2
+    dest: "/etc/systemd/system/{{ tg_mount_units.results[1].stdout }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start tmpfs mounts (decrypted media RAM-only)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - "{{ tg_mount_units.results[0].stdout }}"
+    - "{{ tg_mount_units.results[1].stdout }}"
+
 # ─── Python venv + source ────────────────────────────────────────────────
 - name: Create Collector Virtualenv
   ansible.builtin.command: python3 -m venv {{ media_gallery_dir }}/venv
