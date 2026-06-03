@@ -116,7 +116,7 @@ def _trigger_manifest_rebuild():
     env.setdefault("TG_RCLONE_REMOTE", REMOTE)
     try:
         subprocess.Popen(
-            [py, os.path.join(here, "build_manifest.py"), "--fast"],
+            [py, os.path.join(here, "build_manifest.py")],
             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception:  # noqa: BLE001

@@ -114,14 +114,14 @@ async def main():
     log(f"PURGED {deleted} outgoing items; excluded ledger now {len(ex)}.")
 
     # Rebuild the manifest immediately so the gallery never lists items we just
-    # deleted (closes the stale-manifest -> click-404 gap). --fast reuses the
-    # cached date map (purge only removes items; dates don't change).
-    log("Rebuilding manifest (--fast)...")
+    # deleted (closes the stale-manifest -> click-404 gap). Incremental mode
+    # does zero upstream source work here (purge only removes items already in cache).
+    log("Rebuilding manifest...")
     here = os.path.dirname(os.path.abspath(__file__))
     py = os.path.join(here, "venv", "bin", "python")
     if not os.path.exists(py):
         py = sys.executable
-    subprocess.run([py, os.path.join(here, "build_manifest.py"), "--fast"], check=False)
+    subprocess.run([py, os.path.join(here, "build_manifest.py")], check=False)
     log("Manifest rebuilt. Gallery is consistent.")
 
 
