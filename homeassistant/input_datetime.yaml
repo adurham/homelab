@@ -15,3 +15,9 @@ exhaust_fan_last_started:
   has_date: true
   has_time: true
   icon: mdi:fan
+
+pool_pump_off_time:
+  name: "Pool Pump Off Time"
+  has_date: false
+  has_time: true
+  icon: mdi:clock-end
