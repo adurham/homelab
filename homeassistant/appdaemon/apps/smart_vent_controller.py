@@ -229,6 +229,9 @@ WEATHER_ENTITY = "weather.forecast_home"
 HOT_BASE_F = 80.0
 HOT_SPAN_F = 30.0               # +1.0 to the factor per 30°F above HOT_BASE
 HOT_FACTOR_MAX = 2.0
+# Heating mirror: cold outside amplifies the heating supply handicap.
+COLD_BASE_F = 45.0             # below this, the heating handicap starts ramping
+COLD_SPAN_F = 30.0            # +1.0 to the factor per 30°F below COLD_BASE
 
 # Optional manual escape hatch: only used if you ever need to pin a specific
 # room's margin and override the measured value. Normally empty.
@@ -373,9 +376,11 @@ class SmartVentController(hass.Hass):
 
         # Refresh measured per-room supply penalties whenever air is moving;
         # duct temps are only meaningful with airflow. These drive each room's
-        # activation margin (handicapped rooms react earlier) automatically.
-        if hvac_action in ("cooling", "heating", "fan"):
-            self._update_supply_penalties()
+        # activation margin (handicapped rooms react earlier) automatically. The
+        # handicap is mode-correct: warmest-supply-wins when heating, coldest
+        # when cooling. (Skip on "fan" — no conditioned air, so no real penalty.)
+        if hvac_action in ("cooling", "heating"):
+            self._update_supply_penalties(heating=(hvac_action == "heating"))
 
         # Calculate desired positions.
         # room_positions: {(zone_name, room_name): position}
@@ -402,21 +407,21 @@ class SmartVentController(hass.Hass):
                 hvac_mode, hvac_action, target_cool, target_heat
             )
 
-        # Concentrate airflow toward struggling priority rooms (e.g. GB1) by
-        # throttling already-comfortable rooms. Runs in Auto and the Cool Upstairs/
-        # Cool Downstairs presets; a no-op unless a priority room is occupied,
-        # cooling, and above its activation margin. Must run BEFORE backpressure
-        # so backpressure remains the final safety net.
+        # Concentrate airflow toward any struggling room by throttling already-
+        # comfortable rooms. Symmetric: helps hot rooms when cooling, cold rooms
+        # when heating. Must run BEFORE backpressure so backpressure remains the
+        # final safety net.
         room_positions = self._apply_priority_rooms(
-            room_positions, hvac_action, target_cool
+            room_positions, hvac_action, target_cool, target_heat
         )
 
-        # Fan-assist redistribution: when the AC is idle but a priority room is
-        # still hot and cold air is banked elsewhere, run the blower and shove
-        # that banked cold air into the priority room. Manages the fan mode and
-        # may rewrite room_positions. Runs before backpressure.
+        # Fan-assist redistribution: when the system is idle but a room is still
+        # off-target and oppositely-conditioned air is banked elsewhere, run the
+        # blower and shove that banked air where it's needed (cold air to a hot
+        # room when cooling; warm air to a cold room when heating). Manages the
+        # fan mode and may rewrite room_positions. Runs before backpressure.
         room_positions = self._apply_fan_assist(
-            room_positions, mode, hvac_action, target_cool
+            room_positions, mode, hvac_action, target_cool, target_heat
         )
 
         # Apply backpressure protection
@@ -557,20 +562,25 @@ class SmartVentController(hass.Hass):
         return re.sub(r"_vent(_\d+)?$",
                       lambda m: "_duct_temperature" + (m.group(1) or ""), s)
 
-    def _update_supply_penalties(self):
+    def _update_supply_penalties(self, heating=False):
         """Measure each room's supply-air penalty from the duct sensors and fold
-        it into the smoothed EMA. Only meaningful when air is actually moving
-        (cooling/fan), otherwise duct temps drift to ambient and mean nothing.
+        it into the smoothed EMA. Only meaningful when air is actually moving;
+        otherwise duct temps drift to ambient and mean nothing.
 
-        Penalty = room's best (coldest) duct reading minus the coldest duct in
-        the whole house. A handicapped room (warm supply) reads a large penalty.
+        The handicap INVERTS by mode (validated against May 7 heating data:
+        Main Bathroom had the WARMEST duct while cooling but the COLDEST duct
+        while heating — it's the worst-served room either way):
+          - cooling: best supply is the COLDEST duct; penalty = duct - house_min
+          - heating: best supply is the HOTTEST duct; penalty = house_max - duct
+        A large penalty == this room gets the least-effective supply air for the
+        current mode, so it should react earlier.
         """
         room_duct = {}
         for zone_name, zone in ZONES.items():
             for room_name, sensors in zone["rooms"].items():
                 vals = []
                 for v in sensors.get("vents", []):
-                    # A throttled/closed vent reads a warm duct simply because
+                    # A throttled/closed vent reads a stale duct simply because
                     # air isn't flowing past the sensor — that's not a delivery
                     # handicap. Only sample ducts whose vent is open enough for
                     # the reading to reflect real supply-air temperature.
@@ -584,15 +594,22 @@ class SmartVentController(hass.Hass):
                     if dt is not None:
                         vals.append(dt)
                 if vals:
-                    # A room's effective supply is the coldest air it can get.
-                    room_duct[(zone_name, room_name)] = min(vals)
+                    # A room's effective supply is its most-useful duct for the
+                    # mode: hottest when heating, coldest when cooling.
+                    room_duct[(zone_name, room_name)] = (
+                        max(vals) if heating else min(vals))
 
         if len(room_duct) < 2:
             return  # not enough data to compare
 
-        house_best = min(room_duct.values())
+        if heating:
+            house_best = max(room_duct.values())   # hottest supply available
+        else:
+            house_best = min(room_duct.values())   # coldest supply available
+
         for key, duct in room_duct.items():
-            penalty = max(0.0, duct - house_best)
+            penalty = (house_best - duct) if heating else (duct - house_best)
+            penalty = max(0.0, penalty)
             if penalty < PRIORITY_PENALTY_MIN_SAMPLE:
                 penalty = 0.0
             prev = self._supply_penalty.get(key)
@@ -604,11 +621,12 @@ class SmartVentController(hass.Hass):
                     + (1 - PRIORITY_PENALTY_EMA) * prev
                 )
 
-    def _hot_factor(self):
-        """Amplify supply penalties when it's hot outside (handicap matters more).
+    def _weather_factor(self, heating=False):
+        """Amplify supply penalties when outdoor temp makes the handicap bite.
 
-        Returns 1.0 at/below HOT_BASE_F, ramping to HOT_FACTOR_MAX as outdoor
-        temp climbs. Falls back to 1.0 if the weather entity is unavailable.
+        Cooling: hotter outside -> handicap matters more (ramps above HOT_BASE_F).
+        Heating: colder outside -> handicap matters more (ramps below COLD_BASE_F).
+        Returns 1.0 in the mild band or if the weather entity is unavailable.
         """
         outdoor = None
         w = self.get_state(WEATHER_ENTITY, attribute="temperature")
@@ -617,48 +635,71 @@ class SmartVentController(hass.Hass):
                 outdoor = float(w)
             except (TypeError, ValueError):
                 outdoor = None
-        if outdoor is None or outdoor <= HOT_BASE_F:
+        if outdoor is None:
+            return 1.0
+        if heating:
+            if outdoor >= COLD_BASE_F:
+                return 1.0
+            factor = 1.0 + (COLD_BASE_F - outdoor) / COLD_SPAN_F
+            return min(factor, HOT_FACTOR_MAX)
+        if outdoor <= HOT_BASE_F:
             return 1.0
         factor = 1.0 + (outdoor - HOT_BASE_F) / HOT_SPAN_F
         return min(factor, HOT_FACTOR_MAX)
 
-    def _room_margin(self, key):
-        """Activation margin (°F over cool setpoint) for a room.
+    def _room_margin(self, key, heating=False):
+        """Activation margin (°F past the active setpoint) for a room.
 
-        Derived from the room's measured supply-air penalty, amplified by how
-        hot it is outside. A handicapped/sun-loaded room gets a lower (earlier-
-        engaging) margin automatically. A manual override, if present, wins.
+        Derived from the room's measured supply-air penalty (which is already
+        mode-correct from _update_supply_penalties), amplified by how extreme it
+        is outside. A handicapped room gets a lower (earlier-engaging) margin
+        automatically, in BOTH heating and cooling. Override, if present, wins.
         """
         if key in PRIORITY_MARGIN_OVERRIDES:
             return PRIORITY_MARGIN_OVERRIDES[key]
         penalty = self._supply_penalty.get(key, 0.0)
         margin = (PRIORITY_MARGIN_BASE
-                  - PRIORITY_PENALTY_GAIN * penalty * self._hot_factor())
+                  - PRIORITY_PENALTY_GAIN * penalty * self._weather_factor(heating))
         return max(PRIORITY_MARGIN_MIN, min(PRIORITY_MARGIN_BASE, margin))
 
-    def _apply_priority_rooms(self, room_positions, hvac_action, target_cool):
-        """Redirect CFM toward ANY struggling room by throttling cooler rooms.
+    def _apply_priority_rooms(self, room_positions, hvac_action,
+                              target_cool, target_heat=None):
+        """Redirect CFM toward ANY struggling room by throttling rooms that are
+        already comfortable. Symmetric across heating and cooling.
 
         Generalized over the whole house: every occupied room is eligible to be
-        a beneficiary when it's the one running hot. When several rooms are above
-        the cool setpoint they all sit at 100% and none gets a larger *share* of
-        the blower output — the only lever that moves more CFM to a hot room is
-        throttling OTHER, cooler rooms. This pass does that, worst-room-first.
+        a beneficiary when it's the one falling behind the active setpoint. When
+        several rooms are off-target they all sit at 100% and none gets a larger
+        *share* of supply air — the only lever that moves more CFM to a needy
+        room is throttling OTHER, satisfied rooms. Worst-room-first.
 
-        A beneficiary is never also a donor (we don't steal from a room that's
-        itself struggling). If the whole house is uniformly hot there are no
-        eligible donors and this is a no-op. Mutates and returns room_positions.
+        Cooling: beneficiary = above cool setpoint; donor = cooler than it.
+        Heating: beneficiary = below heat setpoint; donor = warmer than it.
+
+        A beneficiary is never also a donor. If the whole house is uniformly off
+        there are no eligible donors and this is a no-op. Mutates and returns
+        room_positions.
         """
-        # Only meaningful while actively cooling with a known cool setpoint.
-        if hvac_action != "cooling" or target_cool is None:
+        if hvac_action == "cooling" and target_cool is not None:
+            heating = False
+            setpoint = target_cool
+        elif hvac_action == "heating" and target_heat is not None:
+            heating = True
+            setpoint = target_heat
+        else:
             return room_positions
+
+        # "off" = how far past the setpoint in the unhelpful direction (always
+        # positive when the room needs help). Cooling: temp - setpoint (too hot).
+        # Heating: setpoint - temp (too cold).
+        def off_by(t):
+            return (setpoint - t) if heating else (t - setpoint)
 
         precool = self.datetime().hour in PRECOOL_HOURS
 
-        # Build the beneficiary list: every occupied room over its (possibly
-        # pre-cool-lowered) activation margin. Sort worst-first so the hottest
-        # room gets first pick of the limited donor pool.
-        beneficiaries = []  # (over, key, temp, escalated)
+        # Build the beneficiary list: every occupied room past its (possibly
+        # pre-conditioning-lowered) activation margin. Worst-first.
+        beneficiaries = []  # (off, key, temp, escalated)
         for zone_name, zone in ZONES.items():
             for room_name, sensors in zone["rooms"].items():
                 key = (zone_name, room_name)
@@ -668,23 +709,23 @@ class SmartVentController(hass.Hass):
                 occ_entity = sensors.get("occupancy")
                 if occ_entity and self.get_state(occ_entity) != "on":
                     continue  # only help occupied rooms
-                margin = self._room_margin(key)
+                margin = self._room_margin(key, heating)
                 eff_margin = (PRECOOL_MARGIN
                               if (precool and PRECOOL_MARGIN < margin)
                               else margin)
-                over = temp - target_cool
-                if over <= eff_margin:
+                off = off_by(temp)
+                if off <= eff_margin:
                     continue
-                escalated = over >= PRIORITY_ESCALATE_OVER
-                beneficiaries.append((over, key, temp, escalated))
+                escalated = off >= PRIORITY_ESCALATE_OVER
+                beneficiaries.append((off, key, temp, escalated))
 
         if not beneficiaries:
             return room_positions
 
-        beneficiaries.sort(reverse=True)  # largest overshoot first
+        beneficiaries.sort(reverse=True)  # largest deviation first
         beneficiary_keys = {b[1] for b in beneficiaries}
 
-        for over, key, temp, escalated in beneficiaries:
+        for off, key, temp, escalated in beneficiaries:
             zone_name, room_name = key
             donor_pos = (PRIORITY_DONOR_POS_ESCALATED if escalated
                          else PRIORITY_DONOR_POS)
@@ -692,9 +733,9 @@ class SmartVentController(hass.Hass):
             # Pin the beneficiary fully open.
             room_positions[key] = 100
 
-            # Donors: rooms at least PRIORITY_DONOR_COOLER_BY °F cooler than this
-            # beneficiary, that are NOT themselves beneficiaries, and aren't
-            # already at/below the chosen throttle position.
+            # Donors: rooms at least PRIORITY_DONOR_COOLER_BY °F more comfortable
+            # (cooling: cooler; heating: warmer) than this beneficiary, that are
+            # NOT themselves beneficiaries, and aren't already throttled.
             donors = []
             for (zn, rn), pos in room_positions.items():
                 if (zn, rn) == key or (zn, rn) in beneficiary_keys:
@@ -703,16 +744,22 @@ class SmartVentController(hass.Hass):
                 dtemp = self._read_temp(droom["temp"])
                 if dtemp is None:
                     continue
-                if dtemp > temp - PRIORITY_DONOR_COOLER_BY:
-                    continue  # not enough margin below the beneficiary
+                # Donor must have real margin in the helpful direction.
+                if heating:
+                    if dtemp < temp + PRIORITY_DONOR_COOLER_BY:
+                        continue  # not enough warmer than the cold beneficiary
+                else:
+                    if dtemp > temp - PRIORITY_DONOR_COOLER_BY:
+                        continue  # not enough cooler than the hot beneficiary
                 if pos <= donor_pos:
                     continue  # already at/below the chosen throttle position
                 docc = droom.get("occupancy")
                 doccupied = self.get_state(docc) == "on" if docc else False
                 donors.append(((zn, rn), doccupied, dtemp))
 
-            # Unoccupied first, then coolest first.
-            donors.sort(key=lambda x: (x[1], x[2]))
+            # Unoccupied first; then the most-comfortable donor gives up air most
+            # safely (coolest when cooling, warmest when heating).
+            donors.sort(key=lambda x: (x[1], -x[2] if heating else x[2]))
             throttled = 0
             for dkey, docc, dtemp in donors:
                 if throttled >= PRIORITY_MAX_DONORS:
@@ -723,18 +770,19 @@ class SmartVentController(hass.Hass):
                          f"{dkey[0]}/{dkey[1]} ({dtemp:.1f}F, "
                          f"{'occ' if docc else 'empty'}) -> {donor_pos}%")
 
-            tag = []
+            mode_tag = "heat" if heating else "cool"
+            tag = [mode_tag]
             if escalated:
                 tag.append("ESCALATED")
-            if precool and self._room_margin(key) > PRECOOL_MARGIN:
-                tag.append("precool")
-            tagstr = f" [{','.join(tag)}]" if tag else ""
+            if precool and self._room_margin(key, heating) > PRECOOL_MARGIN:
+                tag.append("pre" + mode_tag)
+            tagstr = f" [{','.join(tag)}]"
 
             if throttled == 0:
-                self.log(f"  Priority {room_name} ({temp:.1f}F, +{over:.1f})"
-                         f"{tagstr} struggling but no cooler donor rooms")
+                self.log(f"  Priority {room_name} ({temp:.1f}F, off{off:+.1f})"
+                         f"{tagstr} struggling but no donor rooms")
             else:
-                self.log(f"  Priority {room_name} ({temp:.1f}F, +{over:.1f})"
+                self.log(f"  Priority {room_name} ({temp:.1f}F, off{off:+.1f})"
                          f"{tagstr}: pinned 100%, redirected flow from "
                          f"{throttled} room(s) -> {donor_pos}%")
 
@@ -742,31 +790,51 @@ class SmartVentController(hass.Hass):
 
     # ── Fan-assist redistribution ─────────────────────────────────────────────
 
-    def _apply_fan_assist(self, room_positions, mode, hvac_action, target_cool):
-        """Force-circulate banked cold air to ANY hot room when the AC is idle.
+    def _apply_fan_assist(self, room_positions, mode, hvac_action,
+                          target_cool, target_heat=None):
+        """Force-circulate banked conditioned air to ANY off-target room when the
+        system is idle. Symmetric across heating and cooling.
 
         The single hallway thermostat goes idle on house AVERAGE, leaving an
-        individual room hot while cold air sits banked in the basement/bathrooms.
-        This runs the air handler fan (no compressor, no cooling cost), opens the
-        hot room(s), and chokes the cold rooms so their banked cold air gets
-        pushed to where it's needed. Releases the fan to auto when no longer
-        needed. Applies house-wide, worst-room-first.
+        individual room off-target while oppositely-conditioned air sits banked
+        elsewhere (cold air in the basement after AC; warm air in a sunny room
+        after heat). This runs the air handler fan (no compressor, no conditioning
+        cost), opens the needy room(s), and chokes the banked rooms so their air
+        is pushed where it's needed. Releases the fan to auto when no longer
+        needed. House-wide, worst-room-first.
 
-        Only acts in Auto mode (the presets manage the fan themselves). Mutates
-        and returns room_positions; sets fan_mode as a side effect.
+        Cooling season: push banked COLD air to a hot room.
+        Heating season: push banked WARM air to a cold room.
+
+        Decides direction from the thermostat's recent action / mode. Only acts
+        in Auto. Mutates and returns room_positions; sets fan_mode as a side
+        effect.
         """
-        if mode != "Auto" or target_cool is None:
+        if mode != "Auto":
             self._release_fan_assist()
             return room_positions
 
-        # Fan-assist is for when we are NOT actively cooling. If the compressor
-        # is running, the cooling-path priority pass already handles it.
-        if hvac_action == "cooling":
+        # Fan-assist is for when the system is NOT actively conditioning. If the
+        # compressor/burner is running, the priority pass already handles it.
+        if hvac_action in ("cooling", "heating"):
             self._release_fan_assist()
             return room_positions
 
-        # Beneficiaries: occupied rooms hot enough to warrant circulation.
-        beneficiaries = []  # (over, key, temp)
+        # Decide which way to redistribute. Prefer whichever setpoint the house
+        # is currently violating; in dual-setpoint (heat_cool) idle this picks
+        # the real problem. Heating takes precedence only if a room is actually
+        # below the heat setpoint and none is above the cool setpoint.
+        heating = self._fan_assist_direction(target_cool, target_heat)
+        if heating is None:
+            self._release_fan_assist()
+            return room_positions
+        setpoint = target_heat if heating else target_cool
+
+        def off_by(t):
+            return (setpoint - t) if heating else (t - setpoint)
+
+        # Beneficiaries: occupied rooms far enough off-target to warrant it.
+        beneficiaries = []  # (off, key, temp)
         for zone_name, zone in ZONES.items():
             for room_name, sensors in zone["rooms"].items():
                 key = (zone_name, room_name)
@@ -776,19 +844,18 @@ class SmartVentController(hass.Hass):
                 occ_entity = sensors.get("occupancy")
                 if occ_entity and self.get_state(occ_entity) != "on":
                     continue
-                over = temp - target_cool
-                if over < FAN_ASSIST_OVER:
+                if off_by(temp) < FAN_ASSIST_OVER:
                     continue
-                beneficiaries.append((over, key, temp))
+                beneficiaries.append((off_by(temp), key, temp))
 
-        beneficiaries.sort(reverse=True)  # hottest first
+        beneficiaries.sort(reverse=True)  # worst-off first
         beneficiary_keys = {b[1] for b in beneficiaries}
 
         engaged_any = False
-        for over, key, temp in beneficiaries:
+        for off, key, temp in beneficiaries:
             zone_name, room_name = key
-            # Is there actually banked cold air to move? Find donor rooms clearly
-            # cooler than this room and NOT themselves beneficiaries.
+            # Is there banked oppositely-conditioned air to move? Donors clearly
+            # more comfortable than this room and NOT themselves beneficiaries.
             donors = []
             for zn, z in ZONES.items():
                 for rn in z["rooms"]:
@@ -798,20 +865,26 @@ class SmartVentController(hass.Hass):
                     dtemp = self._read_temp(droom["temp"])
                     if dtemp is None:
                         continue
-                    if dtemp <= temp - FAN_ASSIST_DONOR_COOLER_BY:
+                    if heating:
+                        useful = dtemp >= temp + FAN_ASSIST_DONOR_COOLER_BY
+                    else:
+                        useful = dtemp <= temp - FAN_ASSIST_DONOR_COOLER_BY
+                    if useful:
                         docc = droom.get("occupancy")
                         doccupied = (self.get_state(docc) == "on"
                                      if docc else False)
                         donors.append(((zn, rn), doccupied, dtemp))
 
             if not donors:
-                continue  # no banked cold air -> running the fan would do nothing
+                continue  # nothing banked to move -> running the fan is pointless
 
-            # Engage: fan on, hot room wide open, choke the cold donors so their
-            # air is redirected to where it's needed.
+            # Engage: fan on, needy room wide open, choke the banked rooms so
+            # their air is redirected to where it's needed.
             engaged_any = True
             room_positions[key] = 100
-            donors.sort(key=lambda x: (x[1], x[2]))  # unoccupied, coolest first
+            # unoccupied first; then most-comfortable donor (warmest when
+            # heating, coolest when cooling) gives up air most safely.
+            donors.sort(key=lambda x: (x[1], -x[2] if heating else x[2]))
             throttled = 0
             for dkey, docc, dtemp in donors:
                 if throttled >= PRIORITY_MAX_DONORS:
@@ -819,9 +892,10 @@ class SmartVentController(hass.Hass):
                 room_positions[dkey] = 0
                 throttled += 1
 
-            self.log(f"  FAN-ASSIST {room_name} ({temp:.1f}F, "
-                     f"+{temp - target_cool:.1f} over, hvac={hvac_action}): "
-                     f"blower ON, redirecting banked cold air from "
+            kind = "warm" if heating else "cold"
+            self.log(f"  FAN-ASSIST {room_name} ({temp:.1f}F, off{off:+.1f}, "
+                     f"{'heat' if heating else 'cool'}, hvac={hvac_action}): "
+                     f"blower ON, redirecting banked {kind} air from "
                      f"{throttled} room(s)")
 
         if engaged_any:
@@ -830,6 +904,33 @@ class SmartVentController(hass.Hass):
             self._release_fan_assist()
 
         return room_positions
+
+    def _fan_assist_direction(self, target_cool, target_heat):
+        """Decide fan-assist redistribution direction from current room temps.
+
+        Returns True (heat: move warm air to cold rooms), False (cool: move cold
+        air to hot rooms), or None (nothing to do). Looks at which setpoint
+        OCCUPIED rooms are actually violating; if both, the larger violation
+        wins. This keeps a single hallway thermostat's idle state from leaving a
+        room stranded on either side of the deadband.
+        """
+        worst_hot = 0.0   # most over the cool setpoint
+        worst_cold = 0.0  # most under the heat setpoint
+        for zone_name, zone in ZONES.items():
+            for room_name, sensors in zone["rooms"].items():
+                occ = sensors.get("occupancy")
+                if occ and self.get_state(occ) != "on":
+                    continue
+                t = self._read_temp(sensors["temp"])
+                if t is None:
+                    continue
+                if target_cool is not None:
+                    worst_hot = max(worst_hot, t - target_cool)
+                if target_heat is not None:
+                    worst_cold = max(worst_cold, target_heat - t)
+        if worst_hot < FAN_ASSIST_OVER and worst_cold < FAN_ASSIST_OVER:
+            return None
+        return worst_cold > worst_hot
 
     def _engage_fan_assist(self):
         """Turn the air handler fan to 'on', tracking that WE did it."""
