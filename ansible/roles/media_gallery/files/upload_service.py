@@ -46,13 +46,49 @@ EXCLUDE_FILE = Path(os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/ex
 MAX_BYTES = int(os.environ.get("UPLOAD_MAX_MB", "200")) * 1024 * 1024
 STAGING_ROOT = Path(os.environ.get("UPLOAD_STAGING", "/var/lib/media-gallery/upload_staging"))
 DEBOUNCE = int(os.environ.get("REBUILD_DEBOUNCE_SEC", "20"))
-# Machine-ingest API key. Browser uploads come through lb-01/Authentik (no key);
-# the upstream source collector (media-ingest-01) authenticates with this key on the X-Ingest-Key
-# header so it can push WITHOUT a human Authentik session. Empty = key auth
-# disabled (browser-only). Set via env from vault.
-INGEST_KEY = os.environ.get("INGEST_API_KEY", "").strip()
+# ─── Machine ingest auth: OAuth2 (Authentik) Bearer JWT ────────────────────
+# The upstream source collector authenticates as a real Authentik OAuth2 app
+# (client_credentials grant). It presents Authorization: Bearer <RS256 JWT>;
+# we validate signature against Authentik's JWKS + issuer + audience + expiry.
+# Browser uploads come through lb-01/Authentik (SSO) and need no token.
+# INGEST_JWKS_URL / INGEST_ISSUER / INGEST_AUDIENCE configure validation.
+INGEST_JWKS_URL = os.environ.get("INGEST_JWKS_URL", "").strip()
+INGEST_ISSUER = os.environ.get("INGEST_ISSUER", "").strip()
+INGEST_AUDIENCE = os.environ.get("INGEST_AUDIENCE", "").strip()
 SRC = REMOTE + "by-chat"
 CHUNK = 1024 * 1024  # 1 MiB streaming chunks
+
+# JWKS client (cached; refreshes keys automatically on unknown kid)
+_jwk_client = None
+
+
+def _get_jwk_client():
+    global _jwk_client
+    if _jwk_client is None and INGEST_JWKS_URL:
+        import jwt
+        _jwk_client = jwt.PyJWKClient(INGEST_JWKS_URL, cache_keys=True, lifespan=3600)
+    return _jwk_client
+
+
+def validate_bearer(auth_header: str) -> bool:
+    """Validate an 'Authorization: Bearer <jwt>' header against Authentik's
+    JWKS. Returns True only on a fully valid token (sig + iss + aud + exp)."""
+    if not (INGEST_JWKS_URL and auth_header.startswith("Bearer ")):
+        return False
+    token = auth_header[len("Bearer "):].strip()
+    try:
+        import jwt
+        client = _get_jwk_client()
+        signing_key = client.get_signing_key_from_jwt(token)
+        jwt.decode(
+            token, signing_key.key, algorithms=["RS256"],
+            audience=INGEST_AUDIENCE or None,
+            issuer=INGEST_ISSUER or None,
+            options={"require": ["exp", "iss"]},
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp", ".gif"}
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
@@ -147,18 +183,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _key_ok(self) -> bool:
-        """True if the request carries the valid machine-ingest key. Browser
-        requests won't have it (and don't need it — they're gated by Authentik
-        at lb-01); the collector uses it for headless push."""
-        if not INGEST_KEY:
-            return False
-        sent = self.headers.get("X-Ingest-Key", "")
-        # constant-time compare
-        import hmac
-        return hmac.compare_digest(sent, INGEST_KEY)
+        """True if the request carries a valid Authentik-issued Bearer JWT
+        (the collector's OAuth2 client_credentials token). Browser requests won't
+        have it (and don't need it — gated by Authentik SSO at lb-01)."""
+        return validate_bearer(self.headers.get("Authorization", ""))
 
     def do_GET(self):
         p = unquote(self.path)
+        # /ingest/* GETs (collector reads, e.g. /excluded) require a valid Bearer
+        # JWT — the exclusion ledger is sensitive (message IDs). Browser GETs
+        # don't hit this service (rclone serves them, gated by Authentik).
+        if p.startswith("/ingest/"):
+            if not self._key_ok():
+                return self._json(401, {"error": "unauthorized"})
+            p = p[len("/ingest"):]
         if p == "/status":
             return self._json(200, {
                 "pending_rebuild": _dirty.is_set(),
@@ -177,6 +215,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = unquote(self.path)
+        # /ingest/* is the collector path (routed by lb-01 WITHOUT Authentik SSO;
+        # this service validates the Bearer JWT itself). Strip the prefix so
+        # /ingest/upload/X == /upload/X. The metadata override still requires a
+        # valid token via _key_ok(), so the prefix alone grants nothing.
+        if p.startswith("/ingest/"):
+            # collector-only path: require a valid Bearer JWT for ALL operations
+            # (not just metadata override). Browser uploads use /upload directly
+            # behind Authentik SSO; /ingest is exclusively the keyed collector.
+            if not self._key_ok():
+                return self._json(401, {"error": "unauthorized"})
+            p = p[len("/ingest"):]
         if p.startswith("/mkdir/"):
             return self._mkdir(p[len("/mkdir/"):])
         if p.startswith("/upload/"):
