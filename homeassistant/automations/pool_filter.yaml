@@ -1,0 +1,112 @@
+# Pool filter - temperature-adaptive daytime schedule for a ~10k gal pool.
+# Pump: Pentair Dynamo 1.5 HP single-speed (P/N 340063). Filter: SAND.
+# Sand filters trap coarser particles than cartridge, so they want MORE water
+# passes for the same clarity -> target a 2-turnover/day floor. As the sand bed
+# loads, head rises and flow drops to ~50-55 GPM real, so one ~10k-gal turnover
+# is ~3.2 hrs -> 2 turnovers ~= 6.4 hrs.
+# Runtime = forecast daily high / 11, clamped 6-9 hrs: floor 6 (~2 turnovers,
+# sand minimum), ceiling 9 (~2.7 turnovers for hot/high-UV days). Spreads
+# across NWI summer: cool ~6, warm ~7, hot ~8, heat wave ~9.
+# NIPSCO Rate 611 is flat $/kWh, so we run in daylight (peak UV) not at night.
+# Fixed 09:00 start; OFF time = 09:00 + computed runtime.
+
+- alias: "Pool Filter Calculate Runtime"
+  id: pool_filter_calculate_runtime
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: time
+      at: "08:45:00"
+    - platform: state
+      entity_id: input_boolean.pool_season
+      to: "on"
+    - platform: homeassistant
+      event: start
+
+  action:
+    - service: weather.get_forecasts
+      target:
+        entity_id: weather.forecast_home
+      data:
+        type: daily
+      response_variable: fc
+    - variables:
+        high: "{{ fc[\"weather.forecast_home\"].forecast[0].temperature | float(80) }}"
+        hours: "{{ [[ (high / 11) | round(0) | int, 6 ] | max, 9 ] | min }}"
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.pool_runtime_hours
+      data:
+        value: "{{ hours }}"
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.pool_pump_off_time
+      data:
+        time: "{{ \"%02d:00:00\" % (9 + hours) }}"
+
+- alias: "Pool Filter Daytime Schedule"
+  id: pool_filter_daytime_schedule
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: time
+      at: "09:00:00"
+      id: pump_on
+    - platform: time
+      at: input_datetime.pool_pump_off_time
+      id: pump_off
+    - platform: state
+      entity_id: input_boolean.pool_season
+      id: resync
+    - platform: homeassistant
+      event: start
+      id: resync
+
+  action:
+    - choose:
+        # Scheduled OFF (end of computed daytime block)
+        - conditions:
+            - condition: trigger
+              id: pump_off
+          sequence:
+            - service: switch.turn_off
+              target:
+                entity_id: switch.shelly1minig3_28372f21c5b8
+
+        # Scheduled ON (09:00) - only during pool season
+        - conditions:
+            - condition: trigger
+              id: pump_on
+            - condition: state
+              entity_id: input_boolean.pool_season
+              state: "on"
+          sequence:
+            - service: switch.turn_on
+              target:
+                entity_id: switch.shelly1minig3_28372f21c5b8
+
+        # Re-sync after season toggle / HA restart: match pump to
+        # (season on AND now inside 09:00 -> off-time window)
+        - conditions:
+            - condition: trigger
+              id: resync
+          sequence:
+            - if:
+                - condition: state
+                  entity_id: input_boolean.pool_season
+                  state: "on"
+                - condition: template
+                  value_template: >
+                    {% set t = now().strftime("%H:%M:%S") %}
+                    {% set off = states("input_datetime.pool_pump_off_time") %}
+                    {{ t >= "09:00:00" and off not in ["unknown","unavailable"] and t < off }}
+              then:
+                - service: switch.turn_on
+                  target:
+                    entity_id: switch.shelly1minig3_28372f21c5b8
+              else:
+                - service: switch.turn_off
+                  target:
+                    entity_id: switch.shelly1minig3_28372f21c5b8

@@ -5,3 +5,11 @@ exhaust_fan_runtime_minutes:
   step: 1
   unit_of_measurement: "min"
   icon: mdi:fan-clock
+
+pool_runtime_hours:
+  name: "Pool Filter Target Runtime"
+  min: 0
+  max: 24
+  step: 1
+  unit_of_measurement: "h"
+  icon: mdi:pool-thermometer
