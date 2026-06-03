@@ -28,8 +28,19 @@ API_HASH = os.environ["TG_API_HASH"]
 SESSION = os.environ.get("TG_SESSION", "/var/lib/media-gallery/galmeta")
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediaingest/.config/rclone/rclone.conf")
+EXCLUDE_FILE = os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/excluded.json")
 SRC = REMOTE + "by-chat"
 GALLERY = REMOTE + "gallery"
+
+
+def load_excluded() -> set:
+    """Stems the user trashed — skip them in the manifest so they don't show."""
+    try:
+        import json as _j
+        with open(EXCLUDE_FILE) as f:
+            return set(_j.load(f))
+    except (OSError, ValueError):
+        return set()
 
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".gif"}
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
@@ -63,12 +74,17 @@ def chat_folder_for(chat_id, name):
 
 
 async def date_map(client):
+    """stem -> {date, out}. 'out' True = message YOU sent (filtered out of the
+    gallery — we only keep media sent TO you)."""
     m = {}
     async for d in client.iter_dialogs():
         try:
             async for msg in client.iter_messages(d.entity, filter=InputMessagesFilterPhotoVideo):
                 if msg.media:
-                    m[f"{d.id}_{msg.id}"] = msg.date.isoformat() if msg.date else None
+                    m[f"{d.id}_{msg.id}"] = {
+                        "date": msg.date.isoformat() if msg.date else None,
+                        "out": bool(getattr(msg, "out", False)),
+                    }
         except Exception as e:  # noqa: BLE001
             log(f"  (skip {d.name!r}: {type(e).__name__})")
     return m
@@ -102,10 +118,21 @@ async def main():
     originals = list_originals()
     log(f"originals: {len(originals)}")
 
+    excluded = load_excluded()
+    log(f"excluded (trashed): {len(excluded)}")
+
     manifest = []
+    skipped_excluded = skipped_outgoing = 0
     for chat, leaf, stem, ext in originals:
         is_video = ext in VIDEO_EXT
         if not (is_video or ext in IMAGE_EXT):
+            continue
+        if stem in excluded:
+            skipped_excluded += 1
+            continue
+        meta = dates.get(stem) or {}
+        if meta.get("out"):  # message YOU sent — keep only received media
+            skipped_outgoing += 1
             continue
         manifest.append({
             "stem": stem,
@@ -113,10 +140,11 @@ async def main():
             "file": f"by-chat/{chat}/{leaf}",
             "thumb": f"thumb/{chat}/{stem}.jpg",  # on-the-fly endpoint
             "type": "video" if is_video else "image",
-            "date": dates.get(stem),
+            "date": meta.get("date"),
         })
     manifest.sort(key=lambda x: (x["date"] or ""), reverse=True)
-    log(f"manifest items: {len(manifest)}")
+    log(f"manifest items: {len(manifest)} (skipped {skipped_excluded} trashed, "
+        f"{skipped_outgoing} outgoing)")
 
     work = Path(tempfile.mkdtemp(prefix="manifest_"))
     mp = work / "manifest.json"

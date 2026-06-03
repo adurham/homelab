@@ -51,6 +51,19 @@ BACKFILL_DIR = SAVE_BASE / "backfill"
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediaingest/.config/rclone/rclone.conf")
 STATE_FILE = os.environ.get("TG_BACKFILL_STATE", SESSION + ".backfill.json")
+EXCLUDE_FILE = os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/excluded.json")
+
+
+def _load_excluded() -> set:
+    try:
+        with open(EXCLUDE_FILE) as f:
+            return set(json.load(f))
+    except (OSError, ValueError):
+        return set()
+
+
+# Stems the user trashed — never re-download them on backfill re-runs.
+EXCLUDED = _load_excluded()
 
 
 def log(*a):
@@ -143,6 +156,13 @@ async def do_run(client, name_filters, batch, sleep_s):
                 min_id=last_done, reverse=True,  # oldest->newest so checkpoint is monotonic
             ):
                 if not msg.media:
+                    continue
+                # only media sent TO us, and not something the user trashed
+                if getattr(msg, "out", False):
+                    max_seen = max(max_seen, msg.id)
+                    continue
+                if f"{d.id}_{msg.id}" in EXCLUDED:
+                    max_seen = max(max_seen, msg.id)
                     continue
                 stem = chat_folder / f"{d.id}_{msg.id}"
                 try:

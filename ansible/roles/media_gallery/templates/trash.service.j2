@@ -1,0 +1,22 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+[Unit]
+Description=media-gallery trash service (delete media + exclusion ledger)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+Environment=RCLONE_CONFIG=/home/{{ media_gallery_user }}/.config/rclone/rclone.conf
+Environment=TG_RCLONE_REMOTE={{ media_gallery_rclone_remote }}
+Environment=TRASH_PORT={{ media_gallery_trash_port }}
+Environment=TRASH_BIND={{ ip_media_gallery }}
+Environment=THUMB_LOCAL_CACHE={{ media_gallery_state }}/thumbcache
+Environment=TG_EXCLUDE_FILE={{ media_gallery_state }}/excluded.json
+ExecStart={{ media_gallery_dir }}/venv/bin/python {{ media_gallery_dir }}/trash_service.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

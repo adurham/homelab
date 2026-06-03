@@ -104,6 +104,9 @@ async def sender_tag(event) -> str:
 
 async def handle(event) -> None:
     msg = event.message
+    # Only capture media sent TO us — skip our own outgoing messages.
+    if getattr(msg, "out", False):
+        return
     media = getattr(msg, "media", None)
     if media is None:
         return
