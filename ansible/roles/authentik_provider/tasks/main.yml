@@ -337,7 +337,7 @@
 # -------------------------------------------------------------------------
 # TG Gallery — Forward Auth Provider
 # Gates the upstream source collector photo gallery (rclone serve http on the
-# collector CT, 172.16.0.51:8089) behind Authentik SSO. The gallery has no
+# collector CT, {{ ip_media_gallery }}:8089) behind Authentik SSO. The gallery has no
 # built-in auth; lb-01 enforces the gate via forward-auth. Replaces the old
 # WebDAV + basic-auth setup. Reuses the same authz/invalidation flows as the
 # VictoriaMetrics provider above.
@@ -360,7 +360,7 @@
       name: "TG Gallery Provider"
       mode: "forward_single"
       external_host: "https://gallery.chi.lab.amd-e.com"
-      internal_host: "http://172.16.0.51:8089"
+      internal_host: "http://{{ ip_media_gallery }}:8089"
       internal_host_ssl_validation: false
       intercept_header_auth: true
       authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"

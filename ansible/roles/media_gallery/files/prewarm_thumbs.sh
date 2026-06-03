@@ -9,7 +9,7 @@
 # Low concurrency to avoid hammering Drive / the service.
 set -uo pipefail
 RCLONE_CONF="${RCLONE_CONFIG:-/home/mediaingest/.config/rclone/rclone.conf}"
-THUMB_HOST="${THUMB_HOST:-172.16.0.51}"
+THUMB_HOST="${THUMB_HOST:-172.16.0.46}"
 THUMB_PORT="${THUMB_PORT:-8090}"
 LOG="${PREWARM_LOG:-/var/log/media-gallery/prewarm.log}"
 mkdir -p "$(dirname "$LOG")"
