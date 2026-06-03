@@ -176,7 +176,19 @@ async def main():
     SOURCE_STEM = re.compile(r"^-?\d+_\d+$")
     missing = [s for s in archive_stems
                if s not in dates and SOURCE_STEM.match(s)]
-    if rescan or (not dates):
+
+    # In the split architecture the COLLECTOR supplies dates at push time (the
+    # upload service records them into the datemap), so the gallery box needs
+    # NO upstream source access. If creds aren't present (API_ID=0), skip every
+    # upstream source path — missing stems just get a null date rather than crashing.
+    have_creds = API_ID != 0 and bool(API_HASH)
+    if not have_creds:
+        if missing:
+            log(f"No upstream source creds (collector owns capture); {len(missing)} "
+                f"stems without cached dates will sort by null date.")
+        else:
+            log(f"No upstream source creds; using datemap ({len(dates)}) as-is.")
+    elif rescan or (not dates):
         # Preserve upload entries (up_*) — a full upstream source scan only knows about
         # source media, so uploaded-pic dates must be carried over or they'd
         # lose their sort date.
