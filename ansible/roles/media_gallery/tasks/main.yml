@@ -265,6 +265,43 @@
     state: started
     daemon_reload: true
 
+# ─── Gallery auto-refresh (manifest rebuild + thumb prewarm) ───────────────
+# Keeps the gallery current as the live collector captures new media. The
+# manifest rebuild is seconds; prewarm skips already-cached thumbs. NOT a hard
+# dependency of the gallery — purely keeps it fresh.
+- name: Deploy Gallery Refresh Script
+  ansible.builtin.copy:
+    src: refresh_gallery.sh
+    dest: "{{ media_gallery_dir }}/refresh_gallery.sh"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Render Gallery Refresh Service Unit
+  ansible.builtin.template:
+    src: refresh.service.j2
+    dest: /etc/systemd/system/media-gallery-refresh.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Gallery Refresh Timer Unit
+  ansible.builtin.template:
+    src: refresh.timer.j2
+    dest: /etc/systemd/system/media-gallery-refresh.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Gallery Refresh Timer
+  ansible.builtin.systemd:
+    name: media-gallery-refresh.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
 - name: One-Time Login Reminder
   ansible.builtin.debug:
     msg: >-

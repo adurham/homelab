@@ -1,0 +1,11 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+[Unit]
+Description=media-gallery gallery refresh schedule
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec={{ media_gallery_refresh_interval }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

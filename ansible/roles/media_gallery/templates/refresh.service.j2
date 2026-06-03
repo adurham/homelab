@@ -1,0 +1,13 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+[Unit]
+Description=media-gallery gallery refresh (rebuild manifest + warm thumbnails)
+After=network-online.target media-gallery-thumb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+ExecStart={{ media_gallery_dir }}/refresh_gallery.sh
+# generous timeout: first full prewarm of a large archive can take a while
+TimeoutStartSec=3600
