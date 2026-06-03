@@ -87,12 +87,40 @@ def trash_item(chat, stem) -> dict:
             (THUMB_CACHE / chat / f"{stem}.jpg").unlink()
         except OSError:
             pass
-        # ledger
-        ex = load_excluded()
-        ex.add(stem)
-        save_excluded(ex)
-        result["excluded_total"] = len(ex)
+        # Only touch the ledger if we actually deleted the original — avoids a
+        # bad/typo request polluting the exclusion list (which would
+        # permanently block a stem that was never really ours to trash).
+        if any(d.startswith("original:") for d in result["deleted"]):
+            ex = load_excluded()
+            ex.add(stem)
+            save_excluded(ex)
+            result["excluded_total"] = len(ex)
+            _trigger_manifest_rebuild()
+        else:
+            result["excluded_total"] = len(load_excluded())
+            result["note"] = "original not found; not added to ledger"
         return result
+
+
+def _trigger_manifest_rebuild():
+    """Rebuild the manifest (fast, cached date map) in the background so the
+    on-disk manifest stays consistent after a delete. The SPA already drops the
+    tile client-side; this keeps a fresh page-load correct without waiting for
+    the hourly refresh. Fire-and-forget; never blocks the HTTP response."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    py = os.path.join(here, "venv", "bin", "python")
+    if not os.path.exists(py):
+        py = "python3"
+    env = dict(os.environ)
+    env.setdefault("RCLONE_CONFIG", RCLONE_CONF)
+    env.setdefault("TG_RCLONE_REMOTE", REMOTE)
+    try:
+        subprocess.Popen(
+            [py, os.path.join(here, "build_manifest.py"), "--fast"],
+            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class Handler(BaseHTTPRequestHandler):

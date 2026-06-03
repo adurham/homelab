@@ -23,8 +23,10 @@ from pathlib import Path
 from telethon import TelegramClient as SourceClient
 from telethon.tl.types import InputMessagesFilterPhotoVideo
 
-API_ID = int(os.environ["TG_API_ID"])
-API_HASH = os.environ["TG_API_HASH"]
+# API creds only needed for a full (non-fast) scan; don't hard-require them so
+# `--fast` rebuilds work with zero upstream source access.
+API_ID = int(os.environ.get("TG_API_ID", "0"))
+API_HASH = os.environ.get("TG_API_HASH", "")
 SESSION = os.environ.get("TG_SESSION", "/var/lib/media-gallery/galmeta")
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediaingest/.config/rclone/rclone.conf")
@@ -105,15 +107,44 @@ def list_originals():
     return out
 
 
+DATEMAP_CACHE = os.environ.get("TG_DATEMAP_CACHE", "/var/lib/media-gallery/datemap.json")
+
+
+def load_datemap_cache() -> dict:
+    try:
+        import json as _j
+        with open(DATEMAP_CACHE) as f:
+            return _j.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_datemap_cache(m: dict):
+    import json as _j
+    tmp = DATEMAP_CACHE + ".tmp"
+    with open(tmp, "w") as f:
+        _j.dump(m, f)
+    os.replace(tmp, DATEMAP_CACHE)
+
+
 async def main():
-    client = SourceClient(SESSION, API_ID, API_HASH)
-    await client.connect()
-    if not await client.is_user_authorized():
-        log("SESSION NOT AUTHORIZED"); sys.exit(2)
-    log("Scanning upstream source for message dates...")
-    dates = await date_map(client)
-    await client.disconnect()
-    log(f"  date map: {len(dates)} items")
+    # --fast: skip the upstream source rescan, reuse the cached date map. Correct for
+    # rebuilds after a purge/trash (those only REMOVE items; dates of remaining
+    # items don't change). Falls back to a full scan if no cache exists.
+    fast = "--fast" in sys.argv
+    dates = load_datemap_cache()
+    if fast and dates:
+        log(f"FAST mode: using cached date map ({len(dates)} items), no upstream source scan")
+    else:
+        client = SourceClient(SESSION, API_ID, API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            log("SESSION NOT AUTHORIZED"); sys.exit(2)
+        log("Scanning upstream source for message dates...")
+        dates = await date_map(client)
+        await client.disconnect()
+        save_datemap_cache(dates)
+        log(f"  date map: {len(dates)} items (cached)")
 
     originals = list_originals()
     log(f"originals: {len(originals)}")
