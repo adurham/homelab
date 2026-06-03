@@ -127,27 +127,72 @@ def save_datemap_cache(m: dict):
     os.replace(tmp, DATEMAP_CACHE)
 
 
+async def fetch_meta_for(client, stems):
+    """Targeted fetch of {date, out} for specific stems (chatid_msgid), grouped
+    by chat so we pull each chat's messages by id in one call. Milliseconds vs a
+    full dialog rescan."""
+    from collections import defaultdict
+    by_chat = defaultdict(list)
+    for stem in stems:
+        try:
+            cid, mid = stem.rsplit("_", 1)
+            by_chat[int(cid)].append(int(mid))
+        except ValueError:
+            continue
+    out = {}
+    for cid, mids in by_chat.items():
+        try:
+            msgs = await client.get_messages(cid, ids=mids)
+        except Exception as e:  # noqa: BLE001
+            log(f"  (targeted fetch fail chat {cid}: {type(e).__name__})")
+            continue
+        for msg in msgs:
+            if msg is None:
+                continue
+            out[f"{cid}_{msg.id}"] = {
+                "date": msg.date.isoformat() if msg.date else None,
+                "out": bool(getattr(msg, "out", False)),
+            }
+    return out
+
+
 async def main():
-    # --fast: skip the upstream source rescan, reuse the cached date map. Correct for
-    # rebuilds after a purge/trash (those only REMOVE items; dates of remaining
-    # items don't change). Falls back to a full scan if no cache exists.
-    fast = "--fast" in sys.argv
-    dates = load_datemap_cache()
-    if fast and dates:
-        log(f"FAST mode: using cached date map ({len(dates)} items), no upstream source scan")
-    else:
+    # INCREMENTAL (the only mode): start from the cached date map, then targeted-
+    # fetch metadata ONLY for archive items not yet in the cache (new captures).
+    # Deletes/trims need zero upstream source work; new media costs one get_messages per
+    # affected chat. Fast + always correct (new items get date + out flag).
+    # --rescan forces a full dialog scan (rebuild cache from scratch).
+    rescan = "--rescan" in sys.argv
+    dates = {} if rescan else load_datemap_cache()
+
+    originals = list_originals()
+    log(f"originals: {len(originals)}")
+    archive_stems = {stem for _, _, stem, _ in originals}
+
+    missing = [s for s in archive_stems if s not in dates]
+    if rescan or (not dates):
         client = SourceClient(SESSION, API_ID, API_HASH)
         await client.connect()
         if not await client.is_user_authorized():
             log("SESSION NOT AUTHORIZED"); sys.exit(2)
-        log("Scanning upstream source for message dates...")
+        log("Full upstream source scan (building date cache)...")
         dates = await date_map(client)
         await client.disconnect()
         save_datemap_cache(dates)
         log(f"  date map: {len(dates)} items (cached)")
-
-    originals = list_originals()
-    log(f"originals: {len(originals)}")
+    elif missing:
+        log(f"Incremental: {len(missing)} new items not in cache; targeted fetch...")
+        client = SourceClient(SESSION, API_ID, API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            log("SESSION NOT AUTHORIZED"); sys.exit(2)
+        new_meta = await fetch_meta_for(client, missing)
+        await client.disconnect()
+        dates.update(new_meta)
+        save_datemap_cache(dates)
+        log(f"  fetched {len(new_meta)} new; date map now {len(dates)}")
+    else:
+        log(f"No new items; using cached date map ({len(dates)}), no upstream source access")
 
     excluded = load_excluded()
     log(f"excluded (trashed): {len(excluded)}")
