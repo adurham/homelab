@@ -126,7 +126,7 @@ all:
     # name; the ansible role + group are 'media_gallery' after the split.
     media_gallery:
       hosts:
-        media-gallery-01:
+        gallery-01:
           ansible_host: "{{ ip_media_gallery }}"
           vmid: 115
           target_node: pve02
