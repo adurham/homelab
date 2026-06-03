@@ -1,0 +1,44 @@
+{# Managed by Ansible — pve_host_hardening.yml. Cluster-wide PVE firewall. #}
+{# Lives in /etc/pve/firewall/cluster.fw (pmxcfs, replicated to all nodes). #}
+[OPTIONS]
+
+enable: 1
+
+{# Pre-existing BWT repro-lab server set (managed out-of-band; preserved). #}
+[IPSET bwt_servers]
+
+10.99.0.1
+10.99.0.10
+10.99.0.11
+10.99.0.12
+10.99.0.13
+10.99.0.14
+10.99.0.2
+10.99.0.3
+
+{# Trusted sources allowed to reach node mgmt ports (SSH :22 / UI :8006). #}
+[IPSET pve_mgmt] # Trusted management sources for SSH/UI
+{% for cidr in pve_mgmt_sources %}
+{{ cidr }}
+{% endfor %}
+
+{# Cluster node IPs — VXLAN SDN peers (UDP 4789 must flow between them). #}
+[IPSET pve_nodes] # cluster nodes (VXLAN SDN peers)
+{% for ip in pve_node_ips %}
+{{ ip }}
+{% endfor %}
+
+[RULES]
+
+{# CRITICAL: the 'private'/'bwt' networks are a VXLAN SDN zone. Inter-CT
+   traffic between guests on different nodes is VXLAN-encapsulated over UDP
+   4789. Without this allow, enabling the node firewall drops the encapsulated
+   transport and breaks ALL cross-node SDN traffic (e.g. lb-01 -> Authentik).
+   This rule MUST stay at the top of [RULES]. #}
+IN ACCEPT -source +pve_nodes -p udp -dport 4789 -log nolog # VXLAN SDN transport between nodes
+
+{# Management lockdown: SSH + UI only from trusted sources, drop the rest. #}
+IN ACCEPT -source +pve_mgmt -p tcp -dport 22 -log nolog # SSH from trusted mgmt
+IN ACCEPT -source +pve_mgmt -p tcp -dport 8006 -log nolog # PVE UI from trusted mgmt
+IN DROP -p tcp -dport 22 -log nolog # drop foreign SSH
+IN DROP -p tcp -dport 8006 -log nolog # drop foreign UI
