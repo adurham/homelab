@@ -1,0 +1,27 @@
+# Managed by Ansible — roles/media_ingest. Do not edit by hand.
+[Unit]
+Description=upstream source gallery collector (the source protocol source client -> gallery API push)
+After=network-online.target var-lib-tg\x2dsync-staging.mount
+Wants=network-online.target
+Requires=var-lib-tg\x2dsync-staging.mount
+
+[Service]
+Type=simple
+User={{ media_ingest_user }}
+Group={{ media_ingest_user }}
+EnvironmentFile={{ media_ingest_dir }}/collector.env
+ExecStart={{ media_ingest_dir }}/venv/bin/python {{ media_ingest_dir }}/collector.py
+Restart=always
+RestartSec=5
+# source reconnects on its own; if the process dies, bring it back fast.
+StartLimitIntervalSec=0
+
+# Hardening — the collector only needs its own state/log dirs.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ media_ingest_state }} {{ media_ingest_log_dir }}
+
+[Install]
+WantedBy=multi-user.target

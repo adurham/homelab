@@ -1,0 +1,17 @@
+---
+# Service account + install layout for the upstream source gallery collector.
+media_ingest_user: mediaingest
+media_ingest_dir: /opt/media-ingest          # code + venv
+media_ingest_state: /var/lib/media-ingest    # session, staging (RW)
+media_ingest_log_dir: /var/log/media-ingest
+
+# Pin source; bump deliberately.
+media_ingest_telethon_version: "1.43.2"
+
+# Gallery platform the collector pushes captured media to (via authenticated API).
+media_ingest_gallery_base: "https://gallery.chi.lab.amd-e.com"
+
+# Authentik OAuth2 client-credentials token endpoint + collector client id.
+# The client secret comes from the vault.
+media_ingest_authentik_token_url: "https://auth.chi.lab.amd-e.com/application/o/token/"
+media_ingest_collector_client_id: "media-ingest-collector"

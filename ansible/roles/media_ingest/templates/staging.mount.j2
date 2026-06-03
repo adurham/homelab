@@ -1,0 +1,15 @@
+# Managed by Ansible — roles/media_ingest. tmpfs so decrypted media in flight to
+# the gallery lives in RAM only and never persists to disk (hardening vs
+# offline-disk/backup leak).
+[Unit]
+Description=media-ingest staging (tmpfs - decrypted media RAM-only)
+Before=media-ingest-collector.service
+
+[Mount]
+What=tmpfs
+Where={{ media_ingest_state }}/staging
+Type=tmpfs
+Options=size=512M,mode=0750,uid={{ media_ingest_user }},gid={{ media_ingest_user }},noexec,nosuid,nodev
+
+[Install]
+WantedBy=multi-user.target

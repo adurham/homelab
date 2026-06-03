@@ -1,0 +1,25 @@
+---
+# Two-stage deploy of the upstream source gallery collector:
+#   1. media_ingest_host runs on pve02 to create the LXC (vmid 116,
+#      ip_media_ingest 172.16.0.47, hostname media-ingest-01), inject SSH keys, and
+#      set up TUN passthrough (reboot-for-TUN).
+#   2. media_ingest runs against the new CT to install source + requests,
+#      deploy the collector daemon, and wire the systemd unit. The source client
+#      session requires a one-time authorized session file before the
+#      listener will start — the role detects this and skips start until
+#      authorized.
+#
+# Usage:
+#   ansible-playbook deploy_media_ingest.yml --ask-vault-pass
+
+- name: Provision Media Ingest Container
+  hosts: pve02
+  gather_facts: false
+  roles:
+    - media_ingest_host
+
+- name: Deploy Media Ingest Service
+  hosts: media_ingest
+  gather_facts: true
+  roles:
+    - media_ingest
