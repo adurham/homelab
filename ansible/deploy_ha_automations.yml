@@ -19,6 +19,10 @@
     ha_root: "{{ playbook_dir }}/../homeassistant"
     ha_restart: false
     ssh_opts: "-o StrictHostKeyChecking=accept-new"
+    # AppDaemon apps live under the addon's own config dir, NOT /config/apps
+    # (that is a placeholder). The addon slug is part of the path. AppDaemon
+    # hot-reloads on file change, so no core restart is needed for these.
+    appdaemon_apps_dir: "/addon_configs/a0d7b954_appdaemon/apps"
     # Files that go to /config/ (root). Add new ones here as the surface
     # of this repo's HA config grows.
     config_files:
@@ -50,7 +54,7 @@
       failed_when: ha_backup.rc != 0
 
     - name: Ensure target directories exist
-      ansible.builtin.raw: "mkdir -p /config/automations /config/apps"
+      ansible.builtin.raw: "mkdir -p /config/automations /config/apps {{ appdaemon_apps_dir }}"
       register: mkdir_result
       changed_when: mkdir_result.rc == 0
 
@@ -84,6 +88,20 @@
       delegate_to: localhost
       register: scp_apps
       changed_when: scp_apps.rc == 0
+
+    # AppDaemon apps (e.g. smart_vent_controller.py). Copy the directory
+    # *contents* (appdaemon/apps/.) into the addon's apps dir. AppDaemon
+    # watches this dir and hot-reloads changed apps automatically — no core
+    # restart needed. The `.` suffix avoids the nested-dir trap (see the
+    # automations copy above).
+    - name: Copy AppDaemon apps
+      ansible.builtin.shell: >-
+        scp -P {{ ansible_port }} -r {{ ssh_opts }}
+        {{ ha_root }}/appdaemon/apps/.
+        {{ ansible_user }}@{{ ansible_host }}:{{ appdaemon_apps_dir }}/
+      delegate_to: localhost
+      register: scp_appdaemon
+      changed_when: scp_appdaemon.rc == 0
 
     - name: Check Configuration
       ansible.builtin.raw: "ha core check"
