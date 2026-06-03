@@ -201,12 +201,17 @@ UPSTAIRS_HEAT_RISE_BONUS = 2.0
 #                      - PRIORITY_PENALTY_GAIN * smoothed_penalty * hot_factor
 #   clamped to [PRIORITY_MARGIN_MIN, PRIORITY_MARGIN_BASE]
 #
-# Lower margin = engages earlier. A badly-handicapped room can reach a negative
-# margin (favored even slightly below setpoint) — safe, because the donor rule
-# still requires donors to be genuinely cooler, so it can't steal from rooms
-# that aren't actually cold.
+# Lower margin = engages earlier. The floor is 0.0, NOT negative: a bad duct
+# should make a room react the instant it goes OVER setpoint, but never while
+# it's still comfortable. This is what lets shade/occupancy win — a room on the
+# shady, lightly-used side of the house (e.g. a bathroom with a terrible duct)
+# simply never trips, because it rarely gets above setpoint while occupied.
+# No room is ever favored while below the cool setpoint (the pre-cool window
+# only tightens the margin toward 0, it does not go negative). The duct handicap
+# controls how EARLY a room reacts once it's over setpoint, not whether a cool
+# room gets favored for no reason.
 PRIORITY_MARGIN_BASE = 1.5      # margin for a zero-penalty (well-served) room
-PRIORITY_MARGIN_MIN = -1.5      # most aggressive margin a handicapped room gets
+PRIORITY_MARGIN_MIN = 0.0       # most aggressive margin: react at setpoint, not before
 PRIORITY_PENALTY_GAIN = 0.30    # °F margin reduction per °F of supply penalty
 PRIORITY_PENALTY_EMA = 0.30     # smoothing factor for the per-room penalty
 PRIORITY_PENALTY_MIN_SAMPLE = 1.0  # ignore penalties smaller than this (noise)
