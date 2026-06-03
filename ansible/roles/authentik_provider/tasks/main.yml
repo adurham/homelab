@@ -406,6 +406,134 @@
   when: get_gallery_app.status == 404
 
 # -------------------------------------------------------------------------
+# Media Ingest Collector — OAuth2 (client_credentials / M2M) Provider & Application
+# The upstream source collector (media-ingest-01) authenticates as this app to push captured
+# media to the gallery ingest API. NOT a proxy provider (no outpost binding) —
+# it issues RS256 JWTs that the gallery validates against JWKS. A service
+# account whose username EXACTLY matches the client_id is what Authentik maps
+# the client_credentials grant to.
+# -------------------------------------------------------------------------
+
+- name: Get default provider authorization flow (implicit consent)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-provider-authorization-implicit-consent"
+    method: GET
+    headers: "{{ headers }}"
+  register: collector_authz_flow
+
+- name: Get default provider invalidation flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-provider-invalidation-flow"
+    method: GET
+    headers: "{{ headers }}"
+  register: collector_inval_flow
+
+- name: Get an RSA signing keypair (RS256 — required for JWKS validation)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/crypto/certificatekeypairs/?has_key=true&search=authentik"
+    method: GET
+    headers: "{{ headers }}"
+  register: collector_signing_key
+
+- name: Assert a signing keypair was found
+  ansible.builtin.assert:
+    that: collector_signing_key.json.results | length > 0
+    fail_msg: "No RSA signing keypair found — collector JWTs need RS256."
+
+- name: Get OpenID scope property mappings
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/all/?managed=goauthentik.io%2Fproviders%2Foauth2%2Fscope-openid"
+    method: GET
+    headers: "{{ headers }}"
+  register: collector_scope_openid
+
+- name: Get existing Media Ingest Collector provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/?search={{ 'Media Ingest Collector' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: collector_providers
+
+- name: Create Media Ingest Collector OAuth2 Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Media Ingest Collector Provider"
+      authorization_flow: "{{ collector_authz_flow.json.results[0].pk }}"
+      invalidation_flow: "{{ collector_inval_flow.json.results[0].pk }}"
+      redirect_uris: []
+      client_type: "confidential"
+      client_id: "{{ media_ingest_collector_client_id | default('media-ingest-collector') }}"
+      client_secret: "{{ vault_media_ingest_collector_client_secret }}"
+      access_token_validity: "hours=1"
+      signing_key: "{{ collector_signing_key.json.results[0].pk }}"
+      sub_mode: "hashed_user_id"
+      property_mappings: "{{ collector_scope_openid.json.results | map(attribute='pk') | list }}"
+    status_code: [200, 201]
+  when: collector_providers.json.results | length == 0
+  register: new_collector_provider
+
+- name: Ensure signing key on existing Media Ingest Collector provider (RS256)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/{{ collector_providers.json.results[0].pk }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      signing_key: "{{ collector_signing_key.json.results[0].pk }}"
+    status_code: [200]
+  when: collector_providers.json.results | length > 0
+
+- name: Capture Media Ingest Collector provider id
+  ansible.builtin.set_fact:
+    collector_provider_id: "{{ (new_collector_provider.json.pk if new_collector_provider is defined and new_collector_provider.changed else collector_providers.json.results[0].pk) }}"
+
+- name: Get Media Ingest Collector application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/media-ingest-collector/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: get_collector_app
+
+- name: Create Media Ingest Collector application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Media Ingest Collector"
+      slug: "media-ingest-collector"
+      provider: "{{ collector_provider_id }}"
+    status_code: [200, 201, 400]
+  when: get_collector_app.status == 404
+
+- name: Get Media Ingest Collector service account (username must match client_id)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/users/?username={{ media_ingest_collector_client_id | default('media-ingest-collector') }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: collector_svc_account
+
+- name: Create Media Ingest Collector service account
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/users/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      username: "{{ media_ingest_collector_client_id | default('media-ingest-collector') }}"
+      name: "Media Ingest Collector Service Account"
+      type: "service_account"
+      path: "goauthentik.io/service-accounts"
+    status_code: [200, 201, 400]
+  when: collector_svc_account.json.results | length == 0
+
+# -------------------------------------------------------------------------
 # Bind all proxy providers to the embedded outpost. PATCH replaces the
 # entire `providers` list, so we always send the union (existing + ours)
 # rather than just appending. Sorted to keep the diff stable across runs.
