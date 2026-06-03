@@ -66,12 +66,35 @@
     display:flex;align-items:center;justify-content:center;pointer-events:none;}
   .badge::after{content:"";border-left:15px solid #fff;border-top:10px solid transparent;
     border-bottom:10px solid transparent;margin-left:4px;}
-  .vtag{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.7);
+  .vtag{position:absolute;top:6px;left:6px;background:rgba(0,0,0,.7);
     color:#fff;font-size:9.5px;font-weight:700;letter-spacing:.5px;
     padding:2px 5px;border-radius:4px;pointer-events:none;}
   .dlabel{position:absolute;left:0;right:0;bottom:0;padding:14px 8px 5px;
     font-size:11px;color:#dfe2e8;pointer-events:none;
     background:linear-gradient(to top,rgba(0,0,0,.78),transparent);}
+
+  /* trash button on tiles */
+  .trash{position:absolute;top:6px;right:6px;z-index:3;width:28px;height:28px;
+    border-radius:50%;border:none;padding:0;display:flex;align-items:center;
+    justify-content:center;font-size:14px;line-height:1;color:#fff;
+    background:rgba(0,0,0,.6);opacity:0;transition:opacity .15s,background .15s;}
+  .tile:hover .trash{opacity:1;}
+  .trash:hover{background:#d23b3b;border:none;}
+  /* on touch devices, always show */
+  @media(hover:none){.tile .trash{opacity:.85;}}
+  /* inline confirm pill */
+  .confirm{position:absolute;top:6px;left:6px;right:6px;z-index:4;display:flex;
+    gap:4px;}
+  .confirm button{flex:1;padding:4px 0;font-size:11px;font-weight:700;
+    border-radius:6px;border:none;}
+  .confirm .yes{background:#d23b3b;color:#fff;}
+  .confirm .yes:hover{background:#e85050;border:none;}
+  .confirm .no{background:rgba(0,0,0,.7);color:#fff;}
+  .confirm .no:hover{background:rgba(0,0,0,.85);border:none;}
+  .tile.err{outline:2px solid #d23b3b;}
+  .tile.err::after{content:"Delete failed";position:absolute;top:6px;left:6px;
+    right:6px;z-index:5;background:#d23b3b;color:#fff;font-size:10px;font-weight:700;
+    padding:3px 5px;border-radius:5px;text-align:center;}
 
   .state{text-align:center;color:var(--muted);padding:60px 20px;font-size:15px;}
 
@@ -87,6 +110,14 @@
   #lb .nav{position:absolute;top:50%;transform:translateY(-50%);
     font-size:30px;padding:10px 18px;}
   #lb .prev{left:18px;} #lb .next{right:18px;}
+  #lb .lbtrash{position:absolute;top:16px;right:74px;font-size:18px;
+    padding:6px 12px;border-color:#5a3030;}
+  #lb .lbtrash:hover{background:#d23b3b;border-color:#d23b3b;}
+  #lb .lbconfirm{position:absolute;top:16px;right:20px;display:none;gap:8px;
+    z-index:60;}
+  #lb .lbconfirm.show{display:flex;}
+  #lb .lbconfirm .yes{background:#d23b3b;color:#fff;border-color:#d23b3b;}
+  #lb .lbconfirm .yes:hover{background:#e85050;}
   @media(max-width:600px){#lb .nav{padding:8px 12px;font-size:24px;}}
 </style>
 </head>
@@ -109,6 +140,11 @@
 
 <div id="lb">
   <button class="close" id="lbClose">&times;</button>
+  <button class="lbtrash" id="lbTrash" title="Delete">&#128465;</button>
+  <div class="lbconfirm" id="lbConfirm">
+    <button class="yes" id="lbConfirmYes">Delete?</button>
+    <button class="no" id="lbConfirmNo">Cancel</button>
+  </div>
   <button class="nav prev" id="lbPrev">&#8249;</button>
   <div class="media" id="lbMedia"></div>
   <button class="nav next" id="lbNext">&#8250;</button>
@@ -157,6 +193,59 @@
       }else{tile.classList.add('broken');}
     };
     img.src=src;
+  }
+
+  // ---- trash / delete ----
+  function trashItem(it){
+    return fetch('/trash/'+encodeURIComponent(it.chat)+'/'+encodeURIComponent(it.stem),
+      {method:'POST',credentials:'same-origin'})
+      .then(function(r){return r.status===200;})
+      .catch(function(){return false;});
+  }
+  function removeFromData(it){
+    var idx=manifest.indexOf(it); if(idx>=0) manifest.splice(idx,1);
+    var c=it.chat||"(unknown)";
+    if(chatMap[c]){
+      var j=chatMap[c].indexOf(it); if(j>=0) chatMap[c].splice(j,1);
+      if(!chatMap[c].length){
+        delete chatMap[c];
+        var ci=chats.indexOf(c); if(ci>=0) chats.splice(ci,1);
+      }
+    }
+    var v=view.indexOf(it); if(v>=0) view.splice(v,1);
+  }
+  function refreshFolderView(){
+    elSub.textContent=view.length+' item'+(view.length===1?'':'s');
+    if(!view.length){
+      elPhoto.style.display='none'; elPhoto.innerHTML='';
+      elState.style.display='block'; elState.textContent='No items in this folder.';
+    }else{
+      renderPhotos();
+    }
+  }
+  function tileError(tile){
+    tile.classList.add('err');
+    setTimeout(function(){tile.classList.remove('err');},2500);
+  }
+  function showTileConfirm(tile,it,tb){
+    if(tile.querySelector('.confirm')) return;
+    tb.style.display='none';
+    var c=document.createElement('div'); c.className='confirm';
+    c.addEventListener('click',function(e){e.stopPropagation();});
+    var yes=document.createElement('button'); yes.className='yes'; yes.textContent='Delete?';
+    var no=document.createElement('button'); no.className='no'; no.textContent='Cancel';
+    c.appendChild(yes); c.appendChild(no); tile.appendChild(c);
+    var timer=setTimeout(cleanup,3000);
+    function cleanup(){clearTimeout(timer); if(c.parentNode)c.parentNode.removeChild(c); tb.style.display='';}
+    no.addEventListener('click',function(e){e.stopPropagation(); cleanup();});
+    yes.addEventListener('click',function(e){
+      e.stopPropagation(); clearTimeout(timer);
+      yes.textContent='…'; yes.disabled=true; no.disabled=true;
+      trashItem(it).then(function(ok){
+        if(ok){ removeFromData(it); refreshFolderView(); }
+        else { cleanup(); tileError(tile); }
+      });
+    });
   }
 
   // ---------- LANDING ----------
@@ -245,6 +334,14 @@
       }
       var dl=fmtDate(it.date);
       if(dl){var d=document.createElement('div'); d.className='dlabel'; d.textContent=dl; t.appendChild(d);}
+      (function(tile,item){
+        var tb=document.createElement('button'); tb.className='trash';
+        tb.title='Delete'; tb.innerHTML='&#128465;';
+        tb.addEventListener('click',function(e){
+          e.stopPropagation(); showTileConfirm(tile,item,tb);
+        });
+        tile.appendChild(tb);
+      })(t,it);
       frag.appendChild(t);
     });
     elPhoto.innerHTML=''; elPhoto.appendChild(frag);
@@ -270,12 +367,32 @@
     lb.classList.remove('open');
     lbMedia.innerHTML=''; // stop playback
     lbIndex=-1;
+    if(typeof hideLbConfirm==='function') hideLbConfirm();
   }
   function navLb(d){
     if(lbIndex<0) return;
     var n=lbIndex+d;
     if(n<0) n=view.length-1; if(n>=view.length) n=0;
     openLb(n);
+  }
+  var lbConfirm=document.getElementById('lbConfirm');
+  var lbTrashBtn=document.getElementById('lbTrash');
+  function hideLbConfirm(){lbConfirm.classList.remove('show'); lbTrashBtn.style.display='';}
+  function deleteCurrent(){
+    var it=view[lbIndex]; if(!it) return;
+    var btnYes=document.getElementById('lbConfirmYes');
+    btnYes.textContent='…';
+    trashItem(it).then(function(ok){
+      btnYes.textContent='Delete?'; hideLbConfirm();
+      if(!ok){ alert('Delete failed.'); return; }
+      var wasIndex=lbIndex;
+      removeFromData(it);
+      // sync folder grid behind lightbox
+      if(!view.length){ closeLb(); refreshFolderView(); return; }
+      var next=wasIndex; if(next>=view.length) next=0;
+      openLb(next);
+      refreshFolderView();
+    });
   }
 
   // ---------- EVENTS ----------
@@ -292,14 +409,19 @@
     if(current!==null) openFolder(current);
   });
   document.getElementById('lbClose').addEventListener('click',closeLb);
-  document.getElementById('lbPrev').addEventListener('click',function(){navLb(-1);});
-  document.getElementById('lbNext').addEventListener('click',function(){navLb(1);});
+  document.getElementById('lbPrev').addEventListener('click',function(){hideLbConfirm();navLb(-1);});
+  document.getElementById('lbNext').addEventListener('click',function(){hideLbConfirm();navLb(1);});
+  lbTrashBtn.addEventListener('click',function(){
+    lbConfirm.classList.add('show'); lbTrashBtn.style.display='none';
+  });
+  document.getElementById('lbConfirmYes').addEventListener('click',deleteCurrent);
+  document.getElementById('lbConfirmNo').addEventListener('click',hideLbConfirm);
   lb.addEventListener('click',function(e){if(e.target===lb)closeLb();});
   document.addEventListener('keydown',function(e){
     if(!lb.classList.contains('open')) return;
     if(e.key==='Escape') closeLb();
-    else if(e.key==='ArrowLeft') navLb(-1);
-    else if(e.key==='ArrowRight') navLb(1);
+    else if(e.key==='ArrowLeft'){hideLbConfirm();navLb(-1);}
+    else if(e.key==='ArrowRight'){hideLbConfirm();navLb(1);}
   });
 
   // ---------- BOOT ----------

@@ -22,3 +22,7 @@ media_gallery_gallery_port: 8089
 # How often to auto-refresh the gallery (rebuild manifest + warm new thumbs)
 # so it stays current as the live collector captures new media.
 media_gallery_refresh_interval: "1h"
+
+# Trash service port (delete media + exclusion ledger; bound on ip_media_gallery,
+# routed by lb-01 nginx /trash/ behind Authentik).
+media_gallery_trash_port: 8091
