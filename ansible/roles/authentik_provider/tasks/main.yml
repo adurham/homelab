@@ -98,6 +98,52 @@
     proxmox_app_id: "{{ (get_app_direct.json.pk if get_app_direct.status == 200 else create_app.json.pk) }}"
 
 # -------------------------------------------------------------------------
+# Restrict Proxmox app access to the 'Proxmox Admins' / 'Proxmox Users'
+# Authentik groups. Without these bindings, ANY user passing the Require-MFA
+# policy can authenticate to Proxmox (the realm auto-creates a PVE user from
+# the groups claim). With group bindings, a user must ALSO be in one of these
+# groups — so non-members (e.g. test.user, admin) are denied at the SSO gate.
+# Group membership is the single source of truth for Proxmox access.
+# -------------------------------------------------------------------------
+
+- name: Look up Proxmox access groups
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/?name={{ item | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: proxmox_groups
+  loop:
+    - "Proxmox Admins"
+    - "Proxmox Users"
+
+- name: Get existing policy bindings on the Proxmox app
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/policies/bindings/?target={{ proxmox_app_id }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: proxmox_app_bindings
+
+- name: Bind Proxmox access groups to the Proxmox application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/policies/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ proxmox_app_id }}"
+      group: "{{ item.json.results[0].pk }}"
+      enabled: true
+      order: 10
+      negate: false
+    status_code: [200, 201]
+  loop: "{{ proxmox_groups.results }}"
+  when:
+    - item.json.results | length > 0
+    - item.json.results[0].pk not in (proxmox_app_bindings.json.results | map(attribute='group') | select('string') | list)
+  loop_control:
+    label: "{{ item.item }}"
+
+# -------------------------------------------------------------------------
 # Tanium Integration (SAML)
 # -------------------------------------------------------------------------
 
