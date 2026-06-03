@@ -16,16 +16,28 @@
   "id": null,
   "uid": "smart-vent-control",
   "title": "Smart Vent Controller",
-  "tags": ["homeassistant", "hvac", "flair"],
+  "tags": [
+    "homeassistant",
+    "hvac",
+    "flair"
+  ],
   "timezone": "browser",
   "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
       "title": "Room Temperatures by Floor",
       "type": "timeseries",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "datasource": "VictoriaMetrics",
       "fieldConfig": {
         "defaults": {
@@ -38,21 +50,90 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "blue", "value": null },
-              { "color": "green", "value": 19 },
-              { "color": "yellow", "value": 22 },
-              { "color": "red", "value": 25 }
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 19
+              },
+              {
+                "color": "yellow",
+                "value": 22
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
             ]
           }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Cool setpoint" },
+            "matcher": {
+              "id": "byName",
+              "options": "Cool setpoint"
+            },
             "properties": [
-              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
-              { "id": "custom.lineWidth", "value": 1 },
-              { "id": "custom.fillOpacity", "value": 0 },
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "dark-blue" } }
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Heat setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-orange"
+                }
+              }
             ]
           }
         ]
@@ -77,6 +158,11 @@
           "expr": "homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"}",
           "legendFormat": "Cool setpoint",
           "refId": "D"
+        },
+        {
+          "expr": "homeassistant_climate_target_temperature_low_celsius{entity=\"climate.ecobee_thermostat\"}",
+          "legendFormat": "Heat setpoint",
+          "refId": "E"
         }
       ]
     },
@@ -84,7 +170,12 @@
       "id": 2,
       "title": "Vent Positions - 2nd Floor (Upstairs)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
       "datasource": "VictoriaMetrics",
       "fieldConfig": {
         "defaults": {
@@ -95,9 +186,13 @@
             "lineWidth": 2,
             "fillOpacity": 20,
             "spanNulls": true,
-            "stacking": { "mode": "none" }
+            "stacking": {
+              "mode": "none"
+            }
           },
-          "color": { "mode": "palette-classic" }
+          "color": {
+            "mode": "palette-classic"
+          }
         }
       },
       "targets": [
@@ -112,7 +207,12 @@
       "id": 3,
       "title": "Vent Positions - 1st Floor (Downstairs)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
       "datasource": "VictoriaMetrics",
       "fieldConfig": {
         "defaults": {
@@ -124,7 +224,9 @@
             "fillOpacity": 20,
             "spanNulls": true
           },
-          "color": { "mode": "palette-classic" }
+          "color": {
+            "mode": "palette-classic"
+          }
         }
       },
       "targets": [
@@ -139,7 +241,12 @@
       "id": 4,
       "title": "Duct Temperatures (Supply Air)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
       "datasource": "VictoriaMetrics",
       "fieldConfig": {
         "defaults": {
@@ -149,7 +256,9 @@
             "fillOpacity": 5,
             "spanNulls": true
           },
-          "color": { "mode": "palette-classic" }
+          "color": {
+            "mode": "palette-classic"
+          }
         }
       },
       "targets": [
@@ -174,7 +283,12 @@
       "id": 5,
       "title": "HVAC Action",
       "type": "timeseries",
-      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 26 },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
       "datasource": "VictoriaMetrics",
       "fieldConfig": {
         "defaults": {
@@ -182,34 +296,72 @@
             "lineWidth": 2,
             "fillOpacity": 30,
             "spanNulls": true,
-            "stacking": { "mode": "normal" }
+            "stacking": {
+              "mode": "normal"
+            }
           },
           "min": 0,
           "max": 1
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "cooling" },
+            "matcher": {
+              "id": "byName",
+              "options": "cooling"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "heating" },
+            "matcher": {
+              "id": "byName",
+              "options": "heating"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "fan" },
+            "matcher": {
+              "id": "byName",
+              "options": "fan"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "idle" },
+            "matcher": {
+              "id": "byName",
+              "options": "idle"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "semi-dark-green" } }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
             ]
           }
         ]
@@ -237,15 +389,25 @@
         }
       ],
       "options": {
-        "legend": { "displayMode": "list", "placement": "right" },
-        "tooltip": { "mode": "single" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       }
     },
     {
       "id": 6,
       "title": "Zone Avg Temperature vs Setpoint",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
       "datasource": "VictoriaMetrics",
       "fieldConfig": {
         "defaults": {
@@ -258,30 +420,114 @@
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Cool setpoint" },
+            "matcher": {
+              "id": "byName",
+              "options": "Cool setpoint"
+            },
             "properties": [
-              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
-              { "id": "custom.lineWidth", "value": 1 },
-              { "id": "custom.fillOpacity", "value": 0 },
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "dark-blue" } }
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "2F Avg" },
+            "matcher": {
+              "id": "byName",
+              "options": "2F Avg"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "1F Avg" },
+            "matcher": {
+              "id": "byName",
+              "options": "1F Avg"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Basement" },
+            "matcher": {
+              "id": "byName",
+              "options": "Basement"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Heat setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-orange"
+                }
+              }
             ]
           }
         ]
@@ -306,14 +552,137 @@
           "expr": "homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"}",
           "legendFormat": "Cool setpoint",
           "refId": "D"
+        },
+        {
+          "expr": "homeassistant_climate_target_temperature_low_celsius{entity=\"climate.ecobee_thermostat\"}",
+          "legendFormat": "Heat setpoint",
+          "refId": "E"
         }
       ]
+    },
+    {
+      "id": 8,
+      "title": "Supply-Air Penalty by Room (handicap the controller corrects)",
+      "description": "How much worse each room's supply air is than the best duct in the house, RIGHT NOW. Cooling: warmer-than-coldest. A persistently high room is the one the controller favors (lower margin). Only meaningful while air is moving.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_sensor_temperature_celsius{entity=~\"sensor.guest_bedroom_1_8d6d_duct_temperature|sensor.guest_bedroom_1_8136_duct_temperature|sensor.guest_bedroom_2_1ec7_duct_temperature_2|sensor.game_room_889a_duct_temperature|sensor.game_room_89ae_duct_temperature|sensor.game_room_0c83_duct_temperature|sensor.cat_room_b58e_duct_temperature|sensor.cat_room_3075_duct_temperature|sensor.guest_bathroom_e5a3_duct_temperature|sensor.main_bedroom_883f_duct_temperature_2|sensor.main_bedroom_a96d_duct_temperature_2|sensor.main_bedroom_5c2b_duct_temperature_2|sensor.main_bathroom_f586_duct_temperature_2|sensor.hallway_907e_duct_temperature_2|sensor.living_room_fc56_duct_temperature_2|sensor.living_room_5d8e_duct_temperature_2|sensor.kitchen_d124_duct_temperature_2|sensor.dining_room_7a28_duct_temperature_2|sensor.laundry_room_d189_duct_temperature_2|sensor.basement_4d79_duct_temperature\"} - scalar(min(homeassistant_sensor_temperature_celsius{entity=~\"sensor.guest_bedroom_1_8d6d_duct_temperature|sensor.guest_bedroom_1_8136_duct_temperature|sensor.guest_bedroom_2_1ec7_duct_temperature_2|sensor.game_room_889a_duct_temperature|sensor.game_room_89ae_duct_temperature|sensor.game_room_0c83_duct_temperature|sensor.cat_room_b58e_duct_temperature|sensor.cat_room_3075_duct_temperature|sensor.guest_bathroom_e5a3_duct_temperature|sensor.main_bedroom_883f_duct_temperature_2|sensor.main_bedroom_a96d_duct_temperature_2|sensor.main_bedroom_5c2b_duct_temperature_2|sensor.main_bathroom_f586_duct_temperature_2|sensor.hallway_907e_duct_temperature_2|sensor.living_room_fc56_duct_temperature_2|sensor.living_room_5d8e_duct_temperature_2|sensor.kitchen_d124_duct_temperature_2|sensor.dining_room_7a28_duct_temperature_2|sensor.laundry_room_d189_duct_temperature_2|sensor.basement_4d79_duct_temperature\"}))",
+          "legendFormat": "{{friendly_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Air Handler Fan (fan-assist forces 'on' to redistribute banked air)",
+      "description": "When the controller runs the blower during an idle compressor to push banked conditioned air toward an off-target room. mode=on while fan-assist (or you) forces it; mode=auto otherwise.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 30,
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fan on"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fan auto"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_climate_fan_mode{entity=\"climate.ecobee_thermostat\", mode=\"on\"}",
+          "legendFormat": "fan on",
+          "refId": "A"
+        },
+        {
+          "expr": "homeassistant_climate_fan_mode{entity=\"climate.ecobee_thermostat\", mode=\"auto\"}",
+          "legendFormat": "fan auto",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
     },
     {
       "id": 7,
       "title": "Vent Battery Voltages",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 38 },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
       "datasource": "VictoriaMetrics",
       "fieldConfig": {
         "defaults": {
@@ -326,9 +695,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 2.3 },
-              { "color": "green", "value": 2.6 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2.3
+              },
+              {
+                "color": "green",
+                "value": 2.6
+              }
             ]
           }
         }
@@ -343,5 +721,5 @@
     }
   ],
   "schemaVersion": 39,
-  "version": 1
+  "version": 2
 }
