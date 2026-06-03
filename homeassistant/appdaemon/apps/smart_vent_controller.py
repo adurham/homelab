@@ -1,0 +1,638 @@
+"""Smart Vent Controller for Flair vents.
+
+Zones airflow by floor using room temperature, occupancy, and ecobee state.
+Respects manual overrides. Proportional control (0/50/100%).
+Backpressure-aware: never closes more than 60% of total vents.
+
+Controls:
+  input_boolean.vent_control_enabled  - master on/off
+  input_select.vent_control_mode      - Auto / Manual / Cool Upstairs / Cool Downstairs
+"""
+
+import appdaemon.plugins.hass.hassapi as hass
+from datetime import datetime, timedelta
+
+
+# ── Zone / vent / sensor mapping ──────────────────────────────────────────────
+
+ZONES = {
+    "upstairs": {
+        "rooms": {
+            "Guest Bedroom 1": {
+                "temp": "sensor.guest_bedroom_1_temperature",
+                "occupancy": "binary_sensor.guest_bedroom_1_occupancy",
+                "vents": [
+                    "cover.guest_bedroom_1_8d6d_vent",
+                    "cover.guest_bedroom_1_8136_vent",
+                ],
+            },
+            "Guest Bedroom 2": {
+                "temp": "sensor.guest_bedroom_2_temperature",
+                "occupancy": "binary_sensor.guest_bedroom_2_occupancy",
+                "vents": [
+                    "cover.guest_bedroom_2_1ec7_vent_2",
+                ],
+            },
+            "Game Room": {
+                "temp": "sensor.game_room_temperature",
+                "occupancy": "binary_sensor.game_room_occupancy",
+                "vents": [
+                    "cover.game_room_889a_vent",
+                    "cover.game_room_89ae_vent",
+                    "cover.game_room_0c83_vent",
+                ],
+            },
+            "Cat Room": {
+                "temp": "sensor.cat_room_temperature",
+                "occupancy": "binary_sensor.cat_room_occupancy",
+                "vents": [
+                    "cover.cat_room_b58e_vent",
+                    "cover.cat_room_3075_vent",
+                ],
+            },
+            "Guest Bathroom": {
+                "temp": "sensor.guest_bathroom_temperature",
+                "occupancy": "binary_sensor.guest_bathroom_occupancy",
+                "vents": [
+                    "cover.guest_bathroom_e5a3_vent",
+                ],
+            },
+        },
+    },
+    "downstairs": {
+        "rooms": {
+            "Main Bedroom": {
+                "temp": "sensor.main_bedroom_temperature",
+                "occupancy": "binary_sensor.main_bedroom_occupancy",
+                "vents": [
+                    "cover.main_bedroom_883f_vent_2",
+                    "cover.main_bedroom_a96d_vent_2",
+                    "cover.main_bedroom_5c2b_vent_2",
+                ],
+            },
+            "Main Bathroom": {
+                "temp": "sensor.main_bathroom_temperature",
+                "occupancy": "binary_sensor.main_bathroom_occupancy",
+                "vents": [
+                    "cover.main_bathroom_f586_vent_2",
+                ],
+            },
+            "Hallway": {
+                "temp": "sensor.hallway_temperature",
+                "occupancy": None,
+                "vents": [
+                    "cover.hallway_907e_vent_2",
+                ],
+            },
+            "Living Room": {
+                "temp": "sensor.living_room_temperature",
+                "occupancy": "binary_sensor.living_room_occupancy",
+                "vents": [
+                    "cover.living_room_fc56_vent_2",
+                    "cover.living_room_5d8e_vent_2",
+                ],
+            },
+            "Kitchen": {
+                "temp": "sensor.kitchen_temperature",
+                "occupancy": None,
+                "vents": [
+                    "cover.kitchen_d124_vent_2",
+                ],
+            },
+            "Dining Room": {
+                "temp": "sensor.dining_room_temperature",
+                "occupancy": "binary_sensor.dining_room_occupancy",
+                "vents": [
+                    "cover.dining_room_7a28_vent_2",
+                ],
+            },
+            "Laundry Room": {
+                "temp": "sensor.laundry_room_temperature",
+                "occupancy": "binary_sensor.laundry_room_occupancy",
+                "vents": [
+                    "cover.laundry_room_d189_vent_2",
+                ],
+            },
+        },
+    },
+    "basement": {
+        "rooms": {
+            "Basement": {
+                "temp": "sensor.7wq7_temperature",
+                "occupancy": "binary_sensor.7wq7_occupancy",
+                "vents": [
+                    "cover.basement_4d79_vent",
+                ],
+            },
+        },
+    },
+}
+
+def _get_all_vents():
+    """Helper to collect all vent entity IDs from the zone config."""
+    vents = []
+    for zone in ZONES.values():
+        for room in zone["rooms"].values():
+            vents.extend(room.get("vents", []))
+    return vents
+
+THERMOSTAT = "climate.ecobee_thermostat"
+MODE_SELECT = "input_select.vent_control_mode"
+ENABLED_SWITCH = "input_boolean.vent_control_enabled"
+
+# Backpressure: never close more than this fraction of total vents
+MAX_CLOSED_RATIO = 0.60
+
+# How far a room temp can be from setpoint before we react (°F)
+DEADBAND = 1.0
+
+# Hysteresis: once a vent opens, the zone must drop this far BELOW the
+# close threshold before we actually close it. Prevents flapping at setpoint.
+HYSTERESIS = 0.5
+
+# Cycle interval in seconds
+CYCLE_INTERVAL = 120
+
+# After a manual override via HA UI, hold that position for this long
+MANUAL_HOLD_MINUTES = 60
+
+# Heat rises: upstairs gets this bonus (°F) added to its effective diff when
+# cooling. A 2°F bonus means upstairs is treated as 2° hotter than measured,
+# so it wins priority over downstairs when both floors are above setpoint.
+# Reversed for heating: downstairs gets the bonus (cold sinks).
+UPSTAIRS_HEAT_RISE_BONUS = 2.0
+
+# ── Priority-room airflow concentration ───────────────────────────────────────
+# Some rooms are physically disadvantaged: end of a long supply run, west-facing
+# (afternoon solar gain), poorly insulated duct that delivers warm supply air.
+# Guest Bedroom 1 is all three — its supply air arrives ~6°F warmer than its
+# neighbors, so on a hot afternoon it stays at 100% open along with everyone
+# else and simply loses the even split of blower CFM.
+#
+# Scoring alone can't fix this: when every room is above the cool setpoint they
+# all score "needs airflow" and all sit at 100%, so a priority room never gets a
+# *larger share* of the air. The only lever that actually moves more CFM to it
+# is throttling OTHER rooms to redirect flow. This pass does exactly that, but
+# only when the priority room is genuinely struggling, and only while cooling.
+#
+# Guarded so it can never starve the system or other occupants:
+#   - Active only when the priority room is occupied AND cooling AND the room is
+#     this many °F above the cool setpoint.
+#   - Only throttles DONOR rooms that are already close to / below setpoint
+#     (within PRIORITY_DONOR_MAXNEED of it) — never a room that itself needs air.
+#   - Caps the number of donor rooms; donors go to 50%, never 0%.
+#   - The existing backpressure pass still runs afterward as a final safety net.
+PRIORITY_ROOMS = {
+    # (zone, room): activation margin in °F above cool setpoint
+    ("upstairs", "Guest Bedroom 1"): 1.5,
+}
+# A donor room qualifies only if it is at least this many °F COOLER than the
+# priority room itself. Measured relative to the priority room (not the absolute
+# setpoint) on purpose: when the setpoint is aggressive the whole house can sit
+# above it, but a room 3°F+ cooler than the struggling room still has plenty of
+# margin to give up some airflow. Donors are throttled to 50% (never closed), so
+# they keep getting half their flow and won't run away from setpoint.
+PRIORITY_DONOR_COOLER_BY = 3.0
+# Throttle position for donor rooms (Flair vents are 0/50/100 only).
+PRIORITY_DONOR_POS = 50
+# Never throttle more than this many donor rooms for a priority room.
+PRIORITY_MAX_DONORS = 4
+
+
+class SmartVentController(hass.Hass):
+
+    def initialize(self):
+        self.log("Smart Vent Controller initializing...")
+
+        # Track manual overrides: vent_entity -> expiry datetime
+        self._manual_holds = {}
+
+        # Track last-set positions to avoid redundant commands
+        self._last_positions = {}
+
+        # Track last zone-level positions for hysteresis
+        self._last_zone_positions = {}
+
+        # Run the control loop
+        self.run_every(self.control_loop, "now+10", CYCLE_INTERVAL)
+
+        # Listen for manual vent changes (user moved a vent in the UI)
+        all_vents = _get_all_vents()
+        for vent in all_vents:
+            self.listen_state(self.on_vent_manual_change, vent,
+                              attribute="current_tilt_position")
+
+        # Listen for occupancy changes to react immediately
+        for zone in ZONES.values():
+            for room_name, sensors in zone["rooms"].items():
+                occ = sensors.get("occupancy")
+                if occ:
+                    self.listen_state(self.on_occupancy_change, occ)
+
+        # Listen for mode changes to run immediately
+        self.listen_state(self.on_mode_change, MODE_SELECT)
+        self.listen_state(self.on_mode_change, ENABLED_SWITCH)
+
+        self.log(f"Smart Vent Controller ready. {len(all_vents)} vents across "
+                 f"{len(ZONES)} zones. Cycle every {CYCLE_INTERVAL}s.")
+
+    # ── Event handlers ────────────────────────────────────────────────────────
+
+    def on_vent_manual_change(self, entity, attribute, old, new, kwargs):
+        """Detect when a user manually moves a vent (not us)."""
+        if entity in self._last_positions:
+            # If we just set this, ignore the state callback
+            if self._last_positions[entity] == new:
+                return
+        # User moved it manually — hold their position
+        self._manual_holds[entity] = datetime.now() + timedelta(
+            minutes=MANUAL_HOLD_MINUTES
+        )
+        self.log(f"Manual override detected: {entity} -> {new}%, "
+                 f"holding for {MANUAL_HOLD_MINUTES}min")
+
+    def on_occupancy_change(self, entity, attribute, old, new, kwargs):
+        """Run control loop immediately when someone enters/leaves a room."""
+        if old != new and new in ("on", "off"):
+            self.log(f"Occupancy change: {entity} -> {new}, running control loop")
+            self.control_loop(None)
+
+    def on_mode_change(self, entity, attribute, old, new, kwargs):
+        """Run control loop immediately when mode or enabled changes."""
+        self.log(f"Mode change: {entity} {old} -> {new}, running control loop")
+        self.control_loop(None)
+
+    # ── Main control loop ─────────────────────────────────────────────────────
+
+    def control_loop(self, kwargs):
+        """Main control loop — runs every CYCLE_INTERVAL seconds."""
+
+        # Check master switch
+        enabled = self.get_state(ENABLED_SWITCH)
+        if enabled != "on":
+            return
+
+        mode = self.get_state(MODE_SELECT)
+        self.log(f"Control loop: mode={mode}")
+
+        if mode == "Manual":
+            # Don't touch anything
+            return
+
+        # Get thermostat state
+        hvac_mode, hvac_action, target_cool, target_heat = self._get_thermostat_state()
+        self.log(f"Thermostat: mode={hvac_mode}, action={hvac_action}, "
+                 f"cool={target_cool}, heat={target_heat}")
+
+        # Calculate desired positions.
+        # room_positions: {(zone_name, room_name): position}
+        room_positions = {}
+
+        if mode == "Cool Upstairs":
+            for rn in ZONES["upstairs"]["rooms"]:
+                room_positions[("upstairs", rn)] = 100
+            for rn in ZONES["downstairs"]["rooms"]:
+                room_positions[("downstairs", rn)] = 0
+            for rn in ZONES["basement"]["rooms"]:
+                room_positions[("basement", rn)] = 0
+
+        elif mode == "Cool Downstairs":
+            for rn in ZONES["upstairs"]["rooms"]:
+                room_positions[("upstairs", rn)] = 0
+            for rn in ZONES["downstairs"]["rooms"]:
+                room_positions[("downstairs", rn)] = 100
+            for rn in ZONES["basement"]["rooms"]:
+                room_positions[("basement", rn)] = 0
+
+        elif mode == "Auto":
+            room_positions = self._auto_calculate(
+                hvac_mode, hvac_action, target_cool, target_heat
+            )
+
+        # Concentrate airflow toward struggling priority rooms (e.g. GB1) by
+        # throttling already-comfortable rooms. Runs in Auto and the Cool Upstairs/
+        # Cool Downstairs presets; a no-op unless a priority room is occupied,
+        # cooling, and above its activation margin. Must run BEFORE backpressure
+        # so backpressure remains the final safety net.
+        room_positions = self._apply_priority_rooms(
+            room_positions, hvac_action, target_cool
+        )
+
+        # Apply backpressure protection
+        room_positions = self._apply_backpressure_rooms(room_positions)
+        # Set vents per room
+        for (zone_name, room_name), position in room_positions.items():
+            room = ZONES[zone_name]["rooms"][room_name]
+            for vent in room.get("vents", []):
+                self._set_vent(vent, position)
+
+    # ── Auto mode logic ───────────────────────────────────────────────────────
+
+    def _auto_calculate(self, hvac_mode, hvac_action, target_cool, target_heat):
+        """Calculate per-ROOM vent positions based on each room's temp,
+        occupancy, heat-rise physics, and HVAC state.
+
+        Returns: {(zone_name, room_name): position}
+
+        Key behaviors:
+          - Each room is scored independently — rooms near setpoint get
+            throttled to 50%, rooms still far from setpoint stay at 100%.
+          - Upstairs rooms get a heat-rise bonus when cooling.
+          - When HVAC is idle/fan-only: open all for equalization.
+          - Hysteresis prevents flapping at setpoint boundaries.
+        """
+
+        room_positions = {}  # (zone_name, room_name) -> position
+
+        # If HVAC is idle or fan-only, open everything for equalization.
+        if hvac_action in ("idle", "fan", "off", None):
+            self.log(f"  HVAC action={hvac_action} — equalizing (all open)")
+            for zone_name, zone in ZONES.items():
+                for room_name in zone["rooms"]:
+                    room_positions[(zone_name, room_name)] = 100
+            return room_positions
+
+        # HVAC is actively conditioning. Score each room individually.
+        is_cooling = hvac_action == "cooling" or \
+            (hvac_mode in ("cool", "heat_cool") and hvac_action != "heating")
+        is_heating = hvac_action == "heating" or hvac_mode == "heat"
+
+        for zone_name, zone in ZONES.items():
+            for room_name, sensors in zone["rooms"].items():
+                key = (zone_name, room_name)
+                temp = self._read_temp(sensors["temp"])
+
+                if temp is None:
+                    room_positions[key] = 50
+                    self.log(f"  {zone_name}/{room_name}: no temp -> 50%")
+                    continue
+
+                # Check occupancy
+                occ_entity = sensors.get("occupancy")
+                is_occupied = True
+                if occ_entity:
+                    is_occupied = self.get_state(occ_entity) == "on"
+
+                # Occupancy weight: occupied rooms get a bonus to their need
+                occ_bonus = 1.0 if is_occupied else 0.0
+
+                if is_cooling:
+                    if target_cool is None:
+                        room_positions[key] = 50
+                        continue
+                    need = temp - target_cool
+                    # Heat-rise bonus for upstairs
+                    if zone_name == "upstairs":
+                        need += UPSTAIRS_HEAT_RISE_BONUS
+                    elif zone_name == "basement":
+                        need -= UPSTAIRS_HEAT_RISE_BONUS
+                    # Occupied rooms feel more urgent
+                    need += occ_bonus
+
+                elif is_heating:
+                    if target_heat is None:
+                        room_positions[key] = 50
+                        continue
+                    need = target_heat - temp
+                    if zone_name in ("downstairs", "basement"):
+                        need += UPSTAIRS_HEAT_RISE_BONUS
+                    need += occ_bonus
+
+                else:
+                    room_positions[key] = 100
+                    self.log(f"  {zone_name}/{room_name}: unknown action -> 100%")
+                    continue
+
+                # Score -> position
+                # Unoccupied rooms near/below setpoint should close —
+                # no point conditioning an empty room that's comfortable.
+                prev = self._last_zone_positions.get(key)
+
+                if need > DEADBAND * 3:
+                    pos = 100
+                    reason = f"high need ({need:+.1f})"
+                elif need > DEADBAND:
+                    pos = 100
+                    reason = f"needs airflow ({need:+.1f})"
+                elif need > -DEADBAND:
+                    if is_occupied:
+                        pos = 50
+                        reason = f"near setpoint, occupied ({need:+.1f})"
+                    else:
+                        # Unoccupied and near setpoint — close it
+                        if prev and prev > 0 and need > -(DEADBAND + HYSTERESIS):
+                            pos = 50
+                            reason = f"unoccupied hysteresis ({need:+.1f})"
+                        else:
+                            pos = 0
+                            reason = f"unoccupied, near setpoint ({need:+.1f})"
+                else:
+                    if prev and prev > 0 and need > -(DEADBAND + HYSTERESIS):
+                        pos = 50
+                        reason = f"hysteresis ({need:+.1f})"
+                    else:
+                        pos = 0
+                        reason = f"satisfied ({need:+.1f})"
+
+                room_positions[key] = pos
+                self._last_zone_positions[key] = pos
+
+                occ_str = "occ" if is_occupied else "empty"
+                self.log(f"  {zone_name}/{room_name}: {temp:.1f}F "
+                         f"{occ_str} need={need:+.1f} -> {pos}% ({reason})")
+
+        return room_positions
+
+    # ── Priority-room airflow concentration ───────────────────────────────────
+
+    def _apply_priority_rooms(self, room_positions, hvac_action, target_cool):
+        """Redirect CFM toward struggling priority rooms by throttling rooms that
+        are already comfortable.
+
+        Why this exists: when the whole house is above the cool setpoint, every
+        room scores 'needs airflow' and sits at 100%, so a physically
+        disadvantaged room (GB1: end of run, west sun, warm supply) never gets a
+        larger *share* of the blower's output. Boosting its score does nothing
+        once it's already at 100%. The only effective lever is throttling other
+        rooms. This pass does that, conservatively and only while cooling.
+
+        Mutates and returns room_positions.
+        """
+        # Only meaningful while actively cooling with a known cool setpoint.
+        if hvac_action != "cooling" or target_cool is None:
+            return room_positions
+
+        for (zone_name, room_name), margin in PRIORITY_ROOMS.items():
+            key = (zone_name, room_name)
+            room = ZONES.get(zone_name, {}).get("rooms", {}).get(room_name)
+            if not room:
+                continue
+
+            temp = self._read_temp(room["temp"])
+            if temp is None:
+                continue
+
+            # Must be occupied to justify stealing air from other rooms.
+            occ_entity = room.get("occupancy")
+            occupied = True
+            if occ_entity:
+                occupied = self.get_state(occ_entity) == "on"
+            if not occupied:
+                continue
+
+            # Must be genuinely struggling: above setpoint by the activation margin.
+            if temp <= target_cool + margin:
+                continue
+
+            # Pin the priority room fully open.
+            room_positions[key] = 100
+
+            # Find donor rooms: rooms at least PRIORITY_DONOR_COOLER_BY °F cooler
+            # than the priority room, that aren't the priority room and aren't
+            # already at/below the throttle position.
+            donors = []
+            for (zn, rn), pos in room_positions.items():
+                if (zn, rn) == key:
+                    continue
+                droom = ZONES[zn]["rooms"][rn]
+                dtemp = self._read_temp(droom["temp"])
+                if dtemp is None:
+                    continue
+                if dtemp > temp - PRIORITY_DONOR_COOLER_BY:
+                    continue  # not enough margin below the priority room
+                if pos <= PRIORITY_DONOR_POS:
+                    continue  # already throttled/closed by scoring
+                # Prefer unoccupied donors; among equals, the coolest gives up air
+                # most safely.
+                docc = droom.get("occupancy")
+                doccupied = self.get_state(docc) == "on" if docc else False
+                donors.append(((zn, rn), doccupied, dtemp))
+
+            # Unoccupied first, then coolest first.
+            donors.sort(key=lambda x: (x[1], x[2]))
+            throttled = 0
+            for dkey, docc, dtemp in donors:
+                if throttled >= PRIORITY_MAX_DONORS:
+                    break
+                room_positions[dkey] = PRIORITY_DONOR_POS
+                throttled += 1
+                self.log(f"  Priority {room_name} ({temp:.1f}F): throttling "
+                         f"{dkey[0]}/{dkey[1]} ({dtemp:.1f}F, "
+                         f"{'occ' if docc else 'empty'}) -> {PRIORITY_DONOR_POS}%")
+
+            if throttled == 0:
+                self.log(f"  Priority {room_name} ({temp:.1f}F) struggling but "
+                         f"no comfortable donor rooms to throttle")
+            else:
+                self.log(f"  Priority {room_name} ({temp:.1f}F): pinned 100%, "
+                         f"redirected flow from {throttled} room(s)")
+
+        return room_positions
+
+    # ── Backpressure protection ───────────────────────────────────────────────
+
+    def _apply_backpressure_rooms(self, room_positions):
+        """Ensure we don't close more than MAX_CLOSED_RATIO of total vents."""
+
+        total_vents = len(_get_all_vents())
+        max_closed = int(total_vents * MAX_CLOSED_RATIO)
+
+        # Count vents that would be closed
+        closed_count = 0
+        for (zone_name, room_name), pos in room_positions.items():
+            if pos == 0:
+                closed_count += len(ZONES[zone_name]["rooms"][room_name].get("vents", []))
+
+        if closed_count <= max_closed:
+            return room_positions
+
+        self.log(f"Backpressure: {closed_count} vents would close, "
+                 f"max allowed {max_closed}. Opening rooms to 50%.")
+
+        # Open rooms with fewest vents first until under limit
+        closed_rooms = [
+            (key, len(ZONES[key[0]]["rooms"][key[1]].get("vents", [])))
+            for key, pos in room_positions.items() if pos == 0
+        ]
+        closed_rooms.sort(key=lambda x: x[1])
+
+        for key, count in closed_rooms:
+            room_positions[key] = 50
+            closed_count -= count
+            self.log(f"  Opened {key[0]}/{key[1]} ({count} vents) to 50% for backpressure")
+            if closed_count <= max_closed:
+                break
+
+        return room_positions
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _get_thermostat_state(self):
+        """Read ecobee thermostat state, current action, and setpoints.
+
+        Returns (hvac_mode, hvac_action, target_cool, target_heat).
+        hvac_action is what the system is actually doing right now:
+          'cooling', 'heating', 'idle', 'fan', 'off'
+        """
+        state = self.get_state(THERMOSTAT, attribute="all")
+        if not state:
+            return "off", "off", None, None
+
+        attrs = state.get("attributes", {})
+        hvac_mode = state.get("state", "off")
+        hvac_action = attrs.get("hvac_action", "idle")
+
+        target_cool = attrs.get("target_temp_high")
+        target_heat = attrs.get("target_temp_low")
+
+        # Single setpoint mode
+        if target_cool is None and target_heat is None:
+            single = attrs.get("temperature")
+            if single:
+                if hvac_mode == "cool":
+                    target_cool = single
+                elif hvac_mode == "heat":
+                    target_heat = single
+                else:
+                    target_cool = single
+                    target_heat = single
+
+        return hvac_mode, hvac_action, target_cool, target_heat
+
+    def _read_temp(self, entity):
+        """Read a temperature sensor, returning float or None."""
+        val = self.get_state(entity)
+        if val in (None, "unknown", "unavailable"):
+            return None
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return None
+
+    def _set_vent(self, entity, position):
+        """Set a vent to a position, respecting manual holds."""
+
+        # Check manual hold
+        if entity in self._manual_holds:
+            if datetime.now() < self._manual_holds[entity]:
+                return  # Still in manual hold, don't touch
+            else:
+                del self._manual_holds[entity]  # Hold expired
+
+        # Check if vent is available
+        state = self.get_state(entity)
+        if state == "unavailable":
+            return
+
+        # Don't send redundant commands
+        current = self.get_state(entity, attribute="current_tilt_position")
+        if current == position:
+            return
+
+        self.log(f"Setting {entity} -> {position}%")
+        self.call_service(
+            "cover/set_cover_tilt_position",
+            entity_id=entity,
+            tilt_position=position,
+        )
+        self._last_positions[entity] = position
