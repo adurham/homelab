@@ -32,6 +32,10 @@ from PIL import Image
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediaingest/.config/rclone/rclone.conf")
 PORT = int(os.environ.get("THUMB_PORT", "8090"))
+# Bind address: must be reachable by lb-01's nginx (which proxies /thumb/ to
+# the CT's private IP), so default to the private IP, NOT 127.0.0.1. Override
+# with THUMB_BIND if needed.
+BIND = os.environ.get("THUMB_BIND", "172.16.0.51")
 LOCAL_CACHE = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))
 SRC = REMOTE + "by-chat"
 THUMBS = REMOTE + "thumbs"
@@ -153,8 +157,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"thumb service on 127.0.0.1:{PORT}", flush=True)
+    srv = ThreadingHTTPServer((BIND, PORT), Handler)
+    print(f"thumb service on {BIND}:{PORT}", flush=True)
     srv.serve_forever()
 
 
