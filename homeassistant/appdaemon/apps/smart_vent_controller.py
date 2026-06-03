@@ -163,31 +163,35 @@ MANUAL_HOLD_MINUTES = 60
 UPSTAIRS_HEAT_RISE_BONUS = 2.0
 
 # ── Priority-room airflow concentration ───────────────────────────────────────
-# Some rooms are physically disadvantaged: end of a long supply run, west-facing
-# (afternoon solar gain), poorly insulated duct that delivers warm supply air.
-# Guest Bedroom 1 is all three — its supply air arrives ~6°F warmer than its
-# neighbors, so on a hot afternoon it stays at 100% open along with everyone
-# else and simply loses the even split of blower CFM.
+# ANY room can become disadvantaged: end of a long supply run, sun-facing
+# (solar gain), a poorly insulated duct delivering warm supply air, or just a
+# transient hot spot. Guest Bedroom 1 is today's known worst case (end-of-run,
+# west sun, ~6°F warm supply) but this logic is GENERAL — every room is eligible
+# for priority treatment whenever it's the one struggling. GB1 is not special-
+# cased; it simply trips these thresholds most often right now.
 #
-# Scoring alone can't fix this: when every room is above the cool setpoint they
-# all score "needs airflow" and all sit at 100%, so a priority room never gets a
-# *larger share* of the air. The only lever that actually moves more CFM to it
-# is throttling OTHER rooms to redirect flow. This pass does exactly that, but
-# only when the priority room is genuinely struggling, and only while cooling.
+# Scoring alone can't fix a struggling room: when several rooms are above the
+# cool setpoint they all score "needs airflow" and all sit at 100%, so no single
+# room gets a *larger share* of the blower's output. The only lever that moves
+# more CFM to a hot room is throttling OTHER, cooler rooms to redirect flow.
 #
-# Guarded so it can never starve the system or other occupants:
-#   - Active only when the priority room is occupied AND cooling AND the room is
-#     this many °F above the cool setpoint.
-#   - Only throttles DONOR rooms that are already close to / below setpoint
-#     (within PRIORITY_DONOR_MAXNEED of it) — never a room that itself needs air.
-#   - Caps the number of donor rooms; donors go to 50%, never 0%.
-#   - The existing backpressure pass still runs afterward as a final safety net.
-PRIORITY_ROOMS = {
-    # (zone, room): activation margin in °F above cool setpoint
-    ("upstairs", "Guest Bedroom 1"): 1.5,
+# How it generalizes to all rooms:
+#   - Every occupied room over its activation margin is a "beneficiary".
+#   - Beneficiaries are helped worst-first (largest overshoot gets first pick).
+#   - A beneficiary is NEVER a donor — we don't steal from a room that's itself
+#     struggling. Donors are only rooms that are comfortably cooler.
+#   - If the whole house is equally hot there are no donors and it's a no-op
+#     (correct: there's no banked cold air to redistribute).
+#   - The backpressure pass still runs afterward as the final safety net.
+#
+# Default activation margin (°F over the cool setpoint) for ALL rooms. Add an
+# entry to PRIORITY_MARGIN_OVERRIDES only to tune a specific known outlier.
+PRIORITY_MARGIN_DEFAULT = 1.5
+PRIORITY_MARGIN_OVERRIDES = {
+    # ("zone", "Room Name"): margin_f   # e.g. make a room react earlier/later
 }
 # A donor room qualifies only if it is at least this many °F COOLER than the
-# priority room itself. Measured relative to the priority room (not the absolute
+# beneficiary room itself. Measured relative to the beneficiary (not the absolute
 # setpoint) on purpose: when the setpoint is aggressive the whole house can sit
 # above it, but a room 3°F+ cooler than the struggling room still has plenty of
 # margin to give up some airflow. Donors are throttled to 50% (never closed), so
@@ -195,24 +199,25 @@ PRIORITY_ROOMS = {
 PRIORITY_DONOR_COOLER_BY = 3.0
 # Throttle position for donor rooms (Flair vents are 0/50/100 only).
 PRIORITY_DONOR_POS = 50
-# Never throttle more than this many donor rooms for a priority room.
+# Never throttle more than this many donor rooms per beneficiary room.
 PRIORITY_MAX_DONORS = 4
-# Escalation: when a priority room is THIS far over the cool setpoint, it's not
+# Escalation: when a beneficiary is THIS far over the cool setpoint, it's not
 # just lagging, it's losing. Throttle donors all the way to 0% (closed) instead
-# of 50% to dump maximum CFM into the priority room. The backpressure pass still
-# caps total closures at MAX_CLOSED_RATIO, so this can't choke the system.
+# of 50% to dump maximum CFM into it. The backpressure pass still caps total
+# closures at MAX_CLOSED_RATIO, so this can't choke the system.
 PRIORITY_ESCALATE_OVER = 4.0
 PRIORITY_DONOR_POS_ESCALATED = 0
 
 # ── Fan-assist redistribution (the thermostat blind-spot workaround) ───────────
 # A single hallway thermostat goes idle when the HOUSE AVERAGE is satisfied, even
-# while GB1 is still hot — that's the core reason GB1 bakes. But when the AC has
-# been running, other rooms (basement, bathrooms, north side) bank real cold air.
-# This pass force-runs the air handler fan (no compressor), opens the priority
-# room, and chokes the cold rooms — physically pushing banked cold air into the
-# priority room with ZERO additional cooling cost. Engages only when:
+# while an individual room is still hot — that's the core reason a disadvantaged
+# room bakes. But when the AC has been running, other rooms (basement, bathrooms,
+# north side) bank real cold air. This pass force-runs the air handler fan (no
+# compressor), opens the hot room, and chokes the cold rooms — physically pushing
+# banked cold air into the hot room with ZERO additional cooling cost. Applies to
+# ANY occupied room, not just GB1. Engages only when:
 #   - HVAC is idle/fan (NOT actively cooling — cooling is handled above),
-#   - the priority room is occupied and >= FAN_ASSIST_OVER above cool setpoint,
+#   - the room is occupied and >= FAN_ASSIST_OVER above the cool setpoint,
 #   - at least one donor room is >= FAN_ASSIST_DONOR_COOLER_BY cooler than it
 #     (i.e. there's actually cold air banked somewhere to move).
 # Releases the fan back to auto the moment those stop being true, so it never
@@ -222,10 +227,11 @@ FAN_ASSIST_DONOR_COOLER_BY = 3.0
 FAN_ENTITY = "climate.ecobee_thermostat"
 
 # ── Predictive pre-cool ───────────────────────────────────────────────────────
-# GB1 is west-facing: it starts each afternoon already behind because the morning
-# is spent NOT favoring it. During the pre-sun window, while cooling is happening
-# anyway, bias the priority room so it banks headroom before the solar load
-# arrives. Lower activation margin (react earlier) during these local hours.
+# Sun-facing rooms start each afternoon already behind because the morning is
+# spent NOT favoring them. During the pre-sun window, while cooling is happening
+# anyway, bias ANY occupied room that's drifting up so it banks headroom before
+# the solar load arrives. Lower activation margin (react earlier) during these
+# local hours, applied house-wide.
 PRECOOL_HOURS = range(10, 14)   # 10:00–13:59 local time
 PRECOOL_MARGIN = 0.5            # engage priority pass when only this far over
 
@@ -484,80 +490,81 @@ class SmartVentController(hass.Hass):
 
     # ── Priority-room airflow concentration ───────────────────────────────────
 
+    def _room_margin(self, key):
+        """Activation margin for a room: per-room override or the house default."""
+        return PRIORITY_MARGIN_OVERRIDES.get(key, PRIORITY_MARGIN_DEFAULT)
+
     def _apply_priority_rooms(self, room_positions, hvac_action, target_cool):
-        """Redirect CFM toward struggling priority rooms by throttling rooms that
-        are already comfortable.
+        """Redirect CFM toward ANY struggling room by throttling cooler rooms.
 
-        Why this exists: when the whole house is above the cool setpoint, every
-        room scores 'needs airflow' and sits at 100%, so a physically
-        disadvantaged room (GB1: end of run, west sun, warm supply) never gets a
-        larger *share* of the blower's output. Boosting its score does nothing
-        once it's already at 100%. The only effective lever is throttling other
-        rooms. This pass does that, conservatively and only while cooling.
+        Generalized over the whole house: every occupied room is eligible to be
+        a beneficiary when it's the one running hot. When several rooms are above
+        the cool setpoint they all sit at 100% and none gets a larger *share* of
+        the blower output — the only lever that moves more CFM to a hot room is
+        throttling OTHER, cooler rooms. This pass does that, worst-room-first.
 
-        Mutates and returns room_positions.
+        A beneficiary is never also a donor (we don't steal from a room that's
+        itself struggling). If the whole house is uniformly hot there are no
+        eligible donors and this is a no-op. Mutates and returns room_positions.
         """
         # Only meaningful while actively cooling with a known cool setpoint.
         if hvac_action != "cooling" or target_cool is None:
             return room_positions
 
-        for (zone_name, room_name), margin in PRIORITY_ROOMS.items():
-            key = (zone_name, room_name)
-            room = ZONES.get(zone_name, {}).get("rooms", {}).get(room_name)
-            if not room:
-                continue
+        precool = self.datetime().hour in PRECOOL_HOURS
 
-            temp = self._read_temp(room["temp"])
-            if temp is None:
-                continue
+        # Build the beneficiary list: every occupied room over its (possibly
+        # pre-cool-lowered) activation margin. Sort worst-first so the hottest
+        # room gets first pick of the limited donor pool.
+        beneficiaries = []  # (over, key, temp, escalated)
+        for zone_name, zone in ZONES.items():
+            for room_name, sensors in zone["rooms"].items():
+                key = (zone_name, room_name)
+                temp = self._read_temp(sensors["temp"])
+                if temp is None:
+                    continue
+                occ_entity = sensors.get("occupancy")
+                if occ_entity and self.get_state(occ_entity) != "on":
+                    continue  # only help occupied rooms
+                margin = self._room_margin(key)
+                eff_margin = (PRECOOL_MARGIN
+                              if (precool and PRECOOL_MARGIN < margin)
+                              else margin)
+                over = temp - target_cool
+                if over <= eff_margin:
+                    continue
+                escalated = over >= PRIORITY_ESCALATE_OVER
+                beneficiaries.append((over, key, temp, escalated))
 
-            # Must be occupied to justify stealing air from other rooms.
-            occ_entity = room.get("occupancy")
-            occupied = True
-            if occ_entity:
-                occupied = self.get_state(occ_entity) == "on"
-            if not occupied:
-                continue
+        if not beneficiaries:
+            return room_positions
 
-            # Predictive pre-cool: during the pre-sun window, engage at a much
-            # lower margin so the room banks headroom BEFORE the west sun hits,
-            # instead of starting the afternoon already behind.
-            eff_margin = margin
-            precool = self.datetime().hour in PRECOOL_HOURS
-            if precool and PRECOOL_MARGIN < margin:
-                eff_margin = PRECOOL_MARGIN
+        beneficiaries.sort(reverse=True)  # largest overshoot first
+        beneficiary_keys = {b[1] for b in beneficiaries}
 
-            # Must be genuinely struggling: above setpoint by the activation margin.
-            over = temp - target_cool
-            if over <= eff_margin:
-                continue
-
-            # Escalation: badly behind -> close donors fully (0%) for max CFM;
-            # otherwise throttle to 50%. Backpressure still caps total closures.
-            escalated = over >= PRIORITY_ESCALATE_OVER
+        for over, key, temp, escalated in beneficiaries:
+            zone_name, room_name = key
             donor_pos = (PRIORITY_DONOR_POS_ESCALATED if escalated
                          else PRIORITY_DONOR_POS)
 
-            # Pin the priority room fully open.
+            # Pin the beneficiary fully open.
             room_positions[key] = 100
 
-            # Find donor rooms: rooms at least PRIORITY_DONOR_COOLER_BY °F cooler
-            # than the priority room, that aren't the priority room and aren't
+            # Donors: rooms at least PRIORITY_DONOR_COOLER_BY °F cooler than this
+            # beneficiary, that are NOT themselves beneficiaries, and aren't
             # already at/below the chosen throttle position.
             donors = []
             for (zn, rn), pos in room_positions.items():
-                if (zn, rn) == key:
+                if (zn, rn) == key or (zn, rn) in beneficiary_keys:
                     continue
                 droom = ZONES[zn]["rooms"][rn]
                 dtemp = self._read_temp(droom["temp"])
                 if dtemp is None:
                     continue
                 if dtemp > temp - PRIORITY_DONOR_COOLER_BY:
-                    continue  # not enough margin below the priority room
+                    continue  # not enough margin below the beneficiary
                 if pos <= donor_pos:
                     continue  # already at/below the chosen throttle position
-                # Prefer unoccupied donors; among equals, the coolest gives up air
-                # most safely.
                 docc = droom.get("occupancy")
                 doccupied = self.get_state(docc) == "on" if docc else False
                 donors.append(((zn, rn), doccupied, dtemp))
@@ -577,13 +584,13 @@ class SmartVentController(hass.Hass):
             tag = []
             if escalated:
                 tag.append("ESCALATED")
-            if precool and eff_margin == PRECOOL_MARGIN:
+            if precool and self._room_margin(key) > PRECOOL_MARGIN:
                 tag.append("precool")
             tagstr = f" [{','.join(tag)}]" if tag else ""
 
             if throttled == 0:
                 self.log(f"  Priority {room_name} ({temp:.1f}F, +{over:.1f})"
-                         f"{tagstr} struggling but no donor rooms to throttle")
+                         f"{tagstr} struggling but no cooler donor rooms")
             else:
                 self.log(f"  Priority {room_name} ({temp:.1f}F, +{over:.1f})"
                          f"{tagstr}: pinned 100%, redirected flow from "
@@ -594,14 +601,14 @@ class SmartVentController(hass.Hass):
     # ── Fan-assist redistribution ─────────────────────────────────────────────
 
     def _apply_fan_assist(self, room_positions, mode, hvac_action, target_cool):
-        """Force-circulate banked cold air to a hot priority room when the AC is
-        idle.
+        """Force-circulate banked cold air to ANY hot room when the AC is idle.
 
-        The single hallway thermostat goes idle on house AVERAGE, leaving GB1
-        hot while cold air sits banked in the basement/bathrooms. This runs the
-        air handler fan (no compressor, no cooling cost), opens the priority
-        room, and chokes the cold rooms so their banked cold air gets pushed to
-        the priority room. Releases the fan to auto when no longer needed.
+        The single hallway thermostat goes idle on house AVERAGE, leaving an
+        individual room hot while cold air sits banked in the basement/bathrooms.
+        This runs the air handler fan (no compressor, no cooling cost), opens the
+        hot room(s), and chokes the cold rooms so their banked cold air gets
+        pushed to where it's needed. Releases the fan to auto when no longer
+        needed. Applies house-wide, worst-room-first.
 
         Only acts in Auto mode (the presets manage the fan themselves). Mutates
         and returns room_positions; sets fan_mode as a side effect.
@@ -616,30 +623,34 @@ class SmartVentController(hass.Hass):
             self._release_fan_assist()
             return room_positions
 
+        # Beneficiaries: occupied rooms hot enough to warrant circulation.
+        beneficiaries = []  # (over, key, temp)
+        for zone_name, zone in ZONES.items():
+            for room_name, sensors in zone["rooms"].items():
+                key = (zone_name, room_name)
+                temp = self._read_temp(sensors["temp"])
+                if temp is None:
+                    continue
+                occ_entity = sensors.get("occupancy")
+                if occ_entity and self.get_state(occ_entity) != "on":
+                    continue
+                over = temp - target_cool
+                if over < FAN_ASSIST_OVER:
+                    continue
+                beneficiaries.append((over, key, temp))
+
+        beneficiaries.sort(reverse=True)  # hottest first
+        beneficiary_keys = {b[1] for b in beneficiaries}
+
         engaged_any = False
-        for (zone_name, room_name), _margin in PRIORITY_ROOMS.items():
-            key = (zone_name, room_name)
-            room = ZONES.get(zone_name, {}).get("rooms", {}).get(room_name)
-            if not room:
-                continue
-
-            temp = self._read_temp(room["temp"])
-            if temp is None:
-                continue
-
-            occ_entity = room.get("occupancy")
-            if occ_entity and self.get_state(occ_entity) != "on":
-                continue
-
-            if temp - target_cool < FAN_ASSIST_OVER:
-                continue  # not hot enough to bother circulating
-
+        for over, key, temp in beneficiaries:
+            zone_name, room_name = key
             # Is there actually banked cold air to move? Find donor rooms clearly
-            # cooler than the priority room.
+            # cooler than this room and NOT themselves beneficiaries.
             donors = []
             for zn, z in ZONES.items():
                 for rn in z["rooms"]:
-                    if (zn, rn) == key:
+                    if (zn, rn) == key or (zn, rn) in beneficiary_keys:
                         continue
                     droom = ZONES[zn]["rooms"][rn]
                     dtemp = self._read_temp(droom["temp"])
@@ -654,8 +665,8 @@ class SmartVentController(hass.Hass):
             if not donors:
                 continue  # no banked cold air -> running the fan would do nothing
 
-            # Engage: fan on, priority room wide open, choke the cold donors so
-            # their air is redirected to the priority room.
+            # Engage: fan on, hot room wide open, choke the cold donors so their
+            # air is redirected to where it's needed.
             engaged_any = True
             room_positions[key] = 100
             donors.sort(key=lambda x: (x[1], x[2]))  # unoccupied, coolest first
