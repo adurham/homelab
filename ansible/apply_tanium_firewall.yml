@@ -10,11 +10,11 @@
       ansible.builtin.command: pvesh set /cluster/firewall/options -enable 1
       changed_when: false
 
-    - name: Disable Host Firewall (Node Level) - Safety
-      delegate_to: "{{ item }}"
-      ansible.builtin.command: "pvesh set /nodes/{{ item }}/firewall/options -enable 0"
-      loop: "{{ groups['proxmox_nodes'] }}"
-      changed_when: false
+    # NOTE: the node-level firewall is now intentionally ENABLED and managed by
+    # pve_host_hardening.yml (key-only SSH + mgmt lockdown + VXLAN allow). Do NOT
+    # disable it here — that previously-safe stance predates the VXLAN fix and
+    # would undo the host hardening. This playbook only manages the per-Tanium-VM
+    # firewall rules; it must leave the node firewall state alone.
     - name: Deploy Firewall Rules (Cluster FS)
       ansible.builtin.template:
         src: templates/tanium_firewall.fw.j2
