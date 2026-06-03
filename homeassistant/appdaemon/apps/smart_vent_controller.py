@@ -197,6 +197,37 @@ PRIORITY_DONOR_COOLER_BY = 3.0
 PRIORITY_DONOR_POS = 50
 # Never throttle more than this many donor rooms for a priority room.
 PRIORITY_MAX_DONORS = 4
+# Escalation: when a priority room is THIS far over the cool setpoint, it's not
+# just lagging, it's losing. Throttle donors all the way to 0% (closed) instead
+# of 50% to dump maximum CFM into the priority room. The backpressure pass still
+# caps total closures at MAX_CLOSED_RATIO, so this can't choke the system.
+PRIORITY_ESCALATE_OVER = 4.0
+PRIORITY_DONOR_POS_ESCALATED = 0
+
+# ── Fan-assist redistribution (the thermostat blind-spot workaround) ───────────
+# A single hallway thermostat goes idle when the HOUSE AVERAGE is satisfied, even
+# while GB1 is still hot — that's the core reason GB1 bakes. But when the AC has
+# been running, other rooms (basement, bathrooms, north side) bank real cold air.
+# This pass force-runs the air handler fan (no compressor), opens the priority
+# room, and chokes the cold rooms — physically pushing banked cold air into the
+# priority room with ZERO additional cooling cost. Engages only when:
+#   - HVAC is idle/fan (NOT actively cooling — cooling is handled above),
+#   - the priority room is occupied and >= FAN_ASSIST_OVER above cool setpoint,
+#   - at least one donor room is >= FAN_ASSIST_DONOR_COOLER_BY cooler than it
+#     (i.e. there's actually cold air banked somewhere to move).
+# Releases the fan back to auto the moment those stop being true, so it never
+# just runs the blower for nothing.
+FAN_ASSIST_OVER = 2.0
+FAN_ASSIST_DONOR_COOLER_BY = 3.0
+FAN_ENTITY = "climate.ecobee_thermostat"
+
+# ── Predictive pre-cool ───────────────────────────────────────────────────────
+# GB1 is west-facing: it starts each afternoon already behind because the morning
+# is spent NOT favoring it. During the pre-sun window, while cooling is happening
+# anyway, bias the priority room so it banks headroom before the solar load
+# arrives. Lower activation margin (react earlier) during these local hours.
+PRECOOL_HOURS = range(10, 14)   # 10:00–13:59 local time
+PRECOOL_MARGIN = 0.5            # engage priority pass when only this far over
 
 
 class SmartVentController(hass.Hass):
@@ -316,6 +347,14 @@ class SmartVentController(hass.Hass):
         # so backpressure remains the final safety net.
         room_positions = self._apply_priority_rooms(
             room_positions, hvac_action, target_cool
+        )
+
+        # Fan-assist redistribution: when the AC is idle but a priority room is
+        # still hot and cold air is banked elsewhere, run the blower and shove
+        # that banked cold air into the priority room. Manages the fan mode and
+        # may rewrite room_positions. Runs before backpressure.
+        room_positions = self._apply_fan_assist(
+            room_positions, mode, hvac_action, target_cool
         )
 
         # Apply backpressure protection
@@ -480,16 +519,31 @@ class SmartVentController(hass.Hass):
             if not occupied:
                 continue
 
+            # Predictive pre-cool: during the pre-sun window, engage at a much
+            # lower margin so the room banks headroom BEFORE the west sun hits,
+            # instead of starting the afternoon already behind.
+            eff_margin = margin
+            precool = self.datetime().hour in PRECOOL_HOURS
+            if precool and PRECOOL_MARGIN < margin:
+                eff_margin = PRECOOL_MARGIN
+
             # Must be genuinely struggling: above setpoint by the activation margin.
-            if temp <= target_cool + margin:
+            over = temp - target_cool
+            if over <= eff_margin:
                 continue
+
+            # Escalation: badly behind -> close donors fully (0%) for max CFM;
+            # otherwise throttle to 50%. Backpressure still caps total closures.
+            escalated = over >= PRIORITY_ESCALATE_OVER
+            donor_pos = (PRIORITY_DONOR_POS_ESCALATED if escalated
+                         else PRIORITY_DONOR_POS)
 
             # Pin the priority room fully open.
             room_positions[key] = 100
 
             # Find donor rooms: rooms at least PRIORITY_DONOR_COOLER_BY °F cooler
             # than the priority room, that aren't the priority room and aren't
-            # already at/below the throttle position.
+            # already at/below the chosen throttle position.
             donors = []
             for (zn, rn), pos in room_positions.items():
                 if (zn, rn) == key:
@@ -500,8 +554,8 @@ class SmartVentController(hass.Hass):
                     continue
                 if dtemp > temp - PRIORITY_DONOR_COOLER_BY:
                     continue  # not enough margin below the priority room
-                if pos <= PRIORITY_DONOR_POS:
-                    continue  # already throttled/closed by scoring
+                if pos <= donor_pos:
+                    continue  # already at/below the chosen throttle position
                 # Prefer unoccupied donors; among equals, the coolest gives up air
                 # most safely.
                 docc = droom.get("occupancy")
@@ -514,20 +568,138 @@ class SmartVentController(hass.Hass):
             for dkey, docc, dtemp in donors:
                 if throttled >= PRIORITY_MAX_DONORS:
                     break
-                room_positions[dkey] = PRIORITY_DONOR_POS
+                room_positions[dkey] = donor_pos
                 throttled += 1
                 self.log(f"  Priority {room_name} ({temp:.1f}F): throttling "
                          f"{dkey[0]}/{dkey[1]} ({dtemp:.1f}F, "
-                         f"{'occ' if docc else 'empty'}) -> {PRIORITY_DONOR_POS}%")
+                         f"{'occ' if docc else 'empty'}) -> {donor_pos}%")
+
+            tag = []
+            if escalated:
+                tag.append("ESCALATED")
+            if precool and eff_margin == PRECOOL_MARGIN:
+                tag.append("precool")
+            tagstr = f" [{','.join(tag)}]" if tag else ""
 
             if throttled == 0:
-                self.log(f"  Priority {room_name} ({temp:.1f}F) struggling but "
-                         f"no comfortable donor rooms to throttle")
+                self.log(f"  Priority {room_name} ({temp:.1f}F, +{over:.1f})"
+                         f"{tagstr} struggling but no donor rooms to throttle")
             else:
-                self.log(f"  Priority {room_name} ({temp:.1f}F): pinned 100%, "
-                         f"redirected flow from {throttled} room(s)")
+                self.log(f"  Priority {room_name} ({temp:.1f}F, +{over:.1f})"
+                         f"{tagstr}: pinned 100%, redirected flow from "
+                         f"{throttled} room(s) -> {donor_pos}%")
 
         return room_positions
+
+    # ── Fan-assist redistribution ─────────────────────────────────────────────
+
+    def _apply_fan_assist(self, room_positions, mode, hvac_action, target_cool):
+        """Force-circulate banked cold air to a hot priority room when the AC is
+        idle.
+
+        The single hallway thermostat goes idle on house AVERAGE, leaving GB1
+        hot while cold air sits banked in the basement/bathrooms. This runs the
+        air handler fan (no compressor, no cooling cost), opens the priority
+        room, and chokes the cold rooms so their banked cold air gets pushed to
+        the priority room. Releases the fan to auto when no longer needed.
+
+        Only acts in Auto mode (the presets manage the fan themselves). Mutates
+        and returns room_positions; sets fan_mode as a side effect.
+        """
+        if mode != "Auto" or target_cool is None:
+            self._release_fan_assist()
+            return room_positions
+
+        # Fan-assist is for when we are NOT actively cooling. If the compressor
+        # is running, the cooling-path priority pass already handles it.
+        if hvac_action == "cooling":
+            self._release_fan_assist()
+            return room_positions
+
+        engaged_any = False
+        for (zone_name, room_name), _margin in PRIORITY_ROOMS.items():
+            key = (zone_name, room_name)
+            room = ZONES.get(zone_name, {}).get("rooms", {}).get(room_name)
+            if not room:
+                continue
+
+            temp = self._read_temp(room["temp"])
+            if temp is None:
+                continue
+
+            occ_entity = room.get("occupancy")
+            if occ_entity and self.get_state(occ_entity) != "on":
+                continue
+
+            if temp - target_cool < FAN_ASSIST_OVER:
+                continue  # not hot enough to bother circulating
+
+            # Is there actually banked cold air to move? Find donor rooms clearly
+            # cooler than the priority room.
+            donors = []
+            for zn, z in ZONES.items():
+                for rn in z["rooms"]:
+                    if (zn, rn) == key:
+                        continue
+                    droom = ZONES[zn]["rooms"][rn]
+                    dtemp = self._read_temp(droom["temp"])
+                    if dtemp is None:
+                        continue
+                    if dtemp <= temp - FAN_ASSIST_DONOR_COOLER_BY:
+                        docc = droom.get("occupancy")
+                        doccupied = (self.get_state(docc) == "on"
+                                     if docc else False)
+                        donors.append(((zn, rn), doccupied, dtemp))
+
+            if not donors:
+                continue  # no banked cold air -> running the fan would do nothing
+
+            # Engage: fan on, priority room wide open, choke the cold donors so
+            # their air is redirected to the priority room.
+            engaged_any = True
+            room_positions[key] = 100
+            donors.sort(key=lambda x: (x[1], x[2]))  # unoccupied, coolest first
+            throttled = 0
+            for dkey, docc, dtemp in donors:
+                if throttled >= PRIORITY_MAX_DONORS:
+                    break
+                room_positions[dkey] = 0
+                throttled += 1
+
+            self.log(f"  FAN-ASSIST {room_name} ({temp:.1f}F, "
+                     f"+{temp - target_cool:.1f} over, hvac={hvac_action}): "
+                     f"blower ON, redirecting banked cold air from "
+                     f"{throttled} room(s)")
+
+        if engaged_any:
+            self._engage_fan_assist()
+        else:
+            self._release_fan_assist()
+
+        return room_positions
+
+    def _engage_fan_assist(self):
+        """Turn the air handler fan to 'on', tracking that WE did it."""
+        if getattr(self, "_fan_assist_active", False):
+            return
+        current = self.get_state(FAN_ENTITY, attribute="fan_mode")
+        if current == "on":
+            # Already on (user or schedule); don't claim ownership so we won't
+            # turn it off later and stomp their setting.
+            return
+        self.log("  FAN-ASSIST: setting ecobee fan_mode -> on")
+        self.call_service("climate/set_fan_mode",
+                          entity_id=FAN_ENTITY, fan_mode="on")
+        self._fan_assist_active = True
+
+    def _release_fan_assist(self):
+        """Return the fan to 'auto' only if WE turned it on."""
+        if not getattr(self, "_fan_assist_active", False):
+            return
+        self.log("  FAN-ASSIST: releasing ecobee fan_mode -> auto")
+        self.call_service("climate/set_fan_mode",
+                          entity_id=FAN_ENTITY, fan_mode="auto")
+        self._fan_assist_active = False
 
     # ── Backpressure protection ───────────────────────────────────────────────
 
