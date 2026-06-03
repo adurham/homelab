@@ -61,6 +61,10 @@ CONFLICT_OPTION_SKIP = 0
 # Data Classes and Enums
 # ---------------------------------------------------------------------------
 
+class _ForceReimport(Exception):
+    """Internal sentinel: bypass the pre-import idempotency skip under --force-reimport."""
+    pass
+
 class ConflictDefault(Enum):
     """Enum for conflict resolution defaults."""
     REPLACE = "replace"
@@ -1479,6 +1483,17 @@ def main():
     parser.add_argument("--import-out-of-date", action="store_true", help="Import out-of-date solutions")
     parser.add_argument("--import-missing", action="store_true", help="Import missing solutions (new solutions that have never been imported)")
     parser.add_argument("--dry-run", action="store_true", help="Plan actions but do not execute imports")
+    parser.add_argument("--license-match", action="append", default=None,
+                        help="Regex (anchored, on solution id) of licensed solutions to keep; "
+                             "repeatable. Manifest solutions whose id doesn't match ANY pattern "
+                             "are dropped before compare/import. Use for restored TaaS DBs to "
+                             "import only what the customer is licensed for.")
+    parser.add_argument("--force-reimport", action="store_true",
+                        help="Treat EVERY (license-filtered) manifest solution as needing import, "
+                             "regardless of the installed-version comparison. Required when the DB "
+                             "says a solution is installed but the on-disk content/service files are "
+                             "absent (fresh TS/TMS restored from a DB-only dump). Routes all matched "
+                             "solutions through the out-of-date import path; pair with --import-out-of-date.")
     # Reconciled behavior is always used; flag removed
     parser.add_argument("--conflict-default", default="replace", choices=["replace", "skip"], help="Default conflict behavior for unhandled items")
     parser.add_argument("--tls-verify", choices=["0","1"], default="0", help="Override TLS verification (1=verify, 0=disable, default=0)")
@@ -1658,6 +1673,19 @@ def main():
         logging.error(f"Failed to fetch manifest: {exc}")
         sys.exit(1)
 
+    # Optional license filter: keep only manifest solutions whose id matches one
+    # of the supplied --license-match regexes (the patterns from the customer's
+    # licensed_solutions). Anchored full-match on the solution id.
+    if args.license_match:
+        patterns = [re.compile(f"^(?:{p})$") for p in args.license_match]
+        before = len(manifest)
+        kept = {sid: info for sid, info in manifest.items()
+                if any(rx.match(sid) for rx in patterns)}
+        dropped = before - len(kept)
+        logging.info(f"License filter: kept {len(kept)}/{before} manifest solutions "
+                     f"({dropped} dropped as unlicensed)")
+        manifest = kept
+
     # Phase 1: Compare each server against the manifest
     server_results = {}
     server_clients = {}  # Keep track of server clients for imports
@@ -1705,7 +1733,16 @@ def main():
                 # Apply optional name-map (for display only)
                 if nm in name_map:
                     nm = name_map[nm]
-                if sid not in sol_map:
+                if args.force_reimport:
+                    # DB-restore case: the version compare is meaningless because the
+                    # on-disk content/service files don't exist on this fresh box.
+                    # Force every matched manifest solution through the out-of-date
+                    # import path so it gets (re)imported regardless of installed_ver.
+                    installed_ver = sol_map.get(sid, {}).get("version", "(absent)")
+                    logging.info(f"[FORCE-REIMPORT] {name}: Solution {sid} ({nm}) "
+                                 f"(DB says: {installed_ver}, Manifest: {ver})")
+                    results["out_of_date"].append({"sid": sid, "api_version": installed_ver, "manifest_version": ver, "name": nm})
+                elif sid not in sol_map:
                     logging.info(f"[MISSING] {name}: Solution {sid} ({nm}) (version {ver}) not found in installed source")
                     results["missing"].append({"sid": sid, "version": ver, "name": nm})
                 else:
@@ -1848,8 +1885,13 @@ def main():
                 server_imports_attempted += 1
                 import_stats["total_attempted"] += 1
 
-                # Re-check installed version just before import (idempotency)
+                # Re-check installed version just before import (idempotency).
+                # SKIP this short-circuit under --force-reimport: on a DB-only
+                # restore the DB version matching the manifest does NOT mean the
+                # content is on disk, so we must import anyway.
                 try:
+                    if args.force_reimport:
+                        raise _ForceReimport()
                     current_map = fetch_installed_effective_versions(client)
                     current_ver = current_map.get(sid, {}).get("version")
                     if current_ver == manifest_version:
@@ -1857,6 +1899,8 @@ def main():
                         server_imports_skipped += 1
                         import_stats["total_skipped"] += 1
                         continue
+                except _ForceReimport:
+                    pass
                 except Exception:
                     pass
 
