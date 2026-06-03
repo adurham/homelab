@@ -121,12 +121,12 @@ all:
       vars:
         ansible_user: root
 
+    # The media gallery platform (content-agnostic encrypted media store +
+    # viewer on GDrive). Hostname/paths keep the historical media-gallery-01
+    # name; the ansible role + group are 'media_gallery' after the split.
     media_gallery:
       hosts:
         media-gallery-01:
-          # Outbound-only CT (no inbound services) — reached over the
-          # private_subnet ProxyCommand (jump host = personal MacBook), same
-          # as dns/proxy/mail. No tailnet membership needed.
           ansible_host: "{{ ip_media_gallery }}"
           vmid: 115
           target_node: pve02
