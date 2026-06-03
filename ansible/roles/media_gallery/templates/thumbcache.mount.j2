@@ -1,0 +1,14 @@
+# Managed by Ansible — roles/media_gallery. tmpfs so decrypted thumbnails live
+# in RAM only and never persist to disk (hardening vs offline-disk/backup leak).
+[Unit]
+Description=media-gallery thumbnail cache (tmpfs - decrypted media RAM-only)
+Before=media-gallery-thumb.service
+
+[Mount]
+What=tmpfs
+Where={{ media_gallery_state }}/thumbcache
+Type=tmpfs
+Options=size=512M,mode=0750,uid={{ media_gallery_user }},gid={{ media_gallery_user }},noexec,nosuid,nodev
+
+[Install]
+WantedBy=multi-user.target

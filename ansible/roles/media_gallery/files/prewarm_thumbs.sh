@@ -1,31 +1,28 @@
 #!/usr/bin/env bash
 # Background pre-warm: walk the manifest and request every thumbnail from the
-# local thumb service so its cache (encrypted, on Drive) fills up. This is NOT
-# a dependency — the gallery works without it; this just makes thumbnails
-# instant instead of ~10s-cold. Safe to re-run; cached thumbs return fast.
+# thumb service so its tmpfs (RAM) cache fills. NOT a dependency — the gallery
+# works without it via on-the-fly fallback; this just makes thumbnails instant
+# instead of ~2.5s cold (pulled from the encrypted Drive cache into tmpfs).
 #
-# Runs at low concurrency to avoid hammering Drive / the single-proc service.
+# IMPORTANT: hit the thumb service on its real bind address (the CT's private
+# IP, NOT localhost — the service binds 172.16.0.51 so nginx can reach it).
+# Low concurrency to avoid hammering Drive / the service.
 set -uo pipefail
 RCLONE_CONF="${RCLONE_CONFIG:-/home/mediaingest/.config/rclone/rclone.conf}"
-THUMB_BASE="http://127.0.0.1:${THUMB_PORT:-8090}/thumb"
+THUMB_HOST="${THUMB_HOST:-172.16.0.51}"
+THUMB_PORT="${THUMB_PORT:-8090}"
 LOG="${PREWARM_LOG:-/var/log/media-gallery/prewarm.log}"
 mkdir -p "$(dirname "$LOG")"
 exec >>"$LOG" 2>&1
 echo "=== prewarm start $(date -Is) ==="
 
-# Pull the manifest (decrypted) and extract chat/stem -> thumb paths.
 MANIFEST=$(rclone --config "$RCLONE_CONF" cat gcrypt:gallery/manifest.json 2>/dev/null)
-if [ -z "$MANIFEST" ]; then echo "no manifest, abort"; exit 0; fi
+[ -z "$MANIFEST" ] && { echo "no manifest"; exit 0; }
 
-# Parse thumb paths with python (jq may be absent).
-echo "$MANIFEST" | python3 -c '
-import json,sys
+echo "$MANIFEST" | python3 -c 'import json,sys
 for it in json.load(sys.stdin):
     t=it.get("thumb")
-    if t: print(t)
-' | while read -r thumb; do
-  # thumb = thumb/<chat>/<stem>.jpg ; request it (generates+caches if missing)
-  curl -s -o /dev/null --max-time 90 "http://127.0.0.1:${THUMB_PORT:-8090}/${thumb}"
-done
+    if t: print(t)' | \
+  xargs -P 6 -I{} curl -s -o /dev/null --max-time 120 "http://${THUMB_HOST}:${THUMB_PORT}/{}"
 
 echo "=== prewarm done $(date -Is) ==="

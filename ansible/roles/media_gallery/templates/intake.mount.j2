@@ -1,0 +1,14 @@
+# Managed by Ansible — roles/media_gallery. tmpfs so decrypted originals (live
+# collector + backfill staging) live in RAM only and never persist to disk.
+[Unit]
+Description=media-gallery captures cache (tmpfs - decrypted media RAM-only)
+Before=media-gallery.service
+
+[Mount]
+What=tmpfs
+Where={{ media_gallery_state }}/captures
+Type=tmpfs
+Options=size=512M,mode=0750,uid={{ media_gallery_user }},gid={{ media_gallery_user }},noexec,nosuid,nodev
+
+[Install]
+WantedBy=multi-user.target
