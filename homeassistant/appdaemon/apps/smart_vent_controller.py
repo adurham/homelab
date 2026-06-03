@@ -9,6 +9,8 @@ Controls:
   input_select.vent_control_mode      - Auto / Manual / Cool Upstairs / Cool Downstairs
 """
 
+import re
+
 import appdaemon.plugins.hass.hassapi as hass
 from datetime import datetime, timedelta
 
@@ -184,11 +186,49 @@ UPSTAIRS_HEAT_RISE_BONUS = 2.0
 #     (correct: there's no banked cold air to redistribute).
 #   - The backpressure pass still runs afterward as the final safety net.
 #
-# Default activation margin (°F over the cool setpoint) for ALL rooms. Add an
-# entry to PRIORITY_MARGIN_OVERRIDES only to tune a specific known outlier.
-PRIORITY_MARGIN_DEFAULT = 1.5
+# Activation margin (°F over the cool setpoint) is DERIVED, not hand-tuned. A
+# room with a warm supply-air handicap should react earlier — we measure that
+# handicap directly from the Flair duct (supply-air) temperature sensors instead
+# of maintaining a per-room table.
+#
+# Each cooling cycle we compute every room's "supply penalty" = how many °F
+# warmer its supply air arrives vs. the coldest duct in the house (the best the
+# system can deliver). A room at the end of a long/uninsulated run reads a large
+# penalty automatically; a well-served room reads ~0. The penalty is smoothed
+# (EMA) so a transient throttled-vent reading doesn't jerk the margins around.
+#
+#   effective_margin = PRIORITY_MARGIN_BASE
+#                      - PRIORITY_PENALTY_GAIN * smoothed_penalty * hot_factor
+#   clamped to [PRIORITY_MARGIN_MIN, PRIORITY_MARGIN_BASE]
+#
+# Lower margin = engages earlier. A badly-handicapped room can reach a negative
+# margin (favored even slightly below setpoint) — safe, because the donor rule
+# still requires donors to be genuinely cooler, so it can't steal from rooms
+# that aren't actually cold.
+PRIORITY_MARGIN_BASE = 1.5      # margin for a zero-penalty (well-served) room
+PRIORITY_MARGIN_MIN = -1.5      # most aggressive margin a handicapped room gets
+PRIORITY_PENALTY_GAIN = 0.30    # °F margin reduction per °F of supply penalty
+PRIORITY_PENALTY_EMA = 0.30     # smoothing factor for the per-room penalty
+PRIORITY_PENALTY_MIN_SAMPLE = 1.0  # ignore penalties smaller than this (noise)
+# Only sample a duct's temperature when its vent is at least this open — a
+# throttled vent reads warm because air isn't flowing, which is not a real
+# supply handicap. Prevents a feedback loop (throttle -> looks handicapped ->
+# gets favored -> opens -> penalty corrects).
+DUCT_SAMPLE_MIN_TILT = 100
+
+# Outdoor temperature makes the handicap matter more: on a hot day a warm-supply
+# room falls behind faster, so we amplify its penalty. hot_factor ramps from 1.0
+# at HOT_BASE up to (1 + (outdoor-HOT_BASE)/HOT_SPAN). Read from the weather
+# entity; if unavailable, hot_factor = 1.0 (no amplification).
+WEATHER_ENTITY = "weather.forecast_home"
+HOT_BASE_F = 80.0
+HOT_SPAN_F = 30.0               # +1.0 to the factor per 30°F above HOT_BASE
+HOT_FACTOR_MAX = 2.0
+
+# Optional manual escape hatch: only used if you ever need to pin a specific
+# room's margin and override the measured value. Normally empty.
 PRIORITY_MARGIN_OVERRIDES = {
-    # ("zone", "Room Name"): margin_f   # e.g. make a room react earlier/later
+    # ("zone", "Room Name"): margin_f
 }
 # A donor room qualifies only if it is at least this many °F COOLER than the
 # beneficiary room itself. Measured relative to the beneficiary (not the absolute
@@ -249,6 +289,11 @@ class SmartVentController(hass.Hass):
 
         # Track last zone-level positions for hysteresis
         self._last_zone_positions = {}
+
+        # EMA-smoothed per-room supply penalty (°F warmer than the best duct),
+        # measured from the Flair duct sensors. Drives each room's activation
+        # margin so handicapped rooms react earlier without a hardcoded table.
+        self._supply_penalty = {}
 
         # Run the control loop
         self.run_every(self.control_loop, "now+10", CYCLE_INTERVAL)
@@ -320,6 +365,12 @@ class SmartVentController(hass.Hass):
         hvac_mode, hvac_action, target_cool, target_heat = self._get_thermostat_state()
         self.log(f"Thermostat: mode={hvac_mode}, action={hvac_action}, "
                  f"cool={target_cool}, heat={target_heat}")
+
+        # Refresh measured per-room supply penalties whenever air is moving;
+        # duct temps are only meaningful with airflow. These drive each room's
+        # activation margin (handicapped rooms react earlier) automatically.
+        if hvac_action in ("cooling", "heating", "fan"):
+            self._update_supply_penalties()
 
         # Calculate desired positions.
         # room_positions: {(zone_name, room_name): position}
@@ -490,9 +541,95 @@ class SmartVentController(hass.Hass):
 
     # ── Priority-room airflow concentration ───────────────────────────────────
 
+    @staticmethod
+    def _duct_sensor_for_vent(vent_entity):
+        """Map a Flair cover entity to its duct (supply-air) temp sensor.
+
+        cover.guest_bedroom_1_8d6d_vent     -> sensor.guest_bedroom_1_8d6d_duct_temperature
+        cover.dining_room_7a28_vent_2       -> sensor.dining_room_7a28_duct_temperature_2
+        """
+        s = vent_entity.replace("cover.", "sensor.", 1)
+        return re.sub(r"_vent(_\d+)?$",
+                      lambda m: "_duct_temperature" + (m.group(1) or ""), s)
+
+    def _update_supply_penalties(self):
+        """Measure each room's supply-air penalty from the duct sensors and fold
+        it into the smoothed EMA. Only meaningful when air is actually moving
+        (cooling/fan), otherwise duct temps drift to ambient and mean nothing.
+
+        Penalty = room's best (coldest) duct reading minus the coldest duct in
+        the whole house. A handicapped room (warm supply) reads a large penalty.
+        """
+        room_duct = {}
+        for zone_name, zone in ZONES.items():
+            for room_name, sensors in zone["rooms"].items():
+                vals = []
+                for v in sensors.get("vents", []):
+                    # A throttled/closed vent reads a warm duct simply because
+                    # air isn't flowing past the sensor — that's not a delivery
+                    # handicap. Only sample ducts whose vent is open enough for
+                    # the reading to reflect real supply-air temperature.
+                    tilt = self.get_state(v, attribute="current_tilt_position")
+                    try:
+                        if tilt is not None and int(tilt) < DUCT_SAMPLE_MIN_TILT:
+                            continue
+                    except (TypeError, ValueError):
+                        pass
+                    dt = self._read_temp(self._duct_sensor_for_vent(v))
+                    if dt is not None:
+                        vals.append(dt)
+                if vals:
+                    # A room's effective supply is the coldest air it can get.
+                    room_duct[(zone_name, room_name)] = min(vals)
+
+        if len(room_duct) < 2:
+            return  # not enough data to compare
+
+        house_best = min(room_duct.values())
+        for key, duct in room_duct.items():
+            penalty = max(0.0, duct - house_best)
+            if penalty < PRIORITY_PENALTY_MIN_SAMPLE:
+                penalty = 0.0
+            prev = self._supply_penalty.get(key)
+            if prev is None:
+                self._supply_penalty[key] = penalty
+            else:
+                self._supply_penalty[key] = (
+                    PRIORITY_PENALTY_EMA * penalty
+                    + (1 - PRIORITY_PENALTY_EMA) * prev
+                )
+
+    def _hot_factor(self):
+        """Amplify supply penalties when it's hot outside (handicap matters more).
+
+        Returns 1.0 at/below HOT_BASE_F, ramping to HOT_FACTOR_MAX as outdoor
+        temp climbs. Falls back to 1.0 if the weather entity is unavailable.
+        """
+        outdoor = None
+        w = self.get_state(WEATHER_ENTITY, attribute="temperature")
+        if w is not None:
+            try:
+                outdoor = float(w)
+            except (TypeError, ValueError):
+                outdoor = None
+        if outdoor is None or outdoor <= HOT_BASE_F:
+            return 1.0
+        factor = 1.0 + (outdoor - HOT_BASE_F) / HOT_SPAN_F
+        return min(factor, HOT_FACTOR_MAX)
+
     def _room_margin(self, key):
-        """Activation margin for a room: per-room override or the house default."""
-        return PRIORITY_MARGIN_OVERRIDES.get(key, PRIORITY_MARGIN_DEFAULT)
+        """Activation margin (°F over cool setpoint) for a room.
+
+        Derived from the room's measured supply-air penalty, amplified by how
+        hot it is outside. A handicapped/sun-loaded room gets a lower (earlier-
+        engaging) margin automatically. A manual override, if present, wins.
+        """
+        if key in PRIORITY_MARGIN_OVERRIDES:
+            return PRIORITY_MARGIN_OVERRIDES[key]
+        penalty = self._supply_penalty.get(key, 0.0)
+        margin = (PRIORITY_MARGIN_BASE
+                  - PRIORITY_PENALTY_GAIN * penalty * self._hot_factor())
+        return max(PRIORITY_MARGIN_MIN, min(PRIORITY_MARGIN_BASE, margin))
 
     def _apply_priority_rooms(self, room_positions, hvac_action, target_cool):
         """Redirect CFM toward ANY struggling room by throttling cooler rooms.
