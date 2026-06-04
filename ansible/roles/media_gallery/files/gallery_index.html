@@ -179,15 +179,47 @@
   .folder .frename:hover{background:var(--accent);border-color:var(--accent);}
   .folder .fdelete:hover{background:#d23b3b;border-color:#d23b3b;}
   @media(hover:none){.folder .frename,.folder .fdelete{opacity:.85;}}
+  /* folder selection checkbox (top-left, mirror of photo selbox) */
+  .folder .fselbox{position:absolute;top:6px;left:6px;z-index:5;width:26px;height:26px;
+    border-radius:6px;border:2px solid rgba(255,255,255,.85);background:rgba(20,24,30,.6);
+    display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;
+    cursor:pointer;opacity:0;transition:opacity .12s,background .12s;}
+  .folder:hover .fselbox{opacity:.9;}
+  .folder.selected{outline:3px solid var(--accent);outline-offset:-3px;}
+  .folder.selected .fselbox{background:var(--accent);border-color:var(--accent);opacity:1;}
+  @media(hover:none){.folder .fselbox{opacity:.85;}}
+  /* stacked multi-progress dialog (parallel folder deletes) */
+  #mprogScrim{position:fixed;inset:0;z-index:160;background:rgba(0,0,0,.45);
+    display:none;align-items:center;justify-content:center;}
+  #mprogScrim.show{display:flex;}
+  #mprogDlg{width:440px;max-width:92vw;background:#1b2129;border:1px solid var(--border);
+    border-radius:14px;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.6);}
+  #mprogDlg .mpd-title{font-size:15px;font-weight:600;margin-bottom:14px;}
+  #mprogDlg .mprow{margin-bottom:12px;}
+  #mprogDlg .mprow .mp-head{display:flex;justify-content:space-between;font-size:13px;
+    margin-bottom:5px;gap:10px;}
+  #mprogDlg .mprow .mp-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #mprogDlg .mprow .mp-stat{flex:0 0 auto;color:var(--muted);font-size:12px;display:flex;
+    align-items:center;gap:6px;}
+  #mprogDlg .mprow .mp-track{height:7px;border-radius:5px;background:#2a313b;overflow:hidden;}
+  #mprogDlg .mprow .mp-fill{height:100%;width:0;border-radius:5px;
+    background:linear-gradient(90deg,#5b8cff,#7aa2ff);transition:width .25s ease;}
+  #mprogDlg .mprow.ok .mp-fill{background:#2e7d4f;}
+  #mprogDlg .mprow.err .mp-fill{background:#d23b3b;}
+  #mprogDlg .mprow .spin{width:13px;height:13px;border:2px solid #3a4150;
+    border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;}
+  #mprogDlg .mpd-more{font-size:12px;color:var(--muted);margin:4px 0 12px;}
+  #mprogDlg .mpd-foot{text-align:right;}
+  #mprogDlg .mpd-foot button{font-size:13px;padding:7px 16px;}
   /* ---- multi-select + bulk action bar ---- */
-  #bulkBar{display:none;position:sticky;top:54px;z-index:9;align-items:center;gap:10px;
+  #bulkBar,#fbulkBar{display:none;position:sticky;top:54px;z-index:9;align-items:center;gap:10px;
     flex-wrap:wrap;background:rgba(28,32,38,.97);border:1px solid var(--border);
     border-radius:10px;padding:10px 14px;margin:10px 16px;backdrop-filter:blur(8px);}
-  #bulkBar.show{display:flex;}
-  #bulkBar #bulkCount{font-weight:600;font-size:14px;min-width:90px;}
-  #bulkBar button{font-size:13px;padding:7px 12px;}
-  #bulkBar button.danger{border-color:#5a3030;}
-  #bulkBar button.danger:hover{background:#d23b3b;border-color:#d23b3b;}
+  #bulkBar.show,#fbulkBar.show{display:flex;}
+  #bulkBar #bulkCount,#fbulkBar #fbulkCount{font-weight:600;font-size:14px;min-width:90px;}
+  #bulkBar button,#fbulkBar button{font-size:13px;padding:7px 12px;}
+  #bulkBar button.danger,#fbulkBar button.danger{border-color:#5a3030;}
+  #bulkBar button.danger:hover,#fbulkBar button.danger:hover{background:#d23b3b;border-color:#d23b3b;}
   #bulkBar #bulkMove:hover{background:var(--accent);border-color:var(--accent);}
   .bulkmovemenu{display:none;position:absolute;top:48px;left:14px;z-index:20;
     flex-direction:column;gap:4px;background:#1a1f27;border:1px solid var(--border);
@@ -380,6 +412,12 @@
     <button id="bulkClear">Clear</button>
     <div class="bulkmovemenu" id="bulkMoveMenu"></div>
   </div>
+  <!-- folder bulk bar: shows on the landing when ≥1 folder is selected -->
+  <div id="fbulkBar">
+    <span id="fbulkCount">0 folders selected</span>
+    <button id="fbulkDelete" class="danger">&#128465; Delete folders</button>
+    <button id="fbulkClear">Clear</button>
+  </div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
   <div id="dupView" style="display:none"></div>
@@ -394,6 +432,14 @@
     <div class="ph" id="propTitle">Properties</div>
     <div class="pb" id="propBody"></div>
     <div class="pf"><button id="propClose">Close</button></div>
+  </div>
+</div>
+<div id="mprogScrim">
+  <div id="mprogDlg">
+    <div class="mpd-title" id="mpdTitle">Deleting folders…</div>
+    <div id="mpdRows"></div>
+    <div class="mpd-more" id="mpdMore" style="display:none"></div>
+    <div class="mpd-foot"><button id="mpdClose" style="display:none">Done</button></div>
   </div>
 </div>
 <div id="progScrim">
@@ -428,6 +474,7 @@
   var current=null;        // null = landing; "*" all; else chat name
   var view=[];             // current folder's sorted items
   var lbIndex=-1;
+  var selectedFolders=new Set();   // landing-page multi-folder selection (declared early so render guards pass)
 
   // ---- toast (visible feedback for every action) ----
   var _toastEl=null, _toastTimer=null;
@@ -684,7 +731,7 @@
       m.querySelector('.fname').textContent=name;
       m.querySelector('.fcount').textContent=items+' item'+(items===1?'':'s');
       f.appendChild(m);
-      // rename pencil + delete (not on the "All items" aggregate)
+      // rename pencil + delete + select (not on the "All items" aggregate)
       if(name!=='All items'){
         var rb=document.createElement('button'); rb.className='frename';
         rb.title='Rename folder'; rb.innerHTML='&#9998;';
@@ -692,6 +739,12 @@
         var db=document.createElement('button'); db.className='fdelete';
         db.title='Delete folder'; db.innerHTML='&#128465;';
         f.appendChild(db);
+        // selection checkbox (top-left) for multi-folder delete
+        var fsb=document.createElement('div'); fsb.className='fselbox';
+        fsb.title='Select folder';
+        if(typeof selectedFolders!=='undefined' && selectedFolders.has(name)){ f.classList.add('selected'); fsb.innerHTML='&#10003;'; }
+        fsb.addEventListener('click',function(e){ e.stopPropagation(); toggleFolderSelect(name,f); });
+        f.appendChild(fsb);
         // folder is a drop target for drag-to-move from inside another folder
         f.addEventListener('dragover',function(e){ if(dragStems.length){ e.preventDefault(); f.classList.add('dragover'); e.dataTransfer.dropEffect='move'; } });
         f.addEventListener('dragleave',function(){ f.classList.remove('dragover'); });
@@ -720,6 +773,13 @@
       frag.appendChild(makeFolder(n,0,''));
     });
     elFolder.innerHTML=''; elFolder.appendChild(frag);
+    // prune folder-selection of folders that no longer exist, refresh the bar
+    if(typeof selectedFolders!=='undefined'){
+      Array.from(selectedFolders).forEach(function(n){
+        if(!chatMap[n] && emptyFolders.indexOf(n)<0) selectedFolders.delete(n);
+      });
+      refreshFbulkBar();
+    }
   }
 
   // ---- "+ New folder" tile + inline create form ----
@@ -799,6 +859,7 @@
 
     elFolder.style.display='none'; elFolder.innerHTML='';
     var dv=document.getElementById('dupView'); if(dv) dv.style.display='none';
+    var fbb=document.getElementById('fbulkBar'); if(fbb) fbb.classList.remove('show');
     elPhoto.style.display='grid';
     elBack.style.display='inline-block';
     elSort.style.display='inline-block';
@@ -1100,23 +1161,143 @@
     openFolder(f.dataset.chat);
   });
 
-  // ---- delete a whole folder (and its contents) ----
+  // ---- delete a single folder (and its contents) ----
+  function rmdirFolder(name){
+    // returns a promise resolving {ok, status}; does NOT touch UI/toast
+    if(chatMap[name]) chatMap[name].forEach(function(it){ pendingDel[it.stem]=true; });
+    return fetch('/rmdir/'+encodeURIComponent(name),{method:'POST',credentials:'same-origin'})
+      .then(function(r){ return {ok:r.status===200, status:r.status}; },
+            function(){ return {ok:false, status:0}; });
+  }
   function deleteFolder(name){
     if(!name||name==='*') return;
     var count=(chatMap[name]?chatMap[name].length:0);
     if(!confirm('Delete folder "'+name+'"'+(count?(' and its '+count+' item'+(count===1?'':'s')):'')+'? This cannot be undone.')) return;
     toast('Deleting folder “'+name+'”…','work',true);
-    fetch('/rmdir/'+encodeURIComponent(name),{method:'POST',credentials:'same-origin'})
-      .then(function(r){
-        if(r.status===200){
-          toast('✓ Deleted folder “'+name+'”','ok');
-          // suppress all its items locally until the server manifest catches up
-          if(chatMap[name]) chatMap[name].forEach(function(it){ pendingDel[it.stem]=true; });
-          var ei=emptyFolders.indexOf(name); if(ei>=0) emptyFolders.splice(ei,1);
-          reloadManifest(null);
-        } else { toast('Delete failed (HTTP '+r.status+')','err'); }
-      }).catch(function(){ toast('Network error deleting folder','err'); });
+    rmdirFolder(name).then(function(res){
+      if(res.ok){
+        toast('✓ Deleted folder “'+name+'”','ok');
+        var ei=emptyFolders.indexOf(name); if(ei>=0) emptyFolders.splice(ei,1);
+        reloadManifest(null);
+      } else { toast('Delete failed (HTTP '+res.status+')','err'); }
+    });
   }
+
+  // ---- MULTI-FOLDER SELECT + DELETE ----
+  // (selectedFolders declared near the top with the other state vars)
+  var elFbulkBar=document.getElementById('fbulkBar');
+  function refreshFbulkBar(){
+    document.getElementById('fbulkCount').textContent=
+      selectedFolders.size+' folder'+(selectedFolders.size===1?'':'s')+' selected';
+    elFbulkBar.classList.toggle('show', selectedFolders.size>0 && current===null);
+  }
+  function clearFolderSelection(){
+    selectedFolders.clear(); refreshFbulkBar();
+    Array.prototype.forEach.call(document.querySelectorAll('.folder.selected'),function(f){
+      f.classList.remove('selected'); var b=f.querySelector('.fselbox'); if(b) b.innerHTML='';
+    });
+  }
+  function toggleFolderSelect(name, el){
+    if(selectedFolders.has(name)){ selectedFolders.delete(name); el.classList.remove('selected'); var b=el.querySelector('.fselbox'); if(b) b.innerHTML=''; }
+    else { selectedFolders.add(name); el.classList.add('selected'); var b2=el.querySelector('.fselbox'); if(b2) b2.innerHTML='&#10003;'; }
+    refreshFbulkBar();
+  }
+  document.getElementById('fbulkClear').addEventListener('click',clearFolderSelection);
+  document.getElementById('fbulkDelete').addEventListener('click',function(){
+    var names=Array.from(selectedFolders); if(!names.length) return;
+    var totalItems=names.reduce(function(a,n){return a+(chatMap[n]?chatMap[n].length:0);},0);
+    if(!confirm('Delete '+names.length+' folder'+(names.length===1?'':'s')+
+      (totalItems?(' and their '+totalItems+' item'+(totalItems===1?'':'s')):'')+
+      '? This cannot be undone.')) return;
+    deleteFoldersParallel(names);
+  });
+
+  // delete N folders with up to MAX_PARALLEL in flight; show stacked progress
+  function deleteFoldersParallel(names){
+    var MAX_PARALLEL=3;
+    mprogOpen(names, MAX_PARALLEL);
+    var queue=names.slice(), done=0, fail=0, active=0, idx=0;
+    function pump(){
+      while(active<MAX_PARALLEL && queue.length){
+        var name=queue.shift(); active++;
+        mprogStart(name);
+        (function(n){
+          rmdirFolder(n).then(function(res){
+            active--;
+            if(res.ok){ done++; mprogFinishRow(n,true);
+              var ei=emptyFolders.indexOf(n); if(ei>=0) emptyFolders.splice(ei,1);
+            } else { fail++; mprogFinishRow(n,false,res.status); }
+            if(queue.length){ pump(); }
+            else if(active===0){ mprogAllDone(done,fail); clearFolderSelection(); reloadManifest(null); }
+          });
+        })(name);
+      }
+    }
+    pump();
+  }
+
+  // ---- stacked multi-progress dialog ----
+  var _mp={};
+  function mprogOpen(names, maxShown){
+    _mp={names:names, maxShown:maxShown, rows:{}, started:0, total:names.length};
+    document.getElementById('mpdTitle').textContent='Deleting '+names.length+' folder'+(names.length===1?'':'s')+'…';
+    document.getElementById('mpdRows').innerHTML='';
+    document.getElementById('mpdMore').style.display='none';
+    document.getElementById('mpdClose').style.display='none';
+    document.getElementById('mprogScrim').classList.add('show');
+  }
+  function mprogStart(name){
+    _mp.started++;
+    var rowsEl=document.getElementById('mpdRows');
+    // show at most maxShown active rows; collapse the rest into a counter
+    if(rowsEl.children.length < _mp.maxShown){
+      var row=document.createElement('div'); row.className='mprow'; row.dataset.name=name;
+      row.innerHTML='<div class="mp-head"><span class="mp-name"></span>'+
+        '<span class="mp-stat"><span class="spin"></span><span class="mp-pct">working…</span></span></div>'+
+        '<div class="mp-track"><div class="mp-fill"></div></div>';
+      row.querySelector('.mp-name').textContent='📁 '+name;
+      rowsEl.appendChild(row); _mp.rows[name]=row;
+      // animate fill to ~85% while in-flight (indeterminate-ish)
+      requestAnimationFrame(function(){ row.querySelector('.mp-fill').style.width='85%'; });
+    }
+    updateMpMore();
+  }
+  function mprogFinishRow(name, ok, status){
+    var row=_mp.rows[name];
+    if(row){
+      row.classList.add(ok?'ok':'err');
+      row.querySelector('.mp-fill').style.width='100%';
+      row.querySelector('.mp-stat').innerHTML=ok?'✓ done':('✕ failed'+(status?(' ('+status+')'):''));
+      // free the slot after a beat so a queued folder can take its row
+      setTimeout(function(){
+        if(row.parentNode){ row.parentNode.removeChild(row); }
+        delete _mp.rows[name];
+        // promote a waiting folder into a visible row if any are pending
+        updateMpMore();
+      }, 600);
+    }
+    updateMpMore();
+  }
+  function updateMpMore(){
+    var doneCount=_mp.total - queueRemaining();
+    var inFlight=Object.keys(_mp.rows).length;
+    var waiting=_mp.total - _mp.started;
+    var moreEl=document.getElementById('mpdMore');
+    if(waiting>0){ moreEl.style.display='block'; moreEl.textContent='+ '+waiting+' more queued…'; }
+    else { moreEl.style.display='none'; }
+  }
+  function queueRemaining(){ return _mp.total - _mp.started; }
+  function mprogAllDone(done, fail){
+    document.getElementById('mpdTitle').textContent=
+      fail? ('Deleted '+done+' folder'+(done===1?'':'s')+', '+fail+' failed')
+          : ('✓ Deleted '+done+' folder'+(done===1?'':'s'));
+    document.getElementById('mpdMore').style.display='none';
+    document.getElementById('mpdClose').style.display='';
+  }
+  setTimeout(function(){
+    var c=document.getElementById('mpdClose');
+    if(c) c.addEventListener('click',function(){ document.getElementById('mprogScrim').classList.remove('show'); });
+  },0);
 
   // ---- folder rename ----
   function renameFolder(oldName){
