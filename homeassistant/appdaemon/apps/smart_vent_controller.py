@@ -955,7 +955,13 @@ class SmartVentController(hass.Hass):
         looping). Best-effort: a heartbeat failure must never break control.
         """
         try:
-            now = self.datetime()
+            # aware=True so the ISO string carries the UTC offset. A naive
+            # local timestamp is misread by HA's Prometheus export (it assumes
+            # UTC), which shifted the exported epoch by the local offset and
+            # made any VictoriaMetrics "heartbeat age" panel read garbage. The
+            # watchdog reads HA's last_changed so it was unaffected, but the
+            # exported metric must be correct for Grafana to use it.
+            now = self.datetime(aware=True)
             enabled = self.get_state(ENABLED_SWITCH)
             mode = self.get_state(MODE_SELECT)
             self.set_state(
