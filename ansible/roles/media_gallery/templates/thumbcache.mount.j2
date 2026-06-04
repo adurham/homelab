@@ -8,7 +8,7 @@ Before=media-gallery-thumb.service
 What=tmpfs
 Where={{ media_gallery_state }}/thumbcache
 Type=tmpfs
-Options=size=512M,mode=0750,uid={{ media_gallery_user }},gid={{ media_gallery_user }},noexec,nosuid,nodev
+Options=size={{ media_gallery_thumbcache_tmpfs_size }},mode=0750,uid={{ media_gallery_user }},gid={{ media_gallery_user }},noexec,nosuid,nodev
 
 [Install]
 WantedBy=multi-user.target

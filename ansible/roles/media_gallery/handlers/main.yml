@@ -18,6 +18,12 @@
     state: restarted
     daemon_reload: true
 
+- name: Restart Thumb
+  ansible.builtin.systemd:
+    name: media-gallery-thumb.service
+    state: restarted
+    daemon_reload: true
+
 - name: Restart Trash
   ansible.builtin.systemd:
     name: media-gallery-trash.service

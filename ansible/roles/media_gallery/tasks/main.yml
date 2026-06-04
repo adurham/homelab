@@ -277,6 +277,49 @@
     state: started
     daemon_reload: true
 
+# ─── On-the-fly thumbnail service ──────────────────────────────────────────
+# GET /thumb/<chat>/<stem>.jpg → ~400px poster, generated + cached on first hit
+# (Pillow for images, ffmpeg for videos), persisted to gcrypt:thumbs/. Routed by
+# lb-01 /thumb/ behind Authentik. Needs ffmpeg for video posters. The thumbcache
+# tmpfs (RAM-only) must be large enough to hold the biggest original transiently
+# during video thumbnailing (sized via media_gallery_thumbcache_tmpfs_size).
+- name: Install ffmpeg (video thumbnail posters)
+  ansible.builtin.apt:
+    name: ffmpeg
+    state: present
+    update_cache: true
+  retries: 3
+  delay: 10
+  register: ffmpeg_install
+  until: ffmpeg_install is succeeded
+
+- name: Deploy Thumbnail Service
+  ansible.builtin.copy:
+    src: thumb_service.py
+    dest: "{{ media_gallery_dir }}/thumb_service.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+  notify: Restart Thumb
+
+- name: Render Thumbnail Service Unit
+  ansible.builtin.template:
+    src: thumb.service.j2
+    dest: /etc/systemd/system/media-gallery-thumb.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Thumb
+
+- name: Enable & Start Thumbnail Service
+  ansible.builtin.systemd:
+    name: media-gallery-thumb.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
 # ─── Web gallery (browser viewer, gated by Authentik at lb-01) ─────────────
 # rclone serve http with a custom thumbnail-grid template. No built-in auth:
 # access is via https://gallery.chi.lab.amd-e.com → lb-01 nginx forward-auth

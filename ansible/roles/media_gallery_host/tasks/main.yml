@@ -29,8 +29,8 @@
   ansible.builtin.command: >
     pct create 115 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
     --hostname media-gallery-01
-    --cores 1 --memory 1024 --swap 512
-    --rootfs nvme-data:8
+    --cores {{ media_gallery_ct_cores }} --memory {{ media_gallery_ct_memory_mb }} --swap {{ media_gallery_ct_swap_mb }}
+    --rootfs nvme-data:{{ media_gallery_ct_rootfs_gb }}
     --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_media_gallery }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
     --unprivileged 1
     --features nesting=1
@@ -39,6 +39,36 @@
     --onboot 1
   no_log: true
   when: pct_check.rc != 0
+
+# Ensure CPU/RAM match the codified sizing even for an already-existing CT
+# (handles the live-drift case where the CT was hand-bumped). Idempotent: pct
+# set is a no-op when the values already match.
+- name: Ensure TG Collector CT cores/memory match codified sizing
+  ansible.builtin.command: >
+    pct set 115
+    --cores {{ media_gallery_ct_cores }}
+    --memory {{ media_gallery_ct_memory_mb }}
+    --swap {{ media_gallery_ct_swap_mb }}
+  register: tgh_set
+  changed_when: false
+
+# Ensure the rootfs is at least the codified size. `pct resize` only grows
+# (shrinking isn't supported), and errors harmlessly if already at/above target,
+# so failed_when filters the "smaller than current" / no-op cases. CRITICAL: an
+# 8 GiB rootfs (the old default) fills during a multi-GB video upload and drops
+# the connection — this guarantees the headroom regardless of how the CT was made.
+- name: Ensure TG Collector rootfs is at least the codified size
+  ansible.builtin.command: pct resize 115 rootfs {{ media_gallery_ct_rootfs_gb }}G
+  register: tgh_resize
+  # `pct resize` only grows. It exits non-zero when the disk is already at/above
+  # the target ("disk is already at specified size") or when asked to shrink —
+  # both are no-ops, not failures. Treat only OTHER non-zero exits as real errors.
+  changed_when: tgh_resize.rc == 0
+  failed_when:
+    - tgh_resize.rc != 0
+    - "'already at specified size' not in tgh_resize.stderr"
+    - "'shrink' not in tgh_resize.stderr"
+    - "'smaller' not in tgh_resize.stderr"
 
 - name: Ensure TG Collector Container is Running
   ansible.builtin.command: pct start 115

@@ -1,0 +1,30 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# On-the-fly thumbnail service: GET /thumb/<chat>/<stem>.jpg returns a ~400px
+# poster, generating + caching it on first request (Pillow for images, ffmpeg
+# for videos), persisting to the encrypted gcrypt:thumbs/ cache. No built-in
+# auth: routed by lb-01 nginx /thumb/ behind Authentik, binds the private IP.
+# The thumbcache is a RAM-backed tmpfs (decrypted media RAM-only); for a VIDEO
+# the full original is fetched into that tmpfs to make the poster, so the tmpfs
+# (thumbcache.mount) is sized to hold the largest original.
+[Unit]
+Description=media-gallery on-the-fly thumbnail service
+After=network-online.target var-lib-media\x2dgallery-thumbcache.mount
+Wants=network-online.target
+Requires=var-lib-media\x2dgallery-thumbcache.mount
+
+[Service]
+Type=simple
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+Environment=RCLONE_CONFIG=/home/{{ media_gallery_user }}/.config/rclone/rclone.conf
+Environment=TG_RCLONE_REMOTE={{ media_gallery_rclone_remote }}
+Environment=THUMB_PORT={{ media_gallery_thumb_port | default(8090) }}
+Environment=THUMB_BIND={{ ip_media_gallery }}
+Environment=THUMB_LOCAL_CACHE={{ media_gallery_state }}/thumbcache
+Environment=THUMB_MAX_CONCURRENT_DL={{ media_gallery_thumb_max_concurrent_dl }}
+ExecStart={{ media_gallery_dir }}/venv/bin/python {{ media_gallery_dir }}/thumb_service.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
