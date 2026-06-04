@@ -62,13 +62,16 @@
   changed_when: lxc_start.rc == 0
   when: not lb_exists
 
-# lb-01 is PRIVATE-SDN ONLY. It reaches the LAN (Proxmox UI on 192.168.86.x,
-# etc.) outbound via the tailscale-gw NAT (172.16.0.1 masquerades 172.16/24).
-# A LAN interface used to exist (net1 on vmbr0/DHCP) but was removed — its
-# flaky DHCP lease was a recurring 502 cause for proxmox.chi. These two tasks
-# ENFORCE private-only on re-apply: strip any net1, and ensure net0 carries the
-# private gateway.
-- name: Check if Net1 (legacy LAN) exists
+# lb-01 is DUAL-HOMED: net0 = private SDN (backends), net1 = LAN ingress.
+# It IS the internet ingress — Google Home forwards :80/:443 to its LAN IP, and
+# it runs the No-IP DDNS updater. The backends (gallery/vm/graf) are private-
+# only, but the load balancer itself must straddle LAN+SDN or external access
+# (auth.chi, tanium.chi, etc.) breaks. net1 uses a STATIC LAN IP — AdGuard (in
+# Home Assistant) does DHCP but systemd-networkd won't reliably hold a lease on
+# this CT, and a static ingress IP is the right call for infra anyway. The
+# in-CT eth1.network deliberately sets NO gateway so default egress stays via
+# the private SDN gateway (no asymmetric-routing 502s).
+- name: Check if Net1 (LAN ingress) exists
   delegate_to: "{{ lb_node }}"
   ansible.builtin.shell: |
     set -o pipefail
@@ -77,10 +80,10 @@
   failed_when: false
   changed_when: false
 
-- name: Remove legacy LAN interface (net1) — enforce private-only
+- name: Ensure LAN ingress interface (net1 on vmbr0)
   delegate_to: "{{ lb_node }}"
-  ansible.builtin.command: "pct set {{ lxc_id }} --delete net1"
-  when: lb_exists and net1_check.rc == 0
+  ansible.builtin.command: "pct set {{ lxc_id }} --net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1"
+  when: lb_exists and net1_check.rc != 0
   changed_when: true
 
 - name: Ensure private gateway on net0

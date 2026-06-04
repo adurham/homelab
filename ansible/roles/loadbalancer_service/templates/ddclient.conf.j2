@@ -14,7 +14,10 @@ ssl=yes                 # use ssl-support.
 ## No-IP (www.no-ip.com)
 ##
 protocol=noip
-use=web, web=checkip.dyndns.com/, web-skip='IP Address'
+## Public-IP detection: api.ipify.org returns the bare IPv4 (robust). The old
+## checkip.dyndns.com method intermittently returned "address NOT FOUND" and
+## icanhazip can return IPv6 — ipify avoids both.
+use=web, web=api.ipify.org
 server=dynupdate.no-ip.com
 login={{ noip_username }}
 password={{ noip_password }}

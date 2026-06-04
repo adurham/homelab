@@ -10,6 +10,35 @@
     update_cache: true
     cache_valid_time: 3600
 
+# LAN ingress: lb-01's eth1 (vmbr0) gets a STATIC IP so Google Home can
+# port-forward :80/:443 to a stable target. Static (not DHCP) because
+# systemd-networkd won't reliably hold a DHCP lease on this CT and AdGuard
+# (the LAN DHCP server) reservations are an extra dependency. CRITICAL: no
+# Gateway= here — default egress must stay via the private SDN gateway on eth0,
+# or lb-01's return traffic to backends takes the LAN path and causes
+# asymmetric-routing 502s (the bug we hit when first adding this NIC).
+- name: Configure LAN ingress interface (static, no default route)
+  ansible.builtin.copy:
+    dest: /etc/systemd/network/eth1.network
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Match]
+      Name = eth1
+
+      [Network]
+      Description = LAN ingress (Google Home forwards :80/:443 here) — static
+      Address = {{ lb_lan_ingress_ip | default('192.168.86.30') }}/24
+      IPv6AcceptRA = false
+  register: lb_eth1_net
+
+- name: Restart systemd-networkd if ingress config changed
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    state: restarted
+  when: lb_eth1_net.changed
+
 - name: Create SSL Directory
   ansible.builtin.file:
     path: /etc/nginx/ssl
