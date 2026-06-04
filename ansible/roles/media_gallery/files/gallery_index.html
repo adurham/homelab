@@ -531,6 +531,10 @@
 
   // ---------- FOLDER VIEW ----------
   function openFolder(chat){
+    // Only reset the selection when NAVIGATING to a different folder — NOT on a
+    // same-folder re-render (e.g. the background reloadManifest timer calls
+    // openFolder(current) to refresh, and must not wipe an in-progress selection).
+    var navigating = (chat !== current);
     current=chat;
     var items=(chat==='*')?manifest.slice():(chatMap[chat]?chatMap[chat].slice():[]);
     var name=(chat==='*')?'All items':chat;
@@ -543,7 +547,8 @@
     elSort.style.display='inline-block';
     // "All items" is a virtual aggregate; can't upload into it
     elUploadBtn.style.display=(chat==='*')?'none':'inline-block';
-    clearSelection();   // reset selection when entering a folder
+    if(navigating) clearSelection();   // reset only on real navigation
+    else { pruneSelection(); refreshBulkBar(); }  // same-folder refresh: keep valid selections
     hideUploadBar();
     elTitle.textContent=name;
     elSub.textContent=items.length+' item'+(items.length===1?'':'s');
@@ -848,6 +853,15 @@
       t.classList.remove('selected'); var sb=t.querySelector('.selbox'); if(sb) sb.innerHTML='';
     });
   }
+  // drop selected stems that are no longer present in the current view (e.g. moved
+  // away on a background refresh); keep the rest intact.
+  function pruneSelection(){
+    if(!selected.size) return;
+    var present={}; view.forEach(function(it){ present[it.stem]=1; });
+    Array.from(selected).forEach(function(stem){
+      if(!present[stem]) selected.delete(stem);
+    });
+  }
   function setTileSel(tile,on){
     var sb=tile.querySelector('.selbox');
     if(on){ tile.classList.add('selected'); if(sb) sb.innerHTML='&#10003;'; }
@@ -915,7 +929,7 @@
 
   function bulkMove(dest, stemsOverride){
     hideBulkMoveMenu();
-    var stems=stemsOverride||Array.prototype.slice.call(selected);
+    var stems=stemsOverride||Array.from(selected);
     if(!stems.length){ toast('Nothing selected to move.','err'); return; }
     var src=current, done=0, fail=0, moved=[];
     toast('Moving 0/'+stems.length+' to '+dest+'…','work',true);
@@ -944,7 +958,7 @@
   document.getElementById('bulkDelete').addEventListener('click',function(){
     if(!selected.size){ toast('Nothing selected to delete.','err'); return; }
     if(!confirm('Delete '+selected.size+' item(s)? This cannot be undone.')) return;
-    var stems=Array.prototype.slice.call(selected);
+    var stems=Array.from(selected);
     var done=0, fail=0, gone=[];
     toast('Deleting 0/'+stems.length+'…','work',true);
     var chain=Promise.resolve();
@@ -973,7 +987,7 @@
     var it=view[i]; if(!it) return;
     // if dragging an unselected tile, drag just that one; else drag the whole selection
     if(!selected.has(it.stem)){ dragStems=[it.stem]; }
-    else { dragStems=Array.prototype.slice.call(selected); }
+    else { dragStems=Array.from(selected); }
     tile.classList.add('dragging');
     try{ e.dataTransfer.setData('text/plain',dragStems.join(',')); e.dataTransfer.effectAllowed='move'; }catch(_){}
   }
