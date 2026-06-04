@@ -94,17 +94,25 @@ async def date_map(client):
 
 
 def list_originals():
-    r = rclone("lsf", "-R", "--files-only", SRC)
+    # --format "sp" => "<size>;<path>" so we capture the byte size for each item
+    r = rclone("lsf", "-R", "--files-only", "--format", "sp", "--separator", ";", SRC)
     out = []
     for line in r.stdout.splitlines():
         line = line.strip()
-        if not line or "/" not in line:
+        if not line or ";" not in line:
             continue
-        chat, leaf = line.split("/", 1)
+        size_str, path = line.split(";", 1)
+        if "/" not in path:
+            continue
+        chat, leaf = path.split("/", 1)
         if "/" in leaf:  # skip nested unexpectedly
             continue
         stem, ext = os.path.splitext(leaf)
-        out.append((chat, leaf, stem, ext.lower()))
+        try:
+            size = int(size_str)
+        except ValueError:
+            size = None
+        out.append((chat, leaf, stem, ext.lower(), size))
     return out
 
 
@@ -168,7 +176,7 @@ async def main():
 
     originals = list_originals()
     log(f"originals: {len(originals)}")
-    archive_stems = {stem for _, _, stem, _ in originals}
+    archive_stems = {stem for _, _, stem, _, _ in originals}
 
     # Only real upstream source stems (<chatid>_<msgid>, all digits) get a targeted
     # upstream source fetch. Uploaded items (up_<ms>_<rand>) have their date recorded at
@@ -223,7 +231,7 @@ async def main():
 
     manifest = []
     skipped_excluded = skipped_outgoing = 0
-    for chat, leaf, stem, ext in originals:
+    for chat, leaf, stem, ext, size in originals:
         is_video = ext in VIDEO_EXT
         if not (is_video or ext in IMAGE_EXT):
             continue
@@ -241,6 +249,7 @@ async def main():
             "thumb": f"thumb/{chat}/{stem}.jpg",  # on-the-fly endpoint
             "type": "video" if is_video else "image",
             "date": meta.get("date"),
+            "size": size,
         })
     manifest.sort(key=lambda x: (x["date"] or ""), reverse=True)
     log(f"manifest items: {len(manifest)} (skipped {skipped_excluded} trashed, "
