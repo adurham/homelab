@@ -262,6 +262,21 @@ async def main():
     mp.unlink()
     log("manifest uploaded to gcrypt:gallery/manifest.json — DONE")
 
+    # Also publish the FULL folder list (incl. EMPTY folders) so the SPA can show
+    # folders that have no items yet. The manifest only carries items, so without
+    # this an empty folder vanishes on reload.
+    try:
+        lsd = rclone("lsf", "--dirs-only", "-R", SRC)
+        folders = sorted({d.strip().rstrip("/") for d in lsd.stdout.splitlines()
+                          if d.strip() and "/" not in d.strip().rstrip("/")})
+        fp = work / "folders.json"
+        fp.write_text(json.dumps(folders, separators=(",", ":")))
+        rclone("copyto", str(fp), f"{GALLERY}/folders.json")
+        fp.unlink()
+        log(f"folders.json uploaded ({len(folders)} folders incl. empty) — DONE")
+    except Exception as e:  # noqa: BLE001
+        log(f"folders.json skipped: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

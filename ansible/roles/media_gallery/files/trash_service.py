@@ -137,6 +137,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = unquote(self.path)
+        if p.startswith("/trashbatch"):
+            return self._trashbatch()
         if not p.startswith("/trash/"):
             self._json(404, {"error": "not found"})
             return
@@ -152,6 +154,61 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, trash_item(chat, stem))
         except Exception as e:  # noqa: BLE001
             self._json(500, {"error": f"{type(e).__name__}: {e}"})
+
+    def _trashbatch(self):
+        """POST /trashbatch  body: {"chat": "...", "stems": [...]}
+        Delete many items from one folder in a SINGLE pair of rclone processes
+        (originals + thumbs via --include filters) instead of N x 2 sequential
+        deletefile calls, then append all stems to the exclusion ledger once."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length) or "{}")
+        except (ValueError, OSError):
+            return self._json(400, {"error": "bad json body"})
+        chat = body.get("chat", "")
+        stems = body.get("stems") or []
+        if ".." in chat or "/" in chat or not isinstance(stems, list) or not stems:
+            return self._json(400, {"error": "want {chat, stems[]}"})
+        stems = [s for s in stems if ".." not in s and "/" not in s]
+        if not stems:
+            return self._json(400, {"error": "no valid stems"})
+        with _lock:
+            # resolve leaves present in the folder
+            ls = rclone("lsf", f"{SRC}/{chat}/")
+            by_stem = {}
+            for line in ls.stdout.splitlines():
+                leaf = line.strip()
+                if leaf:
+                    by_stem[os.path.splitext(leaf)[0]] = leaf
+            leaves = [by_stem[s] for s in stems if s in by_stem]
+            deleted = 0
+            if leaves:
+                inc = []
+                for leaf in leaves:
+                    inc += ["--include", leaf]
+                r = rclone("delete", f"{SRC}/{chat}", *inc,
+                           "--transfers", "16", "--checkers", "32")
+                if r.returncode == 0:
+                    deleted = len(leaves)
+            # thumbnails (best effort)
+            tinc = []
+            for s in stems:
+                tinc += ["--include", f"{s}.jpg"]
+            rclone("delete", f"{THUMBS}/{chat}", *tinc,
+                   "--transfers", "16", "--checkers", "32")
+            for s in stems:
+                try:
+                    (THUMB_CACHE / chat / f"{s}.jpg").unlink()
+                except OSError:
+                    pass
+            # add to exclusion ledger once
+            ex = load_excluded()
+            for s in stems:
+                ex.add(s)
+            save_excluded(ex)
+            _trigger_manifest_rebuild()
+            return self._json(200, {"deleted": deleted, "requested": len(stems),
+                                    "excluded_total": len(ex)})
 
 
 def main():
