@@ -105,7 +105,6 @@
   changed_when: false
   loop:
     - "{{ media_gallery_state }}/thumbcache"
-    - "{{ media_gallery_state }}/captures"
 
 - name: Render thumbcache tmpfs mount unit
   ansible.builtin.template:
@@ -116,24 +115,12 @@
     mode: '0644'
   notify: Reload Systemd
 
-- name: Render captures tmpfs mount unit
-  ansible.builtin.template:
-    src: captures.mount.j2
-    dest: "/etc/systemd/system/{{ tg_mount_units.results[1].stdout }}"
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Reload Systemd
-
-- name: Enable & Start tmpfs mounts (decrypted media RAM-only)
+- name: Enable & Start thumbcache tmpfs mount (decrypted posters RAM-only)
   ansible.builtin.systemd:
-    name: "{{ item }}"
+    name: "{{ tg_mount_units.results[0].stdout }}"
     enabled: true
     state: started
     daemon_reload: true
-  loop:
-    - "{{ tg_mount_units.results[0].stdout }}"
-    - "{{ tg_mount_units.results[1].stdout }}"
 
 # ─── Python venv + source ────────────────────────────────────────────────
 - name: Create Collector Virtualenv
@@ -161,47 +148,30 @@
   become: true
   become_user: "{{ media_gallery_user }}"
 
-# ─── Deploy code ───────────────────────────────────────────────────────────
-- name: Deploy Collector Daemon
+# ─── Deploy manifest + dedup tooling ───────────────────────────────────────
+# Post-split, the gallery box does NOT run the collector (that moved to the
+# media_ingest role / CT). This box runs: gallery (SPA + rclone serve), thumb,
+# trash, upload services, plus the manifest builder and the tier-1 dedup scan.
+- name: Deploy Manifest Builder
   ansible.builtin.copy:
-    src: collector.py
-    dest: "{{ media_gallery_dir }}/collector.py"
-    owner: "{{ media_gallery_user }}"
-    group: "{{ media_gallery_user }}"
-    mode: '0750'
-  notify: Restart Collector
-
-- name: Deploy Login Helper
-  ansible.builtin.copy:
-    src: login.py
-    dest: "{{ media_gallery_dir }}/login.py"
+    src: build_manifest.py
+    dest: "{{ media_gallery_dir }}/build_manifest.py"
     owner: "{{ media_gallery_user }}"
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
-- name: Deploy Sync Script
+- name: Deploy Duplicate Scanner (tier-1 perceptual hash)
   ansible.builtin.copy:
-    src: sync.sh
-    dest: "{{ media_gallery_dir }}/sync.sh"
+    src: dedup_scan.py
+    dest: "{{ media_gallery_dir }}/dedup_scan.py"
     owner: "{{ media_gallery_user }}"
     group: "{{ media_gallery_user }}"
     mode: '0750'
-
-# ─── Env file (secrets from vault) ─────────────────────────────────────────
-- name: Render Collector Env File
-  ansible.builtin.template:
-    src: collector.env.j2
-    dest: "{{ media_gallery_dir }}/collector.env"
-    owner: "{{ media_gallery_user }}"
-    group: "{{ media_gallery_user }}"
-    mode: '0600'
-  no_log: true
-  notify: Restart Collector
 
 # ─── rclone config (crypt over gdrive) ─────────────────────────────────────
 # The OAuth token + crypt passwords come from vault (generated one-time via
 # the authorize flow on the Mac; see README). force:false so a token the
-# daemon refreshes itself isn't clobbered on re-apply.
+# service refreshes itself isn't clobbered on re-apply.
 - name: Drop rclone Config
   ansible.builtin.template:
     src: rclone.conf.j2
@@ -211,71 +181,6 @@
     mode: '0600'
     force: false
   no_log: true
-
-# ─── Detect whether the source client session is already authorized ──────────────
-# The collector unit exits 2 if the .session isn't authorized yet. Gate the
-# enable/start (and the Restart handler) on this so a fresh deploy doesn't
-# crash-loop before the one-time login.py has been run.
-- name: Check for Authorized Session File
-  ansible.builtin.stat:
-    path: "{{ media_gallery_state }}/collector.session"
-  register: session_stat
-
-- name: Set Session Authorized Fact
-  ansible.builtin.set_fact:
-    collector_session_authorized: "{{ session_stat.stat.exists and session_stat.stat.size | default(0) > 0 }}"
-
-# ─── systemd units ─────────────────────────────────────────────────────────
-- name: Render Collector Service Unit
-  ansible.builtin.template:
-    src: collector.service.j2
-    dest: /etc/systemd/system/media-gallery.service
-    owner: root
-    group: root
-    mode: '0644'
-  notify:
-    - Reload Systemd
-    - Restart Collector
-
-- name: Render Sync Service Unit
-  ansible.builtin.template:
-    src: sync.service.j2
-    dest: /etc/systemd/system/media-gallery-sync.service
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Reload Systemd
-
-- name: Render Sync Timer Unit
-  ansible.builtin.template:
-    src: sync.timer.j2
-    dest: /etc/systemd/system/media-gallery-sync.timer
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Reload Systemd
-
-- name: Enable & Start Collector (only if session authorized)
-  ansible.builtin.systemd:
-    name: media-gallery.service
-    enabled: true
-    state: started
-    daemon_reload: true
-  when: collector_session_authorized
-
-- name: Enable Collector Unit (session not yet authorized)
-  ansible.builtin.systemd:
-    name: media-gallery.service
-    enabled: true
-    daemon_reload: true
-  when: not collector_session_authorized
-
-- name: Enable & Start Sync Timer
-  ansible.builtin.systemd:
-    name: media-gallery-sync.timer
-    enabled: true
-    state: started
-    daemon_reload: true
 
 # ─── On-the-fly thumbnail service ──────────────────────────────────────────
 # GET /thumb/<chat>/<stem>.jpg → ~400px poster, generated + cached on first hit
@@ -324,7 +229,7 @@
 # rclone serve http with a custom thumbnail-grid template. No built-in auth:
 # access is via https://gallery.chi.lab.amd-e.com → lb-01 nginx forward-auth
 # → proxy_pass to this CT at {{ ip_media_gallery }}:{{ media_gallery_gallery_port }}.
-- name: Deploy Gallery HTML Template
+- name: Deploy Gallery HTML Template (rclone dir-listing fallback)
   ansible.builtin.copy:
     src: gallery.html.tmpl
     dest: "{{ media_gallery_dir }}/gallery.html.tmpl"
@@ -332,6 +237,30 @@
     group: "{{ media_gallery_user }}"
     mode: '0644'
   notify: Restart Gallery
+
+# The single-page app served at / (lb-01 rewrites / -> /gallery/index.html).
+# It lives locally AND is published into the encrypted store so rclone serve
+# returns it at /gallery/index.html.
+- name: Deploy Gallery SPA (local copy)
+  ansible.builtin.copy:
+    src: gallery_index.html
+    dest: "{{ media_gallery_dir }}/gallery_index.html"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0644'
+  register: spa_copy
+
+- name: Publish Gallery SPA into the encrypted store (gcrypt:gallery/index.html)
+  ansible.builtin.command:
+    cmd: >-
+      rclone
+      --config /home/{{ media_gallery_user }}/.config/rclone/rclone.conf
+      copyto {{ media_gallery_dir }}/gallery_index.html
+      {{ media_gallery_rclone_remote | default('gcrypt:') }}gallery/index.html
+  become: true
+  become_user: "{{ media_gallery_user }}"
+  when: spa_copy is changed
+  changed_when: true
 
 - name: Render Gallery Service Unit
   ansible.builtin.template:
@@ -363,14 +292,6 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
   notify: Restart Trash
-
-- name: Deploy Purge-Outgoing Helper
-  ansible.builtin.copy:
-    src: purge_outgoing.py
-    dest: "{{ media_gallery_dir }}/purge_outgoing.py"
-    owner: "{{ media_gallery_user }}"
-    group: "{{ media_gallery_user }}"
-    mode: '0750'
 
 - name: Render Trash Service Unit
   ansible.builtin.template:
@@ -451,6 +372,14 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+- name: Deploy Thumbnail Prewarm Script (called by refresh)
+  ansible.builtin.copy:
+    src: prewarm_thumbs.sh
+    dest: "{{ media_gallery_dir }}/prewarm_thumbs.sh"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
 - name: Render Gallery Refresh Service Unit
   ansible.builtin.template:
     src: refresh.service.j2
@@ -504,8 +433,9 @@
     state: present
   loop:
     - "{{ media_gallery_gallery_port }}"
-    - "8090"
+    - "{{ media_gallery_thumb_port }}"
     - "{{ media_gallery_trash_port }}"
+    - "{{ media_gallery_upload_port }}"
   notify: Save tg iptables
 
 - name: "iptables: allow lb-01 (Authentik front door) to service ports"
@@ -519,8 +449,9 @@
     state: present
   loop:
     - "{{ media_gallery_gallery_port }}"
-    - "8090"
+    - "{{ media_gallery_thumb_port }}"
     - "{{ media_gallery_trash_port }}"
+    - "{{ media_gallery_upload_port }}"
   notify: Save tg iptables
 
 - name: "iptables: drop all other access to service ports"
@@ -533,8 +464,9 @@
     state: present
   loop:
     - "{{ media_gallery_gallery_port }}"
-    - "8090"
+    - "{{ media_gallery_thumb_port }}"
     - "{{ media_gallery_trash_port }}"
+    - "{{ media_gallery_upload_port }}"
   notify: Save tg iptables
 
 # SSH: key-only. mediagallery is nologin; admin is root-via-key. No password auth.
@@ -550,13 +482,3 @@
     group: root
     mode: '0644'
   notify: Reload SSH
-
-- name: One-Time Login Reminder
-  ansible.builtin.debug:
-    msg: >-
-      Session not yet authorized. Run the one-time login on the CT:
-      sudo -u {{ media_gallery_user }} env TG_API_ID=<id> TG_API_HASH=<hash>
-      TG_SESSION={{ media_gallery_state }}/collector TG_PHONE=<phone>
-      {{ media_gallery_dir }}/venv/bin/python {{ media_gallery_dir }}/login.py
-      then: systemctl start media-gallery.service
-  when: not collector_session_authorized

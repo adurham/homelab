@@ -3,15 +3,6 @@
   ansible.builtin.systemd:
     daemon_reload: true
 
-- name: Restart Collector
-  ansible.builtin.systemd:
-    name: media-gallery.service
-    state: restarted
-    daemon_reload: true
-  # Only restart if the session is already authorized; otherwise the unit
-  # exits 2 (NOT_AUTHORIZED) until the one-time login.py is run.
-  when: collector_session_authorized | default(false)
-
 - name: Restart Gallery
   ansible.builtin.systemd:
     name: media-gallery-gallery.service
