@@ -373,15 +373,15 @@
   /* the keep/delete toggle is an explicit footer button, not the whole card */
   .dupcard .dc-toggle{display:block;width:100%;border:none;border-top:1px solid var(--border);
     font-size:12px;font-weight:600;padding:8px;cursor:pointer;}
-  .dupcard.keep .dc-toggle{background:#1d3a2a;color:#6ee7a0;}
-  .dupcard.trash .dc-toggle{background:#3a1d1d;color:#ff8c8c;}
-  .dupcard.keep{outline:3px solid #2e7d4f;outline-offset:-3px;}
-  .dupcard.trash{outline:3px solid #d23b3b;outline-offset:-3px;}
+  .dupcard.dckeep .dc-toggle{background:#1d3a2a;color:#6ee7a0;}
+  .dupcard.dcdel .dc-toggle{background:#3a1d1d;color:#ff8c8c;}
+  .dupcard.dckeep{outline:3px solid #2e7d4f;outline-offset:-3px;}
+  .dupcard.dcdel{outline:3px solid #d23b3b;outline-offset:-3px;}
   .dupcard .dc-badge{position:absolute;top:8px;left:8px;font-size:10px;font-weight:700;
     padding:3px 8px;border-radius:5px;color:#fff;}
-  .dupcard.keep .dc-badge{background:#2e7d4f;}
-  .dupcard.trash .dc-badge{background:#d23b3b;}
-  .dupcard.trash img{opacity:.55;}
+  .dupcard.dckeep .dc-badge{background:#2e7d4f;}
+  .dupcard.dcdel .dc-badge{background:#d23b3b;}
+  .dupcard.dcdel img{opacity:.55;}
   @media(max-width:600px){#lb .nav{padding:8px 12px;font-size:24px;}}
 </style>
 </head>
@@ -1866,7 +1866,7 @@
         var di=dupShown.length; dupShown.push(m);
         var dt=m.date?(' · '+fmtDate(m.date)):'';
         var meta=(m.chat||'')+(m.size?(' · '+fmtBytes(m.size)):'')+dt;
-        html+='<div class="dupcard '+act+'" data-stem="'+m.stem+'" data-chat="'+(m.chat||'')+'" data-di="'+di+'">'+
+        html+='<div class="dupcard '+(act==='keep'?'dckeep':'dcdel')+'" data-stem="'+m.stem+'" data-chat="'+(m.chat||'')+'" data-di="'+di+'">'+
           '<span class="dc-badge">'+(act==='keep'?'KEEP':'DELETE')+'</span>'+
           '<img loading="lazy" src="/'+m.thumb+'" data-di="'+di+'">'+
           '<div class="dc-meta">'+meta+'</div>'+
@@ -1905,7 +1905,7 @@
   }
   function setDupCard(c, act){
     var stem=c.dataset.stem; dupAction[stem]=act;
-    c.classList.remove('keep','trash'); c.classList.add(act);
+    c.classList.remove('dckeep','dcdel'); c.classList.add(act==='keep'?'dckeep':'dcdel');
     var badge=c.querySelector('.dc-badge'); if(badge) badge.textContent=act==='keep'?'KEEP':'DELETE';
     var tg=c.querySelector('.dc-toggle'); if(tg) tg.innerHTML=act==='keep'?'✓ Keeping — click to delete':'🗑 Deleting — click to keep';
   }
