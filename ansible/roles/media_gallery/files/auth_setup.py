@@ -6,7 +6,7 @@ Creates the authorized .session file that collector.py then reuses headlessly.
 Run this ONCE, interactively, on the LXC (it prompts for the login code that
 upstream source sends to the existing app, and for the 2FA cloud password if set):
 
-    sudo -u mediaingest TG_API_ID=... TG_API_HASH=... TG_SESSION=/var/lib/media-gallery/collector \
+    sudo -u mediagallery TG_API_ID=... TG_API_HASH=... TG_SESSION=/var/lib/media-gallery/collector \
         /opt/media-gallery/venv/bin/python /opt/media-gallery/login.py
 
 After it prints "Authorized as ...", the session is saved and the systemd

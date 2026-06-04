@@ -31,7 +31,7 @@ from urllib.parse import unquote
 from PIL import Image
 
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
-RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediaingest/.config/rclone/rclone.conf")
+RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
 PORT = int(os.environ.get("THUMB_PORT", "8090"))
 # Bind address: must be reachable by lb-01's nginx (which proxies /thumb/ to
 # the CT's private IP), so default to the private IP, NOT 127.0.0.1. Override

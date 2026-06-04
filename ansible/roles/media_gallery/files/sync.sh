@@ -8,7 +8,7 @@
 #   2. verify the remote has each file (rclone check), then delete locals
 #      OLDER than CACHE_DAYS — recent captures stay local for fast access.
 #
-# rclone config lives at /home/mediaingest/.config/rclone/rclone.conf and
+# rclone config lives at /home/mediagallery/.config/rclone/rclone.conf and
 # defines two remotes:
 #   gdrive:  the raw Google Drive remote (OAuth token)
 #   gcrypt:  crypt remote wrapping gdrive:media-gallery  (the encryption layer)
@@ -19,7 +19,7 @@ set -euo pipefail
 SAVE_DIR="${TG_SAVE_DIR:-/var/lib/media-gallery/captures}"
 REMOTE="${TG_RCLONE_REMOTE:-gcrypt:}"
 CACHE_DAYS="${TG_CACHE_DAYS:-7}"
-RCLONE_CONF="${RCLONE_CONFIG:-/home/mediaingest/.config/rclone/rclone.conf}"
+RCLONE_CONF="${RCLONE_CONFIG:-/home/mediagallery/.config/rclone/rclone.conf}"
 LOG="${INGEST_LOG:-/var/log/media-gallery/sync.log}"
 
 mkdir -p "$(dirname "$LOG")"

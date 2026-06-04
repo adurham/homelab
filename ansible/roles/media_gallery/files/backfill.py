@@ -49,7 +49,7 @@ SESSION = os.environ.get("TG_SESSION", "/var/lib/media-gallery/collector")
 SAVE_BASE = Path(os.environ.get("TG_SAVE_DIR", "/var/lib/media-gallery/captures"))
 BACKFILL_DIR = SAVE_BASE / "backfill"
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
-RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediaingest/.config/rclone/rclone.conf")
+RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
 STATE_FILE = os.environ.get("TG_BACKFILL_STATE", SESSION + ".backfill.json")
 EXCLUDE_FILE = os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/excluded.json")
 

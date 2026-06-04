@@ -1,6 +1,6 @@
 ---
 # Service account + install layout for the upstream source media collector.
-media_gallery_user: mediaingest
+media_gallery_user: mediagallery
 media_gallery_dir: /opt/media-gallery        # code + venv
 media_gallery_state: /var/lib/media-gallery  # session, captures (ReadWrite)
 media_gallery_log_dir: /var/log/media-gallery

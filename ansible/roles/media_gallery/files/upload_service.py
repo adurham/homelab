@@ -38,7 +38,7 @@ from urllib.parse import unquote
 from PIL import Image
 
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
-RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediaingest/.config/rclone/rclone.conf")
+RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
 PORT = int(os.environ.get("UPLOAD_PORT", "8092"))
 BIND = os.environ.get("UPLOAD_BIND", "172.16.0.46")
 DATEMAP_CACHE = Path(os.environ.get("TG_DATEMAP_CACHE", "/var/lib/media-gallery/datemap.json"))
