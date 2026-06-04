@@ -233,6 +233,24 @@
   #toast .spin{width:15px;height:15px;border:2px solid #3a4150;border-top-color:var(--accent);
     border-radius:50%;animation:spin .7s linear infinite;flex:0 0 auto;}
   @keyframes spin{to{transform:rotate(360deg);}}
+  /* OS-style progress dialog (file-manager copy/move sheet) */
+  #progScrim{position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.45);
+    display:none;align-items:center;justify-content:center;}
+  #progScrim.show{display:flex;}
+  #progDlg{width:380px;max-width:92vw;background:#1b2129;border:1px solid var(--border);
+    border-radius:14px;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.6);}
+  #progDlg .pd-title{font-size:15px;font-weight:600;margin-bottom:4px;display:flex;
+    align-items:center;gap:10px;}
+  #progDlg .pd-sub{font-size:12.5px;color:var(--muted);margin-bottom:14px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #progDlg .pd-track{height:8px;border-radius:6px;background:#2a313b;overflow:hidden;}
+  #progDlg .pd-fill{height:100%;width:0;background:linear-gradient(90deg,#5b8cff,#7aa2ff);
+    border-radius:6px;transition:width .15s ease;}
+  #progDlg .pd-stats{display:flex;justify-content:space-between;font-size:12px;
+    color:var(--muted);margin-top:8px;}
+  #progDlg .pd-done{margin-top:14px;text-align:right;}
+  #progDlg .pd-done button{font-size:13px;padding:7px 16px;}
+  #progDlg.err .pd-fill{background:#d23b3b;}
   @media(max-width:600px){#lb .nav{padding:8px 12px;font-size:24px;}}
 </style>
 </head>
@@ -271,6 +289,15 @@
 </main>
 <div id="rubber"></div>
 <div id="toast"></div>
+<div id="progScrim">
+  <div id="progDlg">
+    <div class="pd-title"><span class="spin" id="pdSpin"></span><span id="pdTitle">Moving…</span></div>
+    <div class="pd-sub" id="pdSub"></div>
+    <div class="pd-track"><div class="pd-fill" id="pdFill"></div></div>
+    <div class="pd-stats"><span id="pdLeft">0 of 0</span><span id="pdPct">0%</span></div>
+    <div class="pd-done" id="pdDone" style="display:none"><button id="pdClose">Done</button></div>
+  </div>
+</div>
 
 <div id="lb">
   <button class="close" id="lbClose">&times;</button>
@@ -308,6 +335,43 @@
   }
   function toastHide(){ if(_toastEl) _toastEl.classList.remove('show'); }
 
+  // ---- OS-style progress dialog ----
+  var _pd={};
+  function progOpen(title,total){
+    _pd.total=total; _pd.done=0;
+    _pd.scrim=document.getElementById('progScrim');
+    document.getElementById('pdTitle').textContent=title;
+    document.getElementById('pdSpin').style.display='';
+    document.getElementById('pdSub').textContent='';
+    document.getElementById('pdFill').style.width='0%';
+    document.getElementById('pdLeft').textContent='0 of '+total;
+    document.getElementById('pdPct').textContent='0%';
+    document.getElementById('pdDone').style.display='none';
+    document.getElementById('progDlg').classList.remove('err');
+    _pd.scrim.classList.add('show');
+  }
+  function progStep(label){
+    _pd.done++;
+    var pct=_pd.total?Math.round(_pd.done/_pd.total*100):100;
+    document.getElementById('pdFill').style.width=pct+'%';
+    document.getElementById('pdLeft').textContent=_pd.done+' of '+_pd.total;
+    document.getElementById('pdPct').textContent=pct+'%';
+    if(label) document.getElementById('pdSub').textContent=label;
+  }
+  function progFinish(title, isErr){
+    document.getElementById('pdSpin').style.display='none';
+    document.getElementById('pdTitle').textContent=title;
+    document.getElementById('pdFill').style.width='100%';
+    if(isErr) document.getElementById('progDlg').classList.add('err');
+    document.getElementById('pdDone').style.display='';
+  }
+  function progClose(){ var s=document.getElementById('progScrim'); if(s) s.classList.remove('show'); }
+  document.addEventListener('DOMContentLoaded',function(){});
+  // wire Done button once (element exists at parse time)
+  setTimeout(function(){
+    var c=document.getElementById('pdClose'); if(c) c.addEventListener('click',progClose);
+  },0);
+
   var elFolder=document.getElementById('folderGrid');
   var elPhoto=document.getElementById('photoGrid');
   var elState=document.getElementById('state');
@@ -329,7 +393,38 @@
     return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   }
 
+  // Client-authoritative pending ops: the server manifest rebuild is debounced
+  // (~20s), so an immediate refetch returns STALE data (moved/deleted files still
+  // present). We track what the client knows changed and reconcile every manifest
+  // we load: apply pending moves (rewrite chat) / deletes (drop), and once the
+  // server's data already agrees, retire that pending entry.
+  //   pendingMove[stem] = destFolder ; pendingDel[stem] = true
+  var pendingMove={}, pendingDel={};
+  function applyPending(){
+    // returns a reconciled copy and prunes pending entries the server caught up on
+    var out=[];
+    manifest.forEach(function(it){
+      if(pendingDel[it.stem]){
+        // server still lists it -> keep suppressing; if server dropped it we won't see it
+        return; // omit
+      }
+      if(pendingMove[it.stem]){
+        if(it.chat===pendingMove[it.stem]){ delete pendingMove[it.stem]; out.push(it); } // server caught up
+        else { var clone={}; for(var k in it) clone[k]=it[k]; clone.chat=pendingMove[it.stem];
+               clone.file=clone.file&&clone.file.replace('by-chat/'+it.chat+'/','by-chat/'+clone.chat+'/');
+               clone.thumb=clone.thumb&&clone.thumb.replace('/'+it.chat+'/','/'+clone.chat+'/');
+               out.push(clone); }
+        return;
+      }
+      out.push(it);
+    });
+    // retire deletes the server has dropped (stem no longer anywhere in manifest)
+    var stillThere={}; manifest.forEach(function(it){ stillThere[it.stem]=1; });
+    Object.keys(pendingDel).forEach(function(s){ if(!stillThere[s]) delete pendingDel[s]; });
+    manifest=out;
+  }
   function buildChats(){
+    applyPending();
     chatMap={}; chats=[];
     manifest.forEach(function(it){
       var c=it.chat||"(unknown)";
@@ -927,30 +1022,38 @@
     return null;
   }
 
+  function rerenderCurrent(){
+    if(current==null) return;
+    view=(current==='*'?manifest.slice():(chatMap[current]?chatMap[current].slice():[]));
+    applySort(view); renderPhotos(); renderFolderRail();
+    elSub.textContent=view.length+' item'+(view.length===1?'':'s');
+    elState.style.display=view.length?'none':'block';
+    if(!view.length) elState.textContent='No items in this folder.';
+  }
+
   function bulkMove(dest, stemsOverride){
     hideBulkMoveMenu();
     var stems=stemsOverride||Array.from(selected);
     if(!stems.length){ toast('Nothing selected to move.','err'); return; }
     var src=current, done=0, fail=0, moved=[];
-    toast('Moving 0/'+stems.length+' to '+dest+'…','work',true);
+    progOpen('Moving '+stems.length+' item'+(stems.length>1?'s':'')+' to “'+dest+'”', stems.length);
     var chain=Promise.resolve();
-    stems.forEach(function(stem){
+    stems.forEach(function(stem,idx){
       chain=chain.then(function(){
+        progStep('Item '+(idx+1)+' of '+stems.length);
         return fetch('/move/'+encodeURIComponent(src)+'/'+encodeURIComponent(stem)+'/'+encodeURIComponent(dest),
           {method:'POST',credentials:'same-origin'})
-          .then(function(r){ if(r.status===200){ done++; moved.push(stem); } else fail++; },function(){ fail++; })
-          .then(function(){ toast('Moving '+(done+fail)+'/'+stems.length+' to '+dest+'…','work',true); });
+          .then(function(r){ if(r.status===200){ done++; moved.push(stem); pendingMove[stem]=dest; } else fail++; },function(){ fail++; });
       });
     });
     chain.then(function(){
-      // optimistic: drop moved items from the current view immediately
+      // remove from current view immediately + keep them suppressed until the
+      // server manifest catches up (pendingMove handles the stale-refetch window)
       moved.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); });
-      clearSelection();
-      if(current!=null){ view=(current==='*'?manifest.slice():(chatMap[current]?chatMap[current].slice():[])); applySort(view); renderPhotos(); renderFolderRail();
-        elSub.textContent=view.length+' item'+(view.length===1?'':'s'); }
-      if(fail) toast('Moved '+done+' to '+dest+', '+fail+' failed','err');
-      else toast('✓ Moved '+done+' to '+dest,'ok');
-      reloadManifest(current);   // reconcile with server once its debounce fires
+      clearSelection(); rerenderCurrent();
+      progFinish(fail? ('Moved '+done+', '+fail+' failed') : ('✓ Moved '+done+' to “'+dest+'”'), fail>0);
+      if(!fail) setTimeout(progClose, 700);   // auto-close on clean success
+      reloadManifest(current);                 // background reconcile (pending guards staleness)
     });
   }
 
@@ -960,23 +1063,21 @@
     if(!confirm('Delete '+selected.size+' item(s)? This cannot be undone.')) return;
     var stems=Array.from(selected);
     var done=0, fail=0, gone=[];
-    toast('Deleting 0/'+stems.length+'…','work',true);
+    progOpen('Deleting '+stems.length+' item'+(stems.length>1?'s':''), stems.length);
     var chain=Promise.resolve();
-    stems.forEach(function(stem){
+    stems.forEach(function(stem,idx){
       chain=chain.then(function(){
+        progStep('Item '+(idx+1)+' of '+stems.length);
         return fetch('/trash/'+encodeURIComponent(current)+'/'+encodeURIComponent(stem),
           {method:'POST',credentials:'same-origin'})
-          .then(function(r){ if(r.status===200){ done++; gone.push(stem); } else fail++; },function(){ fail++; })
-          .then(function(){ toast('Deleting '+(done+fail)+'/'+stems.length+'…','work',true); });
+          .then(function(r){ if(r.status===200){ done++; gone.push(stem); pendingDel[stem]=true; } else fail++; },function(){ fail++; });
       });
     });
     chain.then(function(){
       gone.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); });
-      clearSelection();
-      if(current!=null){ view=(current==='*'?manifest.slice():(chatMap[current]?chatMap[current].slice():[])); applySort(view); renderPhotos();
-        elSub.textContent=view.length+' item'+(view.length===1?'':'s'); }
-      if(fail) toast('Deleted '+done+', '+fail+' failed','err');
-      else toast('✓ Deleted '+done,'ok');
+      clearSelection(); rerenderCurrent();
+      progFinish(fail? ('Deleted '+done+', '+fail+' failed') : ('✓ Deleted '+done), fail>0);
+      if(!fail) setTimeout(progClose, 700);
       reloadManifest(current);
     });
   });
@@ -1077,6 +1178,7 @@
       .then(function(r){
         if(r.status===200){
           toast('✓ Moved to '+dest,'ok');
+          pendingMove[stem]=dest;   // guard against the stale-manifest refetch
           // remove from current view + advance lightbox
           var wasIndex=lbIndex;
           removeFromData(it);
