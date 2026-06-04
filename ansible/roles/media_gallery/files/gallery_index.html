@@ -539,6 +539,21 @@
     emptyFolders=emptyFolders.filter(function(n){return !chatMap[n];});
   }
 
+  // IntersectionObserver: load a tile's thumb only when it nears the viewport.
+  // rootMargin pre-loads a screenful ahead so scrolling feels instant. Falls back
+  // to eager load if the browser lacks IO (then wireImg is called inline).
+  var _io = (typeof IntersectionObserver!=='undefined') ? new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if(!en.isIntersecting) return;
+      var t=en.target, img=t.querySelector('img');
+      if(img && img.dataset.src && !img.dataset.wired){
+        img.dataset.wired='1';
+        wireImg(t,img,img.dataset.src);
+      }
+      _io.unobserve(t);
+    });
+  }, {root:null, rootMargin:'600px 0px', threshold:0.01}) : null;
+
   // ---- per-tile image loading with shimmer + one retry ----
   function wireImg(tile,img,src){
     var retried=false;
@@ -824,7 +839,11 @@
       var img=document.createElement('img');
       img.loading='lazy'; img.decoding='async';
       t.appendChild(img);
-      wireImg(t,img,'/'+it.thumb);
+      // defer the actual thumb load until the tile nears the viewport — at 1000+
+      // items this stops the browser from queueing every thumbnail at once (the
+      // ~6-conn-per-host cap was serializing them) and cuts initial render cost.
+      img.dataset.src='/'+it.thumb;
+      if(_io){ _io.observe(t); } else { wireImg(t,img,img.dataset.src); }
       if(it.type==='video'){
         var b=document.createElement('div'); b.className='badge'; t.appendChild(b);
         var vt=document.createElement('div'); vt.className='vtag'; vt.textContent='VIDEO'; t.appendChild(vt);
