@@ -69,3 +69,4 @@ net_bwt_gw: "10.99.0.1"
 net_bwt_bridge: "bwt"
 net_bwt_vlan_tag: 200
 net_bwt_mtu: 1450  # VXLAN overhead, same as `private`
+lb_lan_ingress_ip: "192.168.86.86"  # lb-01 LAN ingress (AdGuard static lease "lb-01-ingress", Google Home forwards :80/:443 here)
