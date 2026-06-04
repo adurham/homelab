@@ -21,7 +21,7 @@ Environment=TG_RCLONE_REMOTE={{ media_gallery_rclone_remote }}
 Environment=THUMB_PORT={{ media_gallery_thumb_port | default(8090) }}
 Environment=THUMB_BIND={{ ip_media_gallery }}
 Environment=THUMB_LOCAL_CACHE={{ media_gallery_state }}/thumbcache
-Environment=THUMB_MAX_CONCURRENT_DL={{ media_gallery_thumb_max_concurrent_dl }}
+Environment=THUMB_SPACE_MARGIN_MB={{ media_gallery_thumb_space_margin_mb }}
 ExecStart={{ media_gallery_dir }}/venv/bin/python {{ media_gallery_dir }}/thumb_service.py
 Restart=always
 RestartSec=5

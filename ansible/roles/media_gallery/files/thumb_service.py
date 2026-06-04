@@ -21,6 +21,7 @@ Env: RCLONE_CONFIG, TG_RCLONE_REMOTE (default gcrypt:), THUMB_PORT (default 8090
      THUMB_LOCAL_CACHE (default /var/lib/media-gallery/thumbcache).
 """
 import os
+import shutil
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,13 +47,58 @@ LOCAL_CACHE.mkdir(parents=True, exist_ok=True)
 _locks = {}
 _locks_guard = threading.Lock()
 
-# Bound how many ORIGINALS we download concurrently to generate thumbs. The
-# per-stem lock dedups identical requests, but without a GLOBAL cap a burst of
-# distinct video tiles (gallery scroll) would each pull a full multi-GB original
-# at once and could exhaust the CT's disk (a handful of 2-3 GB videos = tens of
-# GB transient). This semaphore serializes the heavy fetches. Images are tiny so
-# this mostly gates videos; the cap is intentionally small.
-_download_sem = threading.Semaphore(int(os.environ.get("THUMB_MAX_CONCURRENT_DL", "2")))
+# ─── Space-aware admission for original downloads ──────────────────────────
+# To thumbnail a VIDEO we download the full original into the (RAM tmpfs) cache,
+# so the real constraint is BYTES not a request count: a naive count semaphore
+# (e.g. allow 2) can still co-schedule two 3+ GB videos and blow a 6 GB tmpfs.
+# Instead admit a download only when (file_size + margin) fits in CURRENT free
+# space, reserving the bytes for the duration so concurrent downloads see the
+# reduced headroom. A single dedicated big-download lock guarantees forward
+# progress (one oversized file at a time always proceeds, never deadlocks).
+_space_cv = threading.Condition()
+_reserved_bytes = [0]
+SPACE_MARGIN = int(os.environ.get("THUMB_SPACE_MARGIN_MB", "256")) * 1024 * 1024
+_big_lock = threading.Lock()  # serializes the largest fetches for forward progress
+
+
+def _free_bytes() -> int:
+    try:
+        return shutil.disk_usage(str(LOCAL_CACHE)).free - _reserved_bytes[0]
+    except OSError:
+        return 0
+
+
+class _SpaceReservation:
+    """Block until `need` bytes are reservable in the cache fs, hold the
+    reservation, release on exit. If `need` alone exceeds total capacity we
+    can't satisfy it — caller should skip (poster not generatable here)."""
+    def __init__(self, need):
+        self.need = need + SPACE_MARGIN
+        self.ok = False
+
+    def __enter__(self):
+        try:
+            total = shutil.disk_usage(str(LOCAL_CACHE)).total
+        except OSError:
+            total = 0
+        if self.need >= total:
+            self.ok = False
+            return self  # impossible to ever fit; caller skips
+        with _space_cv:
+            # wait until our bytes fit alongside existing reservations
+            waited = 0
+            while _free_bytes() < self.need and waited < 600:
+                _space_cv.wait(timeout=5)
+                waited += 5
+            _reserved_bytes[0] += self.need
+            self.ok = True
+        return self
+
+    def __exit__(self, *a):
+        if self.ok:
+            with _space_cv:
+                _reserved_bytes[0] -= self.need
+                _space_cv.notify_all()
 
 
 def _lock_for(key):
@@ -67,6 +113,28 @@ def _lock_for(key):
 def rclone(*args):
     return subprocess.run(["rclone", "--config", RCLONE_CONF, *args],
                           capture_output=True, text=True)
+
+
+class _NullCtx:
+    """No-op context manager (used when a download isn't 'big')."""
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def remote_size(chat, leaf):
+    """Decrypted byte size of an original via `rclone size`, or None if unknown.
+    Used to reserve cache space before downloading for a video poster."""
+    r = rclone("size", f"{SRC}/{chat}/{leaf}", "--json")
+    if r.returncode != 0:
+        return None
+    try:
+        import json
+        return int(json.loads(r.stdout).get("bytes"))
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def find_original(chat, stem):
@@ -114,9 +182,27 @@ def ensure_thumb(chat, stem) -> Path | None:
         ext = os.path.splitext(leaf)[1].lower()
         is_video = ext in VIDEO_EXT
         tmp_src = LOCAL_CACHE / chat / f"_src_{leaf}"
-        # Serialize heavy original downloads (semaphore) so a scroll-burst of
-        # video tiles can't pull many multi-GB files at once and fill the disk.
-        with _download_sem:
+        # Reserve space for the full original BEFORE downloading, so concurrent
+        # video requests can't collectively overflow the (RAM tmpfs) cache. The
+        # constraint is bytes, not a request count — admit only when the file
+        # fits in current free space. If the file is bigger than the cache total,
+        # the poster simply can't be generated here (skip, no crash).
+        need = remote_size(chat, leaf)
+        if need is None:
+            need = 0  # unknown size: don't block on reservation, best-effort
+        # For the LARGEST files (those that need most of the cache), funnel
+        # through _big_lock so two huge fetches never even try to overlap.
+        try:
+            cache_total = shutil.disk_usage(str(LOCAL_CACHE)).total
+        except OSError:
+            cache_total = 0
+        is_big = cache_total and need > cache_total // 2
+        big_ctx = _big_lock if is_big else _NullCtx()
+        with big_ctx, _SpaceReservation(need) as res:
+            if need and not res.ok:
+                # original is larger than the cache fs can ever hold -> can't
+                # thumbnail it here. Return None (gallery shows a placeholder).
+                return None
             try:
                 r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
                 if r.returncode != 0:
