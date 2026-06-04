@@ -34,11 +34,18 @@ PORT = int(os.environ.get("TRASH_PORT", "8091"))
 BIND = os.environ.get("TRASH_BIND", "172.16.0.46")
 THUMB_CACHE = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))
 EXCLUDE_FILE = Path(os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/excluded.json"))
+# Persistent queue of {chat,stem} the user has marked for deletion. The HTTP
+# request only appends here + to the exclusion ledger (instant); a background
+# reaper thread does the actual rclone deletes. Survives restarts.
+QUEUE_FILE = Path(os.environ.get("TG_DELETE_QUEUE", "/var/lib/media-gallery/pending_delete.json"))
 SRC = REMOTE + "by-chat"
 THUMBS = REMOTE + "thumbs"
 EXCLUDE_REMOTE = REMOTE + "gallery/excluded.json"
 
 _lock = threading.Lock()
+_qlock = threading.Lock()
+# live counters for /trashqueue (reset on restart; queued is recomputed from file)
+_reaper_state = {"reaped": 0, "failed": 0}
 
 
 def rclone(*args):
@@ -60,6 +67,86 @@ def save_excluded(s: set) -> None:
     os.replace(tmp, EXCLUDE_FILE)
     # mirror to Drive (encrypted) for backup; best-effort
     rclone("copyto", str(EXCLUDE_FILE), EXCLUDE_REMOTE)
+
+
+# ── pending-delete queue (instant mark + background reaper) ──────────────────
+def load_queue() -> list:
+    try:
+        return json.loads(QUEUE_FILE.read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def save_queue(items: list) -> None:
+    QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(QUEUE_FILE) + ".tmp"
+    Path(tmp).write_text(json.dumps(items))
+    os.replace(tmp, QUEUE_FILE)
+
+
+def enqueue_deletes(chat: str, stems: list) -> int:
+    """Append {chat,stem} entries to the persistent queue. Instant — no rclone."""
+    with _qlock:
+        q = load_queue()
+        have = {(e.get("chat"), e.get("stem")) for e in q}
+        added = 0
+        for s in stems:
+            if (chat, s) not in have:
+                q.append({"chat": chat, "stem": s})
+                added += 1
+        save_queue(q)
+    return added
+
+
+def _reap_one(entry) -> bool:
+    """Do the actual rclone delete for a single queued entry. Returns True on
+    success (or if the file was already gone)."""
+    chat, stem = entry.get("chat"), entry.get("stem")
+    ok = True
+    leaf = find_original_leaf(chat, stem)
+    if leaf:
+        r = rclone("deletefile", f"{SRC}/{chat}/{leaf}",
+                   "--retries", "3", "--low-level-retries", "5")
+        ok = (r.returncode == 0)
+    # thumbnail (best effort — never blocks success)
+    rclone("deletefile", f"{THUMBS}/{chat}/{stem}.jpg",
+           "--retries", "2", "--low-level-retries", "3")
+    try:
+        (THUMB_CACHE / chat / f"{stem}.jpg").unlink()
+    except OSError:
+        pass
+    return ok
+
+
+def reaper_loop():
+    """Background worker: drains the pending-delete queue. The item is already
+    hidden from the gallery (it's in the exclusion ledger), so this just does the
+    slow Drive deletes without anyone waiting on them."""
+    import time
+    while True:
+        try:
+            with _qlock:
+                q = load_queue()
+            if not q:
+                time.sleep(3)
+                continue
+            entry = q[0]
+            ok = _reap_one(entry)
+            # pop the head (re-read in case new items were appended meanwhile)
+            with _qlock:
+                cur = load_queue()
+                if cur and cur[0].get("stem") == entry.get("stem") and cur[0].get("chat") == entry.get("chat"):
+                    cur.pop(0)
+                    save_queue(cur)
+            if ok:
+                _reaper_state["reaped"] += 1
+            else:
+                _reaper_state["failed"] += 1
+                # leave a failed item out of the queue (already popped) but count it;
+                # it stays excluded so it won't reappear. Avoids head-of-line stall.
+        except Exception:  # noqa: BLE001
+            import time as _t
+            _t.sleep(5)
 
 
 def find_original_leaf(chat, stem):
@@ -135,8 +222,22 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_GET(self):
+        p = unquote(self.path)
+        if p.startswith("/trashqueue"):
+            with _qlock:
+                q = load_queue()
+            return self._json(200, {
+                "queued": len(q),
+                "reaped": _reaper_state["reaped"],
+                "failed": _reaper_state["failed"],
+            })
+        self._json(404, {"error": "not found"})
+
     def do_POST(self):
         p = unquote(self.path)
+        if p.startswith("/trashmark"):
+            return self._trashmark()
         if p.startswith("/trashbatch"):
             return self._trashbatch()
         if not p.startswith("/trash/"):
@@ -154,6 +255,40 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, trash_item(chat, stem))
         except Exception as e:  # noqa: BLE001
             self._json(500, {"error": f"{type(e).__name__}: {e}"})
+
+    def _trashmark(self):
+        """POST /trashmark  body: {"chat": "...", "stems": [...]}
+        INSTANT soft-delete: add the stems to the exclusion ledger (so they
+        vanish from the gallery immediately and never re-download) and to the
+        persistent pending-delete queue. Returns at once — the background reaper
+        does the actual Drive file deletion. This is what makes bulk deletes feel
+        instant while the user keeps browsing."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length) or "{}")
+        except (ValueError, OSError):
+            return self._json(400, {"error": "bad json body"})
+        chat = body.get("chat", "")
+        stems = body.get("stems") or []
+        if ".." in chat or "/" in chat or not isinstance(stems, list) or not stems:
+            return self._json(400, {"error": "want {chat, stems[]}"})
+        stems = [s for s in stems if ".." not in s and "/" not in s]
+        if not stems:
+            return self._json(400, {"error": "no valid stems"})
+        # 1) exclusion ledger — makes them disappear from the manifest now
+        with _lock:
+            ex = load_excluded()
+            for s in stems:
+                ex.add(s)
+            save_excluded(ex)
+        # 2) queue the real deletes for the background reaper
+        added = enqueue_deletes(chat, stems)
+        # 3) kick a manifest rebuild so a fresh page load is already correct
+        _trigger_manifest_rebuild()
+        with _qlock:
+            depth = len(load_queue())
+        return self._json(200, {"marked": len(stems), "queued_added": added,
+                                "queue_depth": depth})
 
     def _trashbatch(self):
         """POST /trashbatch  body: {"chat": "...", "stems": [...]}
@@ -212,8 +347,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    # background reaper drains the pending-delete queue (does the slow rclone
+    # deletes) so the HTTP path stays instant.
+    t = threading.Thread(target=reaper_loop, daemon=True)
+    t.start()
     srv = ThreadingHTTPServer((BIND, PORT), Handler)
-    print(f"trash service on {BIND}:{PORT}", flush=True)
+    print(f"trash service on {BIND}:{PORT} (reaper running)", flush=True)
     srv.serve_forever()
 
 

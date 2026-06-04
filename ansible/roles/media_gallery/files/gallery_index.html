@@ -270,6 +270,14 @@
   #toast .spin{width:15px;height:15px;border:2px solid #3a4150;border-top-color:var(--accent);
     border-radius:50%;animation:spin .7s linear infinite;flex:0 0 auto;}
   @keyframes spin{to{transform:rotate(360deg);}}
+  /* background deletion queue indicator (bottom-left, persistent while draining) */
+  #bgTasks{position:fixed;left:16px;bottom:16px;z-index:140;display:none;align-items:center;
+    gap:9px;background:rgba(28,32,38,.97);border:1px solid var(--border);border-radius:10px;
+    padding:9px 14px;font-size:12.5px;color:var(--text);box-shadow:0 8px 30px rgba(0,0,0,.5);}
+  #bgTasks.show{display:flex;}
+  #bgTasks .spin{width:14px;height:14px;border:2px solid #3a4150;border-top-color:var(--accent);
+    border-radius:50%;animation:spin .7s linear infinite;flex:0 0 auto;}
+  #bgTasks.done .spin{display:none;}
   /* OS-style progress dialog (file-manager copy/move sheet) */
   #progScrim{position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.45);
     display:none;align-items:center;justify-content:center;}
@@ -434,6 +442,7 @@
 </main>
 <div id="rubber"></div>
 <div id="toast"></div>
+<div id="bgTasks" title="Background deletion queue"><span class="spin"></span><span id="bgTasksText"></span></div>
 <div id="ctxMenu"></div>
 <div id="propScrim">
   <div id="propDlg">
@@ -497,6 +506,32 @@
     if(!sticky){ _toastTimer=setTimeout(function(){ _toastEl.classList.remove('show'); }, kind==='err'?4500:2600); }
   }
   function toastHide(){ if(_toastEl) _toastEl.classList.remove('show'); }
+
+  // ---- background deletion queue indicator ----
+  var _bgTimer=null;
+  function bgPoll(){
+    var el=document.getElementById('bgTasks'), txt=document.getElementById('bgTasksText');
+    if(!el) return;
+    fetch('/trashqueue',{credentials:'same-origin'})
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(q){
+        if(!q){ return; }
+        if(q.queued>0){
+          el.classList.add('show'); el.classList.remove('done');
+          txt.textContent='Deleting '+q.queued+' in background…';
+          if(_bgTimer) clearTimeout(_bgTimer);
+          _bgTimer=setTimeout(bgPoll, 2000);   // keep polling while draining
+        } else {
+          // drained — briefly show done, then hide
+          if(_reapShown){ el.classList.add('show','done'); txt.textContent='✓ Background deletes complete';
+            if(_bgTimer) clearTimeout(_bgTimer);
+            _bgTimer=setTimeout(function(){ el.classList.remove('show','done'); _reapShown=false; }, 3000);
+          } else { el.classList.remove('show'); }
+        }
+        if(q.queued>0) _reapShown=true;
+      }).catch(function(){});
+  }
+  var _reapShown=false;
 
   // ---- OS-style progress dialog ----
   var _pd={};
@@ -1502,29 +1537,17 @@
     if(current==null||current==='*'){ toast('Delete from a folder view.','err'); return; }
     if(!confirm('Delete '+selected.size+' item(s)? This cannot be undone.')) return;
     var stems=Array.from(selected), chat=current;
-    progOpen('Deleting '+stems.length+' item'+(stems.length>1?'s':''), stems.length);
-    document.getElementById('pdSub').textContent='Removing '+stems.length+' file'+(stems.length>1?'s':'')+'…';
-    stems.forEach(function(stem){ pendingDel[stem]=true; });
-    var ac=new AbortController(); _pd.abort=ac;
-    fetch('/trashbatch',{method:'POST',credentials:'same-origin',signal:ac.signal,
+    // INSTANT soft-delete: hide now, reaper deletes the files in the background.
+    stems.forEach(function(stem){ pendingDel[stem]=true; var it=itemByStem(stem); if(it) removeFromData(it); });
+    clearSelection(); rerenderCurrent();
+    toast('🗑 Deleting '+stems.length+' in the background','ok');
+    fetch('/trashmark',{method:'POST',credentials:'same-origin',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({chat:chat,stems:stems})})
-      .then(function(r){ return r.json().then(function(j){return {status:r.status,j:j};}); })
-      .then(function(res){
-        var ok=(res.status===200);
-        if(ok){ stems.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); }); }
-        else { stems.forEach(function(stem){ delete pendingDel[stem]; }); }
-        clearSelection(); rerenderCurrent();
-        _pd.done=_pd.total; progStep('');
-        progFinish(ok? ('✓ Deleted '+(res.j.deleted||stems.length)) : ('Delete failed (HTTP '+res.status+')'), !ok);
-        if(ok) setTimeout(progClose, 700);
-        reloadManifest(current);
-      })
-      .catch(function(err){
-        stems.forEach(function(stem){ delete pendingDel[stem]; });
-        if(err && err.name==='AbortError'){ rerenderCurrent(); progClose(); toast('Delete cancelled','err'); }
-        else { progFinish('Network error during delete', true); }
-      });
+      .then(function(r){ if(r.status!==200){ stems.forEach(function(stem){ delete pendingDel[stem]; }); toast('Delete failed (HTTP '+r.status+')','err'); reloadManifest(current); } bgPoll(); })
+      .catch(function(){ stems.forEach(function(stem){ delete pendingDel[stem]; }); toast('Network error during delete','err'); });
+    bgPoll();
+    reloadManifest(current);
   });
 
   // ---------- DRAG-AND-DROP MOVE ----------
@@ -1936,37 +1959,26 @@
     var total=chats.reduce(function(a,k){return a+byChat[k].length;},0);
     if(!total){ toast('Nothing marked for deletion.','err'); return; }
     if(!confirm('Delete '+total+' duplicate item(s)? This cannot be undone.')) return;
-    progOpen('Deleting '+total+' duplicate'+(total>1?'s':''), total);
-    document.getElementById('pdSub').textContent='Removing duplicates…';
-    document.getElementById('pdCancelRow').style.display='none';   // batched per-folder; keep simple
-    var done=0, fail=0;
-    var chain=Promise.resolve();
+    // INSTANT: mark for deletion (soft) — items vanish now, the background reaper
+    // does the real file deletes. No blocking progress dialog.
+    var markedStems={};
     chats.forEach(function(chat){
       var stems=byChat[chat];
-      stems.forEach(function(s){ pendingDel[s]=true; });
-      chain=chain.then(function(){
-        return fetch('/trashbatch',{method:'POST',credentials:'same-origin',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({chat:chat,stems:stems})})
-          .then(function(r){ return r.json().then(function(j){return {status:r.status,j:j};}); })
-          .then(function(res){
-            if(res.status===200){ done+=(res.j.deleted||stems.length); }
-            else { fail+=stems.length; stems.forEach(function(s){ delete pendingDel[s]; }); }
-            _pd.done=done+fail; progStep('');
-          },function(){ fail+=stems.length; stems.forEach(function(s){ delete pendingDel[s]; }); });
-      });
+      stems.forEach(function(s){ pendingDel[s]=true; markedStems[s]=1; });
+      fetch('/trashmark',{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({chat:chat,stems:stems})})
+        .then(function(r){ if(r.status!==200){ stems.forEach(function(s){ delete pendingDel[s]; }); } bgPoll(); })
+        .catch(function(){ stems.forEach(function(s){ delete pendingDel[s]; }); });
     });
-    chain.then(function(){
-      progFinish(fail? ('Deleted '+done+', '+fail+' failed') : ('✓ Deleted '+done+' duplicates'), fail>0);
-      if(!fail) setTimeout(progClose, 800);
-      // drop trashed items locally + refresh the report view (search whole manifest)
-      Object.keys(dupAction).forEach(function(s){
-        if(dupAction[s]==='trash'){
-          for(var k=0;k<manifest.length;k++){ if(manifest[k].stem===s){ removeFromData(manifest[k]); break; } }
-        }
+    toast('🗑 Deleting '+total+' in the background — keep going','ok');
+    bgPoll();
+    {
+      // drop trashed items locally + refresh the report view immediately
+      Object.keys(markedStems).forEach(function(s){
+        for(var k=0;k<manifest.length;k++){ if(manifest[k].stem===s){ removeFromData(manifest[k]); break; } }
       });
       buildChats();
-      // re-fetch the (now stale) report minus deleted stems: just re-render filtered
       fetch('/gallery/dedup.json?ts='+Date.now(),{credentials:'same-origin'})
         .then(function(r){return r.ok?r.json():null;})
         .then(function(j){
@@ -1976,7 +1988,7 @@
                  if(current==='__dup__') renderDuplicates(j); }
         }).catch(function(){});
       reloadManifest(null);
-    });
+    }
   }
   document.getElementById('dedupBtn').addEventListener('click',showDuplicates);
 
@@ -1992,6 +2004,7 @@
       // seed emptyFolders = server folders that have no items in the manifest
       allFolders.forEach(function(f){ if(!chatMap[f] && emptyFolders.indexOf(f)<0) emptyFolders.push(f); });
       renderFolders();   // always render landing (so "+ New folder" is available)
+      bgPoll();          // show the background-delete indicator if a queue is draining
     })
     .catch(function(err){
       elState.textContent='Failed to load gallery: '+err.message;
