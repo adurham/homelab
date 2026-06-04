@@ -193,15 +193,33 @@
   .bulkmovemenu button{text-align:left;font-size:13px;padding:7px 10px;
     background:#222831;border-color:#2a313b;}
   .bulkmovemenu button:hover{background:var(--accent);border-color:var(--accent);}
-  /* per-tile selection checkbox (only visible in select mode) */
-  .tile .selbox{position:absolute;top:6px;left:6px;z-index:5;width:26px;height:26px;
-    border-radius:6px;border:2px solid #fff;background:rgba(20,24,30,.55);display:none;
-    align-items:center;justify-content:center;font-size:16px;color:#fff;cursor:pointer;}
-  body.selectmode .tile .selbox{display:flex;}
-  body.selectmode .tile .trash{display:none;}   /* hide per-tile trash in select mode */
+  /* per-tile selection checkbox — ALWAYS visible (mirror of the trash button) */
+  .tile .selbox{position:absolute;top:6px;left:6px;z-index:5;width:28px;height:28px;
+    border-radius:6px;border:2px solid rgba(255,255,255,.85);background:rgba(20,24,30,.55);
+    display:flex;align-items:center;justify-content:center;font-size:17px;color:#fff;
+    cursor:pointer;opacity:.85;transition:opacity .12s,background .12s;}
+  .tile:hover .selbox{opacity:1;}
   .tile.selected{outline:3px solid var(--accent);outline-offset:-3px;}
-  .tile.selected .selbox{background:var(--accent);border-color:var(--accent);}
-  body.selectmode .tile{cursor:pointer;}
+  .tile.selected .selbox{background:var(--accent);border-color:var(--accent);opacity:1;}
+  .tile.dragging{opacity:.45;}
+  /* rubber-band selection box */
+  #rubber{position:fixed;z-index:30;border:1.5px solid var(--accent);
+    background:rgba(91,140,255,.15);pointer-events:none;display:none;}
+  /* folder rail (drop targets while inside a folder) */
+  #folderRail{display:none;position:sticky;top:54px;z-index:8;gap:8px;flex-wrap:wrap;
+    align-items:center;background:rgba(21,24,29,.95);border:1px solid var(--border);
+    border-radius:10px;padding:10px 12px;margin:10px 16px;backdrop-filter:blur(8px);}
+  #folderRail.show{display:flex;}
+  #folderRail .rail-label{font-size:11px;color:var(--muted);width:100%;margin-bottom:2px;}
+  #folderRail .railitem{display:inline-flex;align-items:center;gap:6px;font-size:13px;
+    padding:7px 12px;border:1px solid #2a313b;border-radius:8px;background:#222831;
+    cursor:pointer;user-select:none;}
+  #folderRail .railitem:hover{border-color:var(--accent);}
+  #folderRail .railitem.dragover{background:var(--accent);border-color:var(--accent);
+    transform:scale(1.05);}
+  #folderRail .railitem.newfolder{border-style:dashed;color:var(--accent);}
+  /* folder tiles become drop targets on the landing page too */
+  .folder.dragover{outline:3px solid var(--accent);outline-offset:-3px;}
   @media(max-width:600px){#lb .nav{padding:8px 12px;font-size:24px;}}
 </style>
 </head>
@@ -211,7 +229,6 @@
   <h1 id="title">Gallery</h1>
   <span class="sub" id="sub"></span>
   <span class="spacer"></span>
-  <button id="selectBtn" style="display:none">&#9745; Select</button>
   <button id="uploadBtn">&#8593; Upload</button>
   <select id="sort" style="display:none">
     <option value="new">Newest first</option>
@@ -224,20 +241,22 @@
     <div class="ub-track"><div class="ub-fill" id="ubFill"></div></div>
     <span class="ub-text" id="ubText"></span>
   </div>
-  <!-- bulk action bar: shows when in select mode -->
+  <!-- bulk action bar: shows whenever ≥1 item is selected -->
   <div id="bulkBar">
     <span id="bulkCount">0 selected</span>
     <button id="bulkAll">Select all</button>
     <button id="bulkMove">&#128194; Move to&hellip;</button>
     <button id="bulkDelete" class="danger">&#128465; Delete</button>
     <button id="bulkClear">Clear</button>
-    <button id="bulkExit">Done</button>
     <div class="bulkmovemenu" id="bulkMoveMenu"></div>
   </div>
+  <!-- folder rail: drop targets while viewing a folder (drag selected photos here) -->
+  <div id="folderRail"></div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
   <div id="state" class="state">Loading…</div>
 </main>
+<div id="rubber"></div>
 
 <div id="lb">
   <button class="close" id="lbClose">&times;</button>
@@ -496,8 +515,7 @@
     elSort.style.display='inline-block';
     // "All items" is a virtual aggregate; can't upload into it
     elUploadBtn.style.display=(chat==='*')?'none':'inline-block';
-    elSelectBtn.style.display=items.length?'inline-block':'none';
-    exitSelectMode();   // reset selection when entering a folder
+    clearSelection();   // reset selection when entering a folder
     hideUploadBar();
     elTitle.textContent=name;
     elSub.textContent=items.length+' item'+(items.length===1?'':'s');
@@ -505,7 +523,30 @@
     if(!items.length) elState.textContent='No items in this folder.';
 
     renderPhotos();
+    renderFolderRail();   // drop targets for drag-to-move
     window.scrollTo(0,0);
+  }
+
+  // ---- folder rail: every OTHER folder as a drop target, while viewing a folder ----
+  function renderFolderRail(){
+    var others=chats.filter(function(c){return c!==current;})
+      .concat(emptyFolders.filter(function(c){return c!==current && chats.indexOf(c)<0;}));
+    elFolderRail.innerHTML='';
+    var lbl=document.createElement('div'); lbl.className='rail-label';
+    lbl.textContent='Drag selected photos onto a folder to move them:';
+    elFolderRail.appendChild(lbl);
+    others.forEach(function(dest){
+      var r=document.createElement('div'); r.className='railitem'; r.textContent='📁 '+dest;
+      r.dataset.dest=dest;
+      wireRailDrop(r,dest);
+      elFolderRail.appendChild(r);
+    });
+    // "+ new folder" drop target
+    var nf=document.createElement('div'); nf.className='railitem newfolder'; nf.textContent='＋ New folder';
+    nf.addEventListener('click',function(){ promptNewFolderThenMove(null); });
+    wireRailDrop(nf,'__new__');
+    elFolderRail.appendChild(nf);
+    elFolderRail.classList.toggle('show', current!=null && current!=='*');
   }
 
   function applySort(arr){
@@ -529,18 +570,23 @@
       }
       var dl=fmtDate(it.date);
       if(dl){var d=document.createElement('div'); d.className='dlabel'; d.textContent=dl; t.appendChild(d);}
-      // selection checkbox (visible only in select mode)
+      // ALWAYS-visible selection checkbox (top-left, mirror of trash top-right)
       var sb=document.createElement('div'); sb.className='selbox';
       sb.innerHTML=selected.has(it.stem)?'&#10003;':'';
+      sb.addEventListener('click',function(e){ e.stopPropagation(); toggleSelect(i,t); });
       t.appendChild(sb);
-      (function(tile,item){
+      // draggable for drag-to-move
+      t.draggable=true;
+      (function(tile,item,idx){
         var tb=document.createElement('button'); tb.className='trash';
         tb.title='Delete'; tb.innerHTML='&#128465;';
         tb.addEventListener('click',function(e){
           e.stopPropagation(); showTileConfirm(tile,item,tb);
         });
         tile.appendChild(tb);
-      })(t,it);
+        tile.addEventListener('dragstart',function(e){ onTileDragStart(e,idx,tile); });
+        tile.addEventListener('dragend',function(e){ onTileDragEnd(e,tile); });
+      })(t,it,i);
       frag.appendChild(t);
     });
     elPhoto.innerHTML=''; elPhoto.appendChild(frag);
@@ -746,63 +792,54 @@
       })
       .catch(function(){ alert('Network error during rename.'); });
   }
+  // tile click: open lightbox. (Selection is via the always-on checkbox; a plain
+  // tile click still opens the viewer. Ctrl/Cmd/Shift-click toggles selection.)
   elPhoto.addEventListener('click',function(e){
+    if(e.target.closest('.selbox')||e.target.closest('.trash')) return;
     var t=e.target.closest('.tile'); if(!t) return;
-    if(selectMode){ toggleSelect(parseInt(t.dataset.i,10), t); return; }
+    if(e.ctrlKey||e.metaKey||e.shiftKey){ toggleSelect(parseInt(t.dataset.i,10),t); return; }
     openLb(parseInt(t.dataset.i,10));
   });
   elBack.addEventListener('click',renderFolders);
 
-  // ---------- MULTI-SELECT + BULK ACTIONS ----------
-  var selectMode=false;
+  // ---------- SELECTION + BULK ACTIONS (always-on, no mode) ----------
   var selected=new Set();   // holds it.stem
-  var elSelectBtn=document.getElementById('selectBtn');
   var elBulkBar=document.getElementById('bulkBar');
   var elBulkCount=document.getElementById('bulkCount');
   var elBulkMoveMenu=document.getElementById('bulkMoveMenu');
+  var elFolderRail=document.getElementById('folderRail');
 
-  function enterSelectMode(){
-    selectMode=true; document.body.classList.add('selectmode');
-    elBulkBar.classList.add('show'); updateBulkCount();
+  function refreshBulkBar(){
+    elBulkCount.textContent=selected.size+' selected';
+    elBulkBar.classList.toggle('show', selected.size>0);
   }
-  function exitSelectMode(){
-    selectMode=false; document.body.classList.remove('selectmode');
-    elBulkBar.classList.remove('show'); hideBulkMoveMenu();
-    selected.clear();
-    // clear any selected styling
-    Array.prototype.forEach.call(elPhoto.querySelectorAll('.tile.selected'),function(t){
+  function clearSelection(){
+    selected.clear(); hideBulkMoveMenu(); refreshBulkBar();
+    Array.prototype.forEach.call(document.querySelectorAll('.tile.selected'),function(t){
       t.classList.remove('selected'); var sb=t.querySelector('.selbox'); if(sb) sb.innerHTML='';
     });
+  }
+  function setTileSel(tile,on){
+    var sb=tile.querySelector('.selbox');
+    if(on){ tile.classList.add('selected'); if(sb) sb.innerHTML='&#10003;'; }
+    else { tile.classList.remove('selected'); if(sb) sb.innerHTML=''; }
   }
   function toggleSelect(i, tile){
     var it=view[i]; if(!it) return;
-    var sb=tile.querySelector('.selbox');
-    if(selected.has(it.stem)){ selected.delete(it.stem); tile.classList.remove('selected'); if(sb) sb.innerHTML=''; }
-    else { selected.add(it.stem); tile.classList.add('selected'); if(sb) sb.innerHTML='&#10003;'; }
-    updateBulkCount();
+    if(selected.has(it.stem)){ selected.delete(it.stem); setTileSel(tile,false); }
+    else { selected.add(it.stem); setTileSel(tile,true); }
+    refreshBulkBar();
   }
-  function updateBulkCount(){ elBulkCount.textContent=selected.size+' selected'; }
   function hideBulkMoveMenu(){ elBulkMoveMenu.classList.remove('show'); elBulkMoveMenu.innerHTML=''; }
 
-  elSelectBtn.addEventListener('click',function(){
-    if(selectMode) exitSelectMode(); else enterSelectMode();
-  });
-  document.getElementById('bulkExit').addEventListener('click',exitSelectMode);
-  document.getElementById('bulkClear').addEventListener('click',function(){
-    selected.clear(); updateBulkCount();
-    Array.prototype.forEach.call(elPhoto.querySelectorAll('.tile.selected'),function(t){
-      t.classList.remove('selected'); var sb=t.querySelector('.selbox'); if(sb) sb.innerHTML='';
-    });
-  });
+  document.getElementById('bulkClear').addEventListener('click',clearSelection);
   document.getElementById('bulkAll').addEventListener('click',function(){
     view.forEach(function(it){ selected.add(it.stem); });
-    Array.prototype.forEach.call(elPhoto.querySelectorAll('.tile'),function(t){
-      t.classList.add('selected'); var sb=t.querySelector('.selbox'); if(sb) sb.innerHTML='&#10003;';
-    });
-    updateBulkCount();
+    Array.prototype.forEach.call(elPhoto.querySelectorAll('.tile'),function(t){ setTileSel(t,true); });
+    refreshBulkBar();
   });
 
-  // ---- bulk move ----
+  // ---- bulk move (button -> menu with destinations + New folder) ----
   document.getElementById('bulkMove').addEventListener('click',function(e){
     e.stopPropagation();
     if(!selected.size){ alert('Select some items first.'); return; }
@@ -810,24 +847,43 @@
     elBulkMoveMenu.innerHTML='';
     var title=document.createElement('div'); title.className='mm-title';
     title.textContent='Move '+selected.size+' item(s) to:'; elBulkMoveMenu.appendChild(title);
+    // + New folder option
+    var nf=document.createElement('button'); nf.textContent='＋ New folder…';
+    nf.addEventListener('click',function(ev){ ev.stopPropagation(); promptNewFolderThenMove(null); });
+    elBulkMoveMenu.appendChild(nf);
     var dests=chats.filter(function(c){return c!==current;})
-      .concat(emptyFolders.filter(function(c){return c!==current;}));
-    if(!dests.length){
-      var none=document.createElement('div'); none.className='mm-title';
-      none.textContent='(no other folders)'; elBulkMoveMenu.appendChild(none);
-    }
+      .concat(emptyFolders.filter(function(c){return c!==current && chats.indexOf(c)<0;}));
     dests.forEach(function(dest){
-      var b=document.createElement('button'); b.textContent=dest;
+      var b=document.createElement('button'); b.textContent='📁 '+dest;
       b.addEventListener('click',function(ev){ ev.stopPropagation(); bulkMove(dest); });
       elBulkMoveMenu.appendChild(b);
     });
     elBulkMoveMenu.classList.add('show');
   });
+  document.addEventListener('click',function(e){
+    if(!e.target.closest('#bulkMove')&&!e.target.closest('#bulkMoveMenu')) hideBulkMoveMenu();
+  });
 
-  function bulkMove(dest){
+  // create a new folder (via /mkdir) then move current selection into it
+  function promptNewFolderThenMove(stemsOverride){
+    var name=window.prompt('New folder name:'); if(name==null) return;
+    name=name.trim(); if(!name) return;
+    if(chatMap[name]||emptyFolders.indexOf(name)>=0){ alert('Folder "'+name+'" already exists.'); return; }
+    fetch('/mkdir/'+encodeURIComponent(name),{method:'POST',credentials:'same-origin'})
+      .then(function(r){
+        if(r.status!==200){ alert('Create failed (HTTP '+r.status+').'); return; }
+        if(emptyFolders.indexOf(name)<0) emptyFolders.push(name);
+        bulkMove(name, stemsOverride);
+      })
+      .catch(function(){ alert('Network error creating folder.'); });
+  }
+
+  function bulkMove(dest, stemsOverride){
     hideBulkMoveMenu();
-    var stems=Array.prototype.slice.call(selected);
+    var stems=stemsOverride||Array.prototype.slice.call(selected);
+    if(!stems.length) return;
     var src=current, done=0, fail=0;
+    elBulkBar.classList.add('show');
     elBulkCount.textContent='Moving 0/'+stems.length+'…';
     var chain=Promise.resolve();
     stems.forEach(function(stem){
@@ -839,8 +895,8 @@
       });
     });
     chain.then(function(){
-      alert('Moved '+done+' item(s) to '+dest+(fail?(', '+fail+' failed'):'')+'.');
-      exitSelectMode(); reloadManifest(current);
+      if(fail) alert('Moved '+done+', '+fail+' failed.');
+      clearSelection(); reloadManifest(current);
     });
   }
 
@@ -861,9 +917,62 @@
       });
     });
     chain.then(function(){
-      alert('Deleted '+done+' item(s)'+(fail?(', '+fail+' failed'):'')+'.');
-      exitSelectMode(); reloadManifest(current);
+      if(fail) alert('Deleted '+done+', '+fail+' failed.');
+      clearSelection(); reloadManifest(current);
     });
+  });
+
+  // ---------- DRAG-AND-DROP MOVE ----------
+  var dragStems=[];
+  function onTileDragStart(e,i,tile){
+    var it=view[i]; if(!it) return;
+    // if dragging an unselected tile, drag just that one; else drag the whole selection
+    if(!selected.has(it.stem)){ dragStems=[it.stem]; }
+    else { dragStems=Array.prototype.slice.call(selected); }
+    tile.classList.add('dragging');
+    try{ e.dataTransfer.setData('text/plain',dragStems.join(',')); e.dataTransfer.effectAllowed='move'; }catch(_){}
+  }
+  function onTileDragEnd(e,tile){ tile.classList.remove('dragging'); }
+  function wireRailDrop(el,dest){
+    el.addEventListener('dragover',function(e){ e.preventDefault(); el.classList.add('dragover'); e.dataTransfer.dropEffect='move'; });
+    el.addEventListener('dragleave',function(){ el.classList.remove('dragover'); });
+    el.addEventListener('drop',function(e){
+      e.preventDefault(); el.classList.remove('dragover');
+      if(!dragStems.length) return;
+      var stems=dragStems.slice(); dragStems=[];
+      if(dest==='__new__'){ promptNewFolderThenMove(stems); }
+      else { bulkMove(dest, stems); }
+    });
+  }
+
+  // ---------- RUBBER-BAND SELECTION (drag on empty grid area) ----------
+  var elRubber=document.getElementById('rubber');
+  var rb=null;
+  elPhoto.addEventListener('mousedown',function(e){
+    // only start band on empty space (not on a tile), left button
+    if(e.button!==0||e.target.closest('.tile')) return;
+    rb={x0:e.clientX,y0:e.clientY,add:e.shiftKey||e.metaKey||e.ctrlKey};
+    if(!rb.add) clearSelection();
+    elRubber.style.display='block';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove',function(e){
+    if(!rb) return;
+    var x=Math.min(e.clientX,rb.x0), y=Math.min(e.clientY,rb.y0),
+        w=Math.abs(e.clientX-rb.x0), h=Math.abs(e.clientY-rb.y0);
+    elRubber.style.left=x+'px'; elRubber.style.top=y+'px';
+    elRubber.style.width=w+'px'; elRubber.style.height=h+'px';
+    var box={left:x,top:y,right:x+w,bottom:y+h};
+    Array.prototype.forEach.call(elPhoto.querySelectorAll('.tile'),function(t){
+      var r=t.getBoundingClientRect();
+      var hit=!(r.right<box.left||r.left>box.right||r.bottom<box.top||r.top>box.bottom);
+      var it=view[parseInt(t.dataset.i,10)]; if(!it) return;
+      if(hit){ selected.add(it.stem); setTileSel(t,true); }
+    });
+    refreshBulkBar();
+  });
+  document.addEventListener('mouseup',function(){
+    if(!rb) return; rb=null; elRubber.style.display='none';
   });
   elSort.addEventListener('change',function(){
     if(current!==null) openFolder(current);
