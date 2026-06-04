@@ -1,15 +1,11 @@
 ---
-# Cluster-wide existence check. `pct list` is node-local; HA can migrate
-# the CT to any node, so we ask pmxcfs for the full cluster resource list.
-# rc=0 means the CT exists somewhere in the cluster.
-- name: Check if Mail Container Exists in cluster
-  ansible.builtin.shell: |
-    set -o pipefail
-    pvesh get /cluster/resources --type vm --output-format json |
-      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==104 for r in json.load(sys.stdin)) else 1)'
-  register: pct_check
-  failed_when: false
-  changed_when: false
+# Resolve the node CT 104 lives on now (HA-aware). Sets ct_exists + ct_node;
+# node-local `pct` ops below delegate to ct_node so they follow HA migrations.
+- name: Resolve owning node for Mail CT
+  ansible.builtin.include_role:
+    name: resolve_ct_node
+  vars:
+    ct_vmid: 104
 
 - name: Create Mail Container
   ansible.builtin.command: >
@@ -23,13 +19,14 @@
     --password "{{ mail_01_root_pass }}"
     --start 1
     --onboot 1
-  when: pct_check.rc != 0
+  when: not ct_exists
   no_log: true
 
 - name: Wait for Mail Container IP
   ansible.builtin.shell: |
     set -o pipefail
     pct exec 104 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  delegate_to: "{{ ct_node }}"
   register: ip_check
   until: ip_check.rc == 0
   retries: 20
@@ -38,12 +35,14 @@
 
 - name: Update Apt Cache in Mail Container
   ansible.builtin.command: pct exec 104 -- apt-get update
-  when: pct_check.rc != 0
+  delegate_to: "{{ ct_node }}"
+  when: not ct_exists
   changed_when: true
 
 - name: Install Python3 in Mail Container
   ansible.builtin.command: pct exec 104 -- apt-get install -y python3
-  when: pct_check.rc != 0
+  delegate_to: "{{ ct_node }}"
+  when: not ct_exists
   changed_when: true
 
 - name: Inject SSH Key into Mail Container
@@ -53,13 +52,15 @@
     cat /root/.ssh/authorized_keys | pct exec 104 -- sh -c "cat > /root/.ssh/authorized_keys"
     pct exec 104 -- chmod 700 /root/.ssh
     pct exec 104 -- chmod 600 /root/.ssh/authorized_keys
-  when: pct_check.rc != 0
+  delegate_to: "{{ ct_node }}"
+  when: not ct_exists
 
 # openssh-server ships with the Ubuntu LXC template but is not enabled by
 # default. Without this the CT is only reachable via `pct exec` from the
 # proxmox host — direct SSH from ansible against the CT's IP fails.
 - name: Ensure SSH is enabled and running
   ansible.builtin.command: pct exec 104 -- systemctl enable --now ssh
+  delegate_to: "{{ ct_node }}"
   changed_when: false
 
 # Per-CT firewall — restrict :25 inbound to graf-01 + authentik only.

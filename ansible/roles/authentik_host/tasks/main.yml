@@ -1,20 +1,30 @@
 ---
-# Cluster-wide existence check. `pct list` is node-local; HA can migrate
-# the CT to any node, so we ask pmxcfs for the full cluster resource list.
-# rc=0 means the CT exists somewhere in the cluster.
-- name: Check if Authentik CT exists in cluster
-  ansible.builtin.shell: |
-    set -o pipefail
-    pvesh get /cluster/resources --type vm --output-format json |
-      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==100 for r in json.load(sys.stdin)) else 1)'
-  register: authentik_host_ct_check
-  failed_when: false
-  changed_when: false
+# HA-aware node resolution. The authentik role touches TWO CTs:
+#   - CT 101 (tailscale-gw) is used as an SSH/network bastion via `pct exec`.
+#   - CT 100 (authentik) is the CT this role manages.
+# Both can be HA-migrated independently, so resolve each owning node. Resolve
+# 101 first and stash it as gw_node; resolve 100 last so ct_node/ct_exists
+# refer to the managed CT for every management task below.
+- name: Resolve owning node for Tailscale GW CT (bastion)
+  ansible.builtin.include_role:
+    name: resolve_ct_node
+  vars:
+    ct_vmid: 101
+
+- name: Stash Tailscale GW owning node
+  ansible.builtin.set_fact:
+    gw_node: "{{ ct_node }}"
+
+- name: Resolve owning node for Authentik CT
+  ansible.builtin.include_role:
+    name: resolve_ct_node
+  vars:
+    ct_vmid: 100
 
 - name: Update Template Database
   ansible.builtin.command: pveam update
   changed_when: false
-  when: authentik_host_ct_check.rc != 0
+  when: not ct_exists
 
 - name: Download Ubuntu 22.04 Template
   ansible.builtin.command: pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
@@ -26,6 +36,7 @@
   ansible.builtin.shell: |
     set -o pipefail
     pct exec 101 -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+  delegate_to: "{{ gw_node }}"
   register: authentik_host_gw_ip
   changed_when: false
 
@@ -47,18 +58,20 @@
     --password "{{ authentik_host_lxc_password }}"
     --ssh-public-keys /root/.ssh/authorized_keys
   changed_when: true
-  when: authentik_host_ct_check.rc != 0
+  when: not ct_exists
   no_log: true
 
 - name: Start Authentik Container
   ansible.builtin.command: pct start 100
+  delegate_to: "{{ ct_node }}"
   changed_when: true
-  when: authentik_host_ct_check.rc != 0
+  when: not ct_exists
 
 # openssh-server ships with the Ubuntu LXC template but is not enabled by
 # default. Enable it before the network-wait loop so the loop succeeds.
 - name: Ensure SSH is enabled and running
   ansible.builtin.command: pct exec 100 -- systemctl enable --now ssh
+  delegate_to: "{{ ct_node }}"
   changed_when: false
 
 # Per-CT firewall — Authentik HTTP ports (80/443/9000/9443) reachable
@@ -84,12 +97,13 @@
 
 - name: Wait for Container Network (via Gateway)
   ansible.builtin.shell: pct exec 101 -- timeout 1 bash -c "cat < /dev/null > /dev/tcp/{{ ip_authentik }}/22"
+  delegate_to: "{{ gw_node }}"
   register: authentik_host_wait_net
   until: authentik_host_wait_net.rc == 0
   retries: 30
   delay: 5
   changed_when: false
-  when: authentik_host_ct_check.rc != 0
+  when: not ct_exists
 
 - name: Add Authentik Host to Inventory
   ansible.builtin.add_host:
