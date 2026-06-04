@@ -692,9 +692,19 @@ class SmartVentController(hass.Hass):
                 )
 
     def _update_delivery_penalties(self, hvac_action, target_cool, target_heat):
-        """Measure each room's achieved-cooling-rate handicap and fold it into a
-        smoothed EMA. This is the capacity/load axis that supply-air temperature
-        cannot see.
+        """Measure each room's achieved-conditioning-rate handicap and fold it
+        into a smoothed EMA. This is the capacity/load axis that supply-air
+        temperature cannot see.
+
+        SYMMETRIC across cooling and heating (winter must work too):
+          - cooling: beneficiary is ABOVE cool setpoint; off = temp - setpoint;
+            approach toward setpoint = temp FALLING (prev_temp - temp).
+          - heating: beneficiary is BELOW heat setpoint; off = setpoint - temp;
+            approach toward setpoint = temp RISING (temp - prev_temp).
+        A capacity-limited room (one undersized vent, heavy load) lags the same
+        way in both seasons, so the handicap is measured identically; only the
+        sign of "off" and "approach" flips. Covered by the heating-mirror tests
+        (T9-T13) in test_delivery_penalty.py.
 
         For each room we compute the rate of approach to the active setpoint
         since the last cycle (°F/min, positive = getting closer). A room accrues
