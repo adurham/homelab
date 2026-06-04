@@ -174,6 +174,34 @@
   .folder:hover .frename{opacity:1;}
   .folder .frename:hover{background:var(--accent);border-color:var(--accent);}
   @media(hover:none){.folder .frename{opacity:.85;}}
+  /* ---- multi-select + bulk action bar ---- */
+  #bulkBar{display:none;position:sticky;top:54px;z-index:9;align-items:center;gap:10px;
+    flex-wrap:wrap;background:rgba(28,32,38,.97);border:1px solid var(--border);
+    border-radius:10px;padding:10px 14px;margin:10px 16px;backdrop-filter:blur(8px);}
+  #bulkBar.show{display:flex;}
+  #bulkBar #bulkCount{font-weight:600;font-size:14px;min-width:90px;}
+  #bulkBar button{font-size:13px;padding:7px 12px;}
+  #bulkBar button.danger{border-color:#5a3030;}
+  #bulkBar button.danger:hover{background:#d23b3b;border-color:#d23b3b;}
+  #bulkBar #bulkMove:hover{background:var(--accent);border-color:var(--accent);}
+  .bulkmovemenu{display:none;position:absolute;top:48px;left:14px;z-index:20;
+    flex-direction:column;gap:4px;background:#1a1f27;border:1px solid var(--border);
+    border-radius:10px;padding:8px;max-height:50vh;overflow-y:auto;min-width:200px;
+    box-shadow:0 8px 30px rgba(0,0,0,.5);}
+  .bulkmovemenu.show{display:flex;}
+  .bulkmovemenu .mm-title{font-size:11px;color:#8a93a0;padding:2px 6px 6px;}
+  .bulkmovemenu button{text-align:left;font-size:13px;padding:7px 10px;
+    background:#222831;border-color:#2a313b;}
+  .bulkmovemenu button:hover{background:var(--accent);border-color:var(--accent);}
+  /* per-tile selection checkbox (only visible in select mode) */
+  .tile .selbox{position:absolute;top:6px;left:6px;z-index:5;width:26px;height:26px;
+    border-radius:6px;border:2px solid #fff;background:rgba(20,24,30,.55);display:none;
+    align-items:center;justify-content:center;font-size:16px;color:#fff;cursor:pointer;}
+  body.selectmode .tile .selbox{display:flex;}
+  body.selectmode .tile .trash{display:none;}   /* hide per-tile trash in select mode */
+  .tile.selected{outline:3px solid var(--accent);outline-offset:-3px;}
+  .tile.selected .selbox{background:var(--accent);border-color:var(--accent);}
+  body.selectmode .tile{cursor:pointer;}
   @media(max-width:600px){#lb .nav{padding:8px 12px;font-size:24px;}}
 </style>
 </head>
@@ -183,6 +211,7 @@
   <h1 id="title">Gallery</h1>
   <span class="sub" id="sub"></span>
   <span class="spacer"></span>
+  <button id="selectBtn" style="display:none">&#9745; Select</button>
   <button id="uploadBtn">&#8593; Upload</button>
   <select id="sort" style="display:none">
     <option value="new">Newest first</option>
@@ -194,6 +223,16 @@
   <div id="uploadBar">
     <div class="ub-track"><div class="ub-fill" id="ubFill"></div></div>
     <span class="ub-text" id="ubText"></span>
+  </div>
+  <!-- bulk action bar: shows when in select mode -->
+  <div id="bulkBar">
+    <span id="bulkCount">0 selected</span>
+    <button id="bulkAll">Select all</button>
+    <button id="bulkMove">&#128194; Move to&hellip;</button>
+    <button id="bulkDelete" class="danger">&#128465; Delete</button>
+    <button id="bulkClear">Clear</button>
+    <button id="bulkExit">Done</button>
+    <div class="bulkmovemenu" id="bulkMoveMenu"></div>
   </div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
@@ -457,6 +496,8 @@
     elSort.style.display='inline-block';
     // "All items" is a virtual aggregate; can't upload into it
     elUploadBtn.style.display=(chat==='*')?'none':'inline-block';
+    elSelectBtn.style.display=items.length?'inline-block':'none';
+    exitSelectMode();   // reset selection when entering a folder
     hideUploadBar();
     elTitle.textContent=name;
     elSub.textContent=items.length+' item'+(items.length===1?'':'s');
@@ -476,6 +517,7 @@
     view.forEach(function(it,i){
       var t=document.createElement('div');
       t.className='tile'; t.dataset.i=i;
+      if(selected.has(it.stem)) t.classList.add('selected');
       var sh=document.createElement('div'); sh.className='shimmer'; t.appendChild(sh);
       var img=document.createElement('img');
       img.loading='lazy'; img.decoding='async';
@@ -487,6 +529,10 @@
       }
       var dl=fmtDate(it.date);
       if(dl){var d=document.createElement('div'); d.className='dlabel'; d.textContent=dl; t.appendChild(d);}
+      // selection checkbox (visible only in select mode)
+      var sb=document.createElement('div'); sb.className='selbox';
+      sb.innerHTML=selected.has(it.stem)?'&#10003;':'';
+      t.appendChild(sb);
       (function(tile,item){
         var tb=document.createElement('button'); tb.className='trash';
         tb.title='Delete'; tb.innerHTML='&#128465;';
@@ -702,9 +748,123 @@
   }
   elPhoto.addEventListener('click',function(e){
     var t=e.target.closest('.tile'); if(!t) return;
+    if(selectMode){ toggleSelect(parseInt(t.dataset.i,10), t); return; }
     openLb(parseInt(t.dataset.i,10));
   });
   elBack.addEventListener('click',renderFolders);
+
+  // ---------- MULTI-SELECT + BULK ACTIONS ----------
+  var selectMode=false;
+  var selected=new Set();   // holds it.stem
+  var elSelectBtn=document.getElementById('selectBtn');
+  var elBulkBar=document.getElementById('bulkBar');
+  var elBulkCount=document.getElementById('bulkCount');
+  var elBulkMoveMenu=document.getElementById('bulkMoveMenu');
+
+  function enterSelectMode(){
+    selectMode=true; document.body.classList.add('selectmode');
+    elBulkBar.classList.add('show'); updateBulkCount();
+  }
+  function exitSelectMode(){
+    selectMode=false; document.body.classList.remove('selectmode');
+    elBulkBar.classList.remove('show'); hideBulkMoveMenu();
+    selected.clear();
+    // clear any selected styling
+    Array.prototype.forEach.call(elPhoto.querySelectorAll('.tile.selected'),function(t){
+      t.classList.remove('selected'); var sb=t.querySelector('.selbox'); if(sb) sb.innerHTML='';
+    });
+  }
+  function toggleSelect(i, tile){
+    var it=view[i]; if(!it) return;
+    var sb=tile.querySelector('.selbox');
+    if(selected.has(it.stem)){ selected.delete(it.stem); tile.classList.remove('selected'); if(sb) sb.innerHTML=''; }
+    else { selected.add(it.stem); tile.classList.add('selected'); if(sb) sb.innerHTML='&#10003;'; }
+    updateBulkCount();
+  }
+  function updateBulkCount(){ elBulkCount.textContent=selected.size+' selected'; }
+  function hideBulkMoveMenu(){ elBulkMoveMenu.classList.remove('show'); elBulkMoveMenu.innerHTML=''; }
+
+  elSelectBtn.addEventListener('click',function(){
+    if(selectMode) exitSelectMode(); else enterSelectMode();
+  });
+  document.getElementById('bulkExit').addEventListener('click',exitSelectMode);
+  document.getElementById('bulkClear').addEventListener('click',function(){
+    selected.clear(); updateBulkCount();
+    Array.prototype.forEach.call(elPhoto.querySelectorAll('.tile.selected'),function(t){
+      t.classList.remove('selected'); var sb=t.querySelector('.selbox'); if(sb) sb.innerHTML='';
+    });
+  });
+  document.getElementById('bulkAll').addEventListener('click',function(){
+    view.forEach(function(it){ selected.add(it.stem); });
+    Array.prototype.forEach.call(elPhoto.querySelectorAll('.tile'),function(t){
+      t.classList.add('selected'); var sb=t.querySelector('.selbox'); if(sb) sb.innerHTML='&#10003;';
+    });
+    updateBulkCount();
+  });
+
+  // ---- bulk move ----
+  document.getElementById('bulkMove').addEventListener('click',function(e){
+    e.stopPropagation();
+    if(!selected.size){ alert('Select some items first.'); return; }
+    if(elBulkMoveMenu.classList.contains('show')){ hideBulkMoveMenu(); return; }
+    elBulkMoveMenu.innerHTML='';
+    var title=document.createElement('div'); title.className='mm-title';
+    title.textContent='Move '+selected.size+' item(s) to:'; elBulkMoveMenu.appendChild(title);
+    var dests=chats.filter(function(c){return c!==current;})
+      .concat(emptyFolders.filter(function(c){return c!==current;}));
+    if(!dests.length){
+      var none=document.createElement('div'); none.className='mm-title';
+      none.textContent='(no other folders)'; elBulkMoveMenu.appendChild(none);
+    }
+    dests.forEach(function(dest){
+      var b=document.createElement('button'); b.textContent=dest;
+      b.addEventListener('click',function(ev){ ev.stopPropagation(); bulkMove(dest); });
+      elBulkMoveMenu.appendChild(b);
+    });
+    elBulkMoveMenu.classList.add('show');
+  });
+
+  function bulkMove(dest){
+    hideBulkMoveMenu();
+    var stems=Array.prototype.slice.call(selected);
+    var src=current, done=0, fail=0;
+    elBulkCount.textContent='Moving 0/'+stems.length+'…';
+    var chain=Promise.resolve();
+    stems.forEach(function(stem){
+      chain=chain.then(function(){
+        return fetch('/move/'+encodeURIComponent(src)+'/'+encodeURIComponent(stem)+'/'+encodeURIComponent(dest),
+          {method:'POST',credentials:'same-origin'})
+          .then(function(r){ if(r.status===200) done++; else fail++; },function(){ fail++; })
+          .then(function(){ elBulkCount.textContent='Moving '+(done+fail)+'/'+stems.length+'…'; });
+      });
+    });
+    chain.then(function(){
+      alert('Moved '+done+' item(s) to '+dest+(fail?(', '+fail+' failed'):'')+'.');
+      exitSelectMode(); reloadManifest(current);
+    });
+  }
+
+  // ---- bulk delete ----
+  document.getElementById('bulkDelete').addEventListener('click',function(){
+    if(!selected.size){ alert('Select some items first.'); return; }
+    if(!confirm('Delete '+selected.size+' item(s)? This cannot be undone.')) return;
+    var stems=Array.prototype.slice.call(selected);
+    var done=0, fail=0;
+    elBulkCount.textContent='Deleting 0/'+stems.length+'…';
+    var chain=Promise.resolve();
+    stems.forEach(function(stem){
+      chain=chain.then(function(){
+        return fetch('/trash/'+encodeURIComponent(current)+'/'+encodeURIComponent(stem),
+          {method:'POST',credentials:'same-origin'})
+          .then(function(r){ if(r.status===200) done++; else fail++; },function(){ fail++; })
+          .then(function(){ elBulkCount.textContent='Deleting '+(done+fail)+'/'+stems.length+'…'; });
+      });
+    });
+    chain.then(function(){
+      alert('Deleted '+done+' item(s)'+(fail?(', '+fail+' failed'):'')+'.');
+      exitSelectMode(); reloadManifest(current);
+    });
+  });
   elSort.addEventListener('change',function(){
     if(current!==null) openFolder(current);
   });
