@@ -146,6 +146,8 @@ ENABLED_SWITCH = "input_boolean.vent_control_enabled"
 # disabled). An external cron watchdog alerts if it goes stale, catching the
 # "app silently died / stopped looping" failure that originally went unnoticed.
 HEARTBEAT_ENTITY = "sensor.smart_vent_controller_heartbeat"
+# Summary sensor for the delivery/capacity handicap (achieved-cooling-rate axis).
+DELIVERY_PENALTY_ENTITY = "sensor.smart_vent_delivery_handicap"
 
 # Backpressure: never close more than this fraction of total vents
 MAX_CLOSED_RATIO = 0.60
@@ -261,6 +263,42 @@ PRIORITY_MAX_DONORS = 4
 PRIORITY_ESCALATE_OVER = 4.0
 PRIORITY_DONOR_POS_ESCALATED = 0
 
+# ── Delivery / capacity handicap (achieved-cooling-rate axis) ──────────────────
+# The SECOND handicap axis, orthogonal to the supply-air penalty above.
+#
+# _update_supply_penalties catches rooms whose SUPPLY air is ineffective (warm
+# duct on a long/uninsulated run) — that was GB1. But a room can have perfectly
+# good supply air, sit wide open, and STILL never reach setpoint because it
+# can't move enough air (an undersized / single vent) or carries a large
+# internal or solar load. GB2 is exactly this: its duct is the COLDEST upstairs
+# (supply penalty ~0, so the supply mechanism correctly stays silent) yet it's
+# the most-often-hottest room — it has one vent and ~90% occupancy. That
+# handicap is invisible to any supply-TEMPERATURE measurement; it only shows up
+# in the room's achieved RATE of approach to setpoint.
+#
+# We measure that rate directly. A room that is (a) occupied, (b) past the
+# deadband in the wrong direction, (c) already receiving good supply air (low
+# supply penalty — so we're not double-counting the GB1 axis), and (d) wide open
+# (we're already giving it everything), yet is NOT closing the gap, has a
+# delivery/capacity handicap. We accrue an EMA penalty for it, smoothed like the
+# supply penalty. That penalty does two things:
+#   1. Lowers the room's activation margin (it becomes a beneficiary earlier).
+#   2. Past DELIVERY_ESCALATE_PENALTY, forces donor ESCALATION (throttle donors
+#      to 0% instead of 50%) so the controller dumps maximum CFM at it — the
+#      only software lever left for a capacity-limited room. Backpressure still
+#      caps total closures, so this can't choke the system.
+# Self-correcting: once the room finally moves toward setpoint the rate goes
+# positive, the stuck condition clears, and the penalty decays back to zero.
+# Like the supply penalty, this is MEASURED per room, not a hand-tuned table, so
+# it generalizes to every room (capacity, load, or solar) on one axis.
+DELIVERY_STUCK_RATE = 0.05      # °F/min toward setpoint; below this while maxed = stuck
+DELIVERY_PENALTY_EMA = 0.25     # smoothing (a touch slower than supply — noisier signal)
+DELIVERY_PENALTY_MAX = 4.0      # cap per-sample stuck contribution (°F) so one reading can't dominate
+DELIVERY_MIN_DT_MIN = 0.5       # ignore intervals shorter than this (sensor noise)
+DELIVERY_MAX_DT_MIN = 10.0      # ignore long gaps (restart / sensor dropout) — rate is meaningless
+DELIVERY_MARGIN_GAIN = 0.30     # °F margin reduction per °F of delivery penalty
+DELIVERY_ESCALATE_PENALTY = 1.5  # delivery penalty above this forces donor escalation
+
 # ── Fan-assist redistribution (the thermostat blind-spot workaround) ───────────
 # A single hallway thermostat goes idle when the HOUSE AVERAGE is satisfied, even
 # while an individual room is still hot — that's the core reason a disadvantaged
@@ -307,6 +345,16 @@ class SmartVentController(hass.Hass):
         # measured from the Flair duct sensors. Drives each room's activation
         # margin so handicapped rooms react earlier without a hardcoded table.
         self._supply_penalty = {}
+
+        # EMA-smoothed per-room DELIVERY penalty (the achieved-cooling-rate axis).
+        # Accrues when a room is occupied, off-target, well-supplied, and wide
+        # open yet still not closing the gap — i.e. a capacity/load handicap that
+        # supply-air temperature cannot see (GB2's single vent). Drives the
+        # margin like the supply penalty and forces donor escalation past
+        # DELIVERY_ESCALATE_PENALTY. _delivery_last holds the prior (temp, time)
+        # sample per room so we can compute the rate between control cycles.
+        self._delivery_penalty = {}
+        self._delivery_last = {}
 
         # Run the control loop
         self.run_every(self.control_loop, "now+10", CYCLE_INTERVAL)
@@ -396,6 +444,13 @@ class SmartVentController(hass.Hass):
         # when cooling. (Skip on "fan" — no conditioned air, so no real penalty.)
         if hvac_action in ("cooling", "heating"):
             self._update_supply_penalties(heating=(hvac_action == "heating"))
+
+        # Second handicap axis: achieved-cooling-rate. Must run AFTER supply
+        # penalties (it reads them to avoid double-counting the supply-air axis)
+        # and BEFORE _apply_priority_rooms (which reads the delivery penalty for
+        # both margin and escalation). Runs every cycle so the penalty decays
+        # when the room recovers or HVAC goes idle.
+        self._update_delivery_penalties(hvac_action, target_cool, target_heat)
 
         # Calculate desired positions.
         # room_positions: {(zone_name, room_name): position}
@@ -636,6 +691,141 @@ class SmartVentController(hass.Hass):
                     + (1 - PRIORITY_PENALTY_EMA) * prev
                 )
 
+    def _update_delivery_penalties(self, hvac_action, target_cool, target_heat):
+        """Measure each room's achieved-cooling-rate handicap and fold it into a
+        smoothed EMA. This is the capacity/load axis that supply-air temperature
+        cannot see.
+
+        For each room we compute the rate of approach to the active setpoint
+        since the last cycle (°F/min, positive = getting closer). A room accrues
+        a delivery penalty only when ALL of these hold, so we isolate a genuine
+        delivery/capacity handicap and never double-count the supply-air axis:
+          - HVAC is actively conditioning in this mode,
+          - the room is occupied (we only care about rooms that matter, and
+            occupancy load is part of the handicap),
+          - the room is past the deadband in the wrong direction (needs help),
+          - the room's vents are effectively wide open (we're already giving it
+            all the airflow we can — so a slow rate isn't just a throttled vent),
+          - its supply penalty is low (good supply air — otherwise the supply
+            mechanism already owns this room and we'd be double-counting),
+          - yet its approach rate is below DELIVERY_STUCK_RATE (it's stuck).
+        The per-sample contribution is the °F still-off, capped, so a room that
+        is both very off-target AND stuck accrues fastest. When any precondition
+        fails (esp. once the room finally starts moving), we feed 0 into the EMA
+        so the penalty decays — self-correcting, no manual reset.
+        """
+        if hvac_action == "cooling" and target_cool is not None:
+            heating = False
+            setpoint = target_cool
+        elif hvac_action == "heating" and target_heat is not None:
+            heating = True
+            setpoint = target_heat
+        else:
+            # Not conditioning — don't measure (rate is meaningless), and let
+            # any existing penalty decay so it doesn't persist across an idle gap.
+            now = self.datetime(aware=True)
+            for key in list(self._delivery_penalty):
+                self._delivery_penalty[key] *= (1 - DELIVERY_PENALTY_EMA)
+            self._delivery_last = {}
+            return
+
+        now = self.datetime(aware=True)
+
+        def off_by(t):
+            return (setpoint - t) if heating else (t - setpoint)
+
+        for zone_name, zone in ZONES.items():
+            for room_name, sensors in zone["rooms"].items():
+                key = (zone_name, room_name)
+                temp = self._read_temp(sensors["temp"])
+                if temp is None:
+                    continue
+
+                prev = self._delivery_last.get(key)
+                self._delivery_last[key] = (temp, now)
+
+                contribution = 0.0
+                stuck = False
+                if prev is not None:
+                    prev_temp, prev_time = prev
+                    dt_min = (now - prev_time).total_seconds() / 60.0
+                    if DELIVERY_MIN_DT_MIN <= dt_min <= DELIVERY_MAX_DT_MIN:
+                        off = off_by(temp)
+                        occ_entity = sensors.get("occupancy")
+                        occupied = (occ_entity is None
+                                    or self.get_state(occ_entity) == "on")
+                        # Effectively wide open? Every vent at/above the duct-
+                        # sample threshold means we're already giving it all the
+                        # airflow we can.
+                        wide_open = True
+                        for v in sensors.get("vents", []):
+                            tilt = self.get_state(
+                                v, attribute="current_tilt_position")
+                            try:
+                                if tilt is not None and int(tilt) < DUCT_SAMPLE_MIN_TILT:
+                                    wide_open = False
+                                    break
+                            except (TypeError, ValueError):
+                                pass
+                        well_supplied = (
+                            self._supply_penalty.get(key, 0.0)
+                            < PRIORITY_PENALTY_MIN_SAMPLE)
+                        # rate toward setpoint: cooling -> temp should fall, so
+                        # approach = prev_temp - temp; heating -> temp - prev_temp.
+                        approach = ((prev_temp - temp) if not heating
+                                    else (temp - prev_temp))
+                        rate = approach / dt_min
+                        if (occupied and off > DEADBAND and wide_open
+                                and well_supplied and rate < DELIVERY_STUCK_RATE):
+                            stuck = True
+                            contribution = min(off, DELIVERY_PENALTY_MAX)
+
+                prevp = self._delivery_penalty.get(key, 0.0)
+                self._delivery_penalty[key] = (
+                    DELIVERY_PENALTY_EMA * contribution
+                    + (1 - DELIVERY_PENALTY_EMA) * prevp
+                )
+                if stuck:
+                    self.log(
+                        f"Delivery handicap: {room_name} stuck "
+                        f"(off={off_by(temp):+.1f}F, well-supplied, wide open, "
+                        f"rate<{DELIVERY_STUCK_RATE}F/min) -> penalty "
+                        f"{self._delivery_penalty[key]:.2f}")
+
+        self._publish_delivery_penalty()
+
+    def _publish_delivery_penalty(self):
+        """Expose the delivery-handicap signal as ONE summary sensor.
+
+        State = current max delivery penalty across all rooms (a numeric "is any
+        room capacity-stuck right now" gauge that the Prometheus export ships to
+        VictoriaMetrics). Per-room values ride along as attributes for the HA UI.
+        One entity instead of 13 keeps the prod entity surface small while still
+        making the new axis observable. Best-effort — never breaks control.
+        """
+        try:
+            per_room = {f"{rn}": round(p, 2)
+                        for (zn, rn), p in self._delivery_penalty.items()
+                        if p >= 0.01}
+            worst = max(self._delivery_penalty.values(), default=0.0)
+            self.set_state(
+                DELIVERY_PENALTY_ENTITY,
+                state=round(worst, 2),
+                attributes={
+                    # Deliberately NO temperature unit / device_class: HA's
+                    # Prometheus export would otherwise classify this as a
+                    # temperature, rename it to *_temperature_celsius AND convert
+                    # the value F->C. We want a plain numeric gauge exported as
+                    # homeassistant_sensor_state. The value is in °F of overshoot;
+                    # the friendly name carries that for humans.
+                    "friendly_name": "Smart Vent Delivery Handicap max F",
+                    "icon": "mdi:fan-alert",
+                    "stuck_rooms": per_room,
+                },
+            )
+        except Exception as e:
+            self.log(f"delivery-penalty publish failed (non-fatal): {e}")
+
     def _weather_factor(self, heating=False):
         """Amplify supply penalties when outdoor temp makes the handicap bite.
 
@@ -673,8 +863,16 @@ class SmartVentController(hass.Hass):
         if key in PRIORITY_MARGIN_OVERRIDES:
             return PRIORITY_MARGIN_OVERRIDES[key]
         penalty = self._supply_penalty.get(key, 0.0)
+        # Two orthogonal handicap axes both pull the margin down (engage earlier):
+        #   - supply penalty: warm/ineffective supply air (GB1), weather-amplified.
+        #   - delivery penalty: well-supplied but stuck — capacity/load (GB2).
+        # They are measured under mutually-exclusive conditions (delivery only
+        # accrues when supply penalty is low), so summing them never
+        # double-counts the same room on the same cause.
+        delivery = self._delivery_penalty.get(key, 0.0)
         margin = (PRIORITY_MARGIN_BASE
-                  - PRIORITY_PENALTY_GAIN * penalty * self._weather_factor(heating))
+                  - PRIORITY_PENALTY_GAIN * penalty * self._weather_factor(heating)
+                  - DELIVERY_MARGIN_GAIN * delivery)
         return max(PRIORITY_MARGIN_MIN, min(PRIORITY_MARGIN_BASE, margin))
 
     def _apply_priority_rooms(self, room_positions, hvac_action,
@@ -731,7 +929,14 @@ class SmartVentController(hass.Hass):
                 off = off_by(temp)
                 if off <= eff_margin:
                     continue
-                escalated = off >= PRIORITY_ESCALATE_OVER
+                # Escalate (throttle donors to 0% not 50%) when the room is far
+                # over setpoint, OR when it carries a real delivery handicap: a
+                # capacity-limited room (GB2) is already wide open, so maximum
+                # donor throttling is the only software lever left to push more
+                # CFM at it — don't wait for it to drift 4°F over first.
+                escalated = (off >= PRIORITY_ESCALATE_OVER
+                             or self._delivery_penalty.get(key, 0.0)
+                             >= DELIVERY_ESCALATE_PENALTY)
                 beneficiaries.append((off, key, temp, escalated))
 
         if not beneficiaries:
