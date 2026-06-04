@@ -8,17 +8,13 @@
   args:
     creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
 
-# Cluster-wide existence check. `pct config` is node-local; HA can migrate
-# the CT to any node, so we ask pmxcfs for the full cluster resource list.
-# rc=0 means the CT exists somewhere in the cluster.
-- name: Check if DNS Container Exists in cluster
-  ansible.builtin.shell: |
-    set -o pipefail
-    pvesh get /cluster/resources --type vm --output-format json |
-      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==102 for r in json.load(sys.stdin)) else 1)'
-  register: pct_check
-  failed_when: false
-  changed_when: false
+# Resolve the node CT 102 lives on now (HA-aware). Sets ct_exists + ct_node;
+# node-local `pct` ops below delegate to ct_node so they follow HA migrations.
+- name: Resolve owning node for DNS CT
+  ansible.builtin.include_role:
+    name: resolve_ct_node
+  vars:
+    ct_vmid: 102
 
 - name: Create DNS Container
   ansible.builtin.command: >
@@ -33,10 +29,11 @@
     --start 1
     --onboot 1
   no_log: true
-  when: pct_check.rc != 0
+  when: not ct_exists
 
 - name: Ensure DNS Container is Running
   ansible.builtin.command: pct start 102
+  delegate_to: "{{ ct_node }}"
   register: dns_start
   failed_when: dns_start.rc != 0 and ("already running" not in dns_start.stderr and "already running" not in dns_start.stdout)
   changed_when: dns_start.rc == 0
@@ -45,6 +42,7 @@
   ansible.builtin.shell: |
     set -o pipefail
     pct exec 102 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  delegate_to: "{{ ct_node }}"
   register: ip_check
   until: ip_check.rc == 0
   retries: 20
@@ -53,12 +51,14 @@
 
 - name: Update Apt Cache in DNS Container
   ansible.builtin.command: pct exec 102 -- apt-get update
-  when: pct_check.rc != 0
+  delegate_to: "{{ ct_node }}"
+  when: not ct_exists
   changed_when: true
 
 - name: Install Python3 in DNS Container
   ansible.builtin.command: pct exec 102 -- apt-get install -y python3
-  when: pct_check.rc != 0
+  delegate_to: "{{ ct_node }}"
+  when: not ct_exists
   changed_when: true
 
 - name: Add DNS Host to Inventory
@@ -82,12 +82,13 @@
     cat /root/.ssh/authorized_keys | pct exec 102 -- sh -c "cat > /root/.ssh/authorized_keys"
     pct exec 102 -- chmod 700 /root/.ssh
     pct exec 102 -- chmod 600 /root/.ssh/authorized_keys
-  delegate_to: pve01
-  when: pct_check.rc != 0
+  delegate_to: "{{ ct_node }}"
+  when: not ct_exists
 
 # openssh-server ships with the Ubuntu LXC template but is not enabled by
 # default. Without this the CT is only reachable via `pct exec` from the
 # proxmox host — direct SSH from ansible against the CT's IP fails.
 - name: Ensure SSH is enabled and running
   ansible.builtin.command: pct exec 102 -- systemctl enable --now ssh
+  delegate_to: "{{ ct_node }}"
   changed_when: false

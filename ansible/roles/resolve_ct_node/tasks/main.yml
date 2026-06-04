@@ -1,0 +1,47 @@
+---
+# Resolve which cluster node currently hosts CT {{ ct_vmid }}, so node-local
+# `pct` operations (exec/set/start/re-boot/destroy) can be delegated to the
+# node the CT actually lives on right now.
+#
+# WHY: Proxmox HA migrates CTs between nodes freely. `pct` is node-local, so a
+# task pinned to a static node — or to the play's target host — fails the
+# moment HA moves the CT elsewhere:
+#   "Configuration file 'nodes/<pinned>/lxc/<id>.conf' does not exist".
+# `pvesh get /cluster/resources` is cluster-wide and works from any node, so
+# we ask it where the CT is and delegate node-local ops to {{ ct_node }}.
+# (Config-only changes can also go through `pvesh /nodes/{{ ct_node }}/lxc/...`
+# which is node-agnostic; `pct exec`/`pct start` have no such equivalent and
+# must be delegated.)
+#
+# INPUT (required):
+#   ct_vmid   - CT id to locate.
+# SETS (persist on the host for the rest of the play):
+#   ct_exists - bool; true if the CT exists somewhere in the cluster.
+#   ct_node   - node hosting the CT now. Falls back to the play host
+#               (inventory_hostname) when the CT does not exist yet, so the
+#               first-create path's post-create ops target the node where
+#               `pct create` just placed it.
+#
+# USAGE (from a role/play whose current host can run pvesh - i.e. a pve node):
+#   - name: Resolve owning node for CT 102
+#     ansible.builtin.include_role:
+#       name: resolve_ct_node
+#     vars:
+#       ct_vmid: 102
+# Then delegate node-local pct ops:  delegate_to: "{{ ct_node }}"
+
+- name: "Locate CT {{ ct_vmid }} in cluster"
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["vmid"]=={{ ct_vmid }}]; print(r[0]["node"] if r else "")'
+  args:
+    executable: /bin/bash
+  register: resolve_ct_node_out
+  failed_when: false
+  changed_when: false
+
+- name: "Resolve CT {{ ct_vmid }} existence and current node"
+  ansible.builtin.set_fact:
+    ct_exists: "{{ (resolve_ct_node_out.stdout | default('') | trim) | length > 0 }}"
+    ct_node: "{{ (resolve_ct_node_out.stdout | default('') | trim) or inventory_hostname }}"

@@ -1,16 +1,29 @@
 ---
-# Cluster-wide existence check. `pct list` is node-local; HA can migrate
-# the CT to any node, so we ask pmxcfs for the full cluster resource list.
-# rc=0 means the CT exists somewhere in the cluster.
-- name: Check if Load Balancer LXC exists in cluster
+# Cluster-wide locate. `pct` is node-local, but Proxmox HA can migrate the
+# CT to any node at any time, so a static target_node pin goes stale the
+# moment HA moves it (symptom: `pct set` fails with "Configuration file
+# 'nodes/<pinned>/lxc/<id>.conf' does not exist"). We ask pmxcfs for the
+# cluster resource list and record the node the CT *actually* lives on,
+# then delegate every node-local pct operation to that node (lb_node).
+# target_node is used only as (a) the cluster-query entry point and (b) the
+# placement node when the CT doesn't exist yet and must be created.
+- name: Locate Load Balancer LXC in cluster
   delegate_to: "{{ target_node }}"
   ansible.builtin.shell: |
     set -o pipefail
     pvesh get /cluster/resources --type vm --output-format json |
-      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]=={{ lxc_id }} for r in json.load(sys.stdin)) else 1)'
-  register: lxc_check
+      python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["vmid"]=={{ lxc_id }}]; print(r[0]["node"] if r else "")'
+  register: lxc_locate
   failed_when: false
   changed_when: false
+
+# lb_exists drives the create/start gates; lb_node is where the CT lives now
+# (falls back to target_node for the not-yet-created case, which is also the
+# placement target — so post-create operations correctly target that node).
+- name: Resolve CT existence and current node
+  ansible.builtin.set_fact:
+    lb_exists: "{{ (lxc_locate.stdout | default('') | trim) | length > 0 }}"
+    lb_node: "{{ (lxc_locate.stdout | default('') | trim) or target_node }}"
 
 - name: Download Template
   delegate_to: "{{ target_node }}"
@@ -34,7 +47,7 @@
     --unprivileged 1
     --ssh-public-keys /root/.ssh/authorized_keys
   no_log: true
-  when: lxc_check.rc != 0
+  when: not lb_exists
   register: lxc_create
 
 - name: Start Load Balancer LXC
@@ -47,7 +60,7 @@
   register: lxc_start
   failed_when: lxc_start.rc != 0 and "already running" not in lxc_start.stderr
   changed_when: lxc_start.rc == 0
-  when: lxc_check.rc != 0
+  when: not lb_exists
 
 # lb-01 is PRIVATE-SDN ONLY. It reaches the LAN (Proxmox UI on 192.168.86.x,
 # etc.) outbound via the tailscale-gw NAT (172.16.0.1 masquerades 172.16/24).
@@ -56,7 +69,7 @@
 # ENFORCE private-only on re-apply: strip any net1, and ensure net0 carries the
 # private gateway.
 - name: Check if Net1 (legacy LAN) exists
-  delegate_to: "{{ target_node }}"
+  delegate_to: "{{ lb_node }}"
   ansible.builtin.shell: |
     set -o pipefail
     pct config {{ lxc_id }} | grep -q '^net1'
@@ -65,13 +78,13 @@
   changed_when: false
 
 - name: Remove legacy LAN interface (net1) — enforce private-only
-  delegate_to: "{{ target_node }}"
+  delegate_to: "{{ lb_node }}"
   ansible.builtin.command: "pct set {{ lxc_id }} --delete net1"
-  when: lxc_check.rc == 0 and net1_check.rc == 0
+  when: lb_exists and net1_check.rc == 0
   changed_when: true
 
 - name: Ensure private gateway on net0
-  delegate_to: "{{ target_node }}"
+  delegate_to: "{{ lb_node }}"
   ansible.builtin.shell: |
     set -o pipefail
     pct config {{ lxc_id }} | grep -q '^net0:.*gw={{ net_private_gw }}'
@@ -80,14 +93,14 @@
   changed_when: false
 
 - name: Set private gateway on net0 if missing
-  delegate_to: "{{ target_node }}"
+  delegate_to: "{{ lb_node }}"
   ansible.builtin.command: >
     pct set {{ lxc_id }} --net0 name=eth0,bridge=private,ip={{ lxc_net_ip }},gw={{ net_private_gw }},firewall=1
-  when: lxc_check.rc == 0 and lb_gw_check.rc != 0
+  when: lb_exists and lb_gw_check.rc != 0
   changed_when: true
 
 - name: Ensure SSH Service is Running
-  delegate_to: "{{ target_node }}"
+  delegate_to: "{{ lb_node }}"
   ansible.builtin.shell: "pct exec {{ lxc_id }} -- systemctl enable --now ssh"
   changed_when: false
   ignore_errors: true
