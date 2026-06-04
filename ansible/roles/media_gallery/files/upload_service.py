@@ -94,7 +94,18 @@ IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp", ".gif"}
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
 
 STAGING_ROOT.mkdir(parents=True, exist_ok=True)
+# ─── Async GDrive push queue ───────────────────────────────────────────────
+# The upload request streams each file to PENDING/<folder>/<stem><ext> (a local,
+# LAN-speed write) and returns 200 IMMEDIATELY. A background pusher thread does
+# the slow rclone copy to Google Drive out-of-band, so the client's upload speed
+# is decoupled from Google's. Before this, the rclone-to-GDrive ran INSIDE the
+# request, so a client waited through the entire GDrive round-trip per batch
+# (multi-GB videos timed out). Now the client only pays the local-disk write.
+PENDING_ROOT = STAGING_ROOT / "pending"
+PENDING_ROOT.mkdir(parents=True, exist_ok=True)
+PUSH_INTERVAL = int(os.environ.get("PUSH_INTERVAL_SEC", "5"))
 _dm_lock = threading.Lock()
+_push_lock = threading.Lock()
 
 # ─── Coalesced manifest rebuild ────────────────────────────────────────────
 # Uploads set a dirty flag; a single background worker rebuilds at most once per
@@ -103,6 +114,40 @@ _dm_lock = threading.Lock()
 _dirty = threading.Event()
 _last_rebuild = [0.0]
 _uploads_total = [0]
+_pending_count = [0]
+
+
+def _pusher_worker():
+    """Background GDrive push: periodically rclone-move PENDING/<folder>/* to
+    gcrypt:by-chat/<folder>/, then arm a manifest rebuild. Decouples the client
+    upload (local write) from the slow GDrive transfer. rclone 'move' is
+    copy-then-delete, so a crash mid-push just re-pushes next cycle (idempotent
+    by stem). New files landing mid-push are caught on the following cycle."""
+    while True:
+        time.sleep(PUSH_INTERVAL)
+        try:
+            folders = [d for d in PENDING_ROOT.iterdir() if d.is_dir()]
+        except OSError:
+            continue
+        pushed_any = False
+        for fdir in folders:
+            # only fully-renamed files (no .tmp); snapshot the list
+            files = [f for f in fdir.iterdir()
+                     if f.is_file() and not f.name.endswith(".tmp")]
+            if not files:
+                continue
+            folder = fdir.name
+            r = rclone("move", str(fdir), f"{SRC}/{folder}",
+                       "--transfers", "8", "--checkers", "16",
+                       "--retries", "5", "--low-level-retries", "10",
+                       "--no-traverse", "--exclude", "*.tmp")
+            if r.returncode == 0:
+                pushed_any = True
+                with _push_lock:
+                    _pending_count[0] = max(0, _pending_count[0] - len(files))
+            # on failure, files stay in PENDING and retry next cycle
+        if pushed_any:
+            _dirty.set()  # rebuild only after files are actually in GDrive
 
 
 def _rebuild_worker():
@@ -202,6 +247,7 @@ class Handler(BaseHTTPRequestHandler):
                 "pending_rebuild": _dirty.is_set(),
                 "last_rebuild": _last_rebuild[0],
                 "uploads_total": _uploads_total[0],
+                "pending_gdrive_push": _pending_count[0],
             })
         if p == "/excluded":
             # The collector fetches this to skip trashed/purged items before
@@ -278,55 +324,82 @@ class Handler(BaseHTTPRequestHandler):
         out_override = (field("out") == "1") if keyed else False
         src_tag = "source" if keyed else "upload"
 
-        stage = Path(STAGING_ROOT) / new_stem()
-        stage.mkdir(parents=True, exist_ok=True)
+        # Stream each file straight into PENDING/<folder>/ (local disk, LAN
+        # speed) and return immediately. The _pusher_worker copies to GDrive
+        # out-of-band. We write to <stem><ext>.tmp then atomically rename, so the
+        # pusher never grabs a half-written file.
+        pdir = PENDING_ROOT / folder
+        pdir.mkdir(parents=True, exist_ok=True)
         stored, errors, datemap_add = [], [], {}
-        try:
-            for item in items:
-                if not getattr(item, "filename", None):
-                    continue
-                ext = safe_ext(item.filename)
-                # honor a provided stem (single-file collector push); else generate
-                stem = stem_override if (stem_override and len(items) == 1) else new_stem()
-                dest = stage / f"{stem}{ext}"
+        for item in items:
+            if not getattr(item, "filename", None):
+                continue
+            ext = safe_ext(item.filename)
+            # honor a provided stem (single-file collector push); else generate
+            stem = stem_override if (stem_override and len(items) == 1) else new_stem()
+            tmp = pdir / f"{stem}{ext}.tmp"
+            dest = pdir / f"{stem}{ext}"
+            try:
+                # chunked stream copy — never load whole file in RAM
+                with open(tmp, "wb") as out:
+                    shutil.copyfileobj(item.file, out, CHUNK)
+                sz = tmp.stat().st_size
+                if sz == 0:
+                    errors.append(f"{item.filename}: empty"); tmp.unlink(); continue
+                if sz > MAX_BYTES:
+                    errors.append(f"{item.filename}: too large"); tmp.unlink(); continue
+                date = date_override or exif_date(tmp) or \
+                    dt.datetime.fromtimestamp(tmp.stat().st_mtime).isoformat()
+                os.replace(tmp, dest)  # atomic; now visible to the pusher
+                datemap_add[stem] = {"date": date, "out": out_override, "src": src_tag}
+                stored.append({"stem": stem, "file": f"by-chat/{folder}/{stem}{ext}",
+                               "orig": item.filename})
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{getattr(item,'filename','?')}: {type(e).__name__}")
                 try:
-                    # chunked stream copy — never load whole file in RAM
-                    with open(dest, "wb") as out:
-                        shutil.copyfileobj(item.file, out, CHUNK)
-                    sz = dest.stat().st_size
-                    if sz == 0:
-                        errors.append(f"{item.filename}: empty"); dest.unlink(); continue
-                    if sz > MAX_BYTES:
-                        errors.append(f"{item.filename}: too large"); dest.unlink(); continue
-                    date = date_override or exif_date(dest) or \
-                        dt.datetime.fromtimestamp(dest.stat().st_mtime).isoformat()
-                    datemap_add[stem] = {"date": date, "out": out_override, "src": src_tag}
-                    stored.append({"stem": stem, "file": f"by-chat/{folder}/{stem}{ext}",
-                                   "orig": item.filename})
-                except Exception as e:  # noqa: BLE001
-                    errors.append(f"{getattr(item,'filename','?')}: {type(e).__name__}")
+                    tmp.unlink()
+                except OSError:
+                    pass
 
-            # ONE rclone copy for the whole batch (fast for many files)
-            if stored:
-                r = rclone("copy", str(stage), f"{SRC}/{folder}",
-                           "--transfers", "8", "--checkers", "16",
-                           "--retries", "5", "--low-level-retries", "10")
-                if r.returncode != 0:
-                    return self._json(500, {"error": "batch upload failed",
-                                            "detail": r.stderr[:300]})
-                update_datemap(datemap_add)
-                _uploads_total[0] += len(stored)
-                _dirty.set()  # coalesced rebuild
-        finally:
-            shutil.rmtree(stage, ignore_errors=True)
+        # Record dates now so the manifest is correct once the pusher lands the
+        # files in GDrive. The pusher arms the rebuild after the actual push.
+        if stored:
+            update_datemap(datemap_add)
+            _uploads_total[0] += len(stored)
+            with _push_lock:
+                _pending_count[0] += len(stored)
+        # 'queued' = accepted to local staging, GDrive push is async.
         self._json(200, {"folder": folder, "stored": len(stored),
-                         "items": stored, "errors": errors})
+                         "queued": len(stored), "items": stored,
+                         "errors": errors, "async": True})
+
+
+def _drain_pending_on_start():
+    """On startup, re-arm any files left in PENDING from a previous run/crash so
+    the pusher flushes them (and clean up orphaned .tmp partials)."""
+    try:
+        for fdir in PENDING_ROOT.iterdir():
+            if not fdir.is_dir():
+                continue
+            for f in fdir.iterdir():
+                if f.name.endswith(".tmp"):
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+                elif f.is_file():
+                    with _push_lock:
+                        _pending_count[0] += 1
+    except OSError:
+        pass
 
 
 def main():
+    _drain_pending_on_start()
     threading.Thread(target=_rebuild_worker, daemon=True).start()
+    threading.Thread(target=_pusher_worker, daemon=True).start()
     srv = ThreadingHTTPServer((BIND, PORT), Handler)
-    print(f"upload service on {BIND}:{PORT} (debounce {DEBOUNCE}s)", flush=True)
+    print(f"upload service on {BIND}:{PORT} (debounce {DEBOUNCE}s, async GDrive push)", flush=True)
     srv.serve_forever()
 
 

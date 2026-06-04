@@ -17,6 +17,8 @@ Environment=TG_EXCLUDE_FILE={{ media_gallery_state }}/excluded.json
 Environment=UPLOAD_MAX_MB={{ media_gallery_upload_max_mb }}
 Environment=UPLOAD_STAGING={{ media_gallery_state }}/upload_staging
 Environment=REBUILD_DEBOUNCE_SEC=20
+# Async GDrive push: how often the background pusher flushes PENDING/ -> GDrive.
+Environment=PUSH_INTERVAL_SEC={{ media_gallery_push_interval_sec | default(5) }}
 Environment=INGEST_JWKS_URL={{ authentik_url }}/application/o/media-ingest-collector/jwks/
 Environment=INGEST_ISSUER={{ authentik_url }}/application/o/media-ingest-collector/
 Environment=INGEST_AUDIENCE=media-ingest-collector

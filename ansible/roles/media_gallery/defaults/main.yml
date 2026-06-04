@@ -23,6 +23,10 @@ media_gallery_gallery_port: 8089
 # so it stays current as the live collector captures new media.
 media_gallery_refresh_interval: "1h"
 
+# On-the-fly thumbnail service port (bound on ip_media_gallery, routed by lb-01
+# nginx /thumb/ behind Authentik). Generates + caches ~400px posters on demand.
+media_gallery_thumb_port: 8090
+
 # Trash service port (delete media + exclusion ledger; bound on ip_media_gallery,
 # routed by lb-01 nginx /trash/ behind Authentik).
 media_gallery_trash_port: 8091
@@ -30,4 +34,17 @@ media_gallery_trash_port: 8091
 # Upload service port (add pics + create folders; routed by lb-01 /upload /mkdir
 # /status behind Authentik). Built to handle thousands (batched, coalesced).
 media_gallery_upload_port: 8092
-media_gallery_upload_max_mb: 200
+media_gallery_upload_max_mb: 4096
+
+# Thumbnail cache tmpfs size (RAM-backed; decrypted thumbs + the transient
+# full-original download used to make a VIDEO poster live here, never on disk).
+# Must exceed the LARGEST original so big-video posters can be generated — at
+# 512M (the old value) any video >~485 MiB failed with "no space left on device".
+# Sized to comfortably hold the largest video (~3.4 GiB) plus working room. The
+# CT RAM (media_gallery_ct_memory_mb, 8 GiB) must stay above this peak.
+media_gallery_thumbcache_tmpfs_size: "6G"
+
+# Cap on concurrent full-original downloads in the thumb service, so a gallery
+# scroll-burst of video tiles can't pull many multi-GB originals into the tmpfs
+# at once and exhaust it. Read by thumb_service.py as THUMB_MAX_CONCURRENT_DL.
+media_gallery_thumb_max_concurrent_dl: 2
