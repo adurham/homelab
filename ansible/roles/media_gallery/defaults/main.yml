@@ -44,7 +44,10 @@ media_gallery_upload_max_mb: 4096
 # CT RAM (media_gallery_ct_memory_mb, 8 GiB) must stay above this peak.
 media_gallery_thumbcache_tmpfs_size: "6G"
 
-# Cap on concurrent full-original downloads in the thumb service, so a gallery
-# scroll-burst of video tiles can't pull many multi-GB originals into the tmpfs
-# at once and exhaust it. Read by thumb_service.py as THUMB_MAX_CONCURRENT_DL.
-media_gallery_thumb_max_concurrent_dl: 2
+# Free-space safety margin (MiB) the thumb service keeps in the thumbcache tmpfs
+# when admitting an original download for a video poster. The service reserves
+# (file_size + this margin) before downloading, so concurrent video requests
+# can't collectively overflow the RAM tmpfs (the real constraint is BYTES, not a
+# request count — two 3 GB videos would blow a count-based cap). Read by
+# thumb_service.py as THUMB_SPACE_MARGIN_MB.
+media_gallery_thumb_space_margin_mb: 256
