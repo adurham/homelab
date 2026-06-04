@@ -47,7 +47,8 @@
 
   /* photo grid */
   #photoGrid{display:grid;gap:10px;min-height:140px;
-    grid-template-columns:repeat(auto-fill,minmax(170px,1fr));}
+    grid-template-columns:repeat(auto-fill,minmax(var(--tilesize,170px),1fr));}
+  #zoom{width:90px;vertical-align:middle;}
   .tile{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;
     cursor:pointer;background:var(--panel);border:1px solid var(--border);}
   .tile img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;
@@ -322,6 +323,7 @@
   <span class="sub" id="sub"></span>
   <span class="spacer"></span>
   <input type="search" id="searchBox" placeholder="Search…" autocomplete="off">
+  <input type="range" id="zoom" min="110" max="320" step="10" value="170" title="Thumbnail size" style="display:none">
   <button id="viewToggle" title="Toggle list/grid view">&#9776;</button>
   <button id="uploadBtn">&#8593; Upload</button>
   <select id="sort" style="display:none">
@@ -600,6 +602,7 @@
     elFolder.style.display='grid';
     elBack.style.display='none';
     elSort.style.display='none';
+    document.getElementById('zoom').style.display='none';
     elUploadBtn.style.display='none';
     document.getElementById('statusBar').classList.remove('show');
     hideUploadBar();
@@ -745,6 +748,7 @@
     elPhoto.style.display='grid';
     elBack.style.display='inline-block';
     elSort.style.display='inline-block';
+    document.getElementById('zoom').style.display=listView?'none':'';
     // "All items" is a virtual aggregate; can't upload into it
     elUploadBtn.style.display=(chat==='*')?'none':'inline-block';
     if(navigating){ clearSelection(); searchQuery=''; if(elSearch) elSearch.value=''; }
@@ -1384,10 +1388,15 @@
     e.stopPropagation();   // don't trigger grid shortcuts while typing
   });
 
-  // ---------- VIEW TOGGLE + SORT ----------
+  // ---------- VIEW TOGGLE + ZOOM + SORT ----------
   elViewToggle.addEventListener('click',function(){
     listView=!listView; document.body.classList.toggle('listview',listView);
     elViewToggle.innerHTML=listView?'&#9783;':'&#9776;';  // grid vs list glyph
+    elZoom.style.display=listView?'none':'';
+  });
+  var elZoom=document.getElementById('zoom');
+  elZoom.addEventListener('input',function(){
+    document.documentElement.style.setProperty('--tilesize', elZoom.value+'px');
   });
   elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*'?manifest.slice():(chatMap[current]?chatMap[current].slice():[])); applySort(view); renderPhotos(); } });
 
