@@ -316,6 +316,32 @@
     padding:6px 16px;backdrop-filter:blur(8px);}
   #statusBar.show{display:flex;}
   /* thumbnail zoom: tile min-width driven by --tilesize */
+  /* ---- duplicates view ---- */
+  #dupView{padding:0 16px 40px;}
+  #dupBar{position:sticky;top:54px;z-index:9;display:flex;align-items:center;gap:12px;
+    flex-wrap:wrap;background:rgba(28,32,38,.97);border:1px solid var(--border);
+    border-radius:10px;padding:10px 14px;margin:10px 0;backdrop-filter:blur(8px);}
+  #dupBar .grow{flex:1;}
+  #dupBar button{font-size:13px;padding:7px 12px;}
+  #dupBar #dupTrash{border-color:#5a3030;}
+  #dupBar #dupTrash:hover{background:#d23b3b;border-color:#d23b3b;}
+  #dupBar #dupRescan:hover{background:var(--accent);border-color:var(--accent);}
+  .dupgroup{border:1px solid var(--border);border-radius:12px;padding:12px;margin:12px 0;
+    background:var(--panel);}
+  .dupgroup .dg-head{font-size:12.5px;color:var(--muted);margin-bottom:10px;}
+  .dupgroup .dg-items{display:flex;gap:10px;flex-wrap:wrap;}
+  .dupcard{position:relative;width:150px;cursor:pointer;border-radius:8px;overflow:hidden;
+    border:1px solid var(--border);background:#11151a;}
+  .dupcard img{width:150px;height:150px;object-fit:cover;display:block;}
+  .dupcard .dc-meta{font-size:11px;color:var(--muted);padding:5px 7px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .dupcard .dc-keep{position:absolute;top:6px;left:6px;font-size:10px;font-weight:700;
+    padding:2px 7px;border-radius:5px;background:#2e7d4f;color:#fff;display:none;}
+  .dupcard.keep .dc-keep{display:block;}
+  .dupcard.trash{outline:3px solid #d23b3b;outline-offset:-3px;}
+  .dupcard.trash .dc-x{position:absolute;top:6px;right:6px;font-size:14px;color:#fff;
+    background:#d23b3b;border-radius:5px;width:22px;height:22px;display:flex;
+    align-items:center;justify-content:center;}
   @media(max-width:600px){#lb .nav{padding:8px 12px;font-size:24px;}}
 </style>
 </head>
@@ -328,6 +354,7 @@
   <input type="search" id="searchBox" placeholder="Search…" autocomplete="off">
   <input type="range" id="zoom" min="110" max="320" step="10" value="170" title="Thumbnail size" style="display:none">
   <button id="viewToggle" title="Toggle list/grid view">&#9776;</button>
+  <button id="dedupBtn" title="Find duplicate photos">&#9783; Duplicates</button>
   <button id="uploadBtn">&#8593; Upload</button>
   <select id="sort" style="display:none">
     <option value="new">Newest first</option>
@@ -355,6 +382,7 @@
   </div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
+  <div id="dupView" style="display:none"></div>
   <div id="state" class="state">Loading…</div>
   <div id="statusBar"><span id="statusLeft"></span><span id="statusRight"></span></div>
 </main>
@@ -623,6 +651,7 @@
   function renderFolders(){
     current=null;
     elPhoto.style.display='none'; elPhoto.innerHTML='';
+    var dv=document.getElementById('dupView'); if(dv) dv.style.display='none';
     elFolder.style.display='grid';
     elBack.style.display='none';
     elSort.style.display='none';
@@ -769,6 +798,7 @@
     view=items;
 
     elFolder.style.display='none'; elFolder.innerHTML='';
+    var dv=document.getElementById('dupView'); if(dv) dv.style.display='none';
     elPhoto.style.display='grid';
     elBack.style.display='inline-block';
     elSort.style.display='inline-block';
@@ -1566,6 +1596,156 @@
       setKbFocus(f);
     }
   });
+
+  // ---------- DUPLICATES (tier-1 perceptual hash) ----------
+  var elDup=document.getElementById('dupView');
+  // per-stem desired action in the dup view: 'keep' or 'trash'
+  var dupAction={};
+  function showDuplicates(){
+    current='__dup__';
+    elFolder.style.display='none'; elPhoto.style.display='none';
+    elDup.style.display='block'; elBack.style.display='inline-block';
+    elSort.style.display='none'; elUploadBtn.style.display='none';
+    document.getElementById('zoom').style.display='none';
+    document.getElementById('statusBar').classList.remove('show');
+    setCrumb('Duplicates');
+    elState.style.display='none';
+    elDup.innerHTML='<div class="state">Loading duplicate report…</div>';
+    fetch('/gallery/dedup.json',{credentials:'same-origin'})
+      .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+      .then(renderDuplicates)
+      .catch(function(){
+        elDup.innerHTML='<div class="state">No duplicate report yet. Click “Scan now”.<br><br>'+
+          '<button id="dupFirstScan">Scan now</button></div>';
+        var b=document.getElementById('dupFirstScan'); if(b) b.addEventListener('click',triggerDupScan);
+      });
+  }
+  function triggerDupScan(){
+    toast('Duplicate scan started — this takes a minute…','work',true);
+    fetch('/dedupscan',{method:'POST',credentials:'same-origin'})
+      .then(function(r){ if(r.status!==200) throw new Error(r.status);
+        // poll dedup.json for a fresh report
+        var tries=0;
+        var iv=setInterval(function(){
+          tries++;
+          fetch('/gallery/dedup.json?ts='+Date.now(),{credentials:'same-origin'})
+            .then(function(r){return r.ok?r.json():null;})
+            .then(function(j){
+              if(j && j.generated){ clearInterval(iv); toast('✓ Scan complete','ok');
+                if(current==='__dup__') renderDuplicates(j); }
+            }).catch(function(){});
+          if(tries>40){ clearInterval(iv); toast('Scan still running — check back shortly','err'); }
+        },4000);
+      })
+      .catch(function(){ toast('Could not start scan','err'); });
+  }
+  function renderDuplicates(rep){
+    dupAction={};
+    var groups=rep.groups||[];
+    var html='<div id="dupBar">'+
+      '<b>'+groups.length+' duplicate group'+(groups.length===1?'':'s')+'</b> · '+
+      (rep.dup_items||0)+' items · scanned '+(rep.scanned||0)+
+      ' <span class="grow"></span>'+
+      '<span id="dupCount">0 marked for deletion</span>'+
+      '<button id="dupTrash">🗑 Trash marked</button>'+
+      '<button id="dupRescan">↻ Rescan</button></div>';
+    if(!groups.length){
+      html+='<div class="state">No duplicates found 🎉 (Hamming ≤ '+(rep.hamming)+
+        ', generated '+(rep.generated||'')+')</div>';
+      elDup.innerHTML=html; 
+      wireDupBar();
+      return;
+    }
+    groups.forEach(function(g,gi){
+      html+='<div class="dupgroup" data-g="'+gi+'"><div class="dg-head">Group '+(gi+1)+
+        ' — '+g.length+' similar items'+
+        ' (keeping the newest by default)</div><div class="dg-items">';
+      g.forEach(function(m,mi){
+        // default: keep the first (newest), trash the rest
+        var act=(mi===0)?'keep':'trash'; dupAction[m.stem]=act;
+        var meta=(m.chat||'')+(m.size?(' · '+fmtBytes(m.size)):'');
+        html+='<div class="dupcard '+act+'" data-stem="'+m.stem+'" data-chat="'+(m.chat||'')+'">'+
+          '<span class="dc-keep">KEEP</span><span class="dc-x">✕</span>'+
+          '<img loading="lazy" src="/'+m.thumb+'">'+
+          '<div class="dc-meta">'+meta+'</div></div>';
+      });
+      html+='</div></div>';
+    });
+    elDup.innerHTML=html;
+    wireDupBar();
+    // click a card to toggle keep/trash
+    elDup.querySelectorAll('.dupcard').forEach(function(c){
+      c.addEventListener('click',function(){
+        var stem=c.dataset.stem;
+        if(dupAction[stem]==='trash'){ dupAction[stem]='keep'; c.classList.remove('trash'); c.classList.add('keep'); }
+        else { dupAction[stem]='trash'; c.classList.remove('keep'); c.classList.add('trash'); }
+        updateDupCount();
+      });
+    });
+    updateDupCount();
+  }
+  function updateDupCount(){
+    var n=Object.keys(dupAction).filter(function(s){return dupAction[s]==='trash';}).length;
+    var el=document.getElementById('dupCount'); if(el) el.textContent=n+' marked for deletion';
+  }
+  function wireDupBar(){
+    var rs=document.getElementById('dupRescan'); if(rs) rs.addEventListener('click',triggerDupScan);
+    var tr=document.getElementById('dupTrash'); if(tr) tr.addEventListener('click',trashMarkedDups);
+  }
+  function trashMarkedDups(){
+    // group the 'trash' stems by their folder, fire one /trashbatch per folder
+    var byChat={};
+    elDup.querySelectorAll('.dupcard').forEach(function(c){
+      var stem=c.dataset.stem, chat=c.dataset.chat;
+      if(dupAction[stem]==='trash'){ (byChat[chat]=byChat[chat]||[]).push(stem); }
+    });
+    var chats=Object.keys(byChat);
+    var total=chats.reduce(function(a,k){return a+byChat[k].length;},0);
+    if(!total){ toast('Nothing marked for deletion.','err'); return; }
+    if(!confirm('Delete '+total+' duplicate item(s)? This cannot be undone.')) return;
+    progOpen('Deleting '+total+' duplicate'+(total>1?'s':''), total);
+    document.getElementById('pdSub').textContent='Removing duplicates…';
+    document.getElementById('pdCancelRow').style.display='none';   // batched per-folder; keep simple
+    var done=0, fail=0;
+    var chain=Promise.resolve();
+    chats.forEach(function(chat){
+      var stems=byChat[chat];
+      stems.forEach(function(s){ pendingDel[s]=true; });
+      chain=chain.then(function(){
+        return fetch('/trashbatch',{method:'POST',credentials:'same-origin',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({chat:chat,stems:stems})})
+          .then(function(r){ return r.json().then(function(j){return {status:r.status,j:j};}); })
+          .then(function(res){
+            if(res.status===200){ done+=(res.j.deleted||stems.length); }
+            else { fail+=stems.length; stems.forEach(function(s){ delete pendingDel[s]; }); }
+            _pd.done=done+fail; progStep('');
+          },function(){ fail+=stems.length; stems.forEach(function(s){ delete pendingDel[s]; }); });
+      });
+    });
+    chain.then(function(){
+      progFinish(fail? ('Deleted '+done+', '+fail+' failed') : ('✓ Deleted '+done+' duplicates'), fail>0);
+      if(!fail) setTimeout(progClose, 800);
+      // drop trashed items locally + refresh the report view (search whole manifest)
+      Object.keys(dupAction).forEach(function(s){
+        if(dupAction[s]==='trash'){
+          for(var k=0;k<manifest.length;k++){ if(manifest[k].stem===s){ removeFromData(manifest[k]); break; } }
+        }
+      });
+      buildChats();
+      // re-fetch the (now stale) report minus deleted stems: just re-render filtered
+      fetch('/gallery/dedup.json?ts='+Date.now(),{credentials:'same-origin'})
+        .then(function(r){return r.ok?r.json():null;})
+        .then(function(j){
+          if(j){ j.groups=(j.groups||[]).map(function(g){return g.filter(function(m){return !pendingDel[m.stem];});})
+                   .filter(function(g){return g.length>=2;});
+                 j.dup_groups=j.groups.length; j.dup_items=j.groups.reduce(function(a,g){return a+g.length;},0);
+                 if(current==='__dup__') renderDuplicates(j); }
+        }).catch(function(){});
+      reloadManifest(null);
+    });
+  }
+  document.getElementById('dedupBtn').addEventListener('click',showDuplicates);
 
   // ---------- BOOT ----------
   // load the manifest AND the full folder list (incl. empty folders) in parallel
