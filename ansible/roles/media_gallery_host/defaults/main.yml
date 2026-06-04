@@ -1,0 +1,22 @@
+---
+# Gallery platform CT (vmid 115) resource sizing. Codified after live drift was
+# found 2026-06-04: the CT had been bumped to 2 cores / 2 GiB / 32 GiB rootfs but
+# the create task still said 1 core / 1 GiB / 8 GiB. The 8 GiB rootfs in
+# particular broke large uploads — a multi-GB video needs staging headroom (the
+# upload service streams to PENDING/ on local disk before the async rclone push
+# to Google Drive), and an 8 GiB root filled up and dropped the connection
+# mid-transfer. 32 GiB gives comfortable headroom for the biggest videos plus the
+# async pending queue. RAM at 2 GiB keeps the upload service + rclone push
+# comfortable (1 GiB was tight).
+media_gallery_ct_cores: 2
+# RAM bumped 2048 -> 8192 (2026-06-04): the thumbnail cache is a RAM-backed tmpfs
+# (decrypted media is kept RAM-only for hardening), and generating a VIDEO poster
+# downloads the full original INTO that tmpfs before ffmpeg reads it. With the old
+# 512 MiB tmpfs, any video >~485 MiB failed ("no space left on device") and got no
+# poster. The tmpfs is now sized to hold the largest original (see
+# media_gallery_thumbcache_tmpfs_size in the media_gallery role); the CT RAM must
+# exceed that tmpfs peak plus service overhead, hence 8 GiB. pve02 has ample
+# headroom (62 GiB total).
+media_gallery_ct_memory_mb: 8192
+media_gallery_ct_swap_mb: 1024
+media_gallery_ct_rootfs_gb: 32

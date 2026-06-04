@@ -46,6 +46,14 @@ LOCAL_CACHE.mkdir(parents=True, exist_ok=True)
 _locks = {}
 _locks_guard = threading.Lock()
 
+# Bound how many ORIGINALS we download concurrently to generate thumbs. The
+# per-stem lock dedups identical requests, but without a GLOBAL cap a burst of
+# distinct video tiles (gallery scroll) would each pull a full multi-GB original
+# at once and could exhaust the CT's disk (a handful of 2-3 GB videos = tens of
+# GB transient). This semaphore serializes the heavy fetches. Images are tiny so
+# this mostly gates videos; the cap is intentionally small.
+_download_sem = threading.Semaphore(int(os.environ.get("THUMB_MAX_CONCURRENT_DL", "2")))
+
 
 def _lock_for(key):
     with _locks_guard:
@@ -106,21 +114,24 @@ def ensure_thumb(chat, stem) -> Path | None:
         ext = os.path.splitext(leaf)[1].lower()
         is_video = ext in VIDEO_EXT
         tmp_src = LOCAL_CACHE / chat / f"_src_{leaf}"
-        try:
-            r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
-            if r.returncode != 0:
-                return None
-            make_thumb(tmp_src, local, is_video)
-            # 3) persist to encrypted Drive cache (best effort, async-ish)
-            rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
-            return local if local.exists() else None
-        except Exception:  # noqa: BLE001
-            return None
-        finally:
+        # Serialize heavy original downloads (semaphore) so a scroll-burst of
+        # video tiles can't pull many multi-GB files at once and fill the disk.
+        with _download_sem:
             try:
-                tmp_src.unlink()
-            except OSError:
-                pass
+                r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
+                if r.returncode != 0:
+                    return None
+                make_thumb(tmp_src, local, is_video)
+                # 3) persist to encrypted Drive cache (best effort, async-ish)
+                rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
+                return local if local.exists() else None
+            except Exception:  # noqa: BLE001
+                return None
+            finally:
+                try:
+                    tmp_src.unlink()
+                except OSError:
+                    pass
 
 
 class Handler(BaseHTTPRequestHandler):
