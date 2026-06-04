@@ -29,7 +29,7 @@
 
       [Network]
       Description = LAN ingress (Google Home forwards :80/:443 here) — static
-      Address = {{ lb_lan_ingress_ip | default('192.168.86.30') }}/24
+      Address = {{ lb_lan_ingress_ip | default('192.168.86.86') }}/24
       IPv6AcceptRA = false
   register: lb_eth1_net
 
