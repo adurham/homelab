@@ -915,8 +915,66 @@
      "refId": "E"
     }
    ]
+  },
+  {
+   "id": 13,
+   "title": "Delivery / Capacity Handicap (achieved-cooling-rate axis)",
+   "type": "timeseries",
+   "datasource": "VictoriaMetrics",
+   "gridPos": {
+    "h": 7,
+    "w": 24,
+    "x": 0,
+    "y": 70
+   },
+   "description": "Max delivery handicap across rooms (F). Accrues when a room is occupied, off-target, WELL-SUPPLIED (good duct air) and WIDE OPEN yet still not cooling -- the capacity/load handicap that supply-air temperature can't see (e.g. GB2's single vent). >1.5F forces donor escalation. Decays to 0 when the room recovers. Per-room breakdown is in the sensor's stuck_rooms attribute in HA.",
+   "fieldConfig": {
+    "defaults": {
+     "unit": "celsius",
+     "decimals": 2,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 20,
+      "spanNulls": true
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 0.5
+       },
+       {
+        "color": "red",
+        "value": 1.5
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "single"
+    }
+   },
+   "targets": [
+    {
+     "expr": "homeassistant_sensor_state{entity=\"sensor.smart_vent_delivery_handicap\"}",
+     "legendFormat": "max delivery handicap",
+     "refId": "A"
+    }
+   ]
   }
  ],
  "schemaVersion": 39,
- "version": 3
+ "version": 4
 }
