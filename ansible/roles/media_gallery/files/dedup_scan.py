@@ -9,8 +9,8 @@ group items whose hashes are within HAMMING_THRESHOLD of each other (0 = exact
 visual match, higher = looser near-dupe). Result is written to
 gcrypt:gallery/dedup.json for the SPA's "Find duplicates" view.
 
-The second tier (semantic / same-person-different-shot) is intended to live in
-the body-detection program, which already loads the local vision model.
+A second, semantic tier is intended to live in a separate analysis program and
+is out of scope here.
 
 dHash (no numpy/imagehash dep, pure Pillow):
   resize to 9x8 grayscale -> for each row compare adjacent pixels -> 64 bits.
