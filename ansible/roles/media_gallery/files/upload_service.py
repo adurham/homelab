@@ -276,6 +276,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._mkdir(p[len("/mkdir/"):])
         if p.startswith("/upload/"):
             return self._upload(p[len("/upload/"):])
+        if p.startswith("/rename/"):
+            return self._rename(p[len("/rename/"):])
+        if p.startswith("/move/"):
+            return self._move(p[len("/move/"):])
         self._json(404, {"error": "not found"})
 
     def _mkdir(self, raw):
@@ -285,6 +289,83 @@ class Handler(BaseHTTPRequestHandler):
         r = rclone("mkdir", f"{SRC}/{folder}")
         self._json(200 if r.returncode == 0 else 500,
                    {"created": folder} if r.returncode == 0 else {"error": r.stderr[:200]})
+
+    def _rename(self, raw):
+        """POST /rename/<old>/<new> — rename a gallery folder. Moves the original
+        media AND its thumbnail cache, so posters survive the rename. The manifest
+        rebuild then re-keys every item's `chat`/`file`/`thumb` to the new name
+        (the manifest is derived from the folder listing, so a rebuild is enough).
+        Idempotent-ish: refuses if <new> already exists (would merge, surprising)."""
+        parts = [s for s in raw.split("/") if s]
+        if len(parts) != 2:
+            return self._json(400, {"error": "want /rename/<old>/<new>"})
+        old = sanitize_folder(parts[0])
+        new = sanitize_folder(parts[1])
+        if not old or not new:
+            return self._json(400, {"error": "bad folder name"})
+        if old == new:
+            return self._json(200, {"renamed": old, "to": new, "noop": True})
+        # refuse if destination already exists (avoid silent merge)
+        chk = rclone("lsf", f"{SRC}/{new}/")
+        if chk.returncode == 0 and chk.stdout.strip():
+            return self._json(409, {"error": f"folder '{new}' already exists"})
+        # move the originals
+        r = rclone("move", f"{SRC}/{old}", f"{SRC}/{new}",
+                   "--transfers", "8", "--checkers", "16",
+                   "--retries", "5", "--low-level-retries", "10")
+        if r.returncode != 0:
+            return self._json(500, {"error": "rename failed", "detail": r.stderr[:200]})
+        # move the thumbnail cache too (best effort — posters regenerate if missing)
+        rclone("move", f"{REMOTE}thumbs/{old}", f"{REMOTE}thumbs/{new}",
+               "--retries", "3", "--low-level-retries", "5")
+        # clean up the now-empty source dirs
+        rclone("rmdir", f"{SRC}/{old}")
+        rclone("rmdir", f"{REMOTE}thumbs/{old}")
+        _dirty.set()  # rebuild manifest -> items re-keyed to <new>
+        self._json(200, {"renamed": old, "to": new})
+
+    def _move(self, raw):
+        """POST /move/<srcfolder>/<stem>/<destfolder> — move ONE item (its
+        original + thumbnail) between folders. Used by the UI to drag a photo
+        into the right person's folder. The stem keeps its identity; only the
+        containing folder changes."""
+        parts = [s for s in raw.split("/") if s]
+        if len(parts) != 3:
+            return self._json(400, {"error": "want /move/<srcfolder>/<stem>/<destfolder>"})
+        srcf = sanitize_folder(parts[0])
+        stem = parts[1]
+        destf = sanitize_folder(parts[2])
+        if not srcf or not destf or not stem:
+            return self._json(400, {"error": "bad folder or stem"})
+        if srcf == destf:
+            return self._json(200, {"moved": stem, "to": destf, "noop": True})
+        # find the original's leaf (stem + real extension) in the source folder
+        ls = rclone("lsf", f"{SRC}/{srcf}/")
+        if ls.returncode != 0:
+            return self._json(404, {"error": f"source folder '{srcf}' not found"})
+        leaf = None
+        for line in ls.stdout.splitlines():
+            name = line.strip()
+            if name and os.path.splitext(name)[0] == stem:
+                leaf = name
+                break
+        if not leaf:
+            return self._json(404, {"error": f"item '{stem}' not in '{srcf}'"})
+        ext = os.path.splitext(leaf)[1]
+        # ensure dest exists
+        rclone("mkdir", f"{SRC}/{destf}")
+        # move the original
+        r = rclone("moveto", f"{SRC}/{srcf}/{leaf}", f"{SRC}/{destf}/{leaf}",
+                   "--retries", "5", "--low-level-retries", "10")
+        if r.returncode != 0:
+            return self._json(500, {"error": "move failed", "detail": r.stderr[:200]})
+        # move the thumbnail too (best effort — regenerates if missing)
+        rclone("moveto", f"{REMOTE}thumbs/{srcf}/{stem}.jpg",
+               f"{REMOTE}thumbs/{destf}/{stem}.jpg",
+               "--retries", "3", "--low-level-retries", "5")
+        _dirty.set()  # rebuild manifest -> item re-keyed to <destf>
+        self._json(200, {"moved": stem, "from": srcf, "to": destf,
+                         "file": f"by-chat/{destf}/{leaf}"})
 
     def _upload(self, raw):
         folder = sanitize_folder(raw)

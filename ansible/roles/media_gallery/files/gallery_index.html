@@ -154,6 +154,26 @@
   #lb .lbconfirm.show{display:flex;}
   #lb .lbconfirm .yes{background:#d23b3b;color:#fff;border-color:#d23b3b;}
   #lb .lbconfirm .yes:hover{background:#e85050;}
+  /* move button + folder picker menu */
+  #lb .lbmove{position:absolute;top:16px;right:128px;font-size:18px;
+    padding:6px 12px;z-index:60;}
+  #lb .lbmove:hover{background:var(--accent);border-color:var(--accent);}
+  #lb .lbmovemenu{position:absolute;top:60px;right:20px;z-index:61;display:none;
+    flex-direction:column;gap:4px;background:#1a1f27;border:1px solid var(--border);
+    border-radius:10px;padding:8px;max-height:60vh;overflow-y:auto;min-width:180px;
+    box-shadow:0 8px 30px rgba(0,0,0,.5);}
+  #lb .lbmovemenu.show{display:flex;}
+  #lb .lbmovemenu .mm-title{font-size:11px;color:#8a93a0;padding:2px 6px 6px;}
+  #lb .lbmovemenu button{text-align:left;font-size:13px;padding:7px 10px;
+    background:#222831;border-color:#2a313b;}
+  #lb .lbmovemenu button:hover{background:var(--accent);border-color:var(--accent);}
+  /* folder rename pencil */
+  .folder .frename{position:absolute;top:6px;right:6px;z-index:4;width:26px;height:26px;
+    padding:0;font-size:13px;border-radius:6px;opacity:0;transition:opacity .12s;
+    background:rgba(20,24,30,.8);}
+  .folder:hover .frename{opacity:1;}
+  .folder .frename:hover{background:var(--accent);border-color:var(--accent);}
+  @media(hover:none){.folder .frename{opacity:.85;}}
   @media(max-width:600px){#lb .nav{padding:8px 12px;font-size:24px;}}
 </style>
 </head>
@@ -182,11 +202,13 @@
 
 <div id="lb">
   <button class="close" id="lbClose">&times;</button>
+  <button class="lbmove" id="lbMove" title="Move to folder">&#128194;</button>
   <button class="lbtrash" id="lbTrash" title="Delete">&#128465;</button>
   <div class="lbconfirm" id="lbConfirm">
     <button class="yes" id="lbConfirmYes">Delete?</button>
     <button class="no" id="lbConfirmNo">Cancel</button>
   </div>
+  <div class="lbmovemenu" id="lbMoveMenu"></div>
   <button class="nav prev" id="lbPrev">&#8249;</button>
   <div class="media" id="lbMedia"></div>
   <button class="nav next" id="lbNext">&#8250;</button>
@@ -332,6 +354,12 @@
       m.querySelector('.fname').textContent=name;
       m.querySelector('.fcount').textContent=items+' item'+(items===1?'':'s');
       f.appendChild(m);
+      // rename pencil (not on the "All items" aggregate)
+      if(name!=='All items'){
+        var rb=document.createElement('button'); rb.className='frename';
+        rb.title='Rename folder'; rb.innerHTML='&#9998;';
+        f.appendChild(rb);
+      }
       return f;
     }
 
@@ -493,6 +521,7 @@
     lbMedia.innerHTML=''; // stop playback
     lbIndex=-1;
     if(typeof hideLbConfirm==='function') hideLbConfirm();
+    if(typeof hideMoveMenu==='function') hideMoveMenu();
   }
   function navLb(d){
     if(lbIndex<0) return;
@@ -647,9 +676,30 @@
 
   elFolder.addEventListener('click',function(e){
     var f=e.target.closest('.folder'); if(!f) return;
+    if(e.target.closest('.frename')){ e.stopPropagation(); renameFolder(f.dataset.chat); return; }
     if(f.dataset.newfolder){ showNewFolderForm(f); return; }
     openFolder(f.dataset.chat);
   });
+
+  // ---- folder rename ----
+  function renameFolder(oldName){
+    if(!oldName||oldName==='*') return;
+    var nn=window.prompt('Rename folder "'+oldName+'" to:', oldName);
+    if(nn==null) return;
+    nn=nn.trim(); if(!nn||nn===oldName) return;
+    if(chatMap[nn]||emptyFolders.indexOf(nn)>=0){ alert('A folder named "'+nn+'" already exists.'); return; }
+    fetch('/rename/'+encodeURIComponent(oldName)+'/'+encodeURIComponent(nn),
+      {method:'POST',credentials:'same-origin'})
+      .then(function(r){
+        if(r.status===200){
+          // optimistic local update; manifest rebuild on the server re-keys items
+          var ei=emptyFolders.indexOf(oldName); if(ei>=0) emptyFolders[ei]=nn;
+          reloadManifest(null);
+        }else if(r.status===409){ alert('That folder name already exists on the server.'); }
+        else { alert('Rename failed (HTTP '+r.status+').'); }
+      })
+      .catch(function(){ alert('Network error during rename.'); });
+  }
   elPhoto.addEventListener('click',function(e){
     var t=e.target.closest('.tile'); if(!t) return;
     openLb(parseInt(t.dataset.i,10));
@@ -659,13 +709,58 @@
     if(current!==null) openFolder(current);
   });
   document.getElementById('lbClose').addEventListener('click',closeLb);
-  document.getElementById('lbPrev').addEventListener('click',function(){hideLbConfirm();navLb(-1);});
-  document.getElementById('lbNext').addEventListener('click',function(){hideLbConfirm();navLb(1);});
+  document.getElementById('lbPrev').addEventListener('click',function(){hideLbConfirm();hideMoveMenu();navLb(-1);});
+  document.getElementById('lbNext').addEventListener('click',function(){hideLbConfirm();hideMoveMenu();navLb(1);});
   lbTrashBtn.addEventListener('click',function(){
     lbConfirm.classList.add('show'); lbTrashBtn.style.display='none';
   });
   document.getElementById('lbConfirmYes').addEventListener('click',deleteCurrent);
   document.getElementById('lbConfirmNo').addEventListener('click',hideLbConfirm);
+
+  // ---- move-to-folder (lightbox) ----
+  var lbMoveBtn=document.getElementById('lbMove');
+  var lbMoveMenu=document.getElementById('lbMoveMenu');
+  function hideMoveMenu(){lbMoveMenu.classList.remove('show'); lbMoveMenu.innerHTML='';}
+  function showMoveMenu(){
+    var it=view[lbIndex]; if(!it) return;
+    lbMoveMenu.innerHTML='';
+    var title=document.createElement('div'); title.className='mm-title';
+    title.textContent='Move to folder:'; lbMoveMenu.appendChild(title);
+    // destination = every real folder except the current one, plus empty folders
+    var dests=chats.filter(function(c){return c!==it.chat;})
+      .concat(emptyFolders.filter(function(c){return c!==it.chat;}));
+    if(!dests.length){
+      var none=document.createElement('div'); none.className='mm-title';
+      none.textContent='(no other folders — create one first)'; lbMoveMenu.appendChild(none);
+    }
+    dests.forEach(function(dest){
+      var b=document.createElement('button'); b.textContent=dest;
+      b.addEventListener('click',function(e){e.stopPropagation(); doMove(it,dest);});
+      lbMoveMenu.appendChild(b);
+    });
+    lbMoveMenu.classList.add('show');
+  }
+  function doMove(it,dest){
+    hideMoveMenu();
+    var src=it.chat, stem=it.stem;
+    fetch('/move/'+encodeURIComponent(src)+'/'+encodeURIComponent(stem)+'/'+encodeURIComponent(dest),
+      {method:'POST',credentials:'same-origin'})
+      .then(function(r){
+        if(r.status===200){
+          // remove from current view + advance lightbox
+          var wasIndex=lbIndex;
+          removeFromData(it);
+          if(!view.length){ closeLb(); reloadManifest(null); return; }
+          var next=wasIndex; if(next>=view.length) next=0;
+          openLb(next); reloadManifest(current);
+        }else{ alert('Move failed (HTTP '+r.status+').'); }
+      })
+      .catch(function(){ alert('Network error during move.'); });
+  }
+  lbMoveBtn.addEventListener('click',function(e){
+    e.stopPropagation();
+    if(lbMoveMenu.classList.contains('show')) hideMoveMenu(); else showMoveMenu();
+  });
   lb.addEventListener('click',function(e){if(e.target===lb)closeLb();});
   document.addEventListener('keydown',function(e){
     if(!lb.classList.contains('open')) return;
