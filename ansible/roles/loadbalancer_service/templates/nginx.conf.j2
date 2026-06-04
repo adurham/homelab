@@ -490,7 +490,7 @@ server {
     # Trash endpoint (POST): deletes an item from Drive + adds to the exclusion
     # ledger so it never re-downloads. Write-capable, so it stays behind the
     # same Authentik gate as everything else. Routed to the trash service.
-    location /trash/ {
+    location ~ ^/(trash|trashbatch)(/|$) {
         auth_request /outpost.goauthentik.io/auth/nginx;
         error_page 401 = @goauthentik_proxy_signin;
         auth_request_set $auth_cookie $upstream_http_set_cookie;

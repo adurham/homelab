@@ -255,6 +255,9 @@
     color:var(--muted);margin-top:8px;}
   #progDlg .pd-done{margin-top:14px;text-align:right;}
   #progDlg .pd-done button{font-size:13px;padding:7px 16px;}
+  #progDlg .pd-cancel{margin-top:14px;text-align:right;}
+  #progDlg .pd-cancel button{font-size:13px;padding:7px 16px;}
+  #progDlg .pd-cancel button:hover{background:#d23b3b;border-color:#d23b3b;}
   #progDlg.err .pd-fill{background:#d23b3b;}
   /* breadcrumb */
   .crumb{display:flex;align-items:center;gap:6px;font-size:16px;font-weight:600;min-width:0;}
@@ -350,8 +353,6 @@
     <button id="bulkClear">Clear</button>
     <div class="bulkmovemenu" id="bulkMoveMenu"></div>
   </div>
-  <!-- folder rail: drop targets while viewing a folder (drag selected photos here) -->
-  <div id="folderRail"></div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
   <div id="state" class="state">Loading…</div>
@@ -373,6 +374,7 @@
     <div class="pd-sub" id="pdSub"></div>
     <div class="pd-track"><div class="pd-fill" id="pdFill"></div></div>
     <div class="pd-stats"><span id="pdLeft">0 of 0</span><span id="pdPct">0%</span></div>
+    <div class="pd-cancel" id="pdCancelRow"><button id="pdCancel">Cancel</button></div>
     <div class="pd-done" id="pdDone" style="display:none"><button id="pdClose">Done</button></div>
   </div>
 </div>
@@ -416,7 +418,7 @@
   // ---- OS-style progress dialog ----
   var _pd={};
   function progOpen(title,total){
-    _pd.total=total; _pd.done=0;
+    _pd.total=total; _pd.done=0; _pd.abort=null;
     _pd.scrim=document.getElementById('progScrim');
     document.getElementById('pdTitle').textContent=title;
     document.getElementById('pdSpin').style.display='';
@@ -425,6 +427,7 @@
     document.getElementById('pdLeft').textContent='0 of '+total;
     document.getElementById('pdPct').textContent='0%';
     document.getElementById('pdDone').style.display='none';
+    document.getElementById('pdCancelRow').style.display='';   // show Cancel while working
     document.getElementById('progDlg').classList.remove('err');
     _pd.scrim.classList.add('show');
   }
@@ -441,13 +444,19 @@
     document.getElementById('pdTitle').textContent=title;
     document.getElementById('pdFill').style.width='100%';
     if(isErr) document.getElementById('progDlg').classList.add('err');
+    document.getElementById('pdCancelRow').style.display='none';
     document.getElementById('pdDone').style.display='';
+    _pd.abort=null;
   }
-  function progClose(){ var s=document.getElementById('progScrim'); if(s) s.classList.remove('show'); }
-  document.addEventListener('DOMContentLoaded',function(){});
-  // wire Done button once (element exists at parse time)
+  function progClose(){ var s=document.getElementById('progScrim'); if(s) s.classList.remove('show'); _pd.abort=null; }
+  // wire Done + Cancel once (elements exist at parse time)
   setTimeout(function(){
     var c=document.getElementById('pdClose'); if(c) c.addEventListener('click',progClose);
+    var x=document.getElementById('pdCancel');
+    if(x) x.addEventListener('click',function(){
+      if(_pd.abort){ try{ _pd.abort.abort(); }catch(_){}}
+      document.getElementById('pdSub').textContent='Cancelling…';
+    });
   },0);
 
   var elFolder=document.getElementById('folderGrid');
@@ -782,27 +791,9 @@
     sb.classList.add('show');
   }
 
-  // ---- folder rail: every OTHER folder as a drop target, while viewing a folder ----
-  function renderFolderRail(){
-    var others=chats.filter(function(c){return c!==current;})
-      .concat(emptyFolders.filter(function(c){return c!==current && chats.indexOf(c)<0;}));
-    elFolderRail.innerHTML='';
-    var lbl=document.createElement('div'); lbl.className='rail-label';
-    lbl.textContent='Drag selected photos onto a folder to move them:';
-    elFolderRail.appendChild(lbl);
-    others.forEach(function(dest){
-      var r=document.createElement('div'); r.className='railitem'; r.textContent='📁 '+dest;
-      r.dataset.dest=dest;
-      wireRailDrop(r,dest);
-      elFolderRail.appendChild(r);
-    });
-    // "+ new folder" drop target
-    var nf=document.createElement('div'); nf.className='railitem newfolder'; nf.textContent='＋ New folder';
-    nf.addEventListener('click',function(){ promptNewFolderThenMove(null); });
-    wireRailDrop(nf,'__new__');
-    elFolderRail.appendChild(nf);
-    elFolderRail.classList.toggle('show', current!=null && current!=='*');
-  }
+  // (folder rail removed — use the "Move to…" button, right-click → Move to,
+  //  or drag photos onto a folder tile on the landing page)
+  function renderFolderRail(){ /* no-op: rail removed */ }
 
   function fmtBytes(n){
     if(n==null||isNaN(n)) return '';
@@ -996,11 +987,16 @@
   }
 
   function reloadManifest(stayFolder){
-    return fetch('/gallery/manifest.json',{credentials:'same-origin'})
-      .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
-      .then(function(data){
-        manifest=Array.isArray(data)?data:[];
+    return Promise.all([
+      fetch('/gallery/manifest.json',{credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();}),
+      fetch('/gallery/folders.json',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():[];}).catch(function(){return [];})
+    ])
+      .then(function(res){
+        manifest=Array.isArray(res[0])?res[0]:[];
+        var allFolders=Array.isArray(res[1])?res[1]:[];
         buildChats();
+        // re-seed empty folders from the server folder list (so they don't vanish)
+        allFolders.forEach(function(f){ if(!chatMap[f] && emptyFolders.indexOf(f)<0) emptyFolders.push(f); });
         if(current===null){ renderFolders(); }
         else if(stayFolder!=null && (chatMap[stayFolder]||emptyFolders.indexOf(stayFolder)>=0)){
           openFolder(stayFolder);
@@ -1085,9 +1081,21 @@
       .then(function(r){
         if(r.status===200){
           toast('✓ Renamed “'+oldName+'” → “'+nn+'”','ok');
-          // optimistic local update; manifest rebuild on the server re-keys items
+          // OPTIMISTIC re-key in the LOCAL manifest so the change shows instantly.
+          // The server manifest rebuild is debounced ~20s, so a refetch here would
+          // return the OLD name and undo the rename visually. Instead we re-key
+          // every item locally AND record per-stem pendingMove so a later refetch
+          // (or background timer) keeps showing the new name until the server agrees.
+          manifest.forEach(function(it){
+            if(it.chat===oldName){
+              it.chat=nn;
+              if(it.file) it.file=it.file.replace('by-chat/'+oldName+'/','by-chat/'+nn+'/');
+              if(it.thumb) it.thumb=it.thumb.replace('/'+oldName+'/','/'+nn+'/');
+              pendingMove[it.stem]=nn;
+            }
+          });
           var ei=emptyFolders.indexOf(oldName); if(ei>=0) emptyFolders[ei]=nn;
-          reloadManifest(null);
+          buildChats(); renderFolders();
         }else if(r.status===409){ toast('A folder named “'+nn+'” already exists','err'); }
         else { toast('Rename failed (HTTP '+r.status+')','err'); }
       })
@@ -1225,7 +1233,8 @@
     // immediately; pendingMove guards the stale-manifest refetch window.
     document.getElementById('pdSub').textContent='Transferring '+stems.length+' file'+(stems.length>1?'s':'')+'…';
     stems.forEach(function(stem){ pendingMove[stem]=dest; });
-    fetch('/movebatch',{method:'POST',credentials:'same-origin',
+    var ac=new AbortController(); _pd.abort=ac;
+    fetch('/movebatch',{method:'POST',credentials:'same-origin',signal:ac.signal,
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({src:src,dest:dest,stems:stems})})
       .then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; }); })
@@ -1241,35 +1250,42 @@
         if(ok) setTimeout(progClose, 700);
         reloadManifest(current);
       })
-      .catch(function(){
+      .catch(function(err){
         stems.forEach(function(stem){ delete pendingMove[stem]; });
-        progFinish('Network error during move', true);
+        if(err && err.name==='AbortError'){ rerenderCurrent(); progClose(); toast('Move cancelled','err'); }
+        else { progFinish('Network error during move', true); }
       });
   }
 
-  // ---- bulk delete ----
+  // ---- bulk delete (one batched request) ----
   document.getElementById('bulkDelete').addEventListener('click',function(){
     if(!selected.size){ toast('Nothing selected to delete.','err'); return; }
+    if(current==null||current==='*'){ toast('Delete from a folder view.','err'); return; }
     if(!confirm('Delete '+selected.size+' item(s)? This cannot be undone.')) return;
-    var stems=Array.from(selected);
-    var done=0, fail=0, gone=[];
+    var stems=Array.from(selected), chat=current;
     progOpen('Deleting '+stems.length+' item'+(stems.length>1?'s':''), stems.length);
-    var chain=Promise.resolve();
-    stems.forEach(function(stem,idx){
-      chain=chain.then(function(){
-        progStep('Item '+(idx+1)+' of '+stems.length);
-        return fetch('/trash/'+encodeURIComponent(current)+'/'+encodeURIComponent(stem),
-          {method:'POST',credentials:'same-origin'})
-          .then(function(r){ if(r.status===200){ done++; gone.push(stem); pendingDel[stem]=true; } else fail++; },function(){ fail++; });
+    document.getElementById('pdSub').textContent='Removing '+stems.length+' file'+(stems.length>1?'s':'')+'…';
+    stems.forEach(function(stem){ pendingDel[stem]=true; });
+    var ac=new AbortController(); _pd.abort=ac;
+    fetch('/trashbatch',{method:'POST',credentials:'same-origin',signal:ac.signal,
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({chat:chat,stems:stems})})
+      .then(function(r){ return r.json().then(function(j){return {status:r.status,j:j};}); })
+      .then(function(res){
+        var ok=(res.status===200);
+        if(ok){ stems.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); }); }
+        else { stems.forEach(function(stem){ delete pendingDel[stem]; }); }
+        clearSelection(); rerenderCurrent();
+        _pd.done=_pd.total; progStep('');
+        progFinish(ok? ('✓ Deleted '+(res.j.deleted||stems.length)) : ('Delete failed (HTTP '+res.status+')'), !ok);
+        if(ok) setTimeout(progClose, 700);
+        reloadManifest(current);
+      })
+      .catch(function(err){
+        stems.forEach(function(stem){ delete pendingDel[stem]; });
+        if(err && err.name==='AbortError'){ rerenderCurrent(); progClose(); toast('Delete cancelled','err'); }
+        else { progFinish('Network error during delete', true); }
       });
-    });
-    chain.then(function(){
-      gone.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); });
-      clearSelection(); rerenderCurrent();
-      progFinish(fail? ('Deleted '+done+', '+fail+' failed') : ('✓ Deleted '+done), fail>0);
-      if(!fail) setTimeout(progClose, 700);
-      reloadManifest(current);
-    });
   });
 
   // ---------- DRAG-AND-DROP MOVE ----------
@@ -1533,11 +1549,16 @@
   });
 
   // ---------- BOOT ----------
-  fetch('/gallery/manifest.json')
-    .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
-    .then(function(data){
-      manifest=Array.isArray(data)?data:[];
+  // load the manifest AND the full folder list (incl. empty folders) in parallel
+  Promise.all([
+    fetch('/gallery/manifest.json').then(function(r){if(!r.ok)throw new Error(r.status);return r.json();}),
+    fetch('/gallery/folders.json').then(function(r){return r.ok?r.json():[];}).catch(function(){return [];})
+  ]).then(function(res){
+      manifest=Array.isArray(res[0])?res[0]:[];
+      var allFolders=Array.isArray(res[1])?res[1]:[];
       buildChats();
+      // seed emptyFolders = server folders that have no items in the manifest
+      allFolders.forEach(function(f){ if(!chatMap[f] && emptyFolders.indexOf(f)<0) emptyFolders.push(f); });
       renderFolders();   // always render landing (so "+ New folder" is available)
     })
     .catch(function(err){
