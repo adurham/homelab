@@ -278,9 +278,80 @@ class Handler(BaseHTTPRequestHandler):
             return self._upload(p[len("/upload/"):])
         if p.startswith("/rename/"):
             return self._rename(p[len("/rename/"):])
+        if p.startswith("/renamefile/"):
+            return self._renamefile(p[len("/renamefile/"):])
         if p.startswith("/move/"):
             return self._move(p[len("/move/"):])
+        if p.startswith("/rmdir/"):
+            return self._rmdir(p[len("/rmdir/"):])
         self._json(404, {"error": "not found"})
+
+    def _rmdir(self, raw):
+        """POST /rmdir/<folder> — delete a gallery folder AND its contents
+        (originals + thumbnails). Refuses the safety-sensitive known person
+        folders only if non-empty? No — Finder lets you delete non-empty folders;
+        we mirror that but the UI confirms first. Purges originals + thumbs."""
+        folder = sanitize_folder(raw)
+        if not folder:
+            return self._json(400, {"error": "bad folder name"})
+        # purge originals + thumbnail cache for the folder
+        r = rclone("purge", f"{SRC}/{folder}")
+        # purge may fail if the dir doesn't exist; treat 'directory not found' as ok
+        if r.returncode != 0 and "directory not found" not in (r.stderr or "").lower():
+            return self._json(500, {"error": "rmdir failed", "detail": r.stderr[:200]})
+        rclone("purge", f"{REMOTE}thumbs/{folder}")
+        _dirty.set()
+        self._json(200, {"removed": folder})
+
+    def _renamefile(self, raw):
+        """POST /renamefile/<chat>/<oldstem>/<newstem> — rename a single item's
+        stem (original + thumbnail), keeping it in the same folder. Refuses if a
+        file with the new stem already exists in that folder."""
+        parts = [s for s in raw.split("/") if s]
+        if len(parts) != 3:
+            return self._json(400, {"error": "want /renamefile/<chat>/<oldstem>/<newstem>"})
+        chat = sanitize_folder(parts[0])
+        old = parts[1]
+        new = parts[2]
+        if not chat or not old or not new:
+            return self._json(400, {"error": "bad chat or stem"})
+        # disallow path separators / weird chars in the new stem
+        if "/" in new or "\\" in new or new in (".", ".."):
+            return self._json(400, {"error": "bad new name"})
+        ls = rclone("lsf", f"{SRC}/{chat}/")
+        if ls.returncode != 0:
+            return self._json(404, {"error": f"folder '{chat}' not found"})
+        leaf = None
+        names = [l.strip() for l in ls.stdout.splitlines() if l.strip()]
+        for name in names:
+            if os.path.splitext(name)[0] == old:
+                leaf = name
+                break
+        if not leaf:
+            return self._json(404, {"error": f"item '{old}' not in '{chat}'"})
+        ext = os.path.splitext(leaf)[1]
+        # refuse if destination stem already exists
+        for name in names:
+            if os.path.splitext(name)[0] == new:
+                return self._json(409, {"error": f"'{new}' already exists"})
+        r = rclone("moveto", f"{SRC}/{chat}/{leaf}", f"{SRC}/{chat}/{new}{ext}",
+                   "--retries", "5", "--low-level-retries", "10")
+        if r.returncode != 0:
+            return self._json(500, {"error": "rename failed", "detail": r.stderr[:200]})
+        # move the thumbnail too (best effort)
+        rclone("moveto", f"{REMOTE}thumbs/{chat}/{old}.jpg",
+               f"{REMOTE}thumbs/{chat}/{new}.jpg",
+               "--retries", "3", "--low-level-retries", "5")
+        # carry the datemap entry over to the new stem if present
+        try:
+            dm = json.loads(DATEMAP_CACHE.read_text()) if DATEMAP_CACHE.exists() else {}
+            if old in dm:
+                dm[new] = dm.pop(old)
+                DATEMAP_CACHE.write_text(json.dumps(dm))
+        except (OSError, ValueError, NameError):
+            pass
+        _dirty.set()
+        self._json(200, {"renamed": old, "to": new, "folder": chat})
 
     def _mkdir(self, raw):
         folder = sanitize_folder(raw)

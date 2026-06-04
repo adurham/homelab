@@ -171,9 +171,13 @@
   .folder .frename{position:absolute;top:6px;right:6px;z-index:4;width:26px;height:26px;
     padding:0;font-size:13px;border-radius:6px;opacity:0;transition:opacity .12s;
     background:rgba(20,24,30,.8);}
-  .folder:hover .frename{opacity:1;}
+  .folder .fdelete{position:absolute;top:6px;right:38px;z-index:4;width:26px;height:26px;
+    padding:0;font-size:13px;border-radius:6px;opacity:0;transition:opacity .12s;
+    background:rgba(20,24,30,.8);}
+  .folder:hover .frename,.folder:hover .fdelete{opacity:1;}
   .folder .frename:hover{background:var(--accent);border-color:var(--accent);}
-  @media(hover:none){.folder .frename{opacity:.85;}}
+  .folder .fdelete:hover{background:#d23b3b;border-color:#d23b3b;}
+  @media(hover:none){.folder .frename,.folder .fdelete{opacity:.85;}}
   /* ---- multi-select + bulk action bar ---- */
   #bulkBar{display:none;position:sticky;top:54px;z-index:9;align-items:center;gap:10px;
     flex-wrap:wrap;background:rgba(28,32,38,.97);border:1px solid var(--border);
@@ -624,11 +628,23 @@
       m.querySelector('.fname').textContent=name;
       m.querySelector('.fcount').textContent=items+' item'+(items===1?'':'s');
       f.appendChild(m);
-      // rename pencil (not on the "All items" aggregate)
+      // rename pencil + delete (not on the "All items" aggregate)
       if(name!=='All items'){
         var rb=document.createElement('button'); rb.className='frename';
         rb.title='Rename folder'; rb.innerHTML='&#9998;';
         f.appendChild(rb);
+        var db=document.createElement('button'); db.className='fdelete';
+        db.title='Delete folder'; db.innerHTML='&#128465;';
+        f.appendChild(db);
+        // folder is a drop target for drag-to-move from inside another folder
+        f.addEventListener('dragover',function(e){ if(dragStems.length){ e.preventDefault(); f.classList.add('dragover'); e.dataTransfer.dropEffect='move'; } });
+        f.addEventListener('dragleave',function(){ f.classList.remove('dragover'); });
+        f.addEventListener('drop',function(e){
+          e.preventDefault(); f.classList.remove('dragover');
+          if(!dragStems.length) return;
+          var stems=dragStems.slice(); dragStems=[];
+          bulkMove(name, stems);
+        });
       }
       return f;
     }
@@ -1030,9 +1046,28 @@
   elFolder.addEventListener('click',function(e){
     var f=e.target.closest('.folder'); if(!f) return;
     if(e.target.closest('.frename')){ e.stopPropagation(); renameFolder(f.dataset.chat); return; }
+    if(e.target.closest('.fdelete')){ e.stopPropagation(); deleteFolder(f.dataset.chat); return; }
     if(f.dataset.newfolder){ showNewFolderForm(f); return; }
     openFolder(f.dataset.chat);
   });
+
+  // ---- delete a whole folder (and its contents) ----
+  function deleteFolder(name){
+    if(!name||name==='*') return;
+    var count=(chatMap[name]?chatMap[name].length:0);
+    if(!confirm('Delete folder "'+name+'"'+(count?(' and its '+count+' item'+(count===1?'':'s')):'')+'? This cannot be undone.')) return;
+    toast('Deleting folder “'+name+'”…','work',true);
+    fetch('/rmdir/'+encodeURIComponent(name),{method:'POST',credentials:'same-origin'})
+      .then(function(r){
+        if(r.status===200){
+          toast('✓ Deleted folder “'+name+'”','ok');
+          // suppress all its items locally until the server manifest catches up
+          if(chatMap[name]) chatMap[name].forEach(function(it){ pendingDel[it.stem]=true; });
+          var ei=emptyFolders.indexOf(name); if(ei>=0) emptyFolders.splice(ei,1);
+          reloadManifest(null);
+        } else { toast('Delete failed (HTTP '+r.status+')','err'); }
+      }).catch(function(){ toast('Network error deleting folder','err'); });
+  }
 
   // ---- folder rename ----
   function renameFolder(oldName){
