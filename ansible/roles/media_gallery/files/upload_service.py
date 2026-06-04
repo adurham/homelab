@@ -280,6 +280,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._rename(p[len("/rename/"):])
         if p.startswith("/renamefile/"):
             return self._renamefile(p[len("/renamefile/"):])
+        if p.startswith("/dedupscan"):
+            return self._dedupscan()
         if p.startswith("/movebatch"):
             return self._movebatch()
         if p.startswith("/move/"):
@@ -396,6 +398,24 @@ class Handler(BaseHTTPRequestHandler):
         rclone("rmdir", f"{REMOTE}thumbs/{old}")
         _dirty.set()  # rebuild manifest -> items re-keyed to <new>
         self._json(200, {"renamed": old, "to": new})
+
+    def _dedupscan(self):
+        """POST /dedupscan — kick off the tier-1 perceptual-hash duplicate scan in
+        the background. It writes gcrypt:gallery/dedup.json, which the SPA's
+        "Find duplicates" view polls for. Fire-and-forget; returns immediately."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        py = os.path.join(here, "venv", "bin", "python")
+        if not os.path.exists(py):
+            py = "python3"
+        env = dict(os.environ)
+        env.setdefault("RCLONE_CONFIG", RCLONE_CONF)
+        env.setdefault("TG_RCLONE_REMOTE", REMOTE)
+        try:
+            subprocess.Popen([py, os.path.join(here, "dedup_scan.py")],
+                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._json(200, {"started": True})
+        except Exception as e:  # noqa: BLE001
+            self._json(500, {"error": f"{type(e).__name__}: {e}"})
 
     def _movebatch(self):
         """POST /movebatch  body: {"src": "...", "dest": "...", "stems": [...]}
