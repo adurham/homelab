@@ -280,6 +280,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._rename(p[len("/rename/"):])
         if p.startswith("/renamefile/"):
             return self._renamefile(p[len("/renamefile/"):])
+        if p.startswith("/movebatch"):
+            return self._movebatch()
         if p.startswith("/move/"):
             return self._move(p[len("/move/"):])
         if p.startswith("/rmdir/"):
@@ -394,6 +396,58 @@ class Handler(BaseHTTPRequestHandler):
         rclone("rmdir", f"{REMOTE}thumbs/{old}")
         _dirty.set()  # rebuild manifest -> items re-keyed to <new>
         self._json(200, {"renamed": old, "to": new})
+
+    def _movebatch(self):
+        """POST /movebatch  body: {"src": "...", "dest": "...", "stems": [...]}
+        Move MANY items from one folder to another in a SINGLE rclone process
+        (parallel transfers) instead of N sequential moveto calls. A 10-file move
+        drops from ~50s (10 x 2 sequential ~2.5s round-trips) to a few seconds.
+        Originals and thumbnails are each moved in one filtered `rclone move`."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length) or "{}")
+        except (ValueError, OSError):
+            return self._json(400, {"error": "bad json body"})
+        srcf = sanitize_folder(body.get("src", ""))
+        destf = sanitize_folder(body.get("dest", ""))
+        stems = body.get("stems") or []
+        if not srcf or not destf or not isinstance(stems, list) or not stems:
+            return self._json(400, {"error": "want {src, dest, stems[]}"})
+        if srcf == destf:
+            return self._json(200, {"moved": 0, "noop": True})
+        # resolve each stem -> its real leaf (stem + ext) in the source folder
+        ls = rclone("lsf", f"{SRC}/{srcf}/")
+        if ls.returncode != 0:
+            return self._json(404, {"error": f"source folder '{srcf}' not found"})
+        by_stem = {}
+        for line in ls.stdout.splitlines():
+            name = line.strip()
+            if name:
+                by_stem[os.path.splitext(name)[0]] = name
+        leaves = [by_stem[s] for s in stems if s in by_stem]
+        if not leaves:
+            return self._json(404, {"error": "none of the stems were found in src"})
+        rclone("mkdir", f"{SRC}/{destf}")
+        # one rclone move for the originals, restricted to just our leaves
+        inc = []
+        for leaf in leaves:
+            inc += ["--include", leaf]
+        r = rclone("move", f"{SRC}/{srcf}", f"{SRC}/{destf}",
+                   *inc, "--transfers", "16", "--checkers", "32",
+                   "--retries", "5", "--low-level-retries", "10")
+        if r.returncode != 0:
+            return self._json(500, {"error": "batch move failed", "detail": r.stderr[:300]})
+        # one rclone move for the thumbnails (best effort)
+        tinc = []
+        for s in stems:
+            tinc += ["--include", f"{s}.jpg"]
+        rclone("move", f"{REMOTE}thumbs/{srcf}", f"{REMOTE}thumbs/{destf}",
+               *tinc, "--transfers", "16", "--checkers", "32",
+               "--retries", "3", "--low-level-retries", "5")
+        # clean up now-empty source dirs (best effort)
+        rclone("rmdirs", f"{SRC}/{srcf}", "--leave-root")
+        _dirty.set()
+        self._json(200, {"moved": len(leaves), "from": srcf, "to": destf})
 
     def _move(self, raw):
         """POST /move/<srcfolder>/<stem>/<destfolder> — move ONE item (its

@@ -1217,26 +1217,34 @@
     hideBulkMoveMenu();
     var stems=stemsOverride||Array.from(selected);
     if(!stems.length){ toast('Nothing selected to move.','err'); return; }
-    var src=current, done=0, fail=0, moved=[];
+    if(current==null||current==='*'){ toast('Move from a folder view.','err'); return; }
+    var src=current;
     progOpen('Moving '+stems.length+' item'+(stems.length>1?'s':'')+' to “'+dest+'”', stems.length);
-    var chain=Promise.resolve();
-    stems.forEach(function(stem,idx){
-      chain=chain.then(function(){
-        progStep('Item '+(idx+1)+' of '+stems.length);
-        return fetch('/move/'+encodeURIComponent(src)+'/'+encodeURIComponent(stem)+'/'+encodeURIComponent(dest),
-          {method:'POST',credentials:'same-origin'})
-          .then(function(r){ if(r.status===200){ done++; moved.push(stem); pendingMove[stem]=dest; } else fail++; },function(){ fail++; });
+    // ONE batched request — the server moves all of them in a single parallel
+    // rclone process (vs N sequential ~2.5s round-trips). Optimistic UI updates
+    // immediately; pendingMove guards the stale-manifest refetch window.
+    document.getElementById('pdSub').textContent='Transferring '+stems.length+' file'+(stems.length>1?'s':'')+'…';
+    stems.forEach(function(stem){ pendingMove[stem]=dest; });
+    fetch('/movebatch',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({src:src,dest:dest,stems:stems})})
+      .then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; }); })
+      .then(function(res){
+        var ok=(res.status===200), moved=ok?(res.j.moved||stems.length):0;
+        // optimistically drop them from the current view
+        if(ok){ stems.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); }); }
+        else { stems.forEach(function(stem){ delete pendingMove[stem]; }); }
+        clearSelection(); rerenderCurrent();
+        // animate the bar to done
+        _pd.done=_pd.total; progStep('');
+        progFinish(ok? ('✓ Moved '+moved+' to “'+dest+'”') : ('Move failed (HTTP '+res.status+')'), !ok);
+        if(ok) setTimeout(progClose, 700);
+        reloadManifest(current);
+      })
+      .catch(function(){
+        stems.forEach(function(stem){ delete pendingMove[stem]; });
+        progFinish('Network error during move', true);
       });
-    });
-    chain.then(function(){
-      // remove from current view immediately + keep them suppressed until the
-      // server manifest catches up (pendingMove handles the stale-refetch window)
-      moved.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); });
-      clearSelection(); rerenderCurrent();
-      progFinish(fail? ('Moved '+done+', '+fail+' failed') : ('✓ Moved '+done+' to “'+dest+'”'), fail>0);
-      if(!fail) setTimeout(progClose, 700);   // auto-close on clean success
-      reloadManifest(current);                 // background reconcile (pending guards staleness)
-    });
   }
 
   // ---- bulk delete ----
