@@ -537,7 +537,7 @@
     - "{{ media_gallery_trash_port }}"
   notify: Save tg iptables
 
-# SSH: key-only. mediaingest is nologin; admin is root-via-key. No password auth.
+# SSH: key-only. mediagallery is nologin; admin is root-via-key. No password auth.
 - name: Harden SSH (key-only, no passwords)
   ansible.builtin.copy:
     dest: /etc/ssh/sshd_config.d/99-harden.conf

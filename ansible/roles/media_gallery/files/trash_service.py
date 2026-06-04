@@ -29,7 +29,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
-RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediaingest/.config/rclone/rclone.conf")
+RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
 PORT = int(os.environ.get("TRASH_PORT", "8091"))
 BIND = os.environ.get("TRASH_BIND", "172.16.0.46")
 THUMB_CACHE = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))

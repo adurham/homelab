@@ -12,7 +12,7 @@ set -uo pipefail
 
 DIR=/opt/media-gallery
 LOG=/var/log/media-gallery/refresh.log
-export RCLONE_CONFIG=/home/mediaingest/.config/rclone/rclone.conf
+export RCLONE_CONFIG=/home/mediagallery/.config/rclone/rclone.conf
 export TG_RCLONE_REMOTE=gcrypt:
 
 mkdir -p "$(dirname "$LOG")"

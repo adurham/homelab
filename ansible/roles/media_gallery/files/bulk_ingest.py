@@ -148,9 +148,9 @@ def main():
             "print('datemap merged:',len(d))\""
         )
         subprocess.run(
-            f"ssh {args.ssh} \"chown mediaingest:mediaingest /tmp/datemap_add.json; "
-            f"sudo -u mediaingest {merge_cmd}; "
-            f"sudo -u mediaingest env RCLONE_CONFIG=/home/mediaingest/.config/rclone/rclone.conf "
+            f"ssh {args.ssh} \"chown mediagallery:mediagallery /tmp/datemap_add.json; "
+            f"sudo -u mediagallery {merge_cmd}; "
+            f"sudo -u mediagallery env RCLONE_CONFIG=/home/mediagallery/.config/rclone/rclone.conf "
             f"TG_RCLONE_REMOTE=gcrypt: /opt/media-gallery/venv/bin/python "
             f"/opt/media-gallery/build_manifest.py; rm -f /tmp/datemap_add.json\"",
             shell=True, check=False)
