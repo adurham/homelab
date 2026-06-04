@@ -554,6 +554,11 @@ server {
     # in the backend; serve it for the bare root and /index.html. Everything else
     # (/gallery/manifest.json, /by-chat/<...> thumbs+originals) falls through to
     # the catch-all location / below, which proxies to the rclone serve.
+    # The SPA (gallery_index.html) and the manifest/dedup JSON change on every
+    # deploy/op, but rclone serve only sends Last-Modified (no Cache-Control/ETag),
+    # so browsers (Safari especially) serve a STALE cached copy — you'd see an old
+    # build until a hard refresh. Force no-store on these so the browser always
+    # revalidates. Static media (/by-chat, /thumb) keeps normal caching below.
     location = / {
         auth_request /outpost.goauthentik.io/auth/nginx;
         error_page 401 = @goauthentik_proxy_signin;
@@ -561,6 +566,9 @@ server {
         add_header Set-Cookie $auth_cookie;
 
         proxy_pass http://{{ ip_media_gallery }}:8089/gallery/index.html;
+        proxy_hide_header Last-Modified;
+        proxy_hide_header ETag;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -574,6 +582,27 @@ server {
         add_header Set-Cookie $auth_cookie;
 
         proxy_pass http://{{ ip_media_gallery }}:8089/gallery/index.html;
+        proxy_hide_header Last-Modified;
+        proxy_hide_header ETag;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # The SPA bundle + the data JSON, when fetched directly. no-store so a
+    # republished build / rebuilt manifest is picked up without a hard refresh.
+    location ~ ^/gallery/(index\.html|manifest\.json|dedup\.json|folders\.json)$ {
+        auth_request /outpost.goauthentik.io/auth/nginx;
+        error_page 401 = @goauthentik_proxy_signin;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
+
+        proxy_pass http://{{ ip_media_gallery }}:8089;
+        proxy_hide_header Last-Modified;
+        proxy_hide_header ETag;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
