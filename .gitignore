@@ -143,3 +143,29 @@ pet-accident-detector/id_petaccident
 
 # pet-accident-detector captured frames (local tuning corpus, not for repo)
 pet-accident-detector/evidence/
+
+# =============================================================================
+# DECRYPTED MEDIA / BIOMETRIC WORKING DIRS — NEVER COMMIT
+# =============================================================================
+# Gallery import/classification jobs decrypt media to local disk transiently
+# (face/CLIP matching needs plaintext images). These dirs hold decrypted
+# originals, face/CLIP embedding banks (biometric data), who-is-who mappings,
+# and copied OAuth secrets. They are wiped after a job, but guard against ever
+# committing them. Matches the ~/hidden-gallery-import working-dir convention
+# and any *-gallery-import / *-photo-export scratch dir created in-repo.
+*-gallery-import/
+*-photo-export/
+gallery-import/
+photo-export/
+hidden-gallery-import/
+# biometric embedding banks + classification artifacts
+*ref_face_bank*.npz
+*clip_bank*.npz
+*ref_embeddings*.npz
+classification.json
+upload_plan.json
+new_clusters.json
+uploaded_ledger.json
+# copied collector/OAuth secrets staged locally for a job
+collector.env.local
+*.env.local
