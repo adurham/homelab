@@ -22,11 +22,11 @@ setTimeout(()=>{ try{
  setTimeout(()=>{
    var cards=doc.querySelectorAll('.dupcard');
    console.log('cards rendered (3-member group):',cards.length,'(expect 3)', cards.length===3?'PASS':'FAIL');
-   var keep=doc.querySelectorAll('.dupcard.keep').length, trash=doc.querySelectorAll('.dupcard.trash').length;
+   var keep=doc.querySelectorAll('.dupcard.dckeep').length, trash=doc.querySelectorAll('.dupcard.dcdel').length;
    console.log('default keep:',keep,'trash:',trash,'(expect 1/2)', (keep===1&&trash===2)?'PASS':'FAIL');
    // toggle footer on the keep card -> should become trash
-   var keepCard=doc.querySelector('.dupcard.keep'); click(keepCard.querySelector('.dc-toggle'));
-   console.log('after toggle keepCard now trash:', keepCard.classList.contains('trash')?'PASS':'FAIL');
+   var keepCard=doc.querySelector('.dupcard.dckeep'); click(keepCard.querySelector('.dc-toggle'));
+   console.log('after toggle keepCard now trash:', keepCard.classList.contains('dcdel')?'PASS':'FAIL');
    // reset via group "keep newest only"
    click(doc.querySelector('.dg-mark[data-act="keepfirst"]'));
    click(doc.getElementById('dupTrash'));
