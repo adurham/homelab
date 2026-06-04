@@ -15,6 +15,17 @@
 # Re-arm: a forced-off pump stays off until the next 09:00 ON (or a pool_season
 # toggle) via pool_filter.yaml's schedule - intentional, so a real fault is seen
 # and cleared by a human before the pump runs again.
+#
+# DEBOUNCE (8 min): the trigger sensor is the Emporia cloud-polled minute
+# average, which lags real power by up to ~2-3 min and can drop poll samples
+# mid-run, briefly reading ~0 W on a perfectly healthy pump. A 2-min debounce
+# was SHORTER than that worst-case lag, so a cloud-lag race force-killed a
+# running pump (observed 2026-06-03: pump cut twice, then the reading snapped
+# back to 921 W on its own). 8 min outlasts the Emporia lag so the race can't
+# false-trip, while still catching a genuine sustained fault within minutes.
+# This is an interim fix: the real fix is a metering Shelly (1PM Mini Gen3)
+# reporting LOCAL real-time watts, at which point the trigger moves off the
+# laggy cloud sensor and the debounce can drop back down.
 
 - alias: "Pool Pump Safety - Dead (no power draw)"
   id: pool_pump_safety_dead
@@ -26,12 +37,12 @@
     - platform: state
       entity_id: switch.shelly1minig3_28372f21c5b8
       to: "on"
-      for: "00:02:00"
+      for: "00:08:00"
     # Pump was running, then power collapsed mid-run (breaker trip / relay fail)
     - platform: numeric_state
       entity_id: sensor.edgewater_road_power_minute_average_12
       below: 50
-      for: "00:02:00"
+      for: "00:08:00"
 
   condition:
     - condition: state
@@ -72,12 +83,12 @@
     - platform: numeric_state
       entity_id: sensor.edgewater_road_power_minute_average_12
       below: 700
-      for: "00:05:00"
+      for: "00:08:00"
     # Pump came up weak from the start (never reached normal draw)
     - platform: state
       entity_id: switch.shelly1minig3_28372f21c5b8
       to: "on"
-      for: "00:05:00"
+      for: "00:08:00"
 
   condition:
     - condition: state
