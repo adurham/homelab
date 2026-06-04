@@ -123,7 +123,9 @@
     mode: '0644'
     owner: root
     group: root
-  notify: Restart Nginx
+  notify:
+    - Validate Nginx Config
+    - Restart Nginx
 
 - name: Enable Nginx Site
   ansible.builtin.file:

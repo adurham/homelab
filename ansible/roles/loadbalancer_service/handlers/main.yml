@@ -1,4 +1,12 @@
 ---
+# Validate BEFORE restart. Handlers fire in definition order (not notify
+# order), so a task that notifies both runs this first. A bad render makes
+# `nginx -t` fail here and aborts the play before "Restart Nginx" — nginx
+# keeps serving the last-good config instead of crashing on reload.
+- name: Validate Nginx Config
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
 - name: Restart Nginx
   ansible.builtin.service:
     name: nginx
