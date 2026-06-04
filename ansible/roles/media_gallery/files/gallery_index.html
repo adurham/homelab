@@ -358,22 +358,30 @@
   #dupBar #dupTrash{border-color:#5a3030;}
   #dupBar #dupTrash:hover{background:#d23b3b;border-color:#d23b3b;}
   #dupBar #dupRescan:hover{background:var(--accent);border-color:var(--accent);}
-  .dupgroup{border:1px solid var(--border);border-radius:12px;padding:12px;margin:12px 0;
+  .dupgroup{border:1px solid var(--border);border-radius:12px;padding:14px;margin:14px 0;
     background:var(--panel);}
-  .dupgroup .dg-head{font-size:12.5px;color:var(--muted);margin-bottom:10px;}
-  .dupgroup .dg-items{display:flex;gap:10px;flex-wrap:wrap;}
-  .dupcard{position:relative;width:150px;cursor:pointer;border-radius:8px;overflow:hidden;
+  .dupgroup .dg-head{font-size:13px;color:var(--muted);margin-bottom:12px;
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .dupgroup .dg-head .dg-mark{font-size:12px;padding:5px 10px;border-radius:6px;}
+  .dupgroup .dg-items{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;}
+  .dupcard{position:relative;width:220px;border-radius:10px;overflow:hidden;
     border:1px solid var(--border);background:#11151a;}
-  .dupcard img{width:150px;height:150px;object-fit:cover;display:block;}
-  .dupcard .dc-meta{font-size:11px;color:var(--muted);padding:5px 7px;
+  .dupcard img{width:220px;height:220px;object-fit:contain;background:#0a0d11;
+    display:block;cursor:zoom-in;}
+  .dupcard .dc-meta{font-size:11.5px;color:var(--muted);padding:6px 9px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .dupcard .dc-keep{position:absolute;top:6px;left:6px;font-size:10px;font-weight:700;
-    padding:2px 7px;border-radius:5px;background:#2e7d4f;color:#fff;display:none;}
-  .dupcard.keep .dc-keep{display:block;}
+  /* the keep/delete toggle is an explicit footer button, not the whole card */
+  .dupcard .dc-toggle{display:block;width:100%;border:none;border-top:1px solid var(--border);
+    font-size:12px;font-weight:600;padding:8px;cursor:pointer;}
+  .dupcard.keep .dc-toggle{background:#1d3a2a;color:#6ee7a0;}
+  .dupcard.trash .dc-toggle{background:#3a1d1d;color:#ff8c8c;}
+  .dupcard.keep{outline:3px solid #2e7d4f;outline-offset:-3px;}
   .dupcard.trash{outline:3px solid #d23b3b;outline-offset:-3px;}
-  .dupcard.trash .dc-x{position:absolute;top:6px;right:6px;font-size:14px;color:#fff;
-    background:#d23b3b;border-radius:5px;width:22px;height:22px;display:flex;
-    align-items:center;justify-content:center;}
+  .dupcard .dc-badge{position:absolute;top:8px;left:8px;font-size:10px;font-weight:700;
+    padding:3px 8px;border-radius:5px;color:#fff;}
+  .dupcard.keep .dc-badge{background:#2e7d4f;}
+  .dupcard.trash .dc-badge{background:#d23b3b;}
+  .dupcard.trash img{opacity:.55;}
   @media(max-width:600px){#lb .nav{padding:8px 12px;font-size:24px;}}
 </style>
 </head>
@@ -993,6 +1001,7 @@
     lb.classList.remove('open');
     lbMedia.innerHTML=''; // stop playback
     lbIndex=-1;
+    delete lb.dataset.dupmode; delete lb.dataset.dupdi;
     if(typeof hideLbConfirm==='function') hideLbConfirm();
     if(typeof hideMoveMenu==='function') hideMoveMenu();
   }
@@ -1749,6 +1758,11 @@
     // lightbox keys
     if(lb.classList.contains('open')){
       if(e.key==='Escape') closeLb();
+      else if(lb.dataset.dupmode==='1'){
+        // dup-compare mode: page through the flat dup list
+        if(e.key==='ArrowLeft'){ var p=parseInt(lb.dataset.dupdi,10)-1; if(p>=0) openDupLightbox(p); }
+        else if(e.key==='ArrowRight'){ var n=parseInt(lb.dataset.dupdi,10)+1; if(n<dupShown.length) openDupLightbox(n); }
+      }
       else if(e.key==='ArrowLeft'){hideLbConfirm();hideMoveMenu();navLb(-1);}
       else if(e.key==='ArrowRight'){hideLbConfirm();hideMoveMenu();navLb(1);}
       else if(e.key==='Delete'||e.key==='Backspace'){ deleteCurrent(); }
@@ -1837,33 +1851,71 @@
       wireDupBar();
       return;
     }
+    // flat index of every shown dup item so the lightbox can page through them
+    dupShown=[];
     groups.forEach(function(g,gi){
-      html+='<div class="dupgroup" data-g="'+gi+'"><div class="dg-head">Group '+(gi+1)+
-        ' — '+g.length+' similar items'+
-        ' (keeping the newest by default)</div><div class="dg-items">';
+      html+='<div class="dupgroup" data-g="'+gi+'"><div class="dg-head">'+
+        '<b>Group '+(gi+1)+'</b> — '+g.length+' similar items, keeping the newest by default.'+
+        '<span class="grow"></span>'+
+        '<button class="dg-mark" data-g="'+gi+'" data-act="keepfirst">Keep newest only</button>'+
+        '<button class="dg-mark" data-g="'+gi+'" data-act="keepall">Keep all</button>'+
+        '</div><div class="dg-items">';
       g.forEach(function(m,mi){
         // default: keep the first (newest), trash the rest
         var act=(mi===0)?'keep':'trash'; dupAction[m.stem]=act;
-        var meta=(m.chat||'')+(m.size?(' · '+fmtBytes(m.size)):'');
-        html+='<div class="dupcard '+act+'" data-stem="'+m.stem+'" data-chat="'+(m.chat||'')+'">'+
-          '<span class="dc-keep">KEEP</span><span class="dc-x">✕</span>'+
-          '<img loading="lazy" src="/'+m.thumb+'">'+
-          '<div class="dc-meta">'+meta+'</div></div>';
+        var di=dupShown.length; dupShown.push(m);
+        var dt=m.date?(' · '+fmtDate(m.date)):'';
+        var meta=(m.chat||'')+(m.size?(' · '+fmtBytes(m.size)):'')+dt;
+        html+='<div class="dupcard '+act+'" data-stem="'+m.stem+'" data-chat="'+(m.chat||'')+'" data-di="'+di+'">'+
+          '<span class="dc-badge">'+(act==='keep'?'KEEP':'DELETE')+'</span>'+
+          '<img loading="lazy" src="/'+m.thumb+'" data-di="'+di+'">'+
+          '<div class="dc-meta">'+meta+'</div>'+
+          '<button class="dc-toggle">'+(act==='keep'?'✓ Keeping — click to delete':'🗑 Deleting — click to keep')+'</button>'+
+          '</div>';
       });
       html+='</div></div>';
     });
     elDup.innerHTML=html;
     wireDupBar();
-    // click a card to toggle keep/trash
-    elDup.querySelectorAll('.dupcard').forEach(function(c){
-      c.addEventListener('click',function(){
-        var stem=c.dataset.stem;
-        if(dupAction[stem]==='trash'){ dupAction[stem]='keep'; c.classList.remove('trash'); c.classList.add('keep'); }
-        else { dupAction[stem]='trash'; c.classList.remove('keep'); c.classList.add('trash'); }
+    // click image -> open in the lightbox for a full-size visual compare
+    elDup.querySelectorAll('.dupcard img').forEach(function(img){
+      img.addEventListener('click',function(e){ e.stopPropagation(); openDupLightbox(parseInt(img.dataset.di,10)); });
+    });
+    // click the toggle footer -> flip keep/delete
+    elDup.querySelectorAll('.dupcard .dc-toggle').forEach(function(btn){
+      btn.addEventListener('click',function(e){
+        e.stopPropagation();
+        var c=btn.closest('.dupcard'); setDupCard(c, dupAction[c.dataset.stem]==='trash'?'keep':'trash');
+        updateDupCount();
+      });
+    });
+    // per-group quick actions
+    elDup.querySelectorAll('.dg-mark').forEach(function(btn){
+      btn.addEventListener('click',function(){
+        var gi=parseInt(btn.dataset.g,10), mode=btn.dataset.act;
+        var cards=elDup.querySelectorAll('.dupgroup[data-g="'+gi+'"] .dupcard');
+        cards.forEach(function(c,idx){
+          if(mode==='keepall') setDupCard(c,'keep');
+          else setDupCard(c, idx===0?'keep':'trash');   // keepfirst
+        });
         updateDupCount();
       });
     });
     updateDupCount();
+  }
+  function setDupCard(c, act){
+    var stem=c.dataset.stem; dupAction[stem]=act;
+    c.classList.remove('keep','trash'); c.classList.add(act);
+    var badge=c.querySelector('.dc-badge'); if(badge) badge.textContent=act==='keep'?'KEEP':'DELETE';
+    var tg=c.querySelector('.dc-toggle'); if(tg) tg.innerHTML=act==='keep'?'✓ Keeping — click to delete':'🗑 Deleting — click to keep';
+  }
+  // lightbox over the flat dup list (full-size compare, arrow-key paging)
+  var dupShown=[];
+  function openDupLightbox(di){
+    var it=dupShown[di]; if(!it) return;
+    lbMedia.innerHTML='';
+    var el=document.createElement('img'); el.src='/'+it.file; lbMedia.appendChild(el);
+    lb.classList.add('open'); lb.dataset.dupdi=di; lb.dataset.dupmode='1';
   }
   function updateDupCount(){
     var n=Object.keys(dupAction).filter(function(s){return dupAction[s]==='trash';}).length;
