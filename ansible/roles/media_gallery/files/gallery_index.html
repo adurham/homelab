@@ -220,6 +220,19 @@
   #folderRail .railitem.newfolder{border-style:dashed;color:var(--accent);}
   /* folder tiles become drop targets on the landing page too */
   .folder.dragover{outline:3px solid var(--accent);outline-offset:-3px;}
+  /* toast notifications (bottom-center) */
+  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);
+    z-index:200;display:flex;align-items:center;gap:10px;min-width:220px;max-width:90vw;
+    background:#1c2230;border:1px solid var(--border);border-radius:12px;
+    padding:12px 18px;font-size:14px;color:var(--text);box-shadow:0 10px 40px rgba(0,0,0,.55);
+    opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  #toast.ok{border-color:#2e7d4f;}
+  #toast.err{border-color:#d23b3b;}
+  #toast.work{border-color:var(--accent);}
+  #toast .spin{width:15px;height:15px;border:2px solid #3a4150;border-top-color:var(--accent);
+    border-radius:50%;animation:spin .7s linear infinite;flex:0 0 auto;}
+  @keyframes spin{to{transform:rotate(360deg);}}
   @media(max-width:600px){#lb .nav{padding:8px 12px;font-size:24px;}}
 </style>
 </head>
@@ -257,6 +270,7 @@
   <div id="state" class="state">Loading…</div>
 </main>
 <div id="rubber"></div>
+<div id="toast"></div>
 
 <div id="lb">
   <button class="close" id="lbClose">&times;</button>
@@ -279,6 +293,20 @@
   var current=null;        // null = landing; "*" all; else chat name
   var view=[];             // current folder's sorted items
   var lbIndex=-1;
+
+  // ---- toast (visible feedback for every action) ----
+  var _toastEl=null, _toastTimer=null;
+  function toast(msg, kind, sticky){
+    if(!_toastEl) _toastEl=document.getElementById('toast');
+    if(!_toastEl) return;
+    _toastEl.className=''; void _toastEl.offsetWidth;  // restart transition
+    _toastEl.classList.add(kind||'ok','show');
+    _toastEl.innerHTML=(kind==='work'?'<span class="spin"></span>':'')+
+      '<span>'+msg+'</span>';
+    if(_toastTimer){ clearTimeout(_toastTimer); _toastTimer=null; }
+    if(!sticky){ _toastTimer=setTimeout(function(){ _toastEl.classList.remove('show'); }, kind==='err'?4500:2600); }
+  }
+  function toastHide(){ if(_toastEl) _toastEl.classList.remove('show'); }
 
   var elFolder=document.getElementById('folderGrid');
   var elPhoto=document.getElementById('photoGrid');
@@ -784,13 +812,14 @@
       {method:'POST',credentials:'same-origin'})
       .then(function(r){
         if(r.status===200){
+          toast('✓ Renamed “'+oldName+'” → “'+nn+'”','ok');
           // optimistic local update; manifest rebuild on the server re-keys items
           var ei=emptyFolders.indexOf(oldName); if(ei>=0) emptyFolders[ei]=nn;
           reloadManifest(null);
-        }else if(r.status===409){ alert('That folder name already exists on the server.'); }
-        else { alert('Rename failed (HTTP '+r.status+').'); }
+        }else if(r.status===409){ toast('A folder named “'+nn+'” already exists','err'); }
+        else { toast('Rename failed (HTTP '+r.status+')','err'); }
       })
-      .catch(function(){ alert('Network error during rename.'); });
+      .catch(function(){ toast('Network error during rename','err'); });
   }
   // tile click: open lightbox. (Selection is via the always-on checkbox; a plain
   // tile click still opens the viewer. Ctrl/Cmd/Shift-click toggles selection.)
@@ -878,47 +907,63 @@
       .catch(function(){ alert('Network error creating folder.'); });
   }
 
+  // find the manifest item for a stem in the current folder
+  function itemByStem(stem){
+    for(var i=0;i<view.length;i++){ if(view[i].stem===stem) return view[i]; }
+    return null;
+  }
+
   function bulkMove(dest, stemsOverride){
     hideBulkMoveMenu();
     var stems=stemsOverride||Array.prototype.slice.call(selected);
-    if(!stems.length) return;
-    var src=current, done=0, fail=0;
-    elBulkBar.classList.add('show');
-    elBulkCount.textContent='Moving 0/'+stems.length+'…';
+    if(!stems.length){ toast('Nothing selected to move.','err'); return; }
+    var src=current, done=0, fail=0, moved=[];
+    toast('Moving 0/'+stems.length+' to '+dest+'…','work',true);
     var chain=Promise.resolve();
     stems.forEach(function(stem){
       chain=chain.then(function(){
         return fetch('/move/'+encodeURIComponent(src)+'/'+encodeURIComponent(stem)+'/'+encodeURIComponent(dest),
           {method:'POST',credentials:'same-origin'})
-          .then(function(r){ if(r.status===200) done++; else fail++; },function(){ fail++; })
-          .then(function(){ elBulkCount.textContent='Moving '+(done+fail)+'/'+stems.length+'…'; });
+          .then(function(r){ if(r.status===200){ done++; moved.push(stem); } else fail++; },function(){ fail++; })
+          .then(function(){ toast('Moving '+(done+fail)+'/'+stems.length+' to '+dest+'…','work',true); });
       });
     });
     chain.then(function(){
-      if(fail) alert('Moved '+done+', '+fail+' failed.');
-      clearSelection(); reloadManifest(current);
+      // optimistic: drop moved items from the current view immediately
+      moved.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); });
+      clearSelection();
+      if(current!=null){ view=(current==='*'?manifest.slice():(chatMap[current]?chatMap[current].slice():[])); applySort(view); renderPhotos(); renderFolderRail();
+        elSub.textContent=view.length+' item'+(view.length===1?'':'s'); }
+      if(fail) toast('Moved '+done+' to '+dest+', '+fail+' failed','err');
+      else toast('✓ Moved '+done+' to '+dest,'ok');
+      reloadManifest(current);   // reconcile with server once its debounce fires
     });
   }
 
   // ---- bulk delete ----
   document.getElementById('bulkDelete').addEventListener('click',function(){
-    if(!selected.size){ alert('Select some items first.'); return; }
+    if(!selected.size){ toast('Nothing selected to delete.','err'); return; }
     if(!confirm('Delete '+selected.size+' item(s)? This cannot be undone.')) return;
     var stems=Array.prototype.slice.call(selected);
-    var done=0, fail=0;
-    elBulkCount.textContent='Deleting 0/'+stems.length+'…';
+    var done=0, fail=0, gone=[];
+    toast('Deleting 0/'+stems.length+'…','work',true);
     var chain=Promise.resolve();
     stems.forEach(function(stem){
       chain=chain.then(function(){
         return fetch('/trash/'+encodeURIComponent(current)+'/'+encodeURIComponent(stem),
           {method:'POST',credentials:'same-origin'})
-          .then(function(r){ if(r.status===200) done++; else fail++; },function(){ fail++; })
-          .then(function(){ elBulkCount.textContent='Deleting '+(done+fail)+'/'+stems.length+'…'; });
+          .then(function(r){ if(r.status===200){ done++; gone.push(stem); } else fail++; },function(){ fail++; })
+          .then(function(){ toast('Deleting '+(done+fail)+'/'+stems.length+'…','work',true); });
       });
     });
     chain.then(function(){
-      if(fail) alert('Deleted '+done+', '+fail+' failed.');
-      clearSelection(); reloadManifest(current);
+      gone.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); });
+      clearSelection();
+      if(current!=null){ view=(current==='*'?manifest.slice():(chatMap[current]?chatMap[current].slice():[])); applySort(view); renderPhotos();
+        elSub.textContent=view.length+' item'+(view.length===1?'':'s'); }
+      if(fail) toast('Deleted '+done+', '+fail+' failed','err');
+      else toast('✓ Deleted '+done,'ok');
+      reloadManifest(current);
     });
   });
 
@@ -1012,19 +1057,21 @@
   function doMove(it,dest){
     hideMoveMenu();
     var src=it.chat, stem=it.stem;
+    toast('Moving to '+dest+'…','work',true);
     fetch('/move/'+encodeURIComponent(src)+'/'+encodeURIComponent(stem)+'/'+encodeURIComponent(dest),
       {method:'POST',credentials:'same-origin'})
       .then(function(r){
         if(r.status===200){
+          toast('✓ Moved to '+dest,'ok');
           // remove from current view + advance lightbox
           var wasIndex=lbIndex;
           removeFromData(it);
           if(!view.length){ closeLb(); reloadManifest(null); return; }
           var next=wasIndex; if(next>=view.length) next=0;
-          openLb(next); reloadManifest(current);
-        }else{ alert('Move failed (HTTP '+r.status+').'); }
+          openLb(next); renderPhotos(); reloadManifest(current);
+        }else{ toast('Move failed (HTTP '+r.status+')','err'); }
       })
-      .catch(function(){ alert('Network error during move.'); });
+      .catch(function(){ toast('Network error during move','err'); });
   }
   lbMoveBtn.addEventListener('click',function(e){
     e.stopPropagation();
