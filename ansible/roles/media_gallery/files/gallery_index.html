@@ -281,6 +281,27 @@
   #bgTasks .spin{width:14px;height:14px;border:2px solid #3a4150;border-top-color:var(--accent);
     border-radius:50%;animation:spin .7s linear infinite;flex:0 0 auto;}
   #bgTasks.done .spin{display:none;}
+  #bgTasks{cursor:pointer;}
+  /* activity log panel */
+  #taskScrim{position:fixed;inset:0;z-index:170;background:rgba(0,0,0,.45);display:none;
+    align-items:center;justify-content:center;}
+  #taskScrim.show{display:flex;}
+  #taskDlg{width:600px;max-width:94vw;max-height:80vh;display:flex;flex-direction:column;
+    background:#1b2129;border:1px solid var(--border);border-radius:14px;overflow:hidden;
+    box-shadow:0 20px 60px rgba(0,0,0,.6);}
+  #taskDlg .tk-head{display:flex;align-items:center;gap:10px;padding:14px 18px;
+    border-bottom:1px solid var(--border);}
+  #taskDlg .tk-head .grow{flex:1;}
+  #taskDlg .tk-head button{font-size:12px;padding:6px 12px;}
+  #tkBody{padding:8px 0;overflow-y:auto;font-size:12.5px;}
+  #tkBody .tk-row{display:flex;gap:10px;padding:7px 18px;border-bottom:1px solid #232a33;
+    align-items:baseline;}
+  #tkBody .tk-row .tk-time{color:var(--muted);flex:0 0 64px;font-variant-numeric:tabular-nums;}
+  #tkBody .tk-row .tk-op{flex:0 0 90px;font-weight:600;}
+  #tkBody .tk-row .tk-detail{flex:1;color:#cdd3da;word-break:break-all;}
+  #tkBody .tk-row.ok .tk-op{color:#6ee7a0;}
+  #tkBody .tk-row.err .tk-op{color:#ff8c8c;}
+  #tkBody .tk-empty{padding:18px;color:var(--muted);text-align:center;}
   /* OS-style progress dialog (file-manager copy/move sheet) */
   #progScrim{position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.45);
     display:none;align-items:center;justify-content:center;}
@@ -445,7 +466,14 @@
 </main>
 <div id="rubber"></div>
 <div id="toast"></div>
-<div id="bgTasks" title="Background deletion queue"><span class="spin"></span><span id="bgTasksText"></span></div>
+<div id="bgTasks" title="Background tasks — click for activity log"><span class="spin"></span><span id="bgTasksText"></span></div>
+<div id="taskScrim">
+  <div id="taskDlg">
+    <div class="tk-head"><b>Activity log</b><span class="grow"></span>
+      <button id="tkClear">Clear</button><button id="tkClose">Close</button></div>
+    <div id="tkBody"></div>
+  </div>
+</div>
 <div id="ctxMenu"></div>
 <div id="propScrim">
   <div id="propDlg">
@@ -543,11 +571,42 @@
         } else {
           if(_reapShown){ el.classList.add('show','done'); txt.textContent='✓ Background tasks complete';
             if(_bgTimer) clearTimeout(_bgTimer);
-            _bgTimer=setTimeout(function(){ el.classList.remove('show','done'); _reapShown=false; }, 3000);
-          } else { el.classList.remove('show'); }
+            _bgTimer=setTimeout(function(){ el.classList.add('done'); txt.textContent='Activity'; _reapShown=false; }, 3000);
+          } else { el.classList.add('show','done'); txt.textContent='Activity'; }   // idle: stay as a clickable chip
         }
       });
   }
+
+  // ---- activity log (debug / tasks panel) ----
+  var _taskLog=[];   // {t, op, detail, status, ok}
+  function logTask(op, detail, status, msg){
+    var ok=(status>=200&&status<300);
+    _taskLog.unshift({t:new Date(), op:op, detail:detail, status:status, msg:msg||'', ok:ok});
+    if(_taskLog.length>200) _taskLog.length=200;
+    if(document.getElementById('taskScrim').classList.contains('show')) renderTaskLog();
+  }
+  function renderTaskLog(){
+    var b=document.getElementById('tkBody');
+    if(!_taskLog.length){ b.innerHTML='<div class="tk-empty">No activity yet.</div>'; return; }
+    b.innerHTML=_taskLog.map(function(e){
+      var hh=e.t.toLocaleTimeString();
+      var st=e.ok?('✓ '+e.op):('✕ '+e.op+' ('+e.status+')');
+      var det=(e.detail||'')+(e.msg?(' — '+e.msg):'');
+      return '<div class="tk-row '+(e.ok?'ok':'err')+'"><span class="tk-time">'+hh+
+        '</span><span class="tk-op">'+st+'</span><span class="tk-detail">'+
+        String(det).replace(/</g,'&lt;')+'</span></div>';
+    }).join('');
+  }
+  function openTaskLog(){ document.getElementById('taskScrim').classList.add('show'); renderTaskLog(); }
+  setTimeout(function(){
+    var bg=document.getElementById('bgTasks');
+    // keep a small always-visible "Activity" chip so the log is reachable anytime
+    if(bg){ if(!bg.classList.contains('show')){ bg.classList.add('show','done'); document.getElementById('bgTasksText').textContent='Activity'; } }
+    if(bg) bg.addEventListener('click',openTaskLog);
+    var c=document.getElementById('tkClose'); if(c) c.addEventListener('click',function(){ document.getElementById('taskScrim').classList.remove('show'); });
+    var cl=document.getElementById('tkClear'); if(cl) cl.addEventListener('click',function(){ _taskLog=[]; renderTaskLog(); });
+    var sc=document.getElementById('taskScrim'); if(sc) sc.addEventListener('click',function(e){ if(e.target===sc) sc.classList.remove('show'); });
+  },0);
 
   // ---- OS-style progress dialog ----
   var _pd={};
@@ -1765,13 +1824,21 @@
   // ---------- folder cover + chat-id mapping ----------
   function setFolderCover(folder, stem){
     if(!folder||folder==='*'){ toast('Pick a real folder.','err'); return; }
+    if(!stem){ toast('No image stem to set as cover.','err'); return; }
     folderMeta[folder]=folderMeta[folder]||{}; folderMeta[folder].cover=stem;  // optimistic
     fetch('/setcover',{method:'POST',credentials:'same-origin',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({folder:folder,stem:stem})})
-      .then(function(r){ if(r.status===200){ toast('✓ Cover set for “'+folder+'”','ok'); }
-        else { toast('Set cover failed (HTTP '+r.status+')','err'); } })
-      .catch(function(){ toast('Network error setting cover','err'); });
+      .then(function(r){ return r.text().then(function(t){ return {status:r.status, text:t}; }); })
+      .then(function(res){
+        if(res.status===200){ toast('✓ Cover set for “'+folder+'”','ok'); }
+        else {
+          var msg=res.text; try{ var j=JSON.parse(res.text); if(j.error) msg=j.error; }catch(_){}
+          toast('Set cover failed: '+msg,'err');
+          logTask('setcover', folder+'/'+stem, res.status, msg);   // record in the debug log
+        }
+      })
+      .catch(function(e){ toast('Network error setting cover','err'); logTask('setcover', folder+'/'+stem, 0, String(e)); });
   }
   function clearFolderCover(folder){
     if(folderMeta[folder]) delete folderMeta[folder].cover;

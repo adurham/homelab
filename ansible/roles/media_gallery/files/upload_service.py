@@ -413,29 +413,38 @@ class Handler(BaseHTTPRequestHandler):
             if not self._key_ok():
                 return self._json(401, {"error": "unauthorized"})
             p = p[len("/ingest"):]
-        if p.startswith("/mkdir/"):
-            return self._mkdir(p[len("/mkdir/"):])
-        if p.startswith("/upload/"):
-            return self._upload(p[len("/upload/"):])
-        if p.startswith("/rename/"):
-            return self._rename(p[len("/rename/"):])
-        if p.startswith("/renamefile/"):
-            return self._renamefile(p[len("/renamefile/"):])
-        if p.startswith("/dedupscan"):
-            return self._dedupscan()
-        if p.startswith("/setcover"):
-            return self._setcover()
-        if p.startswith("/setchatids"):
-            return self._setchatids()
-        if p.startswith("/movemark"):
-            return self._movemark()
-        if p.startswith("/movebatch"):
-            return self._movebatch()
-        if p.startswith("/move/"):
-            return self._move(p[len("/move/"):])
-        if p.startswith("/rmdir/"):
-            return self._rmdir(p[len("/rmdir/"):])
-        self._json(404, {"error": "not found"})
+        try:
+            if p.startswith("/mkdir/"):
+                return self._mkdir(p[len("/mkdir/"):])
+            if p.startswith("/upload/"):
+                return self._upload(p[len("/upload/"):])
+            if p.startswith("/rename/"):
+                return self._rename(p[len("/rename/"):])
+            if p.startswith("/renamefile/"):
+                return self._renamefile(p[len("/renamefile/"):])
+            if p.startswith("/dedupscan"):
+                return self._dedupscan()
+            if p.startswith("/setcover"):
+                return self._setcover()
+            if p.startswith("/setchatids"):
+                return self._setchatids()
+            if p.startswith("/movemark"):
+                return self._movemark()
+            if p.startswith("/movebatch"):
+                return self._movebatch()
+            if p.startswith("/move/"):
+                return self._move(p[len("/move/"):])
+            if p.startswith("/rmdir/"):
+                return self._rmdir(p[len("/rmdir/"):])
+            self._json(404, {"error": "not found"})
+        except Exception as e:  # noqa: BLE001 — surface the real error, don't bare-500
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[ERROR] {p}: {type(e).__name__}: {e}\n{tb}", flush=True)
+            try:
+                self._json(500, {"error": f"{type(e).__name__}: {e}", "path": p})
+            except Exception:  # noqa: BLE001 — response already partially sent
+                pass
 
     def _rmdir(self, raw):
         """POST /rmdir/<folder> — delete a gallery folder AND its contents
@@ -584,8 +593,8 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json_body()
         if body is None:
             return self._json(400, {"error": "bad json body"})
-        folder = sanitize_folder(body.get("folder", ""))
-        stem = (body.get("stem") or "").strip()
+        folder = sanitize_folder(str(body.get("folder", "")))
+        stem = str(body.get("stem") or "").strip()   # coerce: stem may arrive as int
         if not folder:
             return self._json(400, {"error": "want {folder, stem}"})
         if "/" in stem or ".." in stem:
