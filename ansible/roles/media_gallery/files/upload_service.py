@@ -107,6 +107,105 @@ PUSH_INTERVAL = int(os.environ.get("PUSH_INTERVAL_SEC", "5"))
 _dm_lock = threading.Lock()
 _push_lock = threading.Lock()
 
+# ─── Pending-move queue (instant mark + background mover) ────────────────────
+# /movemark appends {src,dest,stem} here and returns instantly; a reaper thread
+# does the slow rclone relocation out of band. Persistent so it survives restart.
+MOVE_QUEUE_FILE = Path(os.environ.get("TG_MOVE_QUEUE", "/var/lib/media-gallery/pending_move.json"))
+_mvqlock = threading.Lock()
+_mover_state = {"moved": 0, "failed": 0}
+
+
+def _load_move_queue() -> list:
+    try:
+        return json.loads(MOVE_QUEUE_FILE.read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def _save_move_queue(items: list) -> None:
+    MOVE_QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(MOVE_QUEUE_FILE) + ".tmp"
+    Path(tmp).write_text(json.dumps(items))
+    os.replace(tmp, MOVE_QUEUE_FILE)
+
+
+def _enqueue_moves(src: str, dest: str, stems: list) -> int:
+    with _mvqlock:
+        q = _load_move_queue()
+        have = {(e.get("src"), e.get("dest"), e.get("stem")) for e in q}
+        added = 0
+        for s in stems:
+            if (src, dest, s) not in have:
+                q.append({"src": src, "dest": dest, "stem": s})
+                added += 1
+        _save_move_queue(q)
+    return added
+
+
+def _mover_worker():
+    """Background mover: drains the pending-move queue. Items are grouped by
+    (src,dest) and moved in one filtered rclone process per group, then a manifest
+    rebuild is armed so the new paths reconcile. The SPA shows the item in the new
+    folder immediately (still loading from the OLD path), so nothing breaks while
+    this runs."""
+    while True:
+        try:
+            with _mvqlock:
+                q = _load_move_queue()
+            if not q:
+                time.sleep(3)
+                continue
+            # take the first (src,dest) group
+            head = q[0]
+            src, dest = head.get("src"), head.get("dest")
+            group = [e for e in q if e.get("src") == src and e.get("dest") == dest]
+            stems = [e.get("stem") for e in group]
+            ok = _do_move_group(src, dest, stems)
+            # remove the processed group from the queue (re-read for safety)
+            with _mvqlock:
+                cur = _load_move_queue()
+                cur = [e for e in cur
+                       if not (e.get("src") == src and e.get("dest") == dest and e.get("stem") in set(stems))]
+                _save_move_queue(cur)
+            if ok:
+                _mover_state["moved"] += len(stems)
+            else:
+                _mover_state["failed"] += len(stems)
+            _dirty.set()   # rebuild manifest so the new paths become authoritative
+        except Exception:  # noqa: BLE001
+            time.sleep(5)
+
+
+def _do_move_group(src, dest, stems) -> bool:
+    """Relocate a group of stems src->dest in one filtered rclone move (originals
+    + thumbs). Returns True if the originals move succeeded."""
+    ls = rclone("lsf", f"{SRC}/{src}/")
+    if ls.returncode != 0:
+        return False
+    by_stem = {}
+    for line in ls.stdout.splitlines():
+        name = line.strip()
+        if name:
+            by_stem[os.path.splitext(name)[0]] = name
+    leaves = [by_stem[s] for s in stems if s in by_stem]
+    if not leaves:
+        return True   # already moved (nothing left in src) — treat as done
+    rclone("mkdir", f"{SRC}/{dest}")
+    inc = []
+    for leaf in leaves:
+        inc += ["--include", leaf]
+    r = rclone("move", f"{SRC}/{src}", f"{SRC}/{dest}",
+               *inc, "--transfers", "16", "--checkers", "32",
+               "--retries", "5", "--low-level-retries", "10")
+    tinc = []
+    for s in stems:
+        tinc += ["--include", f"{s}.jpg"]
+    rclone("move", f"{REMOTE}thumbs/{src}", f"{REMOTE}thumbs/{dest}",
+           *tinc, "--transfers", "16", "--checkers", "32",
+           "--retries", "3", "--low-level-retries", "5")
+    rclone("rmdirs", f"{SRC}/{src}", "--leave-root")
+    return r.returncode == 0
+
 # ─── Coalesced manifest rebuild ────────────────────────────────────────────
 # Uploads set a dirty flag; a single background worker rebuilds at most once per
 # DEBOUNCE window. Thousands of uploads => a few rebuilds, never a thundering
@@ -257,6 +356,14 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError):
                 ex = []
             return self._json(200, {"excluded": ex, "count": len(ex)})
+        if p == "/movequeue":
+            with _mvqlock:
+                depth = len(_load_move_queue())
+            return self._json(200, {
+                "queued": depth,
+                "moved": _mover_state["moved"],
+                "failed": _mover_state["failed"],
+            })
         self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -282,6 +389,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._renamefile(p[len("/renamefile/"):])
         if p.startswith("/dedupscan"):
             return self._dedupscan()
+        if p.startswith("/movemark"):
+            return self._movemark()
         if p.startswith("/movebatch"):
             return self._movebatch()
         if p.startswith("/move/"):
@@ -416,6 +525,32 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"started": True})
         except Exception as e:  # noqa: BLE001
             self._json(500, {"error": f"{type(e).__name__}: {e}"})
+
+    def _movemark(self):
+        """POST /movemark  body: {"src": "...", "dest": "...", "stems": [...]}
+        INSTANT move: queue the relocation for the background mover and return at
+        once. The SPA re-keys the items to <dest> locally (but keeps loading their
+        thumbs/originals from the OLD path until the mover relocates them), so the
+        destination folder always renders correctly while the move runs."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length) or "{}")
+        except (ValueError, OSError):
+            return self._json(400, {"error": "bad json body"})
+        srcf = sanitize_folder(body.get("src", ""))
+        destf = sanitize_folder(body.get("dest", ""))
+        stems = body.get("stems") or []
+        if not srcf or not destf or not isinstance(stems, list) or not stems:
+            return self._json(400, {"error": "want {src, dest, stems[]}"})
+        if srcf == destf:
+            return self._json(200, {"queued_added": 0, "noop": True})
+        # make sure the destination exists so a fresh page load / rebuild is happy
+        rclone("mkdir", f"{SRC}/{destf}")
+        added = _enqueue_moves(srcf, destf, stems)
+        with _mvqlock:
+            depth = len(_load_move_queue())
+        return self._json(200, {"marked": len(stems), "queued_added": added,
+                                "queue_depth": depth})
 
     def _movebatch(self):
         """POST /movebatch  body: {"src": "...", "dest": "...", "stems": [...]}
@@ -624,6 +759,7 @@ def main():
     _drain_pending_on_start()
     threading.Thread(target=_rebuild_worker, daemon=True).start()
     threading.Thread(target=_pusher_worker, daemon=True).start()
+    threading.Thread(target=_mover_worker, daemon=True).start()
     srv = ThreadingHTTPServer((BIND, PORT), Handler)
     print(f"upload service on {BIND}:{PORT} (debounce {DEBOUNCE}s, async GDrive push)", flush=True)
     srv.serve_forever()

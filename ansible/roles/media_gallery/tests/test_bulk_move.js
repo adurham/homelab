@@ -10,7 +10,8 @@ let batchBody=null;
 const dom=new JSDOM(html,{runScripts:'dangerously',resources:'usable',beforeParse(window){
  window.fetch=(url,opts)=>{const u=String(url);
    if(u.indexOf('manifest.json')>=0)return Promise.resolve({ok:true,status:200,json:()=>Promise.resolve(manifest)});
-   if(u.indexOf('/movebatch')>=0){ batchBody=JSON.parse(opts.body); return Promise.resolve({status:200,json:()=>Promise.resolve({moved:batchBody.stems.length})}); }
+   if(u.indexOf('/movemark')>=0){ batchBody=JSON.parse(opts.body); return Promise.resolve({status:200,json:()=>Promise.resolve({marked:batchBody.stems.length})}); }
+   if(u.indexOf('queue')>=0)return Promise.resolve({ok:true,status:200,json:()=>Promise.resolve({queued:0})});
    return Promise.resolve({status:200,json:()=>Promise.resolve({}),text:()=>Promise.resolve('')});};
  window.alert=(m)=>{window.__a=m;};window.confirm=()=>true;window.prompt=()=>'NF';window.scrollTo=()=>{};
 }});
@@ -28,6 +29,6 @@ setTimeout(()=>{ try{
    const ok = batchBody && batchBody.src==='person_1' && batchBody.dest==='person_2' &&
               batchBody.stems.length===2 && batchBody.stems.indexOf('a1')>=0 && batchBody.stems.indexOf('a3')>=0;
    console.log('batch body:', JSON.stringify(batchBody));
-   console.log(ok?'>>> PASS: one /movebatch with both stems to person_2 <<<':'>>> FAIL <<<');
+   console.log(ok?'>>> PASS: one /movemark with both stems to person_2 <<<':'>>> FAIL <<<');
  },300);
 }catch(e){console.log('EXCEPTION:',e.message);} },800);

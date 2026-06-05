@@ -507,31 +507,34 @@
   }
   function toastHide(){ if(_toastEl) _toastEl.classList.remove('show'); }
 
-  // ---- background deletion queue indicator ----
-  var _bgTimer=null;
+  // ---- unified background-tasks indicator (deletes + moves) ----
+  var _bgTimer=null, _reapShown=false;
   function bgPoll(){
     var el=document.getElementById('bgTasks'), txt=document.getElementById('bgTasksText');
     if(!el) return;
-    fetch('/trashqueue',{credentials:'same-origin'})
-      .then(function(r){return r.ok?r.json():null;})
-      .then(function(q){
-        if(!q){ return; }
-        if(q.queued>0){
+    Promise.all([
+      fetch('/trashqueue',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
+      fetch('/movequeue',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
+    ]).then(function(res){
+        var delN=(res[0]&&res[0].queued)||0, mvN=(res[1]&&res[1].queued)||0;
+        var total=delN+mvN;
+        if(total>0){
           el.classList.add('show'); el.classList.remove('done');
-          txt.textContent='Deleting '+q.queued+' in background…';
+          var parts=[];
+          if(delN>0) parts.push('deleting '+delN);
+          if(mvN>0) parts.push('moving '+mvN);
+          txt.textContent=parts.join(' · ')+' in background…';
+          _reapShown=true;
           if(_bgTimer) clearTimeout(_bgTimer);
-          _bgTimer=setTimeout(bgPoll, 2000);   // keep polling while draining
+          _bgTimer=setTimeout(bgPoll, 2000);
         } else {
-          // drained — briefly show done, then hide
-          if(_reapShown){ el.classList.add('show','done'); txt.textContent='✓ Background deletes complete';
+          if(_reapShown){ el.classList.add('show','done'); txt.textContent='✓ Background tasks complete';
             if(_bgTimer) clearTimeout(_bgTimer);
             _bgTimer=setTimeout(function(){ el.classList.remove('show','done'); _reapShown=false; }, 3000);
           } else { el.classList.remove('show'); }
         }
-        if(q.queued>0) _reapShown=true;
-      }).catch(function(){});
+      });
   }
-  var _reapShown=false;
 
   // ---- OS-style progress dialog ----
   var _pd={};
@@ -631,10 +634,16 @@
       }
       if(pendingMove[it.stem]){
         if(it.chat===pendingMove[it.stem]){ delete pendingMove[it.stem]; out.push(it); } // server caught up
-        else { var clone={}; for(var k in it) clone[k]=it[k]; clone.chat=pendingMove[it.stem];
-               clone.file=clone.file&&clone.file.replace('by-chat/'+it.chat+'/','by-chat/'+clone.chat+'/');
-               clone.thumb=clone.thumb&&clone.thumb.replace('/'+it.chat+'/','/'+clone.chat+'/');
-               out.push(clone); }
+        else {
+          // Show the item in the destination folder, but KEEP file/thumb pointing
+          // at the CURRENT (original) location — the file physically hasn't moved
+          // yet (background mover), so loading from the new path would 404. Once
+          // the server's rebuilt manifest lists it under the new chat, the branch
+          // above retires the pending entry and the real new paths take over.
+          var clone={}; for(var k in it) clone[k]=it[k];
+          clone.chat=pendingMove[it.stem];   // display folder only; paths unchanged
+          out.push(clone);
+        }
         return;
       }
       out.push(it);
@@ -1501,34 +1510,34 @@
     if(!stems.length){ toast('Nothing selected to move.','err'); return; }
     if(current==null||current==='*'){ toast('Move from a folder view.','err'); return; }
     var src=current;
-    progOpen('Moving '+stems.length+' item'+(stems.length>1?'s':'')+' to “'+dest+'”', stems.length);
-    // ONE batched request — the server moves all of them in a single parallel
-    // rclone process (vs N sequential ~2.5s round-trips). Optimistic UI updates
-    // immediately; pendingMove guards the stale-manifest refetch window.
-    document.getElementById('pdSub').textContent='Transferring '+stems.length+' file'+(stems.length>1?'s':'')+'…';
+    // INSTANT move: re-key the items to <dest> locally NOW (so they appear in the
+    // destination immediately) but keep pointing file/thumb at the ORIGINAL path,
+    // because the file physically stays put until the background mover relocates
+    // it. The mover then triggers a manifest rebuild and the paths reconcile.
     stems.forEach(function(stem){ pendingMove[stem]=dest; });
-    var ac=new AbortController(); _pd.abort=ac;
-    fetch('/movebatch',{method:'POST',credentials:'same-origin',signal:ac.signal,
+    // apply the re-key to the in-memory manifest right away
+    manifest.forEach(function(it){
+      if(stems.indexOf(it.stem)>=0 && it.chat===src){ it._origchat=it.chat; it.chat=dest; }
+    });
+    buildChats(); clearSelection(); rerenderCurrent();
+    toast('📁 Moving '+stems.length+' to “'+dest+'” in the background','ok');
+    fetch('/movemark',{method:'POST',credentials:'same-origin',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({src:src,dest:dest,stems:stems})})
-      .then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; }); })
-      .then(function(res){
-        var ok=(res.status===200), moved=ok?(res.j.moved||stems.length):0;
-        // optimistically drop them from the current view
-        if(ok){ stems.forEach(function(stem){ var it=itemByStem(stem); if(it) removeFromData(it); }); }
-        else { stems.forEach(function(stem){ delete pendingMove[stem]; }); }
-        clearSelection(); rerenderCurrent();
-        // animate the bar to done
-        _pd.done=_pd.total; progStep('');
-        progFinish(ok? ('✓ Moved '+moved+' to “'+dest+'”') : ('Move failed (HTTP '+res.status+')'), !ok);
-        if(ok) setTimeout(progClose, 700);
-        reloadManifest(current);
+      .then(function(r){
+        if(r.status!==200){ // roll back the re-key
+          stems.forEach(function(stem){ delete pendingMove[stem]; });
+          manifest.forEach(function(it){ if(stems.indexOf(it.stem)>=0 && it._origchat){ it.chat=it._origchat; delete it._origchat; } });
+          buildChats(); rerenderCurrent(); toast('Move failed (HTTP '+r.status+')','err');
+        }
+        bgPoll();
       })
-      .catch(function(err){
+      .catch(function(){
         stems.forEach(function(stem){ delete pendingMove[stem]; });
-        if(err && err.name==='AbortError'){ rerenderCurrent(); progClose(); toast('Move cancelled','err'); }
-        else { progFinish('Network error during move', true); }
+        manifest.forEach(function(it){ if(stems.indexOf(it.stem)>=0 && it._origchat){ it.chat=it._origchat; delete it._origchat; } });
+        buildChats(); rerenderCurrent(); toast('Network error during move','err');
       });
+    bgPoll();
   }
 
   // ---- bulk delete (one batched request) ----
