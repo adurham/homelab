@@ -91,6 +91,17 @@ def get_folder_meta() -> dict:
     return r.json()
 
 
+def set_chat_ids(folder: str, chat_ids: list) -> dict:
+    """Map source chat-ids to a folder in folder_meta (the single source of
+    truth). Used to seed the static map into folder_meta on first run."""
+    r = requests.post(f"{GALLERY_BASE}/ingest/setchatids",
+                      headers={**_auth_headers(), "Content-Type": "application/json"},
+                      json={"folder": folder, "chat_ids": [str(c) for c in chat_ids]},
+                      timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()
+
+
 if __name__ == "__main__":
     # self-test: token + excluded fetch
     print("token ok, len:", len(_get_token()))
