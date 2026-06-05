@@ -156,6 +156,9 @@
   #lb .lbconfirm .yes{background:#d23b3b;color:#fff;border-color:#d23b3b;}
   #lb .lbconfirm .yes:hover{background:#e85050;}
   /* move button + folder picker menu */
+  #lb #lbCover{position:absolute;top:16px;right:182px;font-size:18px;z-index:60;
+    width:40px;height:40px;border-radius:8px;}
+  #lb #lbCover:hover{background:var(--accent);border-color:var(--accent);}
   #lb .lbmove{position:absolute;top:16px;right:128px;font-size:18px;
     padding:6px 12px;z-index:60;}
   #lb .lbmove:hover{background:var(--accent);border-color:var(--accent);}
@@ -472,6 +475,7 @@
 
 <div id="lb">
   <button class="close" id="lbClose">&times;</button>
+  <button class="lbmove" id="lbCover" title="Set as folder cover">&#9733;</button>
   <button class="lbmove" id="lbMove" title="Move to folder">&#128194;</button>
   <button class="lbtrash" id="lbTrash" title="Delete">&#128465;</button>
   <div class="lbconfirm" id="lbConfirm">
@@ -492,6 +496,15 @@
   var view=[];             // current folder's sorted items
   var lbIndex=-1;
   var selectedFolders=new Set();   // landing-page multi-folder selection (declared early so render guards pass)
+  var folderMeta={};               // {folder: {cover:<stem>, chat_ids:[...]}} from the server
+  // cover thumbnail for a folder: the pinned cover stem if set + present, else newest
+  function folderCover(name, items){
+    var fm=folderMeta[name];
+    if(fm && fm.cover){
+      for(var i=0;i<items.length;i++){ if(items[i].stem===fm.cover) return '/'+items[i].thumb; }
+    }
+    return items&&items[0]?'/'+items[0].thumb:'';
+  }
 
   // ---- toast (visible feedback for every action) ----
   var _toastEl=null, _toastTimer=null;
@@ -818,7 +831,7 @@
     }
     chats.forEach(function(c){
       var items=chatMap[c];
-      frag.appendChild(makeFolder(c,items.length,'/'+items[0].thumb));
+      frag.appendChild(makeFolder(c,items.length,folderCover(c,items)));
     });
     // user-created empty folders (no items yet)
     emptyFolders.forEach(function(n){
@@ -1667,6 +1680,12 @@
     e.stopPropagation();
     if(lbMoveMenu.classList.contains('show')) hideMoveMenu(); else showMoveMenu();
   });
+  document.getElementById('lbCover').addEventListener('click',function(e){
+    e.stopPropagation();
+    // works for both normal lightbox (shown[lbIndex]) and dup-compare mode
+    var it=(lb.dataset.dupmode==='1')?dupShown[parseInt(lb.dataset.dupdi,10)]:shown[lbIndex];
+    if(it) setFolderCover(it.chat, it.stem);
+  });
   lb.addEventListener('click',function(e){if(e.target===lb)closeLb();});
 
   // ---------- SEARCH / FILTER ----------
@@ -1711,6 +1730,7 @@
     var sub=document.createElement('div'); sub.className='ctx-sub'; sub.textContent=n+' selected'; elCtx.appendChild(sub);
     if(n===1){ mi('Open', function(){ openLb(i); }); }
     mi('Move to…', function(){ openCtxMoveMenu(); });
+    if(n===1){ mi('★ Set as folder cover', function(){ setFolderCover(it.chat, it.stem); }); }
     if(n===1){ mi('Rename…', function(){ renameFilePrompt(it); }); }
     if(n===1){ mi('Download', function(){ downloadItem(it); }); }
     if(n===1){ mi('Properties', function(){ showProperties(it); }); }
@@ -1724,6 +1744,107 @@
   function openCtxMoveMenu(){ document.getElementById('bulkMove').click(); }
   document.addEventListener('click',function(e){ if(!e.target.closest('#ctxMenu')) hideCtx(); });
   document.addEventListener('scroll',hideCtx,true);
+
+  // ---------- generic context-menu builder (used everywhere) ----------
+  // entries: [{label, fn, danger}|{sep:true}|{sub:'text'}]
+  function showCtxAt(x, y, entries){
+    elCtx.innerHTML='';
+    entries.forEach(function(en){
+      if(en.sep){ var s=document.createElement('div'); s.className='ctx-sep'; elCtx.appendChild(s); return; }
+      if(en.sub){ var d=document.createElement('div'); d.className='ctx-sub'; d.textContent=en.sub; elCtx.appendChild(d); return; }
+      var b=document.createElement('button'); if(en.danger) b.className='danger';
+      b.innerHTML=en.label;
+      b.addEventListener('click',function(ev){ ev.stopPropagation(); hideCtx(); en.fn(); });
+      elCtx.appendChild(b);
+    });
+    elCtx.style.left=Math.min(x, window.innerWidth-210)+'px';
+    elCtx.style.top=Math.min(y, window.innerHeight-Math.min(60+entries.length*34,320))+'px';
+    elCtx.classList.add('show');
+  }
+
+  // ---------- folder cover + chat-id mapping ----------
+  function setFolderCover(folder, stem){
+    if(!folder||folder==='*'){ toast('Pick a real folder.','err'); return; }
+    folderMeta[folder]=folderMeta[folder]||{}; folderMeta[folder].cover=stem;  // optimistic
+    fetch('/setcover',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({folder:folder,stem:stem})})
+      .then(function(r){ if(r.status===200){ toast('✓ Cover set for “'+folder+'”','ok'); }
+        else { toast('Set cover failed (HTTP '+r.status+')','err'); } })
+      .catch(function(){ toast('Network error setting cover','err'); });
+  }
+  function clearFolderCover(folder){
+    if(folderMeta[folder]) delete folderMeta[folder].cover;
+    fetch('/setcover',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({folder:folder,stem:''})})
+      .then(function(){ toast('Cover reset to newest','ok'); if(current===null) renderFolders(); });
+  }
+  function mapFolderChatIds(folder){
+    var cur=(folderMeta[folder]&&folderMeta[folder].chat_ids||[]).join(', ');
+    var v=window.prompt('source chat IDs for “'+folder+'” (comma-separated).\\n'+
+      'New media from these chats is routed here, even if you rename the folder.', cur);
+    if(v==null) return;
+    var ids=v.split(',').map(function(s){return s.trim();}).filter(Boolean);
+    folderMeta[folder]=folderMeta[folder]||{}; folderMeta[folder].chat_ids=ids;  // optimistic
+    fetch('/setchatids',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({folder:folder,chat_ids:ids})})
+      .then(function(r){ if(r.status===200){ toast(ids.length? ('✓ Mapped '+ids.length+' chat ID(s) → “'+folder+'”') : ('Cleared chat mapping for “'+folder+'”'),'ok'); }
+        else { toast('Mapping failed (HTTP '+r.status+')','err'); } })
+      .catch(function(){ toast('Network error setting mapping','err'); });
+  }
+
+  // ---------- FOLDER tile context menu (landing) ----------
+  elFolder.addEventListener('contextmenu',function(e){
+    var f=e.target.closest('.folder');
+    e.preventDefault();
+    if(f && !f.dataset.newfolder && f.dataset.chat && f.dataset.chat!=='*'){
+      var name=f.dataset.chat;
+      var entries=[
+        {sub:'📁 '+name},
+        {label:'Open', fn:function(){ openFolder(name); }},
+        {label:'Rename…', fn:function(){ renameFolder(name); }},
+        {label:'☆ Reset cover to newest', fn:function(){ clearFolderCover(name); }},
+        {label:'🔗 Map source chat IDs…', fn:function(){ mapFolderChatIds(name); }},
+        {sep:true},
+        {label:'🗑 Delete folder', danger:true, fn:function(){ deleteFolder(name); }}
+      ];
+      showCtxAt(e.clientX, e.clientY, entries);
+    } else {
+      // empty landing space — global actions
+      showCtxAt(e.clientX, e.clientY, [
+        {sub:'Gallery'},
+        {label:'＋ New folder', fn:function(){ var t=elFolder.querySelector('.folder.newfolder'); if(t) showNewFolderForm(t); }},
+        {label:'☷ Duplicates', fn:function(){ showDuplicates(); }},
+        {label:'↻ Reload', fn:function(){ reloadManifest(null); }}
+      ]);
+    }
+  });
+  // dup-view + generic empty-space context menu (anywhere not otherwise handled)
+  document.addEventListener('contextmenu',function(e){
+    if(e.target.closest('.folder')||e.target.closest('.tile')||e.target.closest('#ctxMenu')) return;
+    if(e.target.closest('input')||e.target.closest('textarea')) return;   // let text fields use native menu
+    var dc=e.target.closest('.dupcard');
+    if(dc){
+      e.preventDefault();
+      var stem=dc.dataset.stem, chat=dc.dataset.chat, di=parseInt(dc.dataset.di,10);
+      showCtxAt(e.clientX, e.clientY, [
+        {sub:'📁 '+chat},
+        {label:'Open full size', fn:function(){ openDupLightbox(di); }},
+        {label:'★ Set as folder cover', fn:function(){ setFolderCover(chat, stem); }},
+        {label:(dupAction[stem]==='trash'?'✓ Keep this':'🗑 Delete this'), fn:function(){ setDupCard(dc, dupAction[stem]==='trash'?'keep':'trash'); updateDupCount(); }}
+      ]);
+      return;
+    }
+    // global fallback menu in any blank area
+    e.preventDefault();
+    showCtxAt(e.clientX, e.clientY, [
+      {sub:'Gallery'},
+      {label:current===null?'☷ Duplicates':'← Back to folders', fn:function(){ current===null?showDuplicates():renderFolders(); }},
+      {label:'↻ Reload', fn:function(){ reloadManifest(current); }}
+    ]);
+  });
 
   // ---------- PROPERTIES ----------
   var elPropScrim=document.getElementById('propScrim');
@@ -2005,10 +2126,12 @@
   // load the manifest AND the full folder list (incl. empty folders) in parallel
   Promise.all([
     fetch('/gallery/manifest.json').then(function(r){if(!r.ok)throw new Error(r.status);return r.json();}),
-    fetch('/gallery/folders.json').then(function(r){return r.ok?r.json():[];}).catch(function(){return [];})
+    fetch('/gallery/folders.json').then(function(r){return r.ok?r.json():[];}).catch(function(){return [];}),
+    fetch('/foldermeta',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():{};}).catch(function(){return {};})
   ]).then(function(res){
       manifest=Array.isArray(res[0])?res[0]:[];
       var allFolders=Array.isArray(res[1])?res[1]:[];
+      folderMeta=(res[2]&&typeof res[2]==='object')?res[2]:{};
       buildChats();
       // seed emptyFolders = server folders that have no items in the manifest
       allFolders.forEach(function(f){ if(!chatMap[f] && emptyFolders.indexOf(f)<0) emptyFolders.push(f); });

@@ -532,7 +532,7 @@ server {
     # Upload + mkdir endpoints (POST): add your own pics / create folders. Large
     # bodies (batches of files) + long timeouts. Same Authentik gate; routed to
     # the upload service.
-    location ~ ^/(upload|mkdir|status|rename|renamefile|move|movebatch|movemark|movequeue|rmdir|dedupscan)(/|$) {
+    location ~ ^/(upload|mkdir|status|rename|renamefile|move|movebatch|movemark|movequeue|rmdir|dedupscan|setcover|setchatids|foldermeta)(/|$) {
         auth_request /outpost.goauthentik.io/auth/nginx;
         error_page 401 = @goauthentik_proxy_signin;
         auth_request_set $auth_cookie $upstream_http_set_cookie;

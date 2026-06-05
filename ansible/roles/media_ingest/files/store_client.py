@@ -82,6 +82,15 @@ def get_excluded() -> set:
     return set(r.json().get("excluded", []))
 
 
+def get_folder_meta() -> dict:
+    """Fetch {folder: {cover, chat_ids}} so the collector can route chat-ids to
+    user-mapped folders (rename-safe)."""
+    r = requests.get(f"{GALLERY_BASE}/ingest/foldermeta",
+                     headers=_auth_headers(), timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()
+
+
 if __name__ == "__main__":
     # self-test: token + excluded fetch
     print("token ok, len:", len(_get_token()))
