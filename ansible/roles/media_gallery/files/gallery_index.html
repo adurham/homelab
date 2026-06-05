@@ -782,7 +782,10 @@
     applyPending();
     chatMap={}; chats=[];
     manifest.forEach(function(it){
-      var c=it.chat||"(unknown)";
+      var c=it.chat;
+      // skip items with no folder — a transient empty chat (mid-rename/move/delete
+      // re-key) must NOT spawn a phantom "(unknown)/untitled" folder tile.
+      if(!c) return;
       if(!chatMap[c]){chatMap[c]=[];chats.push(c);}
       chatMap[c].push(it);
     });
@@ -1282,9 +1285,19 @@
       .then(function(res){
         manifest=Array.isArray(res[0])?res[0]:[];
         var allFolders=Array.isArray(res[1])?res[1]:[];
-        buildChats();
-        // re-seed empty folders from the server folder list (so they don't vanish)
-        allFolders.forEach(function(f){ if(!chatMap[f] && emptyFolders.indexOf(f)<0) emptyFolders.push(f); });
+        // retire pending folder-deletes the server's folders.json has dropped
+        Object.keys(pendingRmdir).forEach(function(f){ if(allFolders.indexOf(f)<0){ delete pendingRmdir[f]; } });
+        savePendingRmdir();
+        buildChats();   // applies pendingRename + pendingRmdir to the fresh manifest
+        // re-seed empty folders from the server list, but honor optimistic
+        // rename (use the new name) and delete (skip) — same as the boot seed,
+        // else a just-deleted/renamed folder flashes back until the next refresh.
+        allFolders.forEach(function(f){
+          if(pendingRmdir[f]) return;
+          var nm=pendingRename[f]||f;
+          if(pendingRmdir[nm]) return;
+          if(!chatMap[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
+        });
         if(current===null){ renderFolders(); }
         else if(stayFolder!=null && (chatMap[stayFolder]||emptyFolders.indexOf(stayFolder)>=0)){
           openFolder(stayFolder);
