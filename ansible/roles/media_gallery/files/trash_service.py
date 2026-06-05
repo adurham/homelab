@@ -65,8 +65,13 @@ def save_excluded(s: set) -> None:
     tmp = str(EXCLUDE_FILE) + ".tmp"
     Path(tmp).write_text(json.dumps(sorted(s)))
     os.replace(tmp, EXCLUDE_FILE)
-    # mirror to Drive (encrypted) for backup; best-effort
-    rclone("copyto", str(EXCLUDE_FILE), EXCLUDE_REMOTE)
+    # mirror to Drive (encrypted) for backup in a BACKGROUND thread — a slow
+    # Drive (e.g. a big video download in flight) must not block the HTTP
+    # response. The local ledger is the source of truth; the mirror is backup.
+    threading.Thread(
+        target=lambda: rclone("copyto", str(EXCLUDE_FILE), EXCLUDE_REMOTE),
+        daemon=True,
+    ).start()
 
 
 # ── pending-delete queue (instant mark + background reaper) ──────────────────

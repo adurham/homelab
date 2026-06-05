@@ -42,6 +42,11 @@ SRC = REMOTE + "by-chat"
 THUMBS = REMOTE + "thumbs"
 THUMB_PX = 400
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".gif"}
+# Bytes of a video to stream for a poster frame (header + first frames) instead
+# of downloading the whole original. 24 MiB covers most start-of-file moov atoms.
+VIDEO_HEAD_BYTES = int(os.environ.get("THUMB_VIDEO_HEAD_BYTES", str(24 * 1024 * 1024)))
+# Above this size we never full-download just for a poster (placeholder instead).
+VIDEO_FULL_MAX = int(os.environ.get("THUMB_VIDEO_FULL_MAX_MB", "300")) * 1024 * 1024
 
 LOCAL_CACHE.mkdir(parents=True, exist_ok=True)
 _locks = {}
@@ -182,6 +187,43 @@ def ensure_thumb(chat, stem) -> Path | None:
         ext = os.path.splitext(leaf)[1].lower()
         is_video = ext in VIDEO_EXT
         tmp_src = LOCAL_CACHE / chat / f"_src_{leaf}"
+
+        # VIDEO posters: don't download the whole original (could be GBs). A frame
+        # near the start only needs the file header + first frames, so stream just
+        # the first VIDEO_HEAD_BYTES via `rclone cat --count` and let ffmpeg grab a
+        # poster from that prefix. Falls back to the full-download path only if the
+        # prefix doesn't yield a frame (rare: moov atom at end of file).
+        if is_video:
+            total = remote_size(chat, leaf) or 0
+            # Stream just the first VIDEO_HEAD_BYTES (header + first frames) and let
+            # ffmpeg grab a poster from that prefix. Works for faststart/web videos
+            # (the vast majority). Avoids pulling the whole original (could be GBs).
+            part = LOCAL_CACHE / chat / f"_part_{leaf}"
+            part.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with open(part, "wb") as fh:
+                    cp = subprocess.run(
+                        ["rclone", "--config", RCLONE_CONF, "cat",
+                         "--count", str(VIDEO_HEAD_BYTES), f"{SRC}/{chat}/{leaf}"],
+                        stdout=fh, stderr=subprocess.DEVNULL, timeout=120,
+                    )
+                if cp.returncode == 0 and part.exists() and part.stat().st_size > 0:
+                    make_thumb(part, local, True)
+                    if local.exists() and local.stat().st_size > 0:
+                        rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
+                        return local
+            except Exception:  # noqa: BLE001
+                pass  # prefix had no decodable frame (e.g. trailing moov) -> below
+            finally:
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
+            # prefix failed. For very large videos, DON'T full-download just for a
+            # poster — show a placeholder instead (avoids the 1.4 GB-for-a-thumb
+            # stall that hammered Drive). Smaller videos fall through to full DL.
+            if total and total > VIDEO_FULL_MAX:
+                return None
         # Reserve space for the full original BEFORE downloading, so concurrent
         # video requests can't collectively overflow the (RAM tmpfs) cache. The
         # constraint is bytes, not a request count — admit only when the file
