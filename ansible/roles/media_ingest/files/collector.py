@@ -35,11 +35,39 @@ SESSION = os.environ.get("TG_SESSION", "/var/lib/media-ingest/collector")
 STAGING = Path(os.environ.get("TG_STAGING", "/var/lib/media-ingest/staging"))
 LOG_FILE = os.environ.get("TG_LOG_FILE", "/var/log/media-ingest/collector.log")
 
-# chat-id -> gallery folder (must match the gallery's known folders)
+# chat-id -> gallery folder, STATIC fallback (must match the gallery's folders).
+# The DYNAMIC map (set via the gallery UI, stored in folder_meta.json) takes
+# precedence — see _dynamic_folder_for() — so a user can map/rename folders
+# without editing this file, and routing survives folder renames.
 CHAT_NAMES = {
     "100000001": "person1", "100000002": "person2", "100000003": "person3",
     "100000004": "person4", "100000005": "person5", "777000": "upstream source",
 }
+
+# Cached chat-id -> folder map fetched from the gallery's folder_meta.json.
+_dyn_map = {}
+_dyn_map_ts = 0.0
+_DYN_TTL = 60.0  # refresh at most once a minute
+
+
+def _refresh_dynamic_map():
+    """Pull folder_meta from the gallery and build chat_id -> folder. Best-effort;
+    on any failure we keep the last good map (or empty -> static fallback)."""
+    global _dyn_map, _dyn_map_ts
+    import time as _t
+    if _t.time() - _dyn_map_ts < _DYN_TTL:
+        return
+    _dyn_map_ts = _t.time()
+    try:
+        import store_client
+        meta = store_client.get_folder_meta()  # {folder: {chat_ids:[...]}}
+        m = {}
+        for folder, entry in (meta or {}).items():
+            for cid in (entry.get("chat_ids") or []):
+                m[str(cid)] = folder
+        _dyn_map = m
+    except Exception as e:  # noqa: BLE001
+        log.debug("folder_meta refresh failed: %s", e)
 
 STAGING.mkdir(parents=True, exist_ok=True)
 Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +84,16 @@ def sanitize(name: str) -> str:
 
 
 def folder_for(chat_id, name):
-    return CHAT_NAMES.get(str(chat_id), sanitize(name))
+    # 1) dynamic UI map (rename-safe, user-controlled) wins
+    _refresh_dynamic_map()
+    cid = str(chat_id)
+    if cid in _dyn_map:
+        return _dyn_map[cid]
+    # 2) static fallback map
+    if cid in CHAT_NAMES:
+        return CHAT_NAMES[cid]
+    # 3) sanitized chat title (or 'unknown')
+    return sanitize(name)
 
 
 def ttl_of(media):

@@ -57,6 +57,30 @@ INGEST_ISSUER = os.environ.get("INGEST_ISSUER", "").strip()
 INGEST_AUDIENCE = os.environ.get("INGEST_AUDIENCE", "").strip()
 SRC = REMOTE + "by-chat"
 CHUNK = 1024 * 1024  # 1 MiB streaming chunks
+# Per-folder metadata: {folder: {"cover": "<stem>", "chat_ids": ["123", ...]}}.
+# cover = which item's thumbnail to show on the folder tile (else newest).
+# chat_ids = source chat-ids routed to this folder (rename-safe: the collector
+# resolves chat-id -> folder via this map, so renaming the folder keeps routing).
+# Local source of truth, mirrored to gcrypt:gallery/folder_meta.json for the SPA
+# (read by the browser) and the collector (reads chat_ids to route).
+FOLDER_META_FILE = Path(os.environ.get("TG_FOLDER_META", "/var/lib/media-gallery/folder_meta.json"))
+FOLDER_META_REMOTE = REMOTE + "gallery/folder_meta.json"
+_fmeta_lock = threading.Lock()
+
+
+def load_folder_meta() -> dict:
+    try:
+        return json.loads(FOLDER_META_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_folder_meta(meta: dict) -> None:
+    FOLDER_META_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(FOLDER_META_FILE) + ".tmp"
+    Path(tmp).write_text(json.dumps(meta, separators=(",", ":")))
+    os.replace(tmp, FOLDER_META_FILE)
+    rclone("copyto", str(FOLDER_META_FILE), FOLDER_META_REMOTE)
 
 # JWKS client (cached; refreshes keys automatically on unknown kid)
 _jwk_client = None
@@ -364,6 +388,9 @@ class Handler(BaseHTTPRequestHandler):
                 "moved": _mover_state["moved"],
                 "failed": _mover_state["failed"],
             })
+        if p == "/foldermeta":
+            # browser reads this to render covers; collector reads chat_ids to route
+            return self._json(200, load_folder_meta())
         self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -389,6 +416,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._renamefile(p[len("/renamefile/"):])
         if p.startswith("/dedupscan"):
             return self._dedupscan()
+        if p.startswith("/setcover"):
+            return self._setcover()
+        if p.startswith("/setchatids"):
+            return self._setchatids()
         if p.startswith("/movemark"):
             return self._movemark()
         if p.startswith("/movebatch"):
@@ -505,6 +536,13 @@ class Handler(BaseHTTPRequestHandler):
         # clean up the now-empty source dirs
         rclone("rmdir", f"{SRC}/{old}")
         rclone("rmdir", f"{REMOTE}thumbs/{old}")
+        # carry folder metadata (cover + chat_ids) to the new name — this is what
+        # makes renaming rename-safe for collector routing.
+        with _fmeta_lock:
+            meta = load_folder_meta()
+            if old in meta:
+                meta[new] = {**meta.get(new, {}), **meta.pop(old)}
+                save_folder_meta(meta)
         _dirty.set()  # rebuild manifest -> items re-keyed to <new>
         self._json(200, {"renamed": old, "to": new})
 
@@ -525,6 +563,78 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"started": True})
         except Exception as e:  # noqa: BLE001
             self._json(500, {"error": f"{type(e).__name__}: {e}"})
+
+    def _read_json_body(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            return json.loads(self.rfile.read(length) or "{}")
+        except (ValueError, OSError):
+            return None
+
+    def _setcover(self):
+        """POST /setcover  body: {"folder": "...", "stem": "..."}  (stem="" clears)
+        Pin a specific item's thumbnail as the folder's cover image."""
+        body = self._read_json_body()
+        if body is None:
+            return self._json(400, {"error": "bad json body"})
+        folder = sanitize_folder(body.get("folder", ""))
+        stem = (body.get("stem") or "").strip()
+        if not folder:
+            return self._json(400, {"error": "want {folder, stem}"})
+        if "/" in stem or ".." in stem:
+            return self._json(400, {"error": "bad stem"})
+        with _fmeta_lock:
+            meta = load_folder_meta()
+            entry = meta.get(folder, {})
+            if stem:
+                entry["cover"] = stem
+            else:
+                entry.pop("cover", None)
+            if entry:
+                meta[folder] = entry
+            elif folder in meta:
+                del meta[folder]
+            save_folder_meta(meta)
+        return self._json(200, {"folder": folder, "cover": stem or None})
+
+    def _setchatids(self):
+        """POST /setchatids  body: {"folder": "...", "chat_ids": ["123", ...]}
+        Map source chat-ids to this folder so the collector routes them here
+        regardless of the folder's display name (rename-safe routing)."""
+        body = self._read_json_body()
+        if body is None:
+            return self._json(400, {"error": "bad json body"})
+        folder = sanitize_folder(body.get("folder", ""))
+        chat_ids = body.get("chat_ids")
+        if not folder or not isinstance(chat_ids, list):
+            return self._json(400, {"error": "want {folder, chat_ids[]}"})
+        # normalize to strings, drop blanks
+        chat_ids = [str(c).strip() for c in chat_ids if str(c).strip()]
+        with _fmeta_lock:
+            meta = load_folder_meta()
+            # a chat-id can only map to ONE folder — remove it from any others
+            for fname, entry in list(meta.items()):
+                if fname == folder:
+                    continue
+                cur = entry.get("chat_ids") or []
+                pruned = [c for c in cur if c not in chat_ids]
+                if pruned:
+                    entry["chat_ids"] = pruned
+                else:
+                    entry.pop("chat_ids", None)
+                if not entry:
+                    del meta[fname]
+            entry = meta.get(folder, {})
+            if chat_ids:
+                entry["chat_ids"] = chat_ids
+            else:
+                entry.pop("chat_ids", None)
+            if entry:
+                meta[folder] = entry
+            elif folder in meta:
+                del meta[folder]
+            save_folder_meta(meta)
+        return self._json(200, {"folder": folder, "chat_ids": chat_ids})
 
     def _movemark(self):
         """POST /movemark  body: {"src": "...", "dest": "...", "stems": [...]}
