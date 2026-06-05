@@ -157,6 +157,16 @@
   ansible.builtin.set_fact:
     collector_session_authorized: "{{ session_stat.stat.exists and session_stat.stat.size | default(0) > 0 }}"
 
+# The source session file IS a credential (read access == account takeover).
+# Lock it to 0600 owned by the service user.
+- name: Secure the source session file (0600)
+  ansible.builtin.file:
+    path: "{{ media_ingest_state }}/collector.session"
+    owner: "{{ media_ingest_user }}"
+    group: "{{ media_ingest_user }}"
+    mode: '0600'
+  when: session_stat.stat.exists
+
 # ─── systemd unit ──────────────────────────────────────────────────────────
 - name: Render Collector Collector Service Unit
   ansible.builtin.template:
