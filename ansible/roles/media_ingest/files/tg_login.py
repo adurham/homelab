@@ -9,7 +9,7 @@ Usage (on the media-ingest CT, as the mediaingest user, with collector.env loade
     set -a; . /opt/media-ingest/collector.env; set +a
     /opt/media-ingest/venv/bin/python /opt/media-ingest/tg_login.py
 
-It will prompt for the phone number, the login code source sends, and (if set)
+It will prompt for the phone number, the login code the source sends, and (if set)
 your 2FA password. On success it writes an authorized session to TG_SESSION and
 exits; then start the collector service.
 """
