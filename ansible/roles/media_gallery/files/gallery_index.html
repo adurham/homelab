@@ -426,6 +426,7 @@
   <input type="search" id="searchBox" placeholder="Search…" autocomplete="off">
   <input type="range" id="zoom" min="110" max="320" step="10" value="170" title="Thumbnail size" style="display:none">
   <button id="viewToggle" title="Toggle list/grid view">&#9776;</button>
+  <button id="newFolderBtn" title="Create a new folder">&#43; New folder</button>
   <button id="dedupBtn" title="Find duplicate photos">&#9783; Duplicates</button>
   <button id="uploadBtn">&#8593; Upload</button>
   <select id="sort" style="display:none">
@@ -892,9 +893,6 @@
 
     var frag=document.createDocumentFragment();
 
-    // "+ New folder" tile (first in grid)
-    frag.appendChild(makeNewFolderTile());
-
     function makeFolder(name,items,cover){
       var f=document.createElement('div');
       f.className='folder'+(items===0?' empty':''); f.dataset.chat=name;
@@ -938,12 +936,6 @@
       return f;
     }
 
-    // optional "All items" pseudo-folder
-    if(manifest.length){
-      var allCover=manifest[0]?'/'+manifest[0].thumb:'';
-      var af=makeFolder('All items',manifest.length,allCover);
-      af.dataset.chat='*'; frag.appendChild(af);
-    }
     chats.forEach(function(c){
       var items=chatMap[c];
       frag.appendChild(makeFolder(c,items.length,folderCover(c,items)));
@@ -963,66 +955,23 @@
   }
 
   // ---- "+ New folder" tile + inline create form ----
-  function makeNewFolderTile(){
-    var f=document.createElement('div');
-    f.className='folder newfolder'; f.dataset.newfolder='1';
-    var inner=document.createElement('div'); inner.className='nf-inner';
-    inner.innerHTML='<div class="nf-plus">+</div><div>New folder</div>';
-    f.appendChild(inner);
-    return f;
-  }
-  function showNewFolderForm(tile){
-    if(tile.querySelector('.nf-form')) return;
-    tile.innerHTML='';
-    var form=document.createElement('div'); form.className='nf-form';
-    var input=document.createElement('input');
-    input.type='text'; input.placeholder='Folder name'; input.maxLength=120;
-    var row=document.createElement('div'); row.className='nf-row';
-    var ok=document.createElement('button'); ok.className='nf-ok'; ok.textContent='Create';
-    var cancel=document.createElement('button'); cancel.textContent='Cancel';
-    var err=document.createElement('div'); err.className='nf-err';
-    row.appendChild(ok); row.appendChild(cancel);
-    form.appendChild(input); form.appendChild(row); form.appendChild(err);
-    form.addEventListener('click',function(e){e.stopPropagation();});
-    tile.appendChild(form);
-    input.focus();
-    function reset(){
-      tile.className='folder newfolder'; tile.dataset.newfolder='1';
-      tile.innerHTML='';
-      var inner=document.createElement('div'); inner.className='nf-inner';
-      inner.innerHTML='<div class="nf-plus">+</div><div>New folder</div>';
-      tile.appendChild(inner);
-    }
-    cancel.addEventListener('click',function(e){e.stopPropagation(); reset();});
-    input.addEventListener('keydown',function(e){
-      if(e.key==='Enter'){e.preventDefault(); submit();}
-      else if(e.key==='Escape'){e.preventDefault(); reset();}
-    });
-    ok.addEventListener('click',function(e){e.stopPropagation(); submit();});
-    function submit(){
-      var name=input.value.trim();
-      err.textContent='';
-      if(!name){err.textContent='Enter a name.'; return;}
-      if(chatMap[name]||emptyFolders.indexOf(name)>=0){
-        err.textContent='Folder already exists.'; return;
-      }
-      ok.disabled=true; cancel.disabled=true; ok.textContent='…';
-      fetch('/mkdir/'+encodeURIComponent(name),
-        {method:'POST',credentials:'same-origin'})
-        .then(function(r){
-          if(r.status===200){
-            emptyFolders.push(name);
-            renderFolders();   // re-render landing with the new empty tile
-          }else{
-            ok.disabled=false; cancel.disabled=false; ok.textContent='Create';
-            err.textContent='Failed (HTTP '+r.status+').';
-          }
-        })
-        .catch(function(){
-          ok.disabled=false; cancel.disabled=false; ok.textContent='Create';
-          err.textContent='Network error.';
-        });
-    }
+  // Create a new folder via a prompt (the old "+ New folder" grid tile is gone;
+  // this is reached from the header button and the right-click context menu).
+  function promptNewFolder(){
+    var name=window.prompt('New folder name:');
+    if(name==null) return;
+    name=name.trim();
+    if(!name){ toast('Enter a folder name.','err'); return; }
+    if(chatMap[name]||emptyFolders.indexOf(name)>=0){ toast('A folder named “'+name+'” already exists.','err'); return; }
+    fetch('/mkdir/'+encodeURIComponent(name),{method:'POST',credentials:'same-origin'})
+      .then(function(r){
+        if(r.status===200){
+          emptyFolders.push(name);
+          if(current===null) renderFolders();
+          toast('✓ Created folder “'+name+'”','ok');
+        }else{ toast('Create failed (HTTP '+r.status+')','err'); }
+      })
+      .catch(function(){ toast('Network error creating folder','err'); });
   }
 
   // ---------- FOLDER VIEW ----------
@@ -1348,7 +1297,6 @@
     var f=e.target.closest('.folder'); if(!f) return;
     if(e.target.closest('.frename')){ e.stopPropagation(); renameFolder(f.dataset.chat); return; }
     if(e.target.closest('.fdelete')){ e.stopPropagation(); deleteFolder(f.dataset.chat); return; }
-    if(f.dataset.newfolder){ showNewFolderForm(f); return; }
     openFolder(f.dataset.chat);
   });
 
@@ -1942,11 +1890,12 @@
   elFolder.addEventListener('contextmenu',function(e){
     var f=e.target.closest('.folder');
     e.preventDefault();
-    if(f && !f.dataset.newfolder && f.dataset.chat && f.dataset.chat!=='*'){
+    if(f && f.dataset.chat && f.dataset.chat!=='*'){
       var name=f.dataset.chat;
       var entries=[
         {sub:'📁 '+name},
         {label:'Open', fn:function(){ openFolder(name); }},
+        {label:'＋ New folder…', fn:function(){ promptNewFolder(); }},
         {label:'Rename…', fn:function(){ renameFolder(name); }},
         {label:'☆ Reset cover to newest', fn:function(){ clearFolderCover(name); }},
         {label:'🔗 Map source chat IDs…', fn:function(){ mapFolderChatIds(name); }},
@@ -1958,7 +1907,7 @@
       // empty landing space — global actions
       showCtxAt(e.clientX, e.clientY, [
         {sub:'Gallery'},
-        {label:'＋ New folder', fn:function(){ var t=elFolder.querySelector('.folder.newfolder'); if(t) showNewFolderForm(t); }},
+        {label:'＋ New folder…', fn:function(){ promptNewFolder(); }},
         {label:'☷ Duplicates', fn:function(){ showDuplicates(); }},
         {label:'↻ Reload', fn:function(){ reloadManifest(null); }}
       ]);
@@ -2268,6 +2217,7 @@
     reloadManifest(null);
   }
   document.getElementById('dedupBtn').addEventListener('click',showDuplicates);
+  document.getElementById('newFolderBtn').addEventListener('click',promptNewFolder);
 
   // ---------- BOOT ----------
   // load the manifest AND the full folder list (incl. empty folders) in parallel
