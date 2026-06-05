@@ -714,6 +714,19 @@
   var pendingRename={};
   try{ pendingRename=JSON.parse(localStorage.getItem('gal_pendingRename')||'{}')||{}; }catch(_){ pendingRename={}; }
   function savePendingRenames(){ try{ localStorage.setItem('gal_pendingRename',JSON.stringify(pendingRename)); }catch(_){} }
+  // folder-level optimistic deletes [folderName], persisted across refresh so a
+  // deleted folder stays gone even if a refetch lands before the server rebuild.
+  var pendingRmdir={};
+  try{ pendingRmdir=JSON.parse(localStorage.getItem('gal_pendingRmdir')||'{}')||{}; }catch(_){ pendingRmdir={}; }
+  function savePendingRmdir(){ try{ localStorage.setItem('gal_pendingRmdir',JSON.stringify(pendingRmdir)); }catch(_){} }
+  // Drop deleted folders' items from a freshly-loaded manifest. Retirement is
+  // handled at boot against folders.json (the authoritative folder list), so we
+  // don't prematurely retire an empty folder that has no manifest items.
+  function applyFolderDeletes(){
+    if(Object.keys(pendingRmdir).length){
+      manifest=manifest.filter(function(it){ return !pendingRmdir[it.chat]; });
+    }
+  }
   // Reapply pending folder renames onto a freshly-loaded manifest, and retire a
   // rename once the server's manifest already shows the NEW folder (= caught up).
   function applyFolderRenames(){
@@ -765,6 +778,7 @@
   }
   function buildChats(){
     applyFolderRenames();   // reapply optimistic folder renames (survives refresh)
+    applyFolderDeletes();   // hide optimistically-deleted folders (survives refresh)
     applyPending();
     chatMap={}; chats=[];
     manifest.forEach(function(it){
@@ -1329,21 +1343,31 @@
   function rmdirFolder(name){
     // returns a promise resolving {ok, status}; does NOT touch UI/toast
     if(chatMap[name]) chatMap[name].forEach(function(it){ pendingDel[it.stem]=true; });
+    // persist a folder-level delete so it stays hidden across a refresh until the
+    // server's rebuild drops it from folders.json.
+    pendingRmdir[name]=true; savePendingRmdir();
+    var ei=emptyFolders.indexOf(name); if(ei>=0) emptyFolders.splice(ei,1);
+    if(folderMeta[name]) delete folderMeta[name];
     return fetch('/rmdir/'+encodeURIComponent(name),{method:'POST',credentials:'same-origin'})
-      .then(function(r){ return {ok:r.status===200, status:r.status}; },
-            function(){ return {ok:false, status:0}; });
+      .then(function(r){
+        if(r.status!==200){ delete pendingRmdir[name]; savePendingRmdir(); }  // roll back on failure
+        return {ok:r.status===200, status:r.status};
+      },
+            function(){ delete pendingRmdir[name]; savePendingRmdir(); return {ok:false, status:0}; });
   }
   function deleteFolder(name){
     if(!name||name==='*') return;
     var count=(chatMap[name]?chatMap[name].length:0);
     if(!confirm('Delete folder "'+name+'"'+(count?(' and its '+count+' item'+(count===1?'':'s')):'')+'? This cannot be undone.')) return;
-    toast('Deleting folder “'+name+'”…','work',true);
-    rmdirFolder(name).then(function(res){
-      if(res.ok){
-        toast('✓ Deleted folder “'+name+'”','ok');
-        var ei=emptyFolders.indexOf(name); if(ei>=0) emptyFolders.splice(ei,1);
-        reloadManifest(null);
-      } else { toast('Delete failed (HTTP '+res.status+')','err'); }
+    // rmdirFolder() marks pendingRmdir SYNCHRONOUSLY (before the fetch), so
+    // re-rendering now already hides the folder. The promise only surfaces the
+    // final result / rolls back on failure.
+    var p=rmdirFolder(name);
+    buildChats(); renderFolders();
+    p.then(function(res){
+      if(res.ok){ toast('✓ Deleted folder “'+name+'”','ok');
+        setTimeout(function(){ reloadManifest(null); }, 2500);   // reconcile once server rebuilds
+      } else { toast('Delete failed (HTTP '+res.status+')','err'); buildChats(); renderFolders(); }
     });
   }
 
@@ -2243,11 +2267,19 @@
       var allFolders=Array.isArray(res[1])?res[1]:[];
       folderMeta=(res[2]&&typeof res[2]==='object')?res[2]:{};
       buildChats();
+      // retire any pending folder-delete the server's folders.json no longer
+      // lists (delete fully propagated). Until then, keep hiding it.
+      Object.keys(pendingRmdir).forEach(function(f){
+        if(allFolders.indexOf(f)<0){ delete pendingRmdir[f]; }
+      });
+      savePendingRmdir();
       // seed emptyFolders = server folders that have no items in the manifest,
-      // but honor an optimistic rename (don't re-add the OLD name the server
-      // still lists until its rebuild catches up).
+      // but honor an optimistic rename (don't re-add the OLD name) and SKIP any
+      // folder the user just deleted (still listed until the server rebuild lands).
       allFolders.forEach(function(f){
+        if(pendingRmdir[f]) return;                 // optimistically deleted — skip
         var nm=pendingRename[f]||f;
+        if(pendingRmdir[nm]) return;
         if(!chatMap[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
       });
       renderFolders();   // always render landing (so "+ New folder" is available)
