@@ -255,6 +255,29 @@ async def main():
     log(f"manifest items: {len(manifest)} (skipped {skipped_excluded} trashed, "
         f"{skipped_outgoing} outgoing)")
 
+    # Prune the exclusion ledger: an entry is dead weight once its file is gone
+    # from the archive. We ONLY prune browser-upload stems (up_*) — collector
+    # stems (<chatid>_<msgid>) must stay excluded forever or the collector would
+    # re-capture the same source message. Keeps the ledger from growing without
+    # bound while never re-downloading something the user trashed.
+    try:
+        before = len(excluded)
+        pruned = {s for s in excluded
+                  if str(s).startswith("up_") and s not in archive_stems}
+        if pruned:
+            kept = excluded - pruned
+            ep = Path(EXCLUDE_FILE)
+            if ep.parent.exists():
+                tmp = str(ep) + ".tmp"
+                Path(tmp).write_text(json.dumps(sorted(kept)))
+                os.replace(tmp, ep)
+                # mirror to Drive so the trash service reload sees the pruned copy
+                rclone("copyto", str(ep), f"{REMOTE}gallery/excluded.json")
+                log(f"pruned exclusion ledger: {before} -> {len(kept)} "
+                    f"(dropped {len(pruned)} dead up_ entries)")
+    except Exception as e:  # noqa: BLE001
+        log(f"ledger prune skipped: {e}")
+
     work = Path(tempfile.mkdtemp(prefix="manifest_"))
     mp = work / "manifest.json"
     mp.write_text(json.dumps(manifest, separators=(",", ":")))

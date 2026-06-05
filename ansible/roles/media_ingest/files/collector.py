@@ -35,14 +35,41 @@ SESSION = os.environ.get("TG_SESSION", "/var/lib/media-ingest/collector")
 STAGING = Path(os.environ.get("TG_STAGING", "/var/lib/media-ingest/staging"))
 LOG_FILE = os.environ.get("TG_LOG_FILE", "/var/log/media-ingest/collector.log")
 
-# chat-id -> gallery folder, STATIC fallback (must match the gallery's folders).
-# The DYNAMIC map (set via the gallery UI, stored in folder_meta.json) takes
-# precedence — see _dynamic_folder_for() — so a user can map/rename folders
-# without editing this file, and routing survives folder renames.
+# chat-id -> gallery folder, STATIC SEED. On startup these are pushed into
+# folder_meta.json (the single source of truth) for any chat-id not already
+# mapped there — so after first run the UI map is authoritative, the map
+# survives renames, and you manage everything from the gallery. This dict is
+# only a bootstrap/fallback; edit mappings in the gallery UI, not here.
 CHAT_NAMES = {
     "100000001": "person1", "100000002": "person2", "100000003": "person3",
     "100000004": "person4", "100000005": "person5", "777000": "upstream source",
 }
+
+
+def _seed_static_chat_ids():
+    """One-time on startup: push CHAT_NAMES entries into folder_meta for any
+    chat-id not already mapped there. Makes folder_meta the single source of
+    truth without losing the historical static mappings."""
+    try:
+        import store_client
+        meta = store_client.get_folder_meta() or {}
+        mapped = set()
+        for entry in meta.values():
+            for cid in (entry.get("chat_ids") or []):
+                mapped.add(str(cid))
+        # group unmapped static entries by their target folder
+        to_add = {}
+        for cid, folder in CHAT_NAMES.items():
+            if str(cid) not in mapped:
+                to_add.setdefault(folder, []).append(str(cid))
+        for folder, cids in to_add.items():
+            existing = (meta.get(folder, {}).get("chat_ids") or [])
+            store_client.set_chat_ids(folder, sorted(set(existing) | set(cids)))
+            log.info("seeded folder_meta: %s -> %s", folder, cids)
+        if to_add:
+            log.info("folder_meta seed complete (%d folder(s))", len(to_add))
+    except Exception as e:  # noqa: BLE001
+        log.warning("folder_meta seed skipped: %s", e)
 
 # Cached chat-id -> folder map fetched from the gallery's folder_meta.json.
 _dyn_map = {}
@@ -154,6 +181,8 @@ async def main():
         log.info("gallery auth OK; %d excluded stems", len(ex))
     except Exception as e:  # noqa: BLE001
         log.error("gallery auth FAILED at startup: %s", e)
+    # one-time: seed the static chat-id map into folder_meta (single source of truth)
+    _seed_static_chat_ids()
     await client.run_until_disconnected()
 
 

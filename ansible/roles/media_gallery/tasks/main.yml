@@ -168,6 +168,14 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+- name: Deploy Queue Watchdog (stuck-reaper detector)
+  ansible.builtin.copy:
+    src: queue_watchdog.py
+    dest: "{{ media_gallery_dir }}/queue_watchdog.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
 # ─── rclone config (crypt over gdrive) ─────────────────────────────────────
 # The OAuth token + crypt passwords come from vault (generated one-time via
 # the authorize flow on the Mac; see README). force:false so a token the

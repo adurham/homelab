@@ -270,6 +270,9 @@
   #toast.ok{border-color:#2e7d4f;}
   #toast.err{border-color:#d23b3b;}
   #toast.work{border-color:var(--accent);}
+  #toast .toast-undo{margin-left:14px;padding:5px 14px;font-size:12.5px;font-weight:600;
+    background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;flex:0 0 auto;}
+  #toast .toast-undo:hover{filter:brightness(1.12);}
   #toast .spin{width:15px;height:15px;border:2px solid #3a4150;border-top-color:var(--accent);
     border-radius:50%;animation:spin .7s linear infinite;flex:0 0 auto;}
   @keyframes spin{to{transform:rotate(360deg);}}
@@ -302,6 +305,27 @@
   #tkBody .tk-row.ok .tk-op{color:#6ee7a0;}
   #tkBody .tk-row.err .tk-op{color:#ff8c8c;}
   #tkBody .tk-empty{padding:18px;color:var(--muted);text-align:center;}
+  /* keyboard help overlay */
+  #helpScrim{position:fixed;inset:0;z-index:175;background:rgba(0,0,0,.5);display:none;
+    align-items:center;justify-content:center;}
+  #helpScrim.show{display:flex;}
+  #helpDlg{width:520px;max-width:94vw;max-height:84vh;display:flex;flex-direction:column;
+    background:#1b2129;border:1px solid var(--border);border-radius:14px;overflow:hidden;
+    box-shadow:0 20px 60px rgba(0,0,0,.6);}
+  #helpDlg .hp-head{display:flex;align-items:center;gap:10px;padding:14px 18px;
+    border-bottom:1px solid var(--border);}
+  #helpDlg .hp-head .grow{flex:1;}
+  #helpDlg .hp-head button{font-size:12px;padding:6px 12px;}
+  #helpDlg .hp-body{padding:10px 18px 18px;overflow-y:auto;}
+  #helpDlg .hp-sec{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
+    margin:14px 0 8px;}
+  #helpDlg .hp-row{display:flex;align-items:center;gap:6px;padding:5px 0;font-size:13.5px;}
+  #helpDlg .hp-row span:last-child{margin-left:8px;color:#cdd3da;}
+  #helpDlg .hp-row .hp-mouse{padding:3px 8px;border-radius:6px;background:#2a313b;font-size:12px;}
+  #helpDlg kbd{display:inline-block;min-width:20px;text-align:center;padding:3px 8px;font-size:12px;
+    font-family:inherit;background:#2a313b;border:1px solid #3a4150;border-bottom-width:2px;
+    border-radius:6px;color:#e8ecf1;}
+  #helpBtn{min-width:34px;font-weight:700;}
   #tkBody .tk-row.live{background:rgba(91,140,255,.08);}
   #tkBody .tk-row.live .tk-op{color:var(--accent);}
   #tkBody .tk-row.live .spin{display:inline-block;width:12px;height:12px;border:2px solid #3a4150;
@@ -431,6 +455,7 @@
   <input type="range" id="zoom" min="110" max="320" step="10" value="170" title="Thumbnail size" style="display:none">
   <button id="viewToggle" title="Toggle list/grid view">&#9776;</button>
   <button id="newFolderBtn" title="Create a new folder">&#43; New folder</button>
+  <button id="helpBtn" title="Keyboard shortcuts (?)">?</button>
   <button id="dedupBtn" title="Find duplicate photos">&#9783; Duplicates</button>
   <button id="uploadBtn">&#8593; Upload</button>
   <select id="sort" style="display:none">
@@ -472,6 +497,30 @@
 <div id="rubber"></div>
 <div id="toast"></div>
 <div id="bgTasks" title="Background tasks — click for activity log"><span class="spin"></span><span id="bgTasksText"></span></div>
+<div id="helpScrim">
+  <div id="helpDlg">
+    <div class="hp-head"><b>Keyboard &amp; mouse</b><span class="grow"></span><button id="hpClose">Close</button></div>
+    <div class="hp-body">
+      <div class="hp-sec">In a folder</div>
+      <div class="hp-row"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd><span>Move focus between photos</span></div>
+      <div class="hp-row"><kbd>Space</kbd><span>Select / deselect the focused photo</span></div>
+      <div class="hp-row"><kbd>Enter</kbd><span>Open the focused photo</span></div>
+      <div class="hp-row"><kbd>⌘/Ctrl</kbd>+<kbd>A</kbd><span>Select all</span></div>
+      <div class="hp-row"><kbd>Delete</kbd><span>Delete the selection (Undo offered)</span></div>
+      <div class="hp-row"><kbd>/</kbd><span>Jump to search</span></div>
+      <div class="hp-row"><kbd>Esc</kbd><span>Clear selection / close menus</span></div>
+      <div class="hp-sec">In the photo viewer</div>
+      <div class="hp-row"><kbd>←</kbd><kbd>→</kbd><span>Previous / next photo</span></div>
+      <div class="hp-row"><kbd>Delete</kbd><span>Delete this photo</span></div>
+      <div class="hp-row"><kbd>Esc</kbd><span>Close the viewer</span></div>
+      <div class="hp-sec">Selecting</div>
+      <div class="hp-row"><kbd>⌘/Ctrl</kbd>+click<span>Toggle a photo in the selection</span></div>
+      <div class="hp-row"><kbd>Shift</kbd>+click<span>Range-select</span></div>
+      <div class="hp-row"><span class="hp-mouse">Right-click</span><span>Context menu (long-press on touch)</span></div>
+      <div class="hp-row"><kbd>?</kbd><span>Show / hide this help</span></div>
+    </div>
+  </div>
+</div>
 <div id="taskScrim">
   <div id="taskDlg">
     <div class="tk-head"><b>Activity log</b><span class="grow"></span>
@@ -552,6 +601,36 @@
     if(!sticky){ _toastTimer=setTimeout(function(){ _toastEl.classList.remove('show'); }, kind==='err'?4500:2600); }
   }
   function toastHide(){ if(_toastEl) _toastEl.classList.remove('show'); }
+
+  // toast with an Undo button for a delete. stems can be restored within the
+  // server's REAP_GRACE window (before the reaper actually deletes the files).
+  function toastUndo(msg, stems){
+    if(!_toastEl) _toastEl=document.getElementById('toast');
+    if(!_toastEl) return;
+    _toastEl.className=''; void _toastEl.offsetWidth;
+    _toastEl.classList.add('ok','show');
+    _toastEl.innerHTML='<span>'+msg+'</span><button class="toast-undo">Undo</button>';
+    var btn=_toastEl.querySelector('.toast-undo');
+    btn.addEventListener('click',function(e){
+      e.stopPropagation();
+      fetch('/trashundo',{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({stems:stems})})
+        .then(function(r){ return r.ok?r.json():null; })
+        .then(function(j){
+          if(j && j.restored_count>0){
+            stems.forEach(function(s){ delete pendingDel[s]; });
+            savePending();
+            toast('↩ Restored '+j.restored_count+' item'+(j.restored_count===1?'':'s'),'ok');
+            reloadManifest(current==='__dup__'?null:current);
+          } else { toast('Too late to undo — already deleted.','err'); }
+        })
+        .catch(function(){ toast('Undo failed.','err'); });
+    });
+    if(_toastTimer){ clearTimeout(_toastTimer); _toastTimer=null; }
+    // keep the undo offer up a bit longer than the grace window
+    _toastTimer=setTimeout(function(){ _toastEl.classList.remove('show'); }, 9000);
+  }
 
   // ---- unified background-tasks indicator (deletes + moves) ----
   var _bgTimer=null, _reapShown=false;
@@ -1674,12 +1753,11 @@
   document.getElementById('bulkDelete').addEventListener('click',function(){
     if(!selected.size){ toast('Nothing selected to delete.','err'); return; }
     if(current==null||current==='*'){ toast('Delete from a folder view.','err'); return; }
-    if(!confirm('Delete '+selected.size+' item(s)? This cannot be undone.')) return;
     var stems=Array.from(selected), chat=current;
     // INSTANT soft-delete: hide now, reaper deletes the files in the background.
     stems.forEach(function(stem){ pendingDel[stem]=true; var it=itemByStem(stem); if(it) removeFromData(it); });
     clearSelection(); rerenderCurrent();
-    toast('🗑 Deleting '+stems.length+' in the background','ok');
+    toastUndo('🗑 Deleting '+stems.length+' in the background', stems);
     fetch('/trashmark',{method:'POST',credentials:'same-origin',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({chat:chat,stems:stems})})
@@ -1920,6 +1998,33 @@
       .catch(function(){ toast('Network error setting mapping','err'); });
   }
 
+  // ---------- mobile long-press => context menu ----------
+  // Synthesize a `contextmenu` event after a ~500ms press, so every existing
+  // contextmenu handler (folder tiles, photo tiles, dup cards, blank space)
+  // works on touch devices without separate logic. Cancelled by move/scroll.
+  (function(){
+    var lpTimer=null, lpX=0, lpY=0, lpTarget=null;
+    function clearLp(){ if(lpTimer){ clearTimeout(lpTimer); lpTimer=null; } lpTarget=null; }
+    document.addEventListener('touchstart',function(e){
+      if(e.touches.length!==1) { clearLp(); return; }
+      var t=e.touches[0]; lpX=t.clientX; lpY=t.clientY; lpTarget=e.target;
+      lpTimer=setTimeout(function(){
+        lpTimer=null;
+        if(!lpTarget) return;
+        var ev=new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:lpX,clientY:lpY});
+        lpTarget.dispatchEvent(ev);
+        if(navigator.vibrate) try{ navigator.vibrate(15); }catch(_){}
+      }, 500);
+    }, {passive:true});
+    document.addEventListener('touchmove',function(e){
+      if(!lpTimer) return;
+      var t=e.touches[0];
+      if(Math.abs(t.clientX-lpX)>10 || Math.abs(t.clientY-lpY)>10) clearLp();  // it's a scroll/drag
+    }, {passive:true});
+    document.addEventListener('touchend',clearLp);
+    document.addEventListener('touchcancel',clearLp);
+  })();
+
   // ---------- FOLDER tile context menu (landing) ----------
   elFolder.addEventListener('contextmenu',function(e){
     var f=e.target.closest('.folder');
@@ -2034,6 +2139,14 @@
     return Math.max(1,c);
   }
   document.addEventListener('keydown',function(e){
+    // global: "?" toggles the keyboard-shortcuts help (unless typing in a field)
+    var ae=document.activeElement, atag=(ae&&ae.tagName)||'';
+    if(e.key==='?' && atag!=='INPUT' && atag!=='TEXTAREA'){
+      e.preventDefault(); toggleHelp(); return;
+    }
+    if(e.key==='Escape' && document.getElementById('helpScrim').classList.contains('show')){
+      document.getElementById('helpScrim').classList.remove('show'); return;
+    }
     // lightbox keys
     if(lb.classList.contains('open')){
       if(e.key==='Escape') closeLb();
@@ -2216,20 +2329,20 @@
     var chats=Object.keys(byChat);
     var total=chats.reduce(function(a,k){return a+byChat[k].length;},0);
     if(!total){ toast('Nothing marked for deletion.','err'); return; }
-    if(!confirm('Delete '+total+' duplicate item(s)? This cannot be undone.')) return;
     // INSTANT: mark for deletion (soft) — items vanish now, the background reaper
-    // does the real file deletes. No blocking progress dialog.
-    var markedStems={};
+    // does the real file deletes after the undo grace window. No confirm dialog;
+    // the Undo button is the safety net.
+    var markedStems={}, allStems=[];
     chats.forEach(function(chat){
       var stems=byChat[chat];
-      stems.forEach(function(s){ pendingDel[s]=true; markedStems[s]=1; });
+      stems.forEach(function(s){ pendingDel[s]=true; markedStems[s]=1; allStems.push(s); });
       fetch('/trashmark',{method:'POST',credentials:'same-origin',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({chat:chat,stems:stems})})
         .then(function(r){ if(r.status!==200){ stems.forEach(function(s){ delete pendingDel[s]; }); } bgPoll(); })
         .catch(function(){ stems.forEach(function(s){ delete pendingDel[s]; }); });
     });
-    toast('🗑 Deleting '+total+' in the background — keep going','ok');
+    toastUndo('🗑 Deleting '+total+' duplicate'+(total===1?'':'s')+' in the background', allStems);
     bgPoll();
     // drop trashed items from the manifest locally
     Object.keys(markedStems).forEach(function(s){
@@ -2252,6 +2365,10 @@
   }
   document.getElementById('dedupBtn').addEventListener('click',showDuplicates);
   document.getElementById('newFolderBtn').addEventListener('click',promptNewFolder);
+  function toggleHelp(){ document.getElementById('helpScrim').classList.toggle('show'); }
+  document.getElementById('helpBtn').addEventListener('click',toggleHelp);
+  document.getElementById('hpClose').addEventListener('click',function(){ document.getElementById('helpScrim').classList.remove('show'); });
+  document.getElementById('helpScrim').addEventListener('click',function(e){ if(e.target===this) this.classList.remove('show'); });
 
   // ---------- BOOT ----------
   // load the manifest AND the full folder list (incl. empty folders) in parallel

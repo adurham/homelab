@@ -24,12 +24,16 @@ import json
 import os
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
+# Seconds an item sits in the queue before the reaper actually deletes it. Gives
+# the user an "undo" window. Short enough that bulk deletes still finish promptly.
+REAP_GRACE = int(os.environ.get("TG_REAP_GRACE_SEC", "8"))
 PORT = int(os.environ.get("TRASH_PORT", "8091"))
 BIND = os.environ.get("TRASH_BIND", "172.16.0.46")
 THUMB_CACHE = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))
@@ -90,17 +94,43 @@ def save_queue(items: list) -> None:
 
 
 def enqueue_deletes(chat: str, stems: list) -> int:
-    """Append {chat,stem} entries to the persistent queue. Instant — no rclone."""
+    """Append {chat,stem,ts} entries to the persistent queue. Instant — no rclone.
+    The ts (enqueue time) lets the reaper hold items for REAP_GRACE seconds so an
+    undo can pull them back before the actual Drive delete happens."""
+    now = time.time()
     with _qlock:
         q = load_queue()
         have = {(e.get("chat"), e.get("stem")) for e in q}
         added = 0
         for s in stems:
             if (chat, s) not in have:
-                q.append({"chat": chat, "stem": s})
+                q.append({"chat": chat, "stem": s, "ts": now})
                 added += 1
         save_queue(q)
     return added
+
+
+def undo_deletes(stems: list) -> dict:
+    """Remove the given stems from BOTH the pending-delete queue and the
+    exclusion ledger — i.e. cancel a delete before the reaper has run. Only items
+    still in the queue can be undone (already-reaped files are gone for good)."""
+    sset = {str(s) for s in stems}
+    with _qlock:
+        q = load_queue()
+        restorable = [e.get("stem") for e in q if e.get("stem") in sset]
+        q2 = [e for e in q if e.get("stem") not in sset]
+        save_queue(q2)
+    # pull them back out of the exclusion ledger so they reappear in the manifest
+    with _lock:
+        ex = load_excluded()
+        for s in restorable:
+            ex.discard(s)
+        save_excluded(ex)
+    if restorable:
+        _trigger_manifest_rebuild()
+    too_late = [s for s in sset if s not in set(restorable)]
+    return {"restored": restorable, "restored_count": len(restorable),
+            "too_late": too_late}
 
 
 def _reap_one(entry) -> bool:
@@ -127,7 +157,6 @@ def reaper_loop():
     """Background worker: drains the pending-delete queue. The item is already
     hidden from the gallery (it's in the exclusion ledger), so this just does the
     slow Drive deletes without anyone waiting on them."""
-    import time
     while True:
         try:
             with _qlock:
@@ -136,6 +165,11 @@ def reaper_loop():
                 time.sleep(3)
                 continue
             entry = q[0]
+            # honor the undo grace window — don't delete until the item has aged
+            age = time.time() - float(entry.get("ts", 0) or 0)
+            if age < REAP_GRACE:
+                time.sleep(min(REAP_GRACE - age, 3) + 0.1)
+                continue
             ok = _reap_one(entry)
             # pop the head (re-read in case new items were appended meanwhile)
             with _qlock:
@@ -241,6 +275,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = unquote(self.path)
+        if p.startswith("/trashundo"):
+            return self._trashundo()
         if p.startswith("/trashmark"):
             return self._trashmark()
         if p.startswith("/trashbatch"):
@@ -260,6 +296,22 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, trash_item(chat, stem))
         except Exception as e:  # noqa: BLE001
             self._json(500, {"error": f"{type(e).__name__}: {e}"})
+
+    def _trashundo(self):
+        """POST /trashundo  body: {"stems": [...]}  — cancel a just-issued delete.
+        Pulls the stems back out of the pending-delete queue + exclusion ledger,
+        so they reappear. Only works within the REAP_GRACE window (before the
+        reaper has actually deleted the files)."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length) or "{}")
+        except (ValueError, OSError):
+            return self._json(400, {"error": "bad json body"})
+        stems = body.get("stems") or []
+        if not isinstance(stems, list) or not stems:
+            return self._json(400, {"error": "want {stems[]}"})
+        stems = [s for s in stems if ".." not in str(s) and "/" not in str(s)]
+        return self._json(200, undo_deletes(stems))
 
     def _trashmark(self):
         """POST /trashmark  body: {"chat": "...", "stems": [...]}
