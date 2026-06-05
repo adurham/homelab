@@ -45,6 +45,10 @@ services:
       AUTHENTIK_POSTGRESQL__USER: {{ authentik_pg_user | default('authentik') }}
       AUTHENTIK_POSTGRESQL__NAME: {{ authentik_pg_db | default('authentik') }}
       AUTHENTIK_POSTGRESQL__PASSWORD: {{ authentik_pg_password }}
+      # More gunicorn workers/threads so concurrent auth_request validations (the
+      # gallery fires many) don't serialize behind a single worker and time out.
+      AUTHENTIK_WEB__WORKERS: "{{ authentik_web_workers | default(2) }}"
+      AUTHENTIK_WEB__THREADS: "{{ authentik_web_threads | default(4) }}"
     volumes:
       - media:/media
       - custom-templates:/templates

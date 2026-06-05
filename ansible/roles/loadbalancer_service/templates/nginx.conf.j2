@@ -644,16 +644,22 @@ server {
         # overwhelmed it and caused intermittent 5xx on POSTs like setcover).
         proxy_http_version 1.1;
         proxy_set_header Connection "";
-        # Cache the auth result per session+URL for a few seconds so a page-load
-        # storm of thumbnail auth_requests collapses to ~one check instead of
-        # flooding Authentik until it times out.
+        # Cache the auth result by SESSION COOKIE ONLY (not URL). The auth_request
+        # just validates the session — the answer is identical for every URL on
+        # this vhost. Keying on $request_uri (as before) made every thumbnail a
+        # cache MISS, so the cache did nothing and Authentik still got flooded.
+        # Cookie-only key => a whole page-load's auth checks collapse to ONE.
         proxy_cache auth_cache;
-        proxy_cache_key "$cookie_authentik_proxy_73f99faf$http_authorization$request_uri";
-        proxy_cache_valid 200 10s;
-        proxy_cache_valid 401 403 1s;
+        proxy_cache_key "$cookie_authentik_proxy_73f99faf";
+        proxy_cache_valid 200 30s;
+        proxy_cache_valid 401 403 5s;
+        proxy_cache_lock on;            # de-dupe concurrent identical lookups
+        proxy_cache_lock_timeout 8s;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_504;
         proxy_ignore_headers Cache-Control Expires Set-Cookie;
         proxy_connect_timeout 5s;
-        proxy_read_timeout 10s;
+        proxy_read_timeout 12s;
+        proxy_next_upstream off;
     }
 
     location @goauthentik_proxy_signin {
