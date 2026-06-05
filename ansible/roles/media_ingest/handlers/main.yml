@@ -12,6 +12,13 @@
   # crash-loops until the one-time login session is copied over.
   when: collector_session_authorized | default(false)
 
+- name: Restart Reconcile Timer
+  ansible.builtin.systemd:
+    name: media-ingest-reconcile.timer
+    state: restarted
+    enabled: true
+    daemon_reload: true
+
 - name: Save mediaingest iptables
   ansible.builtin.shell: "mkdir -p /etc/iptables && iptables-save > /etc/iptables/rules.v4"
   changed_when: true

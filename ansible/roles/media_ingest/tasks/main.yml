@@ -125,6 +125,14 @@
     mode: '0750'
   notify: Restart Collector Collector
 
+- name: Deploy Reconcile Sweep Script
+  ansible.builtin.copy:
+    src: reconcile.py
+    dest: "{{ media_ingest_dir }}/reconcile.py"
+    owner: "{{ media_ingest_user }}"
+    group: "{{ media_ingest_user }}"
+    mode: '0750'
+
 - name: Deploy Interactive Login Helper (one-time session re-auth)
   ansible.builtin.copy:
     src: tg_login.py
@@ -200,6 +208,46 @@
       Session not yet authorized. Copy an authorized source session to
       {{ media_ingest_state }}/collector.session (owned by {{ media_ingest_user }}),
       then: systemctl start media-ingest-collector.service
+  when: not collector_session_authorized
+
+# ─── Reconcile sweep (periodic backstop) ───────────────────────────────────
+- name: Render Reconcile Service Unit
+  ansible.builtin.template:
+    src: media-ingest-reconcile.service.j2
+    dest: /etc/systemd/system/media-ingest-reconcile.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Reconcile Timer
+
+- name: Render Reconcile Timer Unit
+  ansible.builtin.template:
+    src: media-ingest-reconcile.timer.j2
+    dest: /etc/systemd/system/media-ingest-reconcile.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Reconcile Timer
+
+# The sweep needs an authorized session (it reads the collector session). Only
+# enable+start the timer once the session exists, mirroring the collector gate.
+- name: Enable & Start Reconcile Timer (only if session authorized)
+  ansible.builtin.systemd:
+    name: media-ingest-reconcile.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: collector_session_authorized
+
+- name: Enable Reconcile Timer Unit (session not yet authorized)
+  ansible.builtin.systemd:
+    name: media-ingest-reconcile.timer
+    enabled: true
+    daemon_reload: true
   when: not collector_session_authorized
 
 # ─── Security hardening ────────────────────────────────────────────────────
