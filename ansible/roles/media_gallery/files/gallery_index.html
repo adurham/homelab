@@ -1949,6 +1949,7 @@
   var elDup=document.getElementById('dupView');
   // per-stem desired action in the dup view: 'keep' or 'trash'
   var dupAction={};
+  var _dupReport=null;   // the current in-memory dedup report (kept fresh after deletes)
   function showDuplicates(){
     current='__dup__';
     elFolder.style.display='none'; elPhoto.style.display='none';
@@ -1989,6 +1990,7 @@
   }
   function renderDuplicates(rep){
     dupAction={};
+    _dupReport=rep;   // remember the current report so deletes update it in place
     var groups=rep.groups||[];
     var html='<div id="dupBar">'+
       '<b>'+groups.length+' duplicate group'+(groups.length===1?'':'s')+'</b> · '+
@@ -2103,22 +2105,24 @@
     });
     toast('🗑 Deleting '+total+' in the background — keep going','ok');
     bgPoll();
-    {
-      // drop trashed items locally + refresh the report view immediately
-      Object.keys(markedStems).forEach(function(s){
-        for(var k=0;k<manifest.length;k++){ if(manifest[k].stem===s){ removeFromData(manifest[k]); break; } }
-      });
-      buildChats();
-      fetch('/gallery/dedup.json?ts='+Date.now(),{credentials:'same-origin'})
-        .then(function(r){return r.ok?r.json():null;})
-        .then(function(j){
-          if(j){ j.groups=(j.groups||[]).map(function(g){return g.filter(function(m){return !pendingDel[m.stem];});})
-                   .filter(function(g){return g.length>=2;});
-                 j.dup_groups=j.groups.length; j.dup_items=j.groups.reduce(function(a,g){return a+g.length;},0);
-                 if(current==='__dup__') renderDuplicates(j); }
-        }).catch(function(){});
-      reloadManifest(null);
+    // drop trashed items from the manifest locally
+    Object.keys(markedStems).forEach(function(s){
+      for(var k=0;k<manifest.length;k++){ if(manifest[k].stem===s){ removeFromData(manifest[k]); break; } }
+    });
+    buildChats();
+    // Re-render the dup view from the CURRENT in-memory report minus the just-
+    // deleted stems — do NOT re-fetch dedup.json (it's a stale snapshot that
+    // still lists them, which previously made deleted dupes reappear and let you
+    // delete the same set twice). A real Rescan regenerates the snapshot.
+    if(_dupReport){
+      _dupReport.groups=(_dupReport.groups||[])
+        .map(function(g){ return g.filter(function(m){ return !markedStems[m.stem]; }); })
+        .filter(function(g){ return g.length>=2; });
+      _dupReport.dup_groups=_dupReport.groups.length;
+      _dupReport.dup_items=_dupReport.groups.reduce(function(a,g){return a+g.length;},0);
+      if(current==='__dup__') renderDuplicates(_dupReport);
     }
+    reloadManifest(null);
   }
   document.getElementById('dedupBtn').addEventListener('click',showDuplicates);
 
