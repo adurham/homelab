@@ -1,0 +1,20 @@
+# Managed by Ansible — roles/media_ingest. Do not edit by hand.
+[Unit]
+Description=media-ingest reconcile sweep (backstop for missed incoming media)
+After=network-online.target {{ media_ingest_mount_unit.stdout }}
+Wants=network-online.target
+Requires={{ media_ingest_mount_unit.stdout }}
+
+[Service]
+Type=oneshot
+User={{ media_ingest_user }}
+Group={{ media_ingest_user }}
+EnvironmentFile={{ media_ingest_dir }}/collector.env
+ExecStart={{ media_ingest_dir }}/venv/bin/python {{ media_ingest_dir }}/reconcile.py --lookback {{ media_ingest_reconcile_lookback }}
+
+# Hardening — same surface as the collector: only its own state/log dirs.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ media_ingest_state }} {{ media_ingest_log_dir }}

@@ -232,7 +232,12 @@ async def handle(event):
 
 
 async def main():
-    client = SourceClient(SESSION, API_ID, API_HASH)
+    # catch_up=True makes the source client request the missed-update difference on
+    # (re)connect, so messages delivered while the daemon was down/reconnecting
+    # are replayed through the NewMessage handler instead of being lost. This is
+    # the live-path defense against restart/disconnect gaps; the periodic
+    # reconcile sweep (reconcile.py) is the belt-and-suspenders backstop.
+    client = SourceClient(SESSION, API_ID, API_HASH, catch_up=True)
     client.add_event_handler(handle, events.NewMessage(incoming=True))
     client.add_event_handler(handle, events.MessageEdited(incoming=True))
     await client.connect()
@@ -249,6 +254,12 @@ async def main():
         log.error("gallery auth FAILED at startup: %s", e)
     # one-time: seed the static chat-id map into folder_meta (single source of truth)
     _seed_static_chat_ids()
+    # replay any updates missed while we were offline, then stream live
+    try:
+        await client.catch_up()
+        log.info("catch_up complete — replayed any offline updates")
+    except Exception as e:  # noqa: BLE001
+        log.warning("catch_up failed (live stream still active): %s", e)
     await client.run_until_disconnected()
 
 

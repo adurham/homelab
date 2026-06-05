@@ -15,3 +15,8 @@ media_ingest_gallery_base: "https://gallery.chi.lab.amd-e.com"
 # The client secret comes from the vault.
 media_ingest_authentik_token_url: "https://auth.chi.lab.amd-e.com/application/o/token/"
 media_ingest_collector_client_id: "media-ingest-collector"
+
+# Reconcile sweep (periodic backstop for any incoming media the live collector
+# missed). Runs reconcile.py on a systemd timer.
+media_ingest_reconcile_interval: "20min"   # OnUnitActiveSec for the timer
+media_ingest_reconcile_lookback: 40        # messages per private chat per sweep
