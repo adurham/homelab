@@ -2198,7 +2198,7 @@
   Promise.all([
     fetch('/gallery/manifest.json').then(function(r){if(!r.ok)throw new Error(r.status);return r.json();}),
     fetch('/gallery/folders.json').then(function(r){return r.ok?r.json():[];}).catch(function(){return [];}),
-    fetch('/foldermeta',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():{};}).catch(function(){return {};})
+    fetch('/foldermeta?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():{};}).catch(function(){return {};})
   ]).then(function(res){
       manifest=Array.isArray(res[0])?res[0]:[];
       var allFolders=Array.isArray(res[1])?res[1]:[];
