@@ -1,15 +1,28 @@
 #!/usr/bin/env python3
 """
-upstream source ephemeral collector (collector edition) — captures ephemeral media in
+upstream source media collector (collector edition) — captures incoming media in
 real time and PUSHES it to the gallery platform via the authenticated ingest
 API. No rclone, no crypt key, no GDrive here: this box only holds the upstream source
 session and the gallery OAuth2 client creds.
 
-On an incoming ephemeral (ttl_seconds) message sent TO us:
+Scope of capture (what counts as "all images FROM the user, not FROM me"):
+  * INCOMING only (msg.out == False) — never our own sent media.
+  * PRIVATE 1:1 chats only (event.is_private) — not groups/channels, so big
+    group/channel media floods don't pollute the gallery. Broaden here if you
+    ever want group capture.
+  * Photos, videos, and image/video documents. Stickers / voice / other docs
+    are skipped. Ephemeral (ttl_seconds / ephemeral) media is INCLUDED
+    automatically and handled non-destructively (silent download, no read
+    receipt — preserves the phone copy).
+  * Stems already in the gallery exclusion ledger (trashed/purged) are skipped
+    so they never re-import.
+
+On a capturable incoming message sent TO us:
   1. silent download to a tmpfs staging dir (no read receipt fired)
   2. resolve the destination folder = the chat's gallery folder name
   3. push to the gallery with stem=<chatid>_<msgid>, the real message date,
-     out=False (received). The gallery encrypts + stores + thumbnails.
+     out=False (received). The gallery encrypts + stores + thumbnails + dedups
+     by stem (idempotent re-push on edits).
   4. delete the local staging file.
 
 Folder naming mirrors the gallery's CHAT_NAMES map so captures land in the same
@@ -129,19 +142,72 @@ def ttl_of(media):
     return None
 
 
+def media_kind(msg):
+    """Classify a message's media for capture. Returns 'photo' / 'video' /
+    'media-doc' for capturable media, or None to skip. Captures photos, videos
+    (incl. gifs / round video notes) and image|video documents; skips stickers,
+    voice/audio, and non-media documents. Ephemeral media is included (its
+    underlying type is still a photo/document)."""
+    if getattr(msg, "sticker", None):
+        return None
+    if getattr(msg, "photo", None):
+        return "photo"
+    if getattr(msg, "video", None) or getattr(msg, "video_note", None) or getattr(msg, "gif", None):
+        return "video"
+    doc = getattr(msg, "document", None)
+    if doc is not None:
+        mt = getattr(doc, "mime_type", "") or ""
+        if mt.startswith("image/") or mt.startswith("video/"):
+            return "media-doc"
+    return None
+
+
+# Gallery exclusion ledger (trashed/purged stems). Refreshed periodically so the
+# collector never re-imports something the user deleted in the gallery.
+_excluded = set()
+_excluded_ts = 0.0
+_EXCL_TTL = 120.0  # refresh at most every 2 minutes
+
+
+def _refresh_excluded():
+    global _excluded, _excluded_ts
+    import time as _t
+    if _t.time() - _excluded_ts < _EXCL_TTL and _excluded_ts:
+        return
+    _excluded_ts = _t.time()
+    try:
+        _excluded = store_client.get_excluded()
+    except Exception as e:  # noqa: BLE001
+        log.debug("excluded refresh failed: %s", e)
+
+
+# In-process set of stems already pushed this run, so NewMessage + MessageEdited
+# (or repeated caption edits) don't re-download/re-push the same item.
+_seen = set()
+
+
 async def handle(event):
     msg = event.message
     if getattr(msg, "out", False):
-        return  # only media sent TO us
-    media = getattr(msg, "media", None)
-    if media is None or not ttl_of(media):
+        return  # only media sent TO us, never our own
+    if not getattr(event, "is_private", False):
+        return  # private 1:1 chats only — skip group/channel floods
+    kind = media_kind(msg)
+    if not kind:
+        return
+    cid = event.chat_id
+    stem = f"{cid}_{msg.id}"
+    if stem in _seen:
+        return
+    _refresh_excluded()
+    if stem in _excluded:
+        log.info("skip excluded stem=%s", stem)
         return
     chat = await event.get_chat()
-    cid = event.chat_id
     folder = folder_for(cid, getattr(chat, "title", None) or getattr(chat, "first_name", None))
-    stem = f"{cid}_{msg.id}"
     date_iso = msg.date.isoformat() if msg.date else ""
-    log.info("EPHEMERAL from chat=%s stem=%s -> folder=%s", cid, stem, folder)
+    eph = " ephemeral" if ttl_of(getattr(msg, "media", None)) else ""
+    log.info("MEDIA%s from chat=%s stem=%s kind=%s -> folder=%s", eph, cid, stem, kind, folder)
 
     tmp = STAGING / stem
     try:
@@ -150,6 +216,7 @@ async def handle(event):
             log.warning("empty download for %s", stem)
             return
         store_client.push_media(folder, path, stem, date_iso, is_out=False)
+        _seen.add(stem)
         log.info("PUSHED %s to gallery folder %s", stem, folder)
     except Exception as e:  # noqa: BLE001
         log.error("capture/push failed %s: %s: %s", stem, type(e).__name__, e)
