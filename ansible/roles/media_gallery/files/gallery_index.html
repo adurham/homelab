@@ -302,6 +302,10 @@
   #tkBody .tk-row.ok .tk-op{color:#6ee7a0;}
   #tkBody .tk-row.err .tk-op{color:#ff8c8c;}
   #tkBody .tk-empty{padding:18px;color:var(--muted);text-align:center;}
+  #tkBody .tk-row.live{background:rgba(91,140,255,.08);}
+  #tkBody .tk-row.live .tk-op{color:var(--accent);}
+  #tkBody .tk-row.live .spin{display:inline-block;width:12px;height:12px;border:2px solid #3a4150;
+    border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;}
   /* OS-style progress dialog (file-manager copy/move sheet) */
   #progScrim{position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.45);
     display:none;align-items:center;justify-content:center;}
@@ -559,6 +563,10 @@
       fetch('/movequeue',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
     ]).then(function(res){
         var delN=(res[0]&&res[0].queued)||0, mvN=(res[1]&&res[1].queued)||0;
+        // remember live queue state so the Activity Log can show it
+        _bgState={del:delN, mv:mvN,
+                  reaped:(res[0]&&res[0].reaped)||0, failed:((res[0]&&res[0].failed)||0)+((res[1]&&res[1].failed)||0),
+                  moved:(res[1]&&res[1].moved)||0};
         var total=delN+mvN;
         if(total>0){
           el.classList.add('show'); el.classList.remove('done');
@@ -575,8 +583,13 @@
             _bgTimer=setTimeout(function(){ el.classList.add('done'); txt.textContent='Activity'; _reapShown=false; }, 3000);
           } else { el.classList.add('show','done'); txt.textContent='Activity'; }   // idle: stay as a clickable chip
         }
+        // keep the Activity Log live while it's open
+        if(document.getElementById('taskScrim').classList.contains('show')) renderTaskLog();
+        // while a queue is draining, keep polling even if nobody triggered it
+        if(total>0 && !_bgTimer){ _bgTimer=setTimeout(bgPoll, 2000); }
       });
   }
+  var _bgState={del:0,mv:0,reaped:0,failed:0,moved:0};
 
   // ---- activity log (debug / tasks panel) ----
   var _taskLog=[];   // {t, op, detail, status, ok}
@@ -588,8 +601,27 @@
   }
   function renderTaskLog(){
     var b=document.getElementById('tkBody');
-    if(!_taskLog.length){ b.innerHTML='<div class="tk-empty">No activity yet.</div>'; return; }
-    b.innerHTML=_taskLog.map(function(e){
+    var html='';
+    // LIVE background queue (delete/move reaper) at the top
+    var bg=_bgState||{};
+    if(bg.del>0 || bg.mv>0){
+      var lp=[];
+      if(bg.del>0) lp.push('Deleting '+bg.del);
+      if(bg.mv>0) lp.push('Moving '+bg.mv);
+      html+='<div class="tk-row live"><span class="tk-time"><span class="spin"></span></span>'+
+        '<span class="tk-op">In progress</span><span class="tk-detail">'+lp.join(' · ')+' in the background…</span></div>';
+    }
+    // session totals (what the reaper has finished this session)
+    if(bg.reaped>0 || bg.moved>0 || bg.failed>0){
+      var sp=[];
+      if(bg.reaped>0) sp.push(bg.reaped+' deleted');
+      if(bg.moved>0) sp.push(bg.moved+' moved');
+      if(bg.failed>0) sp.push(bg.failed+' failed');
+      html+='<div class="tk-row '+(bg.failed>0?'err':'ok')+'"><span class="tk-time">—</span>'+
+        '<span class="tk-op">Completed</span><span class="tk-detail">'+sp.join(' · ')+' (this session)</span></div>';
+    }
+    // per-action log entries (failures/notices recorded by logTask)
+    html+=_taskLog.map(function(e){
       var hh=e.t.toLocaleTimeString();
       var st=e.ok?('✓ '+e.op):('✕ '+e.op+' ('+e.status+')');
       var det=(e.detail||'')+(e.msg?(' — '+e.msg):'');
@@ -597,8 +629,10 @@
         '</span><span class="tk-op">'+st+'</span><span class="tk-detail">'+
         String(det).replace(/</g,'&lt;')+'</span></div>';
     }).join('');
+    if(!html){ html='<div class="tk-empty">No activity.</div>'; }
+    b.innerHTML=html;
   }
-  function openTaskLog(){ document.getElementById('taskScrim').classList.add('show'); renderTaskLog(); }
+  function openTaskLog(){ document.getElementById('taskScrim').classList.add('show'); bgPoll(); renderTaskLog(); }
   setTimeout(function(){
     var bg=document.getElementById('bgTasks');
     // keep a small always-visible "Activity" chip so the log is reachable anytime
