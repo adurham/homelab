@@ -48,14 +48,11 @@ def load_excluded() -> set:
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".gif"}
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
 
-CHAT_NAMES = {
-    "100000001": "person1",
-    "100000002": "person2",
-    "100000003": "person3",
-    "100000004": "person4",
-    "100000005": "person5",
-    "777000": "upstream source",
-}
+# Optional chat-id -> folder alias seed. EMPTY in the public repo (used to hold
+# real chat-ids + people's names — a privacy leak in a public tree). The manifest
+# derives each item's folder from the by-chat/ listing, so this map is not
+# load-bearing here; chat_folder_for() is vestigial. Never commit real identities.
+CHAT_NAMES = {}
 
 
 def log(*a):

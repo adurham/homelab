@@ -35,10 +35,11 @@ SESSION = os.environ.get("TG_SESSION", "/var/lib/media-ingest/backfill")
 STAGING = Path(os.environ.get("TG_STAGING", "/var/lib/media-ingest/staging"))
 STATE_FILE = os.environ.get("TG_BACKFILL_STATE", "/var/lib/media-ingest/backfill_state.json")
 
-CHAT_NAMES = {
-    "100000001": "person1", "100000002": "person2", "100000003": "person3",
-    "100000004": "person4", "100000005": "person5", "777000": "upstream source",
-}
+# Optional chat-id -> folder alias seed. EMPTY in the public repo (used to hold
+# real chat-ids + people's names — a privacy leak in a public tree). Empty means
+# folder_for() falls back to the sanitized chat title; rename from the gallery UI
+# afterward. Never commit real identities here.
+CHAT_NAMES = {}
 STAGING.mkdir(parents=True, exist_ok=True)
 
 

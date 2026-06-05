@@ -25,8 +25,8 @@ setTimeout(()=>{ try{
  var doc=dom1.window.document;
  console.log('default cover (newest a1):',coverSrc(doc));
  // open person1, right-click a2 tile -> set cover. Simpler: call setFolderCover directly via a tile
- var gabi=null;doc.querySelectorAll('#folderGrid .folder').forEach(f=>{if(f.dataset.chat==='person1')gabi=f;});
- click(gabi); // open folder
+ var p1=null;doc.querySelectorAll('#folderGrid .folder').forEach(f=>{if(f.dataset.chat==='person1')p1=f;});
+ click(p1); // open folder
  setTimeout(()=>{
    var tiles=doc.querySelectorAll('#photoGrid .tile');
    // find a2 tile, right-click -> Set as folder cover

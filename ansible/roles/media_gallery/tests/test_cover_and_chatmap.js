@@ -21,12 +21,12 @@ function click(el,opts){el.dispatchEvent(new window.MouseEvent('click',Object.as
 function rclick(el,x,y){el.dispatchEvent(new window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:x||100,clientY:y||100}));}
 setTimeout(()=>{ try{
  console.log('=== T1 cover from folderMeta (person1 cover=a2 -> tile shows a2 thumb) ===');
- var gabi=null;doc.querySelectorAll('#folderGrid .folder').forEach(f=>{if(f.dataset.chat==='person1')gabi=f;});
- var cov=gabi.querySelector('img.cover');
+ var p1=null;doc.querySelectorAll('#folderGrid .folder').forEach(f=>{if(f.dataset.chat==='person1')p1=f;});
+ var cov=p1.querySelector('img.cover');
  console.log('person1 cover src:',cov?cov.getAttribute('src'):'none');
  console.log(cov&&cov.getAttribute('src').indexOf('a2')>=0?'PASS uses pinned cover a2':'FAIL (should be a2 not a1)');
  console.log('=== T2 folder context menu -> Map chat IDs ===');
- rclick(gabi,150,150);
+ rclick(p1,150,150);
  var menu=doc.getElementById('ctxMenu');
  var labels=[].map.call(menu.querySelectorAll('button'),b=>b.textContent);
  console.log('folder ctx items:',labels.join(' | '));
