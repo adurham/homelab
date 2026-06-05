@@ -76,11 +76,18 @@ def load_folder_meta() -> dict:
 
 
 def save_folder_meta(meta: dict) -> None:
+    # Local write is the source of truth and is instant. The Drive mirror is a
+    # best-effort backup — do it in a background thread so a slow/saturated Drive
+    # (e.g. a big video thumbnail download in flight) never blocks the HTTP
+    # response (which previously caused setcover to 500 via the nginx timeout).
     FOLDER_META_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = str(FOLDER_META_FILE) + ".tmp"
     Path(tmp).write_text(json.dumps(meta, separators=(",", ":")))
     os.replace(tmp, FOLDER_META_FILE)
-    rclone("copyto", str(FOLDER_META_FILE), FOLDER_META_REMOTE)
+    threading.Thread(
+        target=lambda: rclone("copyto", str(FOLDER_META_FILE), FOLDER_META_REMOTE),
+        daemon=True,
+    ).start()
 
 # JWKS client (cached; refreshes keys automatically on unknown kid)
 _jwk_client = None
