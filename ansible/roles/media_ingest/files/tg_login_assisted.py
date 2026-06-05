@@ -7,11 +7,11 @@ operator (or an assistant driving it over SSH) can supply them without a TTY:
 
   TG_PHONE      phone number in international format, e.g. +13125550123
   TG_2FA        2FA password (optional; omit/empty if no 2FA)
-  TG_CODE_FILE  path this script POLLS for the login code source sends
+  TG_CODE_FILE  path this script POLLS for the login code the source sends
                 (default /tmp/tg_code). Write the code into that file when it
                 arrives; the script picks it up and finishes.
 
-Flow: submit phone -> source sends a code to the logged-in device -> write the
+Flow: submit phone -> the source sends a code to the logged-in device -> write the
 code to TG_CODE_FILE -> session authorized -> written to TG_SESSION.
 """
 import os

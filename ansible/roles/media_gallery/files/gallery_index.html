@@ -1985,7 +1985,7 @@
   }
   function mapFolderChatIds(folder){
     var cur=(folderMeta[folder]&&folderMeta[folder].chat_ids||[]).join(', ');
-    var v=window.prompt('source chat IDs for “'+folder+'” (comma-separated).\\n'+
+    var v=window.prompt('Source chat IDs for “'+folder+'” (comma-separated).\\n'+
       'New media from these chats is routed here, even if you rename the folder.', cur);
     if(v==null) return;
     var ids=v.split(',').map(function(s){return s.trim();}).filter(Boolean);

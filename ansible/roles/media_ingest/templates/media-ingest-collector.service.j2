@@ -15,7 +15,7 @@ EnvironmentFile={{ media_ingest_dir }}/collector.env
 ExecStart={{ media_ingest_dir }}/venv/bin/python {{ media_ingest_dir }}/collector.py
 Restart=always
 RestartSec=5
-# source reconnects on its own; if the process dies, bring it back fast.
+# the client reconnects on its own; if the process dies, bring it back fast.
 
 # Hardening — the collector only needs its own state/log dirs.
 NoNewPrivileges=true
