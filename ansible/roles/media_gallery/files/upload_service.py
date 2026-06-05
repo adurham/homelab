@@ -203,6 +203,7 @@ def _mover_worker():
             else:
                 _mover_state["failed"] += len(stems)
             _dirty.set()   # rebuild manifest so the new paths become authoritative
+            _rebuild_now.set()  # structural change -> rebuild now, skip debounce
         except Exception:  # noqa: BLE001
             time.sleep(5)
 
@@ -242,6 +243,9 @@ def _do_move_group(src, dest, stems) -> bool:
 # DEBOUNCE window. Thousands of uploads => a few rebuilds, never a thundering
 # herd of one-per-request.
 _dirty = threading.Event()
+# set alongside _dirty by STRUCTURAL ops (rename/rmdir/move) to skip the upload
+# debounce and rebuild the manifest immediately, so the change survives a refresh.
+_rebuild_now = threading.Event()
 _last_rebuild = [0.0]
 _uploads_total = [0]
 _pending_count = [0]
@@ -287,7 +291,14 @@ def _rebuild_worker():
         py = "python3"
     while True:
         _dirty.wait()
-        time.sleep(DEBOUNCE)          # let a burst accumulate
+        # Structural ops (rename/rmdir/move) set _rebuild_now so the manifest is
+        # regenerated IMMEDIATELY — they're one-off and the user expects the change
+        # to survive a refresh right away. Uploads leave it clear and get the
+        # debounce, so a burst of N uploads still coalesces into one rebuild.
+        if _rebuild_now.is_set():
+            _rebuild_now.clear()
+        else:
+            time.sleep(DEBOUNCE)      # let an upload burst accumulate
         _dirty.clear()                # anything after this re-arms for next pass
         env = dict(os.environ)
         env.setdefault("RCLONE_CONFIG", RCLONE_CONF)
@@ -466,6 +477,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(500, {"error": "rmdir failed", "detail": r.stderr[:200]})
         rclone("purge", f"{REMOTE}thumbs/{folder}")
         _dirty.set()
+        _rebuild_now.set()  # structural change -> rebuild now, skip debounce
         self._json(200, {"removed": folder})
 
     def _renamefile(self, raw):
@@ -516,6 +528,7 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError, NameError):
             pass
         _dirty.set()
+        _rebuild_now.set()  # structural change -> rebuild now, skip debounce
         self._json(200, {"renamed": old, "to": new, "folder": chat})
 
     def _mkdir(self, raw):
@@ -565,6 +578,7 @@ class Handler(BaseHTTPRequestHandler):
                 meta[new] = {**meta.get(new, {}), **meta.pop(old)}
                 save_folder_meta(meta)
         _dirty.set()  # rebuild manifest -> items re-keyed to <new>
+        _rebuild_now.set()  # structural change -> rebuild now, skip debounce
         self._json(200, {"renamed": old, "to": new})
 
     def _dedupscan(self):
@@ -733,6 +747,7 @@ class Handler(BaseHTTPRequestHandler):
         # clean up now-empty source dirs (best effort)
         rclone("rmdirs", f"{SRC}/{srcf}", "--leave-root")
         _dirty.set()
+        _rebuild_now.set()  # structural change -> rebuild now, skip debounce
         self._json(200, {"moved": len(leaves), "from": srcf, "to": destf})
 
     def _move(self, raw):
@@ -775,6 +790,7 @@ class Handler(BaseHTTPRequestHandler):
                f"{REMOTE}thumbs/{destf}/{stem}.jpg",
                "--retries", "3", "--low-level-retries", "5")
         _dirty.set()  # rebuild manifest -> item re-keyed to <destf>
+        _rebuild_now.set()  # structural change -> rebuild now, skip debounce
         self._json(200, {"moved": stem, "from": srcf, "to": destf,
                          "file": f"by-chat/{destf}/{leaf}"})
 
