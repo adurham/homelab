@@ -125,6 +125,14 @@
     mode: '0750'
   notify: Restart Collector Collector
 
+- name: Deploy Interactive Login Helper (one-time session re-auth)
+  ansible.builtin.copy:
+    src: tg_login.py
+    dest: "{{ media_ingest_dir }}/tg_login.py"
+    owner: "{{ media_ingest_user }}"
+    group: "{{ media_ingest_user }}"
+    mode: '0750'
+
 # ─── Env file (secrets from vault) ─────────────────────────────────────────
 - name: Render Collector Env File
   ansible.builtin.template:
