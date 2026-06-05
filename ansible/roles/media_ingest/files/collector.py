@@ -48,15 +48,14 @@ SESSION = os.environ.get("TG_SESSION", "/var/lib/media-ingest/collector")
 STAGING = Path(os.environ.get("TG_STAGING", "/var/lib/media-ingest/staging"))
 LOG_FILE = os.environ.get("TG_LOG_FILE", "/var/log/media-ingest/collector.log")
 
-# chat-id -> gallery folder, STATIC SEED. On startup these are pushed into
-# folder_meta.json (the single source of truth) for any chat-id not already
-# mapped there — so after first run the UI map is authoritative, the map
-# survives renames, and you manage everything from the gallery. This dict is
-# only a bootstrap/fallback; edit mappings in the gallery UI, not here.
-CHAT_NAMES = {
-    "100000001": "person1", "100000002": "person2", "100000003": "person3",
-    "100000004": "person4", "100000005": "person5", "777000": "upstream source",
-}
+# chat-id -> gallery folder, optional STATIC SEED. The gallery's folder_meta.json
+# is the SINGLE SOURCE OF TRUTH for chat-id -> folder routing; manage all
+# mappings in the gallery UI. This dict is intentionally EMPTY in the public repo
+# (it used to hold real chat-ids + people's names — a privacy leak in a public
+# tree). Leave it empty: unmapped chats fall back to the sanitized chat title and
+# are then routed/renamed from the gallery. Populate locally only if you need a
+# bootstrap before folder_meta exists, but never commit real identities here.
+CHAT_NAMES = {}
 
 
 def _seed_static_chat_ids():
