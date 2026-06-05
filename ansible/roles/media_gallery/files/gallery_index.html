@@ -695,7 +695,44 @@
   // we load: apply pending moves (rewrite chat) / deletes (drop), and once the
   // server's data already agrees, retire that pending entry.
   //   pendingMove[stem] = destFolder ; pendingDel[stem] = true
+  // Persisted to localStorage so an optimistic move/rename/delete SURVIVES a full
+  // page refresh until the server's rebuilt manifest catches up (the rebuild is
+  // near-instant for structural ops now, but a refresh in the gap would otherwise
+  // show the pre-change manifest — e.g. a rename appearing to revert).
   var pendingMove={}, pendingDel={};
+  try{
+    pendingMove=JSON.parse(localStorage.getItem('gal_pendingMove')||'{}')||{};
+    pendingDel=JSON.parse(localStorage.getItem('gal_pendingDel')||'{}')||{};
+  }catch(_){ pendingMove={}; pendingDel={}; }
+  function savePending(){
+    try{
+      localStorage.setItem('gal_pendingMove',JSON.stringify(pendingMove));
+      localStorage.setItem('gal_pendingDel',JSON.stringify(pendingDel));
+    }catch(_){}
+  }
+  // folder-level optimistic renames {oldName:newName}, persisted across refresh.
+  var pendingRename={};
+  try{ pendingRename=JSON.parse(localStorage.getItem('gal_pendingRename')||'{}')||{}; }catch(_){ pendingRename={}; }
+  function savePendingRenames(){ try{ localStorage.setItem('gal_pendingRename',JSON.stringify(pendingRename)); }catch(_){} }
+  // Reapply pending folder renames onto a freshly-loaded manifest, and retire a
+  // rename once the server's manifest already shows the NEW folder (= caught up).
+  function applyFolderRenames(){
+    var serverChats={}; manifest.forEach(function(it){ serverChats[it.chat]=1; });
+    Object.keys(pendingRename).forEach(function(oldN){
+      var newN=pendingRename[oldN];
+      if(serverChats[newN] && !serverChats[oldN]){ delete pendingRename[oldN]; return; } // server caught up
+      manifest.forEach(function(it){
+        if(it.chat===oldN){
+          it.chat=newN;
+          if(it.file) it.file=it.file.replace('by-chat/'+oldN+'/','by-chat/'+newN+'/');
+          if(it.thumb) it.thumb=it.thumb.replace('/'+oldN+'/','/'+newN+'/');
+        }
+      });
+      // an EMPTY folder rename: folders.json still seeds the old name
+      var oi=emptyFolders.indexOf(oldN); if(oi>=0) emptyFolders[oi]=newN;
+    });
+    savePendingRenames();
+  }
   function applyPending(){
     // returns a reconciled copy and prunes pending entries the server caught up on
     var out=[];
@@ -724,8 +761,10 @@
     var stillThere={}; manifest.forEach(function(it){ stillThere[it.stem]=1; });
     Object.keys(pendingDel).forEach(function(s){ if(!stillThere[s]) delete pendingDel[s]; });
     manifest=out;
+    savePending();   // persist the (now-pruned) pending state across refreshes
   }
   function buildChats(){
+    applyFolderRenames();   // reapply optimistic folder renames (survives refresh)
     applyPending();
     chatMap={}; chats=[];
     manifest.forEach(function(it){
@@ -1438,18 +1477,18 @@
           toast('✓ Renamed “'+oldName+'” → “'+nn+'”','ok');
           // OPTIMISTIC re-key in the LOCAL manifest so the change shows instantly.
           // The server manifest rebuild is debounced ~20s, so a refetch here would
-          // return the OLD name and undo the rename visually. Instead we re-key
-          // every item locally AND record per-stem pendingMove so a later refetch
-          // (or background timer) keeps showing the new name until the server agrees.
-          manifest.forEach(function(it){
-            if(it.chat===oldName){
-              it.chat=nn;
-              if(it.file) it.file=it.file.replace('by-chat/'+oldName+'/','by-chat/'+nn+'/');
-              if(it.thumb) it.thumb=it.thumb.replace('/'+oldName+'/','/'+nn+'/');
-              pendingMove[it.stem]=nn;
-            }
-          });
+          // return the OLD name and undo the rename visually. Re-key every item
+          // locally AND record a folder-level pendingRename in localStorage so the
+          // new name SURVIVES A REFRESH until the server's rebuilt manifest (now
+          // near-instant) reflects it. applyFolderRenames() reapplies on boot.
+          // Record the rename; applyFolderRenames() (in buildChats) does the
+          // actual re-keying — both now and on every future load — until the
+          // server's manifest shows the new name. Don't re-key inline here, or the
+          // retire-check would immediately think the server already caught up.
+          pendingRename[oldName]=nn; savePendingRenames();
           var ei=emptyFolders.indexOf(oldName); if(ei>=0) emptyFolders[ei]=nn;
+          // carry folder cover/meta to the new name locally too
+          if(folderMeta[oldName]){ folderMeta[nn]=folderMeta[oldName]; delete folderMeta[oldName]; }
           buildChats(); renderFolders();
         }else if(r.status===409){ toast('A folder named “'+nn+'” already exists','err'); }
         else { toast('Rename failed (HTTP '+r.status+')','err'); }
@@ -2204,8 +2243,13 @@
       var allFolders=Array.isArray(res[1])?res[1]:[];
       folderMeta=(res[2]&&typeof res[2]==='object')?res[2]:{};
       buildChats();
-      // seed emptyFolders = server folders that have no items in the manifest
-      allFolders.forEach(function(f){ if(!chatMap[f] && emptyFolders.indexOf(f)<0) emptyFolders.push(f); });
+      // seed emptyFolders = server folders that have no items in the manifest,
+      // but honor an optimistic rename (don't re-add the OLD name the server
+      // still lists until its rebuild catches up).
+      allFolders.forEach(function(f){
+        var nm=pendingRename[f]||f;
+        if(!chatMap[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
+      });
       renderFolders();   // always render landing (so "+ New folder" is available)
       bgPoll();          // show the background-delete indicator if a queue is draining
     })
