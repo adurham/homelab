@@ -3,32 +3,44 @@
   mode: single
   max_exceeded: silent
 
+  # POLICY: Eco Mode is NEVER used. The unit rests in Heat Pump (compressor-only,
+  # COP ~3.5) which holds the 140F setpoint on its own tight internal deadband and
+  # still dehumidifies the basement. Eco Mode's only "savings" come from letting the
+  # tank coast cold between cycles, which we do not want -- it short-cycled the
+  # compressor and never let the tank reach setpoint.
+  #
+  # This automation does exactly two things, plus one guardrail:
+  #   1. Crash-out (<35% hot water capacity) -> High Demand (compressor + resistive
+  #      electric elements) for rapid recovery.
+  #   2. Recovered (lower tank within 5F of setpoint) -> back to Heat Pump.
+  #   3. Guardrail: if the unit ever lands in Eco Mode, force it back to Heat Pump.
+
   trigger:
-    # Trigger 1: Low Hot Water % (Emergency Recovery)
+    # Trigger 1: Hot water capacity crashed out (emergency)
     - platform: numeric_state
       entity_id: sensor.econet_hpwh_hot_water
       below: 35
       id: "low_hot_water"
 
-    # Trigger 2: Lower Tank Deadband (10F below setpoint)
-    - platform: template
-      value_template: >
-        {{ states('sensor.econet_hpwh_lower_tank_temperature')|float(0) <
-           (state_attr('climate.econet_hpwh', 'temperature')|float(140) - 10) }}
-      id: "deadband_recovery"
-
-    # Trigger 3: Recovery Complete (lower tank within 5F of setpoint)
+    # Trigger 2: Recovery complete (lower tank within 5F of setpoint)
     - platform: template
       value_template: >
         {{ states('sensor.econet_hpwh_lower_tank_temperature')|float(0) >
            (state_attr('climate.econet_hpwh', 'temperature')|float(140) - 5) }}
       id: "recovery_complete"
 
+    # Trigger 3: Eco guardrail (unit somehow entered Eco Mode)
+    - platform: state
+      entity_id: climate.econet_hpwh
+      attribute: preset_mode
+      to: "Eco Mode"
+      id: "eco_guard"
+
   condition: []
 
   action:
     - choose:
-        # Case A: Emergency Low Hot Water -> High Demand (compressor + elements)
+        # Case A: Crash-out -> High Demand (compressor + electric elements)
         - conditions:
             - condition: trigger
               id: "low_hot_water"
@@ -48,50 +60,17 @@
               data:
                 title: "Hot Water Emergency Recovery"
                 message: >
-                  Hot water low (<35%). Switched to High Demand for rapid recovery.
+                  Hot water capacity low (<35%). Switched to High Demand
+                  (electric elements) for rapid recovery.
 
-        # Case B-cold: Deadband Hit + cold basement -> High Demand
-        # (compressor + resistive elements). In winter the heat-pump-only
-        # path recovers too slowly: a cold evaporator (low basement ambient)
-        # plus near-freezing inlet water tanks the COP and stretches recovery
-        # time. When ambient at the unit is below 60F we bring in the elements
-        # so recovery stays acceptable. Case C still drops back to Eco when
-        # the lower tank is within 5F of setpoint.
+        # Case B: Recovery complete -> back to Heat Pump (resting state)
         - conditions:
             - condition: trigger
-              id: "deadband_recovery"
+              id: "recovery_complete"
             - condition: state
               entity_id: climate.econet_hpwh
               attribute: preset_mode
-              state: "Eco Mode"
-            - condition: numeric_state
-              entity_id: sensor.econet_hpwh_ambient_temperature
-              below: 60
-          sequence:
-            - service: climate.set_preset_mode
-              target:
-                entity_id: climate.econet_hpwh
-              data:
-                preset_mode: "High Demand"
-            - service: persistent_notification.create
-              data:
-                title: "Hot Water Deadband Recovery (cold)"
-                message: >
-                  Lower tank {{ states('sensor.econet_hpwh_lower_tank_temperature')|round(0) }}°F
-                  (>10°F below setpoint), basement ambient
-                  {{ states('sensor.econet_hpwh_ambient_temperature')|round(0) }}°F.
-                  Switched to High Demand for faster cold-weather recovery.
-
-        # Case B-warm: Deadband Hit (default, warm basement) -> Heat Pump
-        # (compressor only, efficient). Summer/shoulder path; default whenever
-        # ambient is >=60F. Also gives free basement dehumidification.
-        - conditions:
-            - condition: trigger
-              id: "deadband_recovery"
-            - condition: state
-              entity_id: climate.econet_hpwh
-              attribute: preset_mode
-              state: "Eco Mode"
+              state: "High Demand"
           sequence:
             - service: climate.set_preset_mode
               target:
@@ -100,34 +79,25 @@
                 preset_mode: "Heat Pump"
             - service: persistent_notification.create
               data:
-                title: "Hot Water Deadband Recovery"
+                title: "Hot Water Recovery Complete"
                 message: >
-                  Lower tank {{ states('sensor.econet_hpwh_lower_tank_temperature')|round(0) }}°F
-                  (>10°F below setpoint). Switched to Heat Pump mode.
+                  Lower tank recovered to
+                  {{ states('sensor.econet_hpwh_lower_tank_temperature')|round(0) }}°F.
+                  Returning to Heat Pump mode.
 
-        # Case C: Recovery Complete -> Eco Mode
+        # Case C: Eco guardrail -> never rest in Eco Mode
         - conditions:
             - condition: trigger
-              id: "recovery_complete"
-            - condition: or
-              conditions:
-                - condition: state
-                  entity_id: climate.econet_hpwh
-                  attribute: preset_mode
-                  state: "High Demand"
-                - condition: state
-                  entity_id: climate.econet_hpwh
-                  attribute: preset_mode
-                  state: "Heat Pump"
+              id: "eco_guard"
           sequence:
             - service: climate.set_preset_mode
               target:
                 entity_id: climate.econet_hpwh
               data:
-                preset_mode: "Eco Mode"
+                preset_mode: "Heat Pump"
             - service: persistent_notification.create
               data:
-                title: "Hot Water Recovery Complete"
+                title: "Hot Water: Eco Mode Blocked"
                 message: >
-                  Lower tank recovered to {{ states('sensor.econet_hpwh_lower_tank_temperature')|round(0) }}°F.
-                  Resuming Eco Mode.
+                  Unit entered Eco Mode; forced back to Heat Pump
+                  (Eco is disabled by policy).
