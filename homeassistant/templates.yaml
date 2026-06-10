@@ -132,7 +132,93 @@
         ] | select('>', 0) | list %}
         {{ (temps | sum / temps | count) | round(1) if temps | count > 0 else 0 }}
 
+    # ── Humidity / dew-point observability ────────────────────────────────
+    # The ecobee's reliable live indoor RH lives in a CLIMATE attribute
+    # (climate.ecobee_thermostat current_humidity). The standalone
+    # sensor.edgewater_road_current_humidity goes stale/frozen and is the only
+    # humidity series Prometheus was exporting -> dashboards plotted a flat
+    # wrong line. Mirror the climate attribute into a real sensor so the
+    # /api/prometheus export (and Grafana) sees the TRUE indoor RH.
+    - name: "Indoor Humidity Live"
+      unique_id: indoor_humidity_live
+      unit_of_measurement: "%"
+      device_class: humidity
+      state_class: measurement
+      state: "{{ state_attr('climate.ecobee_thermostat', 'current_humidity') | float(0) }}"
+
+    # Indoor dew point (°F) via Magnus-Tetens. Computed in °C then converted.
+    # Dew point is the real comfort/moisture metric — RH alone is temp-relative.
+    - name: "Indoor Dew Point"
+      unique_id: indoor_dew_point
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state_class: measurement
+      state: >
+        {% set tf = state_attr('climate.ecobee_thermostat', 'current_temperature') | float(0) %}
+        {% set rh = state_attr('climate.ecobee_thermostat', 'current_humidity') | float(0) %}
+        {% if tf > 0 and rh > 0 %}
+          {% set tc = (tf - 32) * 5 / 9 %}
+          {% set a = 17.27 %}
+          {% set b = 237.7 %}
+          {% set g = (a * tc / (b + tc)) + log(rh / 100) %}
+          {% set dc = (b * g) / (a - g) %}
+          {{ (dc * 9 / 5 + 32) | round(1) }}
+        {% else %}
+          {{ none }}
+        {% endif %}
+
+    # Outdoor dew point (°F) from the weather integration. met.no exposes
+    # dew_point directly as a forecast attribute; fall back to computing it
+    # from temperature + humidity if the attribute is ever missing.
+    - name: "Outdoor Dew Point"
+      unique_id: outdoor_dew_point
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state_class: measurement
+      state: >
+        {% set dp = state_attr('weather.forecast_home', 'dew_point') %}
+        {% if dp is not none %}
+          {{ dp | float | round(1) }}
+        {% else %}
+          {% set tf = state_attr('weather.forecast_home', 'temperature') | float(0) %}
+          {% set rh = state_attr('weather.forecast_home', 'humidity') | float(0) %}
+          {% if tf != 0 and rh > 0 %}
+            {% set tc = (tf - 32) * 5 / 9 %}
+            {% set g = (17.27 * tc / (237.7 + tc)) + log(rh / 100) %}
+            {% set dc = (237.7 * g) / (17.27 - g) %}
+            {{ (dc * 9 / 5 + 32) | round(1) }}
+          {% else %}
+            {{ none }}
+          {% endif %}
+        {% endif %}
+
+    # Dew-point spread (°F): outdoor minus indoor. Positive = outdoor air is
+    # WETTER than inside, so opening windows / pulling in fresh air ADDS
+    # moisture. Drives the "don't open windows" alert.
+    - name: "Dew Point Spread"
+      unique_id: dew_point_spread
+      unit_of_measurement: "°F"
+      state_class: measurement
+      state: >
+        {% set o = states('sensor.outdoor_dew_point') | float(-99) %}
+        {% set i = states('sensor.indoor_dew_point') | float(-99) %}
+        {% if o > -90 and i > -90 %}
+          {{ (o - i) | round(1) }}
+        {% else %}
+          {{ none }}
+        {% endif %}
+
 - binary_sensor:
+    # ON when outdoor air is meaningfully wetter than indoor air (>=2°F dew
+    # point spread) — i.e. opening windows would raise indoor humidity. Keep
+    # the house sealed while this is on.
+    - name: "Outdoor Air Wetter Than Indoor"
+      unique_id: outdoor_air_wetter_than_indoor
+      device_class: moisture
+      delay_on: "00:05:00"
+      delay_off: "00:10:00"
+      state: "{{ states('sensor.dew_point_spread') | float(0) >= 2 }}"
+
     - name: "Washing Machine Running"
       unique_id: washing_machine_running
       delay_off: "00:05:00"
