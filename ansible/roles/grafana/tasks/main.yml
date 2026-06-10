@@ -304,6 +304,15 @@
     mode: '0644'
   notify: Restart Grafana
 
+- name: Deploy Humidity & Moisture Dashboard
+  ansible.builtin.copy:
+    src: humidity_moisture.json
+    dest: /var/lib/grafana/dashboards/humidity_moisture.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
 - name: Create Alerting Provisioning Directory
   ansible.builtin.file:
     path: /etc/grafana/provisioning/alerting

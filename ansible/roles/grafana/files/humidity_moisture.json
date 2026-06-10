@@ -1,0 +1,583 @@
+{
+  "uid": "humidity_moisture",
+  "title": "Humidity & Moisture",
+  "tags": [
+    "climate",
+    "humidity",
+    "hvac"
+  ],
+  "timezone": "America/Chicago",
+  "schemaVersion": 39,
+  "version": 0,
+  "refresh": "5m",
+  "time": {
+    "from": "now-2d",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Now",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Indoor RH",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_sensor_humidity_percent{entity=\"sensor.indoor_humidity_live\"}",
+          "legendFormat": "Indoor RH",
+          "refId": "A",
+          "datasource": "VictoriaMetrics"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Indoor Dew Point",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.indoor_dew_point\"} * 1.8) + 32",
+          "legendFormat": "Indoor Dew Point",
+          "refId": "A",
+          "datasource": "VictoriaMetrics"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Outdoor Dew Point",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 68
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.outdoor_dew_point\"} * 1.8) + 32",
+          "legendFormat": "Outdoor Dew Point",
+          "refId": "A",
+          "datasource": "VictoriaMetrics"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Dew Point Spread (out-in)",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "((homeassistant_sensor_temperature_celsius{entity=\"sensor.outdoor_dew_point\"}) - (homeassistant_sensor_temperature_celsius{entity=\"sensor.indoor_dew_point\"})) * 1.8",
+          "legendFormat": "Dew Point Spread (out-in)",
+          "refId": "A",
+          "datasource": "VictoriaMetrics"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Trends",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 2
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Indoor RH + Dew Points (with AC cooling)",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "axisPlacement": "auto"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AC Cooling"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 35
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "cooling"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Indoor RH %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Indoor Dew Point \u00b0F"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "fahrenheit"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Outdoor Dew Point \u00b0F"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "fahrenheit"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Dehumidify target 54%"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    8,
+                    8
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "min"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_sensor_humidity_percent{entity=\"sensor.indoor_humidity_live\"}",
+          "legendFormat": "Indoor RH %",
+          "refId": "A",
+          "datasource": "VictoriaMetrics"
+        },
+        {
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.indoor_dew_point\"} * 1.8) + 32",
+          "legendFormat": "Indoor Dew Point \u00b0F",
+          "refId": "B",
+          "datasource": "VictoriaMetrics"
+        },
+        {
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.outdoor_dew_point\"} * 1.8) + 32",
+          "legendFormat": "Outdoor Dew Point \u00b0F",
+          "refId": "C",
+          "datasource": "VictoriaMetrics"
+        },
+        {
+          "expr": "homeassistant_climate_action{entity=\"climate.ecobee_thermostat\",action=\"cooling\"}",
+          "legendFormat": "AC Cooling",
+          "refId": "D",
+          "datasource": "VictoriaMetrics"
+        },
+        {
+          "expr": "vector(54)",
+          "legendFormat": "Dehumidify target 54%",
+          "refId": "E",
+          "datasource": "VictoriaMetrics"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "HVAC Action",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 100,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "max": 1,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cooling"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "idle"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fan"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "homeassistant_climate_action{entity=\"climate.ecobee_thermostat\",action=\"cooling\"}",
+          "legendFormat": "cooling",
+          "refId": "A",
+          "datasource": "VictoriaMetrics"
+        },
+        {
+          "expr": "homeassistant_climate_action{entity=\"climate.ecobee_thermostat\",action=\"idle\"}",
+          "legendFormat": "idle",
+          "refId": "B",
+          "datasource": "VictoriaMetrics"
+        },
+        {
+          "expr": "homeassistant_climate_action{entity=\"climate.ecobee_thermostat\",action=\"fan\"}",
+          "legendFormat": "fan",
+          "refId": "C",
+          "datasource": "VictoriaMetrics"
+        }
+      ]
+    }
+  ]
+}
