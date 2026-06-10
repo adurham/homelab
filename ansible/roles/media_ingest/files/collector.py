@@ -48,6 +48,18 @@ SESSION = os.environ.get("TG_SESSION", "/var/lib/media-ingest/collector")
 STAGING = Path(os.environ.get("TG_STAGING", "/var/lib/media-ingest/staging"))
 LOG_FILE = os.environ.get("TG_LOG_FILE", "/var/log/media-ingest/collector.log")
 
+# Active-pull backstop interval (seconds). Telegram deprioritizes update fan-out
+# to idle-looking secondary sessions (a userbot that only pings looks dormant),
+# so the passive push path can lag MINUTES — fatal for self-destruct/TTL media,
+# which is purged server-side the instant it's consumed and is NOT recoverable by
+# the history-based reconcile sweep. We force a getState+getDifference every
+# POLL_INTERVAL seconds to pull any pending updates and replay them through the
+# live handlers, bounding worst-case live-path latency to ~POLL_INTERVAL. The
+# regular active API calls also keep the session looking "live," which improves
+# native push promptness on its own. catch_up is a cheap no-op when nothing is
+# pending. Set TG_POLL_INTERVAL=0 to disable (revert to pure passive push).
+POLL_INTERVAL = float(os.environ.get("TG_POLL_INTERVAL", "15"))
+
 # chat-id -> gallery folder, optional STATIC SEED. The gallery's folder_meta.json
 # is the SINGLE SOURCE OF TRUTH for chat-id -> folder routing; manage all
 # mappings in the gallery UI. This dict is intentionally EMPTY in the public repo
@@ -206,7 +218,16 @@ async def handle(event):
     folder = folder_for(cid, getattr(chat, "title", None) or getattr(chat, "first_name", None))
     date_iso = msg.date.isoformat() if msg.date else ""
     eph = " ephemeral" if ttl_of(getattr(msg, "media", None)) else ""
-    log.info("MEDIA%s from chat=%s stem=%s kind=%s -> folder=%s", eph, cid, stem, kind, folder)
+    # Delivery lag = how long Telegram took to hand us this update after the
+    # message's own timestamp. This is the metric we're hunting: passive push can
+    # be minutes; the active-pull loop should cap it near POLL_INTERVAL.
+    lag_s = None
+    if msg.date:
+        now = dt.datetime.now(dt.timezone.utc)
+        md = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=dt.timezone.utc)
+        lag_s = (now - md).total_seconds()
+    lag_str = f" lag={lag_s:.1f}s" if lag_s is not None else ""
+    log.info("MEDIA%s from chat=%s stem=%s kind=%s -> folder=%s%s", eph, cid, stem, kind, folder, lag_str)
 
     tmp = STAGING / stem
     try:
@@ -260,7 +281,30 @@ async def main():
         log.info("catch_up complete — replayed any offline updates")
     except Exception as e:  # noqa: BLE001
         log.warning("catch_up failed (live stream still active): %s", e)
-    await client.run_until_disconnected()
+
+    # Active-pull backstop: Telegram's passive push to an idle secondary session
+    # can lag minutes, which loses self-destruct/TTL media (purged server-side on
+    # consume, unrecoverable by the history-based reconcile). Force a
+    # getState+getDifference every POLL_INTERVAL seconds so pending updates are
+    # pulled and replayed through the live handlers within ~POLL_INTERVAL,
+    # independent of how badly Telegram deprioritizes native push.
+    async def _poll_loop():
+        if POLL_INTERVAL <= 0:
+            log.info("active-pull poll DISABLED (TG_POLL_INTERVAL<=0)")
+            return
+        log.info("active-pull poll loop online (every %.0fs)", POLL_INTERVAL)
+        while True:
+            await asyncio.sleep(POLL_INTERVAL)
+            try:
+                await client.catch_up()
+            except Exception as e:  # noqa: BLE001
+                log.debug("poll catch_up failed (will retry): %s", e)
+
+    poll_task = asyncio.ensure_future(_poll_loop())
+    try:
+        await client.run_until_disconnected()
+    finally:
+        poll_task.cancel()
 
 
 if __name__ == "__main__":
