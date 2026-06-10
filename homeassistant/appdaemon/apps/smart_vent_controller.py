@@ -317,6 +317,15 @@ FAN_ASSIST_OVER = 2.0
 FAN_ASSIST_DONOR_COOLER_BY = 3.0
 FAN_ENTITY = "climate.ecobee_thermostat"
 
+# Dry-coil lockout. For several minutes after the compressor stops, the
+# evaporator coil is still wet with condensate. Running the blower over it
+# (fan-assist recirculation) re-evaporates that water back into the house —
+# the exact mechanism behind off-cycle humidity creep. Suppress cooling-
+# direction fan-assist until the coil has had this long to drain out the PVC.
+# Cooling only: heating produces no condensate, so winter recirculation is
+# never gated. Bump to 45 if indoor RH still climbs between cycles.
+FAN_ASSIST_COIL_DRY_MIN = 30.0
+
 # ── Predictive pre-cool ───────────────────────────────────────────────────────
 # Sun-facing rooms start each afternoon already behind because the morning is
 # spent NOT favoring them. During the pre-sun window, while cooling is happening
@@ -355,6 +364,13 @@ class SmartVentController(hass.Hass):
         # sample per room so we can compute the rate between control cycles.
         self._delivery_penalty = {}
         self._delivery_last = {}
+
+        # Dry-coil lockout tracking. _cooling_ended_at is the timestamp the
+        # compressor last transitioned out of "cooling"; None while actively
+        # cooling (or if we've never seen a cooling cycle this run). Used by
+        # _apply_fan_assist to suppress recirculation over a still-wet coil.
+        self._cooling_ended_at = None
+        self._last_hvac_action = None
 
         # Run the control loop
         self.run_every(self.control_loop, "now+10", CYCLE_INTERVAL)
@@ -436,6 +452,15 @@ class SmartVentController(hass.Hass):
         hvac_mode, hvac_action, target_cool, target_heat = self._get_thermostat_state()
         self.log(f"Thermostat: mode={hvac_mode}, action={hvac_action}, "
                  f"cool={target_cool}, heat={target_heat}")
+
+        # Track the compressor cooling->idle transition for the dry-coil
+        # lockout. Stamp the moment cooling stops; clear it while cooling so a
+        # fresh cycle resets the drain timer. Read by _apply_fan_assist.
+        if self._last_hvac_action == "cooling" and hvac_action != "cooling":
+            self._cooling_ended_at = self.datetime()
+        elif hvac_action == "cooling":
+            self._cooling_ended_at = None
+        self._last_hvac_action = hvac_action
 
         # Refresh measured per-room supply penalties whenever air is moving;
         # duct temps are only meaningful with airflow. These drive each room's
@@ -1058,6 +1083,22 @@ class SmartVentController(hass.Hass):
         if heating is None:
             self._release_fan_assist()
             return room_positions
+
+        # Dry-coil lockout (cooling direction only). For the first
+        # FAN_ASSIST_COIL_DRY_MIN minutes after the compressor stops, the
+        # evaporator is still shedding condensate; recirculating over it would
+        # re-evaporate that water into the house. Hold the blower until the
+        # coil has drained. Heating has no condensate, so it's never gated.
+        if not heating and self._cooling_ended_at is not None:
+            since_min = (self.datetime()
+                         - self._cooling_ended_at).total_seconds() / 60.0
+            if since_min < FAN_ASSIST_COIL_DRY_MIN:
+                self.log(f"  FAN-ASSIST: coil-dry lockout "
+                         f"({since_min:.0f}/{FAN_ASSIST_COIL_DRY_MIN:.0f}m "
+                         f"since cooling stopped) — holding blower")
+                self._release_fan_assist()
+                return room_positions
+
         setpoint = target_heat if heating else target_cool
 
         def off_by(t):
