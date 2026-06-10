@@ -1,0 +1,61 @@
+# Humidity / moisture alerts.
+# Backed by the dew-point template sensors in templates.yaml.
+
+# 1. Window/fresh-air guidance: tell me when outdoor air is wetter than indoor,
+#    so opening windows or pulling in fresh air would ADD moisture. Fires on the
+#    rising edge of the binary sensor (which already has a 5-min debounce), and
+#    only when someone is home to act on it.
+- alias: "Humidity: Don't Open Windows (outdoor air wetter)"
+  id: "humidity_dont_open_windows"
+  description: "Notify when outdoor dew point exceeds indoor — keep the house sealed."
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.outdoor_air_wetter_than_indoor
+      from: "off"
+      to: "on"
+      for: "00:05:00"
+  condition:
+    - condition: state
+      entity_id: binary_sensor.house_occupied
+      state: "on"
+  action:
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "Keep windows closed"
+        message: >
+          Outdoor air is wetter than inside (outdoor dew point
+          {{ states('sensor.outdoor_dew_point') }}°F vs indoor
+          {{ states('sensor.indoor_dew_point') }}°F, spread
+          +{{ states('sensor.dew_point_spread') }}°F). Opening windows now
+          would raise indoor humidity.
+
+# 2. AC capacity-limit signal: if indoor RH stays high for an hour WHILE the AC
+#    is actively cooling, the AC can't win against the moisture load — the
+#    evidence-based trigger for a standalone main-floor dehumidifier. Threshold
+#    58% (4 pts above the 54% dehumidify target) for a full hour avoids noise.
+- alias: "Humidity: AC Can't Keep Up (RH high while cooling)"
+  id: "humidity_ac_capacity_limit"
+  description: "Notify when indoor RH stays >=58% for 1h while cooling — capacity-limited."
+  mode: single
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.indoor_humidity_live
+      above: 58
+      for: "01:00:00"
+  condition:
+    # Only meaningful while the AC is actually running — high RH with the system
+    # idle is a different (and expected) situation.
+    - condition: state
+      entity_id: climate.ecobee_thermostat
+      attribute: hvac_action
+      state: "cooling"
+  action:
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "AC can't keep up with humidity"
+        message: >
+          Indoor RH has held at {{ states('sensor.indoor_humidity_live') }}%
+          for an hour while the AC runs (target 54%, indoor dew point
+          {{ states('sensor.indoor_dew_point') }}°F). The AC is at its
+          moisture-removal limit — a standalone dehumidifier is the fix.
