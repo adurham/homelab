@@ -1,14 +1,46 @@
 # Managed by Ansible — do not edit by hand.
 # Source: roles/hermes_gateway/templates/config.yaml.j2
 #
-# Mirrors the personal-MacBook config (provider=anthropic, memory features
-# from the post-2026-05-09 pull, auxiliary providers routed through the
-# Claude Code OAuth path). Local-LLM aux endpoints are intentionally
-# omitted — this VM has no exo/LM-Studio reachability.
+# ALL-LOCAL exo setup (2026-06-11): the gateway runs entirely on the local
+# exo cluster reachable at 192.168.86.201:52415 (verified from this LXC:
+# ping + /v1/models 200 + live DSv4/Qwen3.6 generation). No cloud provider.
+#   - main reasoning thread  -> DeepSeek-V4-Flash (provider: exo)
+#   - delegate_task subagents -> Qwen3.6 (delegation.model below)
+#   - all auxiliary tasks incl. vision/image -> Qwen3.6 (custom:exo)
 ---
 model:
-  default: claude-opus-4-7
-  provider: anthropic
+  default: mlx-community/DeepSeek-V4-Flash
+  provider: exo
+
+# Local exo cluster (Thunderbolt-direct Mac Studios). Mirrors the
+# MacBook/Studio config block. discover_models off — models enumerated
+# explicitly so the gateway never probes the cluster's full catalog.
+providers:
+  exo:
+    base_url: http://192.168.86.201:52415/v1
+    api_key: not-needed
+    api_mode: chat_completions
+    discover_models: false
+    models:
+      mlx-community/DeepSeek-V4-Flash:
+        context_length: 1048576
+      mlx-community/Qwen3.6-35B-A3B-8bit:
+        context_length: 262144
+    extra_body:
+      use_prefix_cache: true
+
+# Web search for the all-local (exo/DSv4) gateway. brave-free is the
+# primary backend (BRAVE_SEARCH_API_KEY in env); ddgs (keyless DuckDuckGo)
+# is the auto-detect fallback. anthropic_native_search stays true so that
+# IF this gateway is ever switched back to a Claude main provider it uses
+# Anthropic's native server-side search — non-Claude providers (exo/DSv4)
+# always use the client web_search tool with search_backend below.
+web:
+  backend: ''
+  search_backend: brave-free
+  extract_backend: ''
+  anthropic_native_search: true
+  anthropic_native_search_max_uses: 5
 
 agent:
   max_turns: 90
@@ -46,6 +78,22 @@ agent:
 #   * The model summons a deferred tool's full schema by calling
 #     tool_search_tool_regex (one extra round-trip on first use per
 #     session), then uses it normally.
+# NESTED tools.tool_search — read by tools/tool_search.py load_config(),
+# which drives the UNIVERSAL assemble_tool_defs (ALL providers incl. exo),
+# distinct from the top-level tool_search: block below (anthropic path only).
+# hermes-agent's DEFAULT_CONFIG seeds this nested key to "auto", and at
+# DSv4's 1,048,576-token context the 10%-of-context auto threshold (~105K)
+# sits ABOVE the ~85K MCP catalog, so deferral silently NEVER fires and every
+# turn ships the full tool catalog (~100K-token prefix, ~minutes of prefill).
+# Pin "on" so MCP-tool deferral activates unconditionally. (Quote the value:
+# bare `on` is YAML bool True.)
+tools:
+  tool_search:
+    enabled: "on"
+    threshold_pct: 10
+    search_default_limit: 5
+    max_search_limit: 20
+
 tool_search:
   enabled: true
   variant: regex
@@ -90,6 +138,11 @@ tool_search:
 # inherited from the parent.
 delegation:
   reasoning_effort: high
+  # Route delegate_task / swarm_run subagents to Qwen3.6 on the local exo
+  # cluster (the lighter model), keeping the DSv4 main thread free for the
+  # orchestrator. Resolution order is arg > delegation.model > parent model.
+  provider: exo
+  model: mlx-community/Qwen3.6-35B-A3B-8bit
   # Two-level delegation: orchestrator can spawn leaf subagents but those
   # leaves can't spawn their own subagents. Matches Claude Code's
   # Plan → leaf-research-agent flow without runaway recursion.
@@ -104,9 +157,16 @@ delegation:
   subagent_auto_approve: true
 
 auxiliary:
+  # Vision/image analysis -> Qwen3.6 on the local exo cluster. DSv4 can't
+  # see pixels, so images attached to the main thread are delegated here
+  # (text description fed back to DSv4). Explicit endpoint mirrors the
+  # MacBook/Studio vision config.
   vision:
-    provider: auto
-    model: ''
+    provider: custom:exo
+    model: mlx-community/Qwen3.6-35B-A3B-8bit
+    base_url: http://192.168.86.201:52415/v1
+    api_key: not-needed
+    api_mode: chat_completions
     timeout: 120
     extra_body: {}
     download_timeout: 30
@@ -117,23 +177,23 @@ auxiliary:
     extra_body: {}
   compression:
     provider: auto
-    model: claude-sonnet-4-6
+    model: ''
     timeout: 120
     extra_body: {}
   session_search:
     provider: auto
-    model: claude-haiku-4-5
+    model: ''
     timeout: 30
     extra_body: {}
     max_concurrency: 3
   skills_hub:
     provider: auto
-    model: claude-haiku-4-5
+    model: ''
     timeout: 30
     extra_body: {}
   memory_extraction:
     provider: auto
-    model: claude-haiku-4-5
+    model: ''
     timeout: 30
     extra_body: {}
     # Phase 2 controls — only consumed by tools/memory_extraction
