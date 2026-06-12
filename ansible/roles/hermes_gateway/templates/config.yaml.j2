@@ -42,6 +42,23 @@ web:
   anthropic_native_search: true
   anthropic_native_search_max_uses: 5
 
+# Discord verbosity: final-answer-only. By default the Discord adapter uses
+# the "high" display tier (gateway/display_config.py), which posts a message
+# for every tool call (tool_progress: all), mid-turn "thinking" status
+# chatter (interim_assistant_messages), and periodic heartbeat pings — noisy
+# in a chat client. The per-platform override below mutes all of that so the
+# bot replies ONLY with its final response. (show_reasoning already defaults
+# off, so raw reasoning is never posted.) Mirrors the built-in "low" tier.
+display:
+  show_reasoning: false
+  platforms:
+    discord:
+      tool_progress: 'off'              # no per-command notifications
+      interim_assistant_messages: false # no mid-turn "thinking" status posts
+      long_running_notifications: false # no periodic "still working" pings
+      busy_ack_detail: false            # no iteration-counter busy chatter
+      streaming: false                  # post the final answer in one message
+
 agent:
   max_turns: 90
   gateway_timeout: 1800
