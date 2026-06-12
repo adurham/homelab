@@ -129,6 +129,19 @@
   become_user: hermes
   notify: Restart Hermes Gateway
 
+- name: Install web-search fallback (ddgs)
+  # Keyless DuckDuckGo backend used as the web_search fallback when the
+  # primary brave-free backend is unavailable (rate-limited / key issue).
+  # web.search_backend in config.yaml selects brave-free first; the
+  # auto-detect chain in tools/web_tools.py falls through to ddgs.
+  ansible.builtin.pip:
+    name:
+      - ddgs
+    virtualenv: /opt/hermes-agent/venv
+  become: true
+  become_user: hermes
+  notify: Restart Hermes Gateway
+
 # Hermes home: /home/hermes/.hermes for env/config/auth, /home/hermes/.claude
 # for the Claude Code OAuth credentials file (which the adapter reads via the
 # same code path the macOS keychain uses).
