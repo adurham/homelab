@@ -1,0 +1,39 @@
+---
+# Service account + install layout for the secondary source gallery collector.
+# Mirrors roles/media_ingest (the primary source collector) but runs against a
+# different upstream source platform and on its own CT (media-ingest-02, vmid 117,
+# ip_media_ingest_02 172.16.0.48). The gallery push path is identical: OAuth2
+# client_credentials against Authentik, then POST /ingest/upload/<folder> with a
+# stem + date override, exactly like the primary collector.
+media_ingest_02_user: mediaingest
+media_ingest_02_dir: /opt/media-ingest-02          # code + venv
+media_ingest_02_state: /var/lib/media-ingest-02    # auth.json, staging, metadata db (RW)
+media_ingest_02_log_dir: /var/log/media-ingest-02
+
+# Pin the scraper; bump deliberately. PyPI package name is the functional floor
+# (same convention as the telethon pin in the primary collector).
+media_ingest_02_scraper_version: "3.14.7"
+
+# Gallery platform the collector pushes captured media to (via authenticated API).
+# Same target as the primary collector — both feed the same gallery.
+media_ingest_02_gallery_base: "https://gallery.chi.lab.amd-e.com"
+
+# Authentik OAuth2 client-credentials token endpoint + collector client id.
+# REUSES the primary collector's OAuth2 client (media-ingest-collector) rather
+# than provisioning a separate one. Rationale: the gallery upload service
+# validates JWTs against a single issuer/audience/JWKS URL (media-ingest-collector),
+# so a distinct client would require gallery-side changes to accept multiple
+# audiences. Both collectors are equally trusted (same operator, same gallery
+# target), so credential sharing is the pragmatic call — one OAuth2 client,
+# one service account, one secret to rotate. The client secret comes from the
+# vault (vault_media_ingest_collector_client_secret, same key as the primary).
+media_ingest_02_authentik_token_url: "https://auth.chi.lab.amd-e.com/application/o/token/"
+media_ingest_02_collector_client_id: "media-ingest-collector"
+
+# Scheduled scrape timer (the secondary source is pull-based, not push-based like
+# the primary, so a periodic full sweep is the natural model — mirror the primary's
+# reconcile timer pattern). OnBootSec + OnUnitActiveSec.
+media_ingest_02_scrape_interval: "6h"
+# How many most-recent posts per model to scan each sweep. Bounded so each run is
+# cheap and the timer can fire often. The gallery's stem-dedup means overlap is free.
+media_ingest_02_scrape_lookback: 50
