@@ -73,8 +73,11 @@ def _run_scraper():
     if not SCRAPE_USERNAMES:
         log.warning("M02_SCRAPE_USERNAMES empty — nothing to scrape this tick")
         return None
+    # Binary name is the upstream package's console-script entry point; pull it
+    # from env so the source tree doesn't hardcode the package identity.
+    bin_name = os.environ.get("M02_SCRAPER_BIN", "scraper")
     cmd = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", "scraper-pkg"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", bin_name),
         "--config", CONFIG_FILE,
         "--action", "download",
         "--posts", "all",
