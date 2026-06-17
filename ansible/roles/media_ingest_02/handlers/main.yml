@@ -3,11 +3,12 @@
   ansible.builtin.systemd:
     daemon_reload: true
 
-- name: Restart Media Ingest 02
-  ansible.builtin.systemd:
-    name: media-ingest-02.service
-    state: restarted
-  when: m02_auth_authorized | default(false)
+# NOTE: we deliberately do NOT restart media-ingest-02.service from the handler.
+# The service is a oneshot that runs the scraper (can take many minutes), and
+# `systemctl start` blocks until it finishes — restarting mid-scrape would
+# interrupt an in-flight download. The timer (6h) picks up env/config/code
+# changes on the next tick. To force an immediate run after a deploy, run
+# `systemctl start media-ingest-02.service` manually on the box.
 
 - name: Restart Media Ingest 02 Timer
   ansible.builtin.systemd:
