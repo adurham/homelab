@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
 Secondary source gallery collector (scraper edition) — periodic sweep that runs
-the upstream scraper for all subscribed models, then walks the staging tree and
-PUSHES every downloaded file to the gallery platform via the authenticated ingest
-API. Same gallery push path as the primary collector (store_client.py), just a
-different upstream source and a pull-based (not push-based) capture model.
+the upstream scraper for a configured list of models, then walks the staging tree
+and PUSHES every downloaded file to the gallery platform via the authenticated
+ingest API. Same gallery push path as the primary collector (store_client.py),
+just a different upstream source and a pull-based (not push-based) capture model.
 
 Flow per tick (oneshot service, timer-driven):
-  1. invoke the scraper (download action, all post types, all subscribed models)
-     with --config pointing at our config.json. save_location = tmpfs staging,
+  1. invoke the scraper (download action, all post types) with --username pointing
+     at the configured model list (M02_SCRAPE_USERNAMES env, comma-separated —
+     SENSITIVE, comes from the vault). save_location = tmpfs staging,
      dir_format = {model_username}/ (flat per-model). The scraper's own metadata
      dupe-check db means re-runs only download NEW content — same idempotent
      overlap-the-gallery-stem-dedup contract as the primary's reconcile sweep.
+     The scraper finds auth.json next to config.json (its get_auth_file() returns
+     get_config_path().parent / <main_profile> / authFile), so auth.json lives in
+     <state>/main_profile/auth.json.
   2. walk the staging tree. For each file under <model_username>/:
        stem   = <model_username>_<post_id>_<media_id>  (stable, gallery-dedup-able)
        folder = <model_username>                        (flat, one folder per model)
@@ -20,17 +24,11 @@ Flow per tick (oneshot service, timer-driven):
   3. delete the staging file after a successful push (tmpfs, so a crash naturally
      drops anything in flight — the next sweep re-downloads it).
 
-Stem format note: the scraper names files {filename}.{ext} where {filename} is
-the upstream media filename, which already encodes post_id + media_id in a
-source-stable way. We prefix with the model username to namespace per-model and
-to match the gallery's <chatid>_<msgid> stem convention from the primary
-collector (which lets the gallery dedup + the manifest date-map work uniformly).
-
 Env (from scraper.env, rendered by ansible from vault + defaults):
   M02_STAGING, M02_LOG_FILE, M02_AUTH_FILE, M02_CONFIG_FILE, M02_METADATA_DIR,
-  M02_SCRAPE_LOOKBACK, plus the gallery auth env (AUTHENTIK_TOKEN_URL,
-  COLLECTOR_CLIENT_ID, COLLECTOR_CLIENT_SECRET, GALLERY_BASE) consumed by
-  store_client.
+  M02_SCRAPE_USERNAMES (vault), M02_SCRAPE_LOOKBACK, plus the gallery auth env
+  (AUTHENTIK_TOKEN_URL, COLLECTOR_CLIENT_ID, COLLECTOR_CLIENT_SECRET, GALLERY_BASE)
+  consumed by store_client.
 """
 import datetime as dt
 import logging
@@ -46,9 +44,9 @@ STAGING = Path(os.environ["M02_STAGING"])
 LOG_FILE = os.environ.get("M02_LOG_FILE", "/var/log/media-ingest-02/scraper.log")
 AUTH_FILE = os.environ["M02_AUTH_FILE"]
 CONFIG_FILE = os.environ["M02_CONFIG_FILE"]
-# Bounded per-sweep work: most-recent N posts per model. 0 = unbounded (full scan,
-# relies on the scraper's dupe-check db so re-runs only grab new content).
-LOOKBACK = int(os.environ.get("M02_SCRAPE_LOOKBACK", "0") or "0")
+# Comma-separated list of upstream models to scrape (SENSITIVE — from the vault
+# via env, never hardcoded). Empty = scrape nothing (safe default).
+SCRAPE_USERNAMES = os.environ.get("M02_SCRAPE_USERNAMES", "").strip()
 
 STAGING.mkdir(parents=True, exist_ok=True)
 Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
@@ -57,43 +55,30 @@ logging.basicConfig(level=logging.INFO,
                     handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler(sys.stdout)])
 log = logging.getLogger("media-ingest-02")
 
-# The scraper reads auth.json from its config dir. We keep auth.json in the
-# state dir (locked 0600, vault-managed) and point the scraper at it via a symlink
-# from the config dir. The symlink is re-created each run so a re-auth (new
-# auth.json) propagates without restarting anything.
-SCRAPER_CONFIG_DIR = Path(os.environ.get("M02_SCRAPER_CONFIG_DIR",
-                                          os.path.expanduser("~/.config/scraper-pkg")))
 
-
-def _ensure_auth_link():
-    """Symlink the state-dir auth.json into the scraper's expected config path so
-    the scraper picks up the vault-managed auth without us copying secrets around.
-    Idempotent: re-points the link each run."""
-    SCRAPER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    link = SCRAPER_CONFIG_DIR / "auth.json"
-    target = Path(AUTH_FILE)
-    if not target.exists():
-        log.error("auth.json missing at %s — run assisted login first", target)
-        sys.exit(2)
-    try:
-        if link.is_symlink() or link.exists():
-            link.unlink()
-        link.symlink_to(target)
-    except OSError as e:
-        log.error("could not link auth.json: %s", e)
+def _check_auth():
+    """Verify auth.json exists and is readable before invoking the scraper. The
+    scraper would prompt interactively if auth.json is missing, which would hang
+    a headless service. Fail fast instead."""
+    p = Path(AUTH_FILE)
+    if not p.exists() or p.stat().st_size == 0:
+        log.error("auth.json missing or empty at %s — run assisted login first", p)
         sys.exit(2)
 
 
 def _run_scraper():
-    """Invoke the scraper for all subscribed models, all post types, download
+    """Invoke the scraper for the configured model list, all post types, download
     action. Returns the subprocess CompletedProcess. The scraper's own dupe-check
     db (in M02_METADATA_DIR) means a run only downloads NEW content."""
+    if not SCRAPE_USERNAMES:
+        log.warning("M02_SCRAPE_USERNAMES empty — nothing to scrape this tick")
+        return None
     cmd = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", "scraper-pkg"),
         "--config", CONFIG_FILE,
         "--action", "download",
         "--posts", "all",
-        "--username", "ALL",
+        "--username", SCRAPE_USERNAMES,
     ]
     log.info("invoking scraper: %s", " ".join(cmd))
     try:
@@ -117,16 +102,12 @@ def _walk_and_push():
     for model_dir in sorted(STAGING.iterdir()):
         if not model_dir.is_dir():
             continue
-        folder = model_dir.name  # the gallery folder = the model username (flat)
+        folder = model_dir.name
         for fpath in sorted(model_dir.iterdir()):
             if not fpath.is_file():
                 continue
-            # stem = <model>_<filename-without-ext>; the scraper's filename already
-            # encodes post_id + media_id in a source-stable way. Sanitize to the
-            # gallery's stem charset (alnum + -_).
             raw_stem = f"{folder}_{fpath.stem}"
             stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in raw_stem).strip("-") or "unknown"
-            # date = file mtime (the scraper sets mtime to the post date)
             mtime = fpath.stat().st_mtime
             date_iso = dt.datetime.fromtimestamp(mtime).isoformat()
             try:
@@ -144,7 +125,7 @@ def _walk_and_push():
 
 
 def main():
-    _ensure_auth_link()
+    _check_auth()
     try:
         ex = store_client.get_excluded()
         log.info("gallery auth OK; %d excluded stems", len(ex))
