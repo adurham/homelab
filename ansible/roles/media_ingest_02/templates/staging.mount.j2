@@ -7,7 +7,7 @@
 What=tmpfs
 Where={{ media_ingest_02_state }}/staging
 Type=tmpfs
-Options=mode=0750,uid={{ media_ingest_02_user_uid }},gid={{ media_ingest_02_user_gid }},size=512M
+Options=mode=0750,uid={{ media_ingest_02_user_uid }},gid={{ media_ingest_02_user_gid }},size={{ media_ingest_02_staging_size }}
 
 [Install]
 WantedBy=multi-user.target

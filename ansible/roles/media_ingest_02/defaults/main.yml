@@ -37,6 +37,10 @@ media_ingest_02_scrape_interval: "6h"
 # How many most-recent posts per model to scan each sweep. Bounded so each run is
 # cheap and the timer can fire often. The gallery's stem-dedup means overlap is free.
 media_ingest_02_scrape_lookback: 50
+# tmpfs staging size (RAM-backed). The scraper downloads a whole pass before the
+# wrapper pushes, so staging must hold a full pass worth of media. 4G covers most
+# passes of the manual list + filter discovery; the CT has 8G RAM to back it.
+media_ingest_02_staging_size: "4G"
 # Which upstream models to scrape. SENSITIVE — the model names reveal which
 # accounts the operator is subscribed to, so they live in the vault
 # (vault_media_ingest_02_scrape_usernames), NOT here. The env template pulls
