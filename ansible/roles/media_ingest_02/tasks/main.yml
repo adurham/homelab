@@ -109,7 +109,7 @@
     owner: "{{ media_ingest_02_user }}"
     group: "{{ media_ingest_02_user }}"
     mode: '0750'
-  notify: Restart Media Ingest 02
+  notify: Restart Media Ingest 02 Timer
 
 - name: Deploy Scraper Wrapper
   ansible.builtin.copy:
@@ -118,7 +118,7 @@
     owner: "{{ media_ingest_02_user }}"
     group: "{{ media_ingest_02_user }}"
     mode: '0750'
-  notify: Restart Media Ingest 02
+  notify: Restart Media Ingest 02 Timer
 
 # ─── Config + env (secrets from vault) ─────────────────────────────────────
 - name: Render Scraper Config
@@ -128,7 +128,7 @@
     owner: "{{ media_ingest_02_user }}"
     group: "{{ media_ingest_02_user }}"
     mode: '0640'
-  notify: Restart Media Ingest 02
+  notify: Restart Media Ingest 02 Timer
 
 - name: Render Scraper Env File
   ansible.builtin.template:
@@ -138,7 +138,7 @@
     group: "{{ media_ingest_02_user }}"
     mode: '0600'
   no_log: true
-  notify: Restart Media Ingest 02
+  notify: Restart Media Ingest 02 Timer
 
 # ─── Detect whether the upstream auth.json is already present ──────────────
 # The scraper unit will fail if auth.json isn't present yet (one-time assisted
@@ -171,7 +171,7 @@
     mode: '0644'
   notify:
     - Reload Systemd
-    - Restart Media Ingest 02
+    - Restart Media Ingest 02 Timer
 
 - name: Render Collector Timer Unit
   ansible.builtin.template:
