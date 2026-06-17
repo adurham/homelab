@@ -41,6 +41,11 @@ media_ingest_02_scrape_lookback: 50
 # wrapper pushes, so staging must hold a full pass worth of media. 4G covers most
 # passes of the manual list + filter discovery; the CT has 8G RAM to back it.
 media_ingest_02_staging_size: "4G"
+# Per-model timeout (minutes) for the manual pass. The wrapper loops through the
+# model list one at a time, each with its own timeout, so a single stuck model
+# doesn't kill the rest of the list. The dupe-check DB retries timed-out models
+# next tick. 15min is enough for most models on repeat runs.
+media_ingest_02_scraper_per_model_timeout_min: 15
 # Which upstream models to scrape. SENSITIVE — the model names reveal which
 # accounts the operator is subscribed to, so they live in the vault
 # (vault_media_ingest_02_scrape_usernames), NOT here. The env template pulls

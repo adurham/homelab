@@ -106,12 +106,26 @@ def _run_scraper_pass(label, model_args, timeout_min=90):
 
 
 def _run_scraper():
-    """Run the manual list pass. Kept for backwards compat with the original
-    single-pass flow. Returns the CompletedProcess or None."""
+    """Run the manual list pass, one model at a time. Each model gets its own
+    timeout so a single slow/stuck model doesn't kill the rest of the list —
+    the scraper's dupe-check DB means a timed-out model retries next tick.
+    Returns a list of (model, CompletedProcess) tuples (None for timeouts)."""
     if not SCRAPE_USERNAMES:
         log.warning("M02_SCRAPE_USERNAMES empty — manual pass skipped")
-        return None
-    return _run_scraper_pass("manual", ["--username", SCRAPE_USERNAMES])
+        return []
+    models = [m.strip() for m in SCRAPE_USERNAMES.split(",") if m.strip()]
+    per_model_timeout = int(os.environ.get("M02_SCRAPER_PER_MODEL_TIMEOUT_MIN", "15"))
+    results = []
+    for i, model in enumerate(models, 1):
+        log.info("pass [manual] model %d/%d: %s", i, len(models), model)
+        r = _run_scraper_pass("manual:%s" % model, ["--username", model], timeout_min=per_model_timeout)
+        results.append((model, r))
+        # Push whatever has landed in staging so far — keeps staging from
+        # filling up across many models and gives partial progress on each tick.
+        pushed, failed, skipped = _walk_and_push()
+        if pushed or failed:
+            log.info("pass [manual] mid-pass push: pushed=%d failed=%d", pushed, failed)
+    return results
 
 
 def _run_scraper_filter():
@@ -168,10 +182,13 @@ def main():
         log.error("gallery auth FAILED at startup: %s", e)
         sys.exit(3)
 
-    # Pass 1: the explicit manual model list (always runs if set).
-    r1 = _run_scraper()
-    if r1 is None or r1.returncode != 0:
-        log.warning("manual pass incomplete; continuing to filter pass")
+    # Pass 1: the explicit manual model list (always runs if set). Loops through
+    # models one at a time, each with its own per-model timeout — a single stuck
+    # model doesn't kill the rest. Mid-pass pushes keep staging from filling up.
+    manual_results = _run_scraper()
+    manual_ok = all(r is not None and r.returncode == 0 for _, r in manual_results) if manual_results else True
+    if not manual_ok:
+        log.warning("manual pass had failures/timeouts; continuing to filter pass")
 
     # Pass 2: auto-discovery via filter args (e.g. --current-price paid
     # --active-subscription --username ALL). Only runs if M02_SCRAPE_FILTER_ARGS
