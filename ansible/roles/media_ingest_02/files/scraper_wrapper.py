@@ -47,6 +47,12 @@ CONFIG_FILE = os.environ["M02_CONFIG_FILE"]
 # Comma-separated list of upstream models to scrape (SENSITIVE — from the vault
 # via env, never hardcoded). Empty = scrape nothing (safe default).
 SCRAPE_USERNAMES = os.environ.get("M02_SCRAPE_USERNAMES", "").strip()
+# Optional second pass: auto-discover models matching a filter (e.g. active paid
+# subs). Space-separated scraper flags, e.g. "--current-price paid
+# --active-subscription --username ALL". Empty = skip the auto-discovery pass
+# (safe default — only the explicit SCRAPE_USERNAMES list is scraped). SENSITIVE
+# — reveals the operator's subscription behavior, so it comes from the vault.
+SCRAPE_FILTER_ARGS = os.environ.get("M02_SCRAPE_FILTER_ARGS", "").strip()
 
 STAGING.mkdir(parents=True, exist_ok=True)
 Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
@@ -66,34 +72,60 @@ def _check_auth():
         sys.exit(2)
 
 
-def _run_scraper():
-    """Invoke the scraper for the configured model list, all post types, download
-    action. Returns the subprocess CompletedProcess. The scraper's own dupe-check
-    db (in M02_METADATA_DIR) means a run only downloads NEW content."""
-    if not SCRAPE_USERNAMES:
-        log.warning("M02_SCRAPE_USERNAMES empty — nothing to scrape this tick")
-        return None
-    # Binary name is the upstream package's console-script entry point; pull it
-    # from env so the source tree doesn't hardcode the package identity.
+def _scraper_base_cmd():
+    """Build the base scraper invocation (binary + config + action + posts).
+    Returns the list of base args; callers append the model-selection args."""
     bin_name = os.environ.get("M02_SCRAPER_BIN", "scraper")
-    cmd = [
+    return [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", bin_name),
         "--config", CONFIG_FILE,
         "--action", "download",
         "--posts", "all",
-        "--username", SCRAPE_USERNAMES,
     ]
-    log.info("invoking scraper: %s", " ".join(cmd))
+
+
+def _run_scraper_pass(label, model_args, timeout_min=90):
+    """Invoke the scraper for one pass with the given model-selection args.
+    label is a short tag for logging (e.g. 'manual', 'filter'). Returns the
+    subprocess CompletedProcess or None on timeout/failure."""
+    if not model_args:
+        log.info("pass [%s] skipped — no model args", label)
+        return None
+    cmd = _scraper_base_cmd() + model_args
+    log.info("pass [%s] invoking scraper: %s", label, " ".join(cmd))
     try:
-        r = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=90 * 60)
+        r = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout_min * 60)
     except subprocess.TimeoutExpired:
-        log.error("scraper timed out after 90min")
+        log.error("pass [%s] scraper timed out after %dmin", label, timeout_min)
         return None
     if r.returncode != 0:
-        log.error("scraper exited %d: %s", r.returncode, (r.stderr or "")[-2000:])
+        log.error("pass [%s] scraper exited %d: %s", label, r.returncode, (r.stderr or "")[-2000:])
     else:
-        log.info("scraper exit 0. stdout tail: %s", (r.stdout or "")[-500:])
+        log.info("pass [%s] scraper exit 0. stdout tail: %s", label, (r.stdout or "")[-500:])
     return r
+
+
+def _run_scraper():
+    """Run the manual list pass. Kept for backwards compat with the original
+    single-pass flow. Returns the CompletedProcess or None."""
+    if not SCRAPE_USERNAMES:
+        log.warning("M02_SCRAPE_USERNAMES empty — manual pass skipped")
+        return None
+    return _run_scraper_pass("manual", ["--username", SCRAPE_USERNAMES])
+
+
+def _run_scraper_filter():
+    """Run the auto-discovery filter pass (e.g. --current-price paid
+    --active-subscription --username ALL). Only runs if M02_SCRAPE_FILTER_ARGS
+    is set (from the vault). Returns the CompletedProcess or None."""
+    if not SCRAPE_FILTER_ARGS:
+        log.info("M02_SCRAPE_FILTER_ARGS empty — filter pass skipped")
+        return None
+    # Split the filter args (space-separated scraper flags). shlex handles
+    # quoted values if any.
+    import shlex
+    args = shlex.split(SCRAPE_FILTER_ARGS)
+    return _run_scraper_pass("filter", args)
 
 
 def _walk_and_push():
@@ -136,9 +168,19 @@ def main():
         log.error("gallery auth FAILED at startup: %s", e)
         sys.exit(3)
 
-    r = _run_scraper()
-    if r is None or r.returncode != 0:
-        log.warning("scraper run incomplete; pushing whatever landed in staging")
+    # Pass 1: the explicit manual model list (always runs if set).
+    r1 = _run_scraper()
+    if r1 is None or r1.returncode != 0:
+        log.warning("manual pass incomplete; continuing to filter pass")
+
+    # Pass 2: auto-discovery via filter args (e.g. --current-price paid
+    # --active-subscription --username ALL). Only runs if M02_SCRAPE_FILTER_ARGS
+    # is set. Both passes share the staging dir + dupe-check db, so overlap
+    # between the manual list and the filter-discovered models is free —
+    # already-downloaded content is skipped.
+    r2 = _run_scraper_filter()
+    if r2 is not None and r2.returncode != 0:
+        log.warning("filter pass incomplete; pushing whatever landed in staging")
 
     pushed, failed, skipped = _walk_and_push()
     log.info("sweep done: pushed=%d failed=%d skipped=%d", pushed, failed, skipped)
