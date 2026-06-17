@@ -41,6 +41,7 @@
     - "{{ media_ingest_02_dir }}"
     - "{{ media_ingest_02_state }}"
     - "{{ media_ingest_02_state }}/metadata"
+    - "{{ media_ingest_02_state }}/main_profile"
     - "{{ media_ingest_02_log_dir }}"
 
 # ─── Hardening: tmpfs for decrypted-media staging ──────────────────────────
@@ -144,7 +145,7 @@
 # login). Gate enable/start on this so a fresh deploy doesn't crash-loop.
 - name: Check for auth.json
   ansible.builtin.stat:
-    path: "{{ media_ingest_02_state }}/auth.json"
+    path: "{{ media_ingest_02_state }}/main_profile/auth.json"
   register: auth_stat
 
 - name: Set Auth Authorized Fact
@@ -154,7 +155,7 @@
 # auth.json IS a credential (read access == account takeover). Lock it 0600.
 - name: Secure auth.json (0600)
   ansible.builtin.file:
-    path: "{{ media_ingest_02_state }}/auth.json"
+    path: "{{ media_ingest_02_state }}/main_profile/auth.json"
     owner: "{{ media_ingest_02_user }}"
     group: "{{ media_ingest_02_user }}"
     mode: '0600'
@@ -202,7 +203,7 @@
   ansible.builtin.debug:
     msg: >-
       auth.json not yet present. Run the assisted login helper on this box to
-      populate {{ media_ingest_02_state }}/auth.json (owned by
+      populate {{ media_ingest_02_state }}/main_profile/auth.json (owned by
       {{ media_ingest_02_user }}, 0600), then: systemctl start media-ingest-02.service
   when: not m02_auth_authorized
 
