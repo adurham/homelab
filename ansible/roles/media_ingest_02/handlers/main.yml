@@ -1,0 +1,21 @@
+---
+- name: Reload Systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart Media Ingest 02
+  ansible.builtin.systemd:
+    name: media-ingest-02.service
+    state: restarted
+  when: m02_auth_authorized | default(false)
+
+- name: Restart Media Ingest 02 Timer
+  ansible.builtin.systemd:
+    name: media-ingest-02.timer
+    state: restarted
+  when: m02_auth_authorized | default(false)
+
+- name: Reload SSH
+  ansible.builtin.systemd:
+    name: ssh.service
+    state: reloaded

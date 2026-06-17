@@ -1,0 +1,223 @@
+---
+# Installs the secondary source gallery collector inside the media-ingest-02 LXC.
+# Runs against the CT directly (after media_ingest_02_host provisions it).
+# Pattern: apt deps -> service user -> tmpfs staging -> venv + scraper ->
+# deploy code/units -> render config + env -> conditional start (only once the
+# upstream source auth.json is present — one-time assisted login).
+
+- name: Install Base OS Packages
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-dev
+      - build-essential
+      - ca-certificates
+      - curl
+      - ffmpeg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ─── Service account + directories ─────────────────────────────────────────
+- name: Create Collector System User
+  ansible.builtin.user:
+    name: "{{ media_ingest_02_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "/home/{{ media_ingest_02_user }}"
+    create_home: true
+    state: present
+  register: m02_user
+
+- name: Ensure Install + State + Log Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ media_ingest_02_user }}"
+    group: "{{ media_ingest_02_user }}"
+    mode: '0750'
+  loop:
+    - "{{ media_ingest_02_dir }}"
+    - "{{ media_ingest_02_state }}"
+    - "{{ media_ingest_02_state }}/metadata"
+    - "{{ media_ingest_02_log_dir }}"
+
+# ─── Hardening: tmpfs for decrypted-media staging ──────────────────────────
+# The staging dir holds DECRYPTED media in flight to the gallery. Back it with
+# tmpfs so nothing viewable ever persists to disk — a stolen disk / Proxmox
+# backup / snapshot contains no plaintext. Unit filename is a systemd-escaped
+# path.
+- name: Compute systemd-escaped mount unit name
+  ansible.builtin.command: "systemd-escape -p --suffix=mount {{ media_ingest_02_state }}/staging"
+  register: media_ingest_02_mount_unit
+  changed_when: false
+
+- name: Render staging tmpfs mount unit
+  ansible.builtin.template:
+    src: staging.mount.j2
+    dest: "/etc/systemd/system/{{ media_ingest_02_mount_unit.stdout }}"
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    media_ingest_02_user_uid: "{{ m02_user.uid }}"
+    media_ingest_02_user_gid: "{{ m02_user.group }}"
+  notify: Reload Systemd
+
+- name: Enable & Start staging tmpfs mount (decrypted media RAM-only)
+  ansible.builtin.systemd:
+    name: "{{ media_ingest_02_mount_unit.stdout }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# ─── Python venv + scraper ────────────────────────────────────────────────
+- name: Create Collector Virtualenv
+  ansible.builtin.command: python3 -m venv {{ media_ingest_02_dir }}/venv
+  args:
+    creates: "{{ media_ingest_02_dir }}/venv/bin/python"
+  become: true
+  become_user: "{{ media_ingest_02_user }}"
+
+- name: Upgrade pip/setuptools/wheel
+  ansible.builtin.pip:
+    name:
+      - pip
+      - setuptools
+      - wheel
+    state: latest  # noqa: package-latest
+    virtualenv: "{{ media_ingest_02_dir }}/venv"
+  become: true
+  become_user: "{{ media_ingest_02_user }}"
+
+- name: Install scraper (pinned) + requests
+  ansible.builtin.pip:
+    name:
+      - "scraper-pkg=={{ media_ingest_02_scraper_version }}"
+      - requests
+    virtualenv: "{{ media_ingest_02_dir }}/venv"
+  become: true
+  become_user: "{{ media_ingest_02_user }}"
+
+# ─── Deploy code ───────────────────────────────────────────────────────────
+- name: Deploy Gallery Client
+  ansible.builtin.copy:
+    src: store_client.py
+    dest: "{{ media_ingest_02_dir }}/store_client.py"
+    owner: "{{ media_ingest_02_user }}"
+    group: "{{ media_ingest_02_user }}"
+    mode: '0750'
+  notify: Restart Media Ingest 02
+
+- name: Deploy Scraper Wrapper
+  ansible.builtin.copy:
+    src: scraper_wrapper.py
+    dest: "{{ media_ingest_02_dir }}/scraper_wrapper.py"
+    owner: "{{ media_ingest_02_user }}"
+    group: "{{ media_ingest_02_user }}"
+    mode: '0750'
+  notify: Restart Media Ingest 02
+
+# ─── Config + env (secrets from vault) ─────────────────────────────────────
+- name: Render Scraper Config
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ media_ingest_02_state }}/config.json"
+    owner: "{{ media_ingest_02_user }}"
+    group: "{{ media_ingest_02_user }}"
+    mode: '0640'
+  notify: Restart Media Ingest 02
+
+- name: Render Scraper Env File
+  ansible.builtin.template:
+    src: scraper.env.j2
+    dest: "{{ media_ingest_02_dir }}/scraper.env"
+    owner: "{{ media_ingest_02_user }}"
+    group: "{{ media_ingest_02_user }}"
+    mode: '0600'
+  no_log: true
+  notify: Restart Media Ingest 02
+
+# ─── Detect whether the upstream auth.json is already present ──────────────
+# The scraper unit will fail if auth.json isn't present yet (one-time assisted
+# login). Gate enable/start on this so a fresh deploy doesn't crash-loop.
+- name: Check for auth.json
+  ansible.builtin.stat:
+    path: "{{ media_ingest_02_state }}/auth.json"
+  register: auth_stat
+
+- name: Set Auth Authorized Fact
+  ansible.builtin.set_fact:
+    m02_auth_authorized: "{{ auth_stat.stat.exists and auth_stat.stat.size | default(0) > 0 }}"
+
+# auth.json IS a credential (read access == account takeover). Lock it 0600.
+- name: Secure auth.json (0600)
+  ansible.builtin.file:
+    path: "{{ media_ingest_02_state }}/auth.json"
+    owner: "{{ media_ingest_02_user }}"
+    group: "{{ media_ingest_02_user }}"
+    mode: '0600'
+  when: auth_stat.stat.exists
+
+# ─── systemd unit + timer ──────────────────────────────────────────────────
+- name: Render Collector Service Unit
+  ansible.builtin.template:
+    src: media-ingest-02.service.j2
+    dest: /etc/systemd/system/media-ingest-02.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Media Ingest 02
+
+- name: Render Collector Timer Unit
+  ansible.builtin.template:
+    src: media-ingest-02.timer.j2
+    dest: /etc/systemd/system/media-ingest-02.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Media Ingest 02 Timer
+
+- name: Enable & Start Collector Timer (only if auth authorized)
+  ansible.builtin.systemd:
+    name: media-ingest-02.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: m02_auth_authorized
+
+- name: Enable Collector Timer Unit (auth not yet authorized)
+  ansible.builtin.systemd:
+    name: media-ingest-02.timer
+    enabled: true
+    daemon_reload: true
+  when: not m02_auth_authorized
+
+- name: One-Time Login Reminder
+  ansible.builtin.debug:
+    msg: >-
+      auth.json not yet present. Run the assisted login helper on this box to
+      populate {{ media_ingest_02_state }}/auth.json (owned by
+      {{ media_ingest_02_user }}, 0600), then: systemctl start media-ingest-02.service
+  when: not m02_auth_authorized
+
+# ─── Security hardening ────────────────────────────────────────────────────
+# NOTE: this box makes only OUTBOUND connections (to upstream source + lb-01 for
+# the gallery API). It exposes NO inbound services.
+- name: Harden SSH (key-only, no passwords)
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/99-harden.conf
+    content: |
+      # Managed by Ansible (roles/media_ingest_02). Key-only auth.
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload SSH

@@ -1,0 +1,60 @@
+{
+    "config": {
+        "main_profile": "main_profile",
+        "metadata": "{{ media_ingest_02_state }}/metadata/{model_username}_{model_id}",
+        "discord": "",
+        "file_options": {
+            "save_location": "{{ media_ingest_02_state }}/staging",
+            "dir_format": "{model_username}/",
+            "file_format": "{filename}.{ext}",
+            "textlength": 0,
+            "space-replacer": " ",
+            "date": "MM-DD-YYYY",
+            "text_type_default": "letter",
+            "truncation_default": true
+        },
+        "download_options": {
+            "file_size_limit": 0,
+            "file_size_min": 0,
+            "filter": ["Images", "Audios", "Videos"],
+            "auto_resume": false,
+            "system_free_min": 0,
+            "number_retries": 10
+        },
+        "binary_options": {
+            "mp4decrypt": "",
+            "ffmpeg": ""
+        },
+        "cdm_options": {
+            "private-key": "",
+            "client-id": "",
+            "key-mode-default": "manual"
+        },
+        "performance_options": {
+            "download-sems": 4,
+            "threads": 4
+        },
+        "advanced_options": {
+            "code-execution": false,
+            "dynamic-mode-default": "dc",
+            "backend": "aio",
+            "downloadbars": false,
+            "cache-mode": "sqlite",
+            "appendlog": false,
+            "custom_values": null,
+            "sanitize_text": false,
+            "avatar": false,
+            "temp_dir": null
+        },
+        "responsetype": {
+            "timeline": "Posts",
+            "message": "Messages",
+            "archived": "Archived",
+            "paid": "Messages",
+            "stories": "Stories",
+            "highlights": "Stories",
+            "profile": "Profile",
+            "pinned": "Posts"
+        }
+    }
+}

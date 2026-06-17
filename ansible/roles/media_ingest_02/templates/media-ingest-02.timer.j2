@@ -1,0 +1,13 @@
+# Managed by Ansible — roles/media_ingest_02. Do not edit by hand.
+[Unit]
+Description=Run the secondary source gallery collector periodically
+
+[Timer]
+# First run shortly after boot, then every interval. Persistent=true catches up
+# one missed run if the box was off at the scheduled time.
+OnBootSec=5min
+OnUnitActiveSec={{ media_ingest_02_scrape_interval }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

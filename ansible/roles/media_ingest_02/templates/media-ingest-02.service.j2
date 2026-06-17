@@ -1,0 +1,25 @@
+# Managed by Ansible — roles/media_ingest_02. Do not edit by hand.
+[Unit]
+Description=secondary source gallery collector (periodic scrape -> gallery API push)
+After=network-online.target {{ media_ingest_02_mount_unit.stdout }}
+Wants=network-online.target
+Requires={{ media_ingest_02_mount_unit.stdout }}
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User={{ media_ingest_02_user }}
+Group={{ media_ingest_02_user }}
+EnvironmentFile={{ media_ingest_02_dir }}/scraper.env
+ExecStart={{ media_ingest_02_dir }}/venv/bin/python {{ media_ingest_02_dir }}/scraper_wrapper.py
+
+# Hardening — the scraper only needs its own state/log dirs.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ media_ingest_02_state }} {{ media_ingest_02_log_dir }}
+
+# A sweep can run long (many models, many posts). Give it a generous but bounded
+# runtime so a hung scrape doesn't block the next tick.
+TimeoutStartSec=2h

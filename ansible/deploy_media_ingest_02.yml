@@ -1,0 +1,24 @@
+---
+# Two-stage deploy of the secondary source gallery collector:
+#   1. media_ingest_02_host runs on pve02 to create the LXC (vmid 117,
+#      ip_media_ingest_02 172.16.0.48, hostname media-ingest-02), inject SSH keys.
+#      Uses the Ubuntu 24.04 template (Python 3.12 — the scraper requires >=3.11).
+#   2. media_ingest_02 runs against the new CT to install the scraper + requests,
+#      deploy the wrapper + systemd unit + timer. The scraper requires a one-time
+#      assisted login to populate auth.json before the timer will fire — the role
+#      detects this and skips start until authorized.
+#
+# Usage:
+#   ansible-playbook deploy_media_ingest_02.yml --ask-vault-pass
+
+- name: Provision Media Ingest 02 Container
+  hosts: pve02
+  gather_facts: false
+  roles:
+    - media_ingest_02_host
+
+- name: Deploy Media Ingest 02 Service
+  hosts: media_ingest_02
+  gather_facts: true
+  roles:
+    - media_ingest_02
