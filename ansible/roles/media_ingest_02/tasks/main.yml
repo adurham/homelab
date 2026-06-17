@@ -95,11 +95,12 @@
 - name: Install scraper (pinned) + requests
   ansible.builtin.pip:
     name:
-      - "scraper-pkg=={{ media_ingest_02_scraper_version }}"
+      - "{{ vault_media_ingest_02_scraper_pkg }}=={{ media_ingest_02_scraper_version }}"
       - requests
     virtualenv: "{{ media_ingest_02_dir }}/venv"
   become: true
   become_user: "{{ media_ingest_02_user }}"
+  no_log: true
 
 # ─── Deploy code ───────────────────────────────────────────────────────────
 - name: Deploy Gallery Client
