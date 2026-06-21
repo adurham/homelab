@@ -38,6 +38,27 @@ scrape_configs:
         replacement: '$1'
 
   # ---------------------------------------------------------------------
+  # exo inference cluster (2x Mac Studio M4). Each node exposes a
+  # Prometheus /metrics endpoint on :52415. Reachable from vm-01 over the
+  # LAN (same path as the homeassistant target on 192.168.86.x). The
+  # `exo_is_master` gauge disambiguates which node is authoritative for
+  # per-generation/cluster metrics; per-node system + memory metrics are
+  # reported by every node. Both nodes are scraped so a master re-election
+  # never creates a gap. Targets come from exo_scrape_targets
+  # (roles/victoriametrics/defaults).
+  # ---------------------------------------------------------------------
+  - job_name: 'exo'
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+{% for target in exo_scrape_targets | default([]) %}
+      - targets: ['{{ target.address }}']
+        labels:
+          instance: '{{ target.name }}'
+          cluster: 'homelab'
+{% endfor %}
+
+  # ---------------------------------------------------------------------
   # Loki's own metrics. Loki exposes /metrics on the same port (3100) it
   # uses for the push API. Lets us alert on Loki's internal health
   # (ingestion errors, write failures) before logs stop flowing.
