@@ -17,3 +17,13 @@ blackbox_https_targets:
 blackbox_iframe_self_targets:
   - https://proxmox.chi.lab.amd-e.com
   - https://tanium.chi.lab.amd-e.com
+
+# exo inference cluster nodes (2x Mac Studio M4) scraped on :52415 for the
+# Prometheus /metrics endpoint. Both nodes are listed so master re-election
+# never gaps per-generation metrics. Override at inventory level if the
+# studios' LAN IPs change.
+exo_scrape_targets:
+  - name: macstudio-m4-1
+    address: 192.168.86.201:52415
+  - name: macstudio-m4-2
+    address: 192.168.86.202:52415
