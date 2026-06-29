@@ -70,6 +70,31 @@
       register: scp_automations
       changed_when: scp_automations.rc == 0
 
+    - name: Remove stale automation files (not in local source)
+      # scp only pushes — it doesn't delete. Any .yaml removed from the
+      # local `automations/` directory stays on the remote and HA still
+      # loads it via `!include_dir_merge_list`. This task SSHes in, lists
+      # the remote dir, and rm -f any file not present locally.
+      ansible.builtin.shell: |
+        set -e
+        cd {{ ha_root }}/automations
+        local_=$(ls *.yaml | sort)
+        remote_=$(ssh -p {{ ansible_port }} {{ ssh_opts }} \
+          {{ ansible_user }}@{{ ansible_host }} \
+          "ls /config/automations/" 2>/dev/null | sort)
+        for f in $(comm -23 <(echo "$remote_") <(echo "$local_")); do
+          [ -n "$f" ] || continue
+          # Skip non-.yaml files (bak files, directories)
+          case "$f" in *.yaml) ;; *) continue ;; esac
+          echo "Removing orphan: $f"
+          ssh -p {{ ansible_port }} {{ ssh_opts }} \
+            {{ ansible_user }}@{{ ansible_host }} \
+            "rm -v /config/automations/$f"
+        done
+      delegate_to: localhost
+      register: cleanup_orphans
+      changed_when: cleanup_orphans.stdout | default('') | length > 0
+
     - name: Copy /config/ files
       ansible.builtin.shell: >-
         scp -P {{ ansible_port }} {{ ssh_opts }}
