@@ -607,14 +607,34 @@ class SmartVentController(hass.Hass):
                 # Score -> position
                 # Unoccupied rooms near/below setpoint should close —
                 # no point conditioning an empty room that's comfortable.
+                #
+                # UNOCCUPIED THROTTLE: when a room is >1°F over setpoint AND
+                # unoccupied, cap at 50% instead of 100%. That room still gets
+                # *some* airflow (doesn't run away) but frees ~half its CFM for
+                # the priority pass to push toward an OCCUPIED room that's stuck
+                # (e.g. the Living Room). The on_occupancy_change callback fires
+                # immediately when someone walks in, so it's back to 100% within
+                # 2 seconds — no stale-sensor risk.
+                #
+                # Heating mirror: same logic — an unoccupied cold room that's
+                # still below the heat setpoint gets 50% instead of 100% so its
+                # warm air is banked for occupied rooms that need it.
                 prev = self._last_zone_positions.get(key)
 
                 if need > DEADBAND * 3:
-                    pos = 100
-                    reason = f"high need ({need:+.1f})"
+                    if is_occupied:
+                        pos = 100
+                        reason = f"high need, occupied ({need:+.1f})"
+                    else:
+                        pos = 50
+                        reason = f"high need, unoccupied ({need:+.1f}) — 50%"
                 elif need > DEADBAND:
-                    pos = 100
-                    reason = f"needs airflow ({need:+.1f})"
+                    if is_occupied:
+                        pos = 100
+                        reason = f"needs airflow, occupied ({need:+.1f})"
+                    else:
+                        pos = 50
+                        reason = f"needs airflow, unoccupied ({need:+.1f}) — 50%"
                 elif need > -DEADBAND:
                     if is_occupied:
                         pos = 50
