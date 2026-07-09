@@ -142,7 +142,7 @@
   ansible.builtin.replace:
     path: "{{ m02_messages_py.files[0].path }}"
     regexp: >-
-      async def get_messages\(model_id, username, c=None, post_id=None\):.*?update_check\(data, model_id, after, API\)\n[ \t]*return data
+      (?s)async def get_messages\(model_id, username, c=None, post_id=None\):.*?update_check\(data, model_id, after, API\)\n[ \t]*return data
     replace: |-
       async def get_messages(model_id, username, c=None, post_id=None):
           # PATCHED: use the media-only chat endpoint instead of the messages
