@@ -121,12 +121,14 @@
     mode: '0750'
   notify: Restart Media Ingest 02 Timer
 
-# ─── Patch: use firstId instead of bulk cursor for messages ────────────────
-# The bulk messages endpoint triggers server-side read-receipt marking. The
-# targeted endpoint (with 'firstId' parameter) is used by the web UI for
-# "jump to message" and does NOT trigger read marking. This patch swaps the
-# paginated fetch to use firstId on all runs after the initial cache-populating
-# run. Package identity comes from the vault (no_log to avoid leaking it).
+# ─── Patch: use media-only chat endpoint instead of messages endpoint ──────
+# The messages endpoint marks messages read server-side on any GET. The
+# media-only endpoint returns the same posts with media arrays but does NOT
+# trigger read marking (verified: unread count unchanged across 13 models
+# with unread messages). This patch replaces get_messages to use the
+# media endpoint with offset-based pagination. The URL is constructed from
+# the existing messagesEP constant (path-suffix swap) so no platform URL
+# is hardcoded in this repo. Package identity comes from the vault (no_log).
 - name: Find installed messages module
   ansible.builtin.find:
     paths: "{{ media_ingest_02_dir }}/venv/lib"
@@ -136,14 +138,43 @@
   changed_when: false
   no_log: true
 
-- name: Patch messages module to use firstId instead of bulk cursor
+- name: Patch messages module to use /media endpoint (no read marking)
   ansible.builtin.replace:
     path: "{{ m02_messages_py.files[0].path }}"
     regexp: >-
-      ep = \(\n[ \t]+of_env\.getattr\("messagesNextEP"\)\n[ \t]+if current_message_id\n[ \t]+else of_env\.getattr\("messagesEP"\)\n[ \t]+\)
-    replace: >-
-      ep = (of_env.getattr("messageSPECIFIC") if current_message_id else of_env.getattr("messagesEP"))
-  when: m02_messages_py.files | length > 0
+      async def get_messages\(model_id, username, c=None, post_id=None\):.*?update_check\(data, model_id, after, API\)\n[ \t]*return data
+    replace: |-
+      async def get_messages(model_id, username, c=None, post_id=None):
+          # PATCHED: use the media-only chat endpoint instead of the messages
+          # endpoint. The messages endpoint marks messages read server-side on
+          # any GET. The media endpoint returns the same posts with media arrays
+          # but does NOT trigger read marking. Construct the media URL from the
+          # existing messagesEP constant by swapping the path suffix.
+          _base_ep = of_env.getattr("messagesEP").replace("/messages?", "/media?")
+          offset = 0
+          responseArray = []
+          seen = set()
+          while True:
+              url = _base_ep.format(model_id) + "&offset={}".format(offset)
+              async with c.requests_async(url=url) as r:
+                  if not (200 <= r.status < 300):
+                      break
+                  data = await r.json_()
+                  if not isinstance(data, dict):
+                      break
+                  batch = data.get("list", [])
+                  if not batch:
+                      break
+                  for post in batch:
+                      if post.get("id") not in seen:
+                          seen.add(post.get("id"))
+                          responseArray.append(post)
+                  if not data.get("hasMore"):
+                      break
+                  offset += len(batch)
+          update_check(responseArray, model_id, 0, API)
+          return responseArray
+  when: m02_messages_py.files[0].path is defined and m02_messages_py.files | length > 0
   notify: Restart Media Ingest 02 Timer
   no_log: true
 
