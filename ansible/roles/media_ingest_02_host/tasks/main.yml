@@ -30,7 +30,7 @@
   ansible.builtin.command: >
     pct create 117 /var/lib/vz/template/cache/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
     --hostname media-ingest-02
-    --cores 2 --memory 2048 --swap 512
+    --cores 8 --memory 24576 --swap 512
     --rootfs nvme-data:8
     --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_media_ingest_02 }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
     --unprivileged 1

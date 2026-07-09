@@ -53,6 +53,10 @@ SCRAPE_USERNAMES = os.environ.get("M02_SCRAPE_USERNAMES", "").strip()
 # (safe default — only the explicit SCRAPE_USERNAMES list is scraped). SENSITIVE
 # — reveals the operator's subscription behavior, so it comes from the vault.
 SCRAPE_FILTER_ARGS = os.environ.get("M02_SCRAPE_FILTER_ARGS", "").strip()
+# Name of the upstream source's custom user-list whose members get a full
+# backfill scrape each tick. Pin free-tier models to this list in the source
+# UI. Empty = skip the pinned-list pass.
+PINNED_LIST = os.environ.get("M02_PINNED_LIST", "").strip()
 
 STAGING.mkdir(parents=True, exist_ok=True)
 Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
@@ -74,13 +78,17 @@ def _check_auth():
 
 def _scraper_base_cmd():
     """Build the base scraper invocation (binary + config + action + posts).
-    Returns the list of base args; callers append the model-selection args."""
+    Returns the list of base args; callers append the model-selection args.
+    --neg-filter excludes ad/promotional posts via regex (the --block-ads flag
+    is defined but not wired in this scraper version, so we use --neg-filter
+    with the ad pattern from the scraper docs)."""
     bin_name = os.environ.get("M02_SCRAPER_BIN", "scraper")
     return [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", bin_name),
         "--config", CONFIG_FILE,
         "--action", "download",
         "--posts", "all",
+        "--neg-filter", r"(#(?:ad|ads|AD|advertising|sponsored|promotion)|trial|discount|exclusive\s+offer|giveaway|limited\s+time|\Buser\s+promo|shoutout|endorsement)",
     ]
 
 
@@ -105,26 +113,63 @@ def _run_scraper_pass(label, model_args, timeout_min=90):
     return r
 
 
+def _background_push(stop_event, label):
+    """Continuously push staging to the gallery while scrapers are running.
+    Runs in a background thread, polling staging every 5s and pushing any
+    complete files. This prevents the tmpfs from filling up when high-volume
+    models download faster than the post-completion push can clear."""
+    import time
+    total_pushed = 0
+    while not stop_event.is_set():
+        pushed, failed, skipped = _walk_and_push()
+        total_pushed += pushed
+        if pushed or failed:
+            log.info("pass [%s] bg-push: pushed=%d failed=%d (running total=%d)",
+                     label, pushed, failed, total_pushed)
+        time.sleep(5)
+    # Final flush after scrapers stop
+    pushed, failed, skipped = _walk_and_push()
+    total_pushed += pushed
+    if pushed or failed:
+        log.info("pass [%s] bg-push final: pushed=%d failed=%d (total=%d)",
+                 label, pushed, failed, total_pushed)
+
+
 def _run_scraper():
-    """Run the manual list pass, one model at a time. Each model gets its own
-    timeout so a single slow/stuck model doesn't kill the rest of the list —
-    the scraper's dupe-check DB means a timed-out model retries next tick.
+    """Run the manual list pass with N models in parallel. Each model gets its
+    own timeout so a single slow/stuck model doesn't kill the rest — the
+    scraper's dupe-check DB means a timed-out model retries next tick.
+    Concurrency is bounded by M02_SCRAPER_PARALLELISM (default 4) so we don't
+    hammer the upstream API or exhaust the 8G RAM tmpfs staging.
     Returns a list of (model, CompletedProcess) tuples (None for timeouts)."""
     if not SCRAPE_USERNAMES:
         log.warning("M02_SCRAPE_USERNAMES empty — manual pass skipped")
         return []
     models = [m.strip() for m in SCRAPE_USERNAMES.split(",") if m.strip()]
     per_model_timeout = int(os.environ.get("M02_SCRAPER_PER_MODEL_TIMEOUT_MIN", "15"))
+    parallelism = int(os.environ.get("M02_SCRAPER_PARALLELISM", "4"))
+    log.info("pass [manual] %d models, parallelism=%d, per-model timeout=%dmin",
+             len(models), parallelism, per_model_timeout)
+
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    stop_push = threading.Event()
+    push_thread = threading.Thread(target=_background_push, args=(stop_push, "manual"), daemon=True)
+    push_thread.start()
     results = []
-    for i, model in enumerate(models, 1):
-        log.info("pass [manual] model %d/%d: %s", i, len(models), model)
-        r = _run_scraper_pass("manual:%s" % model, ["--username", model], timeout_min=per_model_timeout)
-        results.append((model, r))
-        # Push whatever has landed in staging so far — keeps staging from
-        # filling up across many models and gives partial progress on each tick.
-        pushed, failed, skipped = _walk_and_push()
-        if pushed or failed:
-            log.info("pass [manual] mid-pass push: pushed=%d failed=%d", pushed, failed)
+    try:
+        with ThreadPoolExecutor(max_workers=parallelism) as pool:
+            futures = {
+                pool.submit(_run_scraper_pass, "manual:%s" % m, ["--username", m], per_model_timeout): m
+                for m in models
+            }
+            for fut in as_completed(futures):
+                model = futures[fut]
+                r = fut.result()
+                results.append((model, r))
+    finally:
+        stop_push.set()
+        push_thread.join(timeout=30)
     return results
 
 
@@ -140,6 +185,257 @@ def _run_scraper_filter():
     import shlex
     args = shlex.split(SCRAPE_FILTER_ARGS)
     return _run_scraper_pass("filter", args)
+
+
+# Upstream package identity (pip name) — SENSITIVE, from the vault via env.
+# Used by importlib to load the scraper's internal modules for API discovery
+# (subscriptions + custom-lists endpoints). Falls back gracefully if unset.
+SCRAPER_PKG = os.environ.get("M02_SCRAPER_PKG", "").strip()
+
+
+def _load_scraper_modules():
+    """Load the upstream scraper's internal modules via importlib, using the
+    vault-sourced package name (M02_SCRAPER_PKG) so the package identity isn't
+    hardcoded in the working tree. Sets the config-path env vars BEFORE import
+    so the scraper's config-reading-at-import-time picks up our config.json.
+    Returns a dict of module refs, or None if the package name is unset / import
+    fails."""
+    import importlib
+    if not SCRAPER_PKG:
+        log.warning("M02_SCRAPER_PKG unset — discovery passes will be skipped")
+        return None
+    # Config path env vars must be set BEFORE importing the scraper package —
+    # its import chain reads the config at import time.
+    os.environ["OFSC_CONFIG_DIR"] = os.path.dirname(CONFIG_FILE)
+    os.environ["OFSC_CONFIG_FILE_NAME"] = os.path.basename(CONFIG_FILE)
+    venv_site = os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "lib", "site-packages")
+    sys.path.insert(0, venv_site)
+    try:
+        mods = {
+            "read_args": importlib.import_module(f"{SCRAPER_PKG}.utils.args.accessors.read"),
+            "write_args": importlib.import_module(f"{SCRAPER_PKG}.utils.args.mutators.write"),
+            "manager": importlib.import_module(f"{SCRAPER_PKG}.managers.manager"),
+            "of_env": importlib.import_module(f"{SCRAPER_PKG}.utils.of_env.of_env"),
+            "settings": importlib.import_module(f"{SCRAPER_PKG}.utils.settings"),
+        }
+        # Point the scraper's arg parser at our config.json, then force a
+        # settings reinit so the auth/signing machinery loads it.
+        args = mods["read_args"].retriveArgs()
+        args.config = CONFIG_FILE
+        mods["write_args"].setArgs(args)
+        mods["settings"].update_settings()
+        # The manager global starts as None — instantiate it directly so we can
+        # use its session machinery (the normal start path runs the CLI menu).
+        if not isinstance(mods["manager"].Manager, mods["manager"].mainManager):
+            mods["manager"].Manager = mods["manager"].mainManager()
+        return mods
+    except Exception as e:
+        log.error("failed to load scraper modules: %s: %s", type(e).__name__, e)
+        return None
+
+
+def _discover_subs(price_filter, label):
+    """Discover active subscriptions matching a price filter. Uses the scraper's
+    own auth machinery (same venv, same auth.json). price_filter is a callable
+    (price -> bool). label is a short tag for logging ('paid', 'free').
+    Replicates final_current_price logic from the scraper's models module."""
+    import asyncio
+    mods = _load_scraper_modules()
+    if mods is None:
+        return []
+    mgr = mods["manager"].Manager  # the mainManager instance (has .session)
+    of_env = mods["of_env"]
+
+    async def _fetch():
+        usernames = []
+        async with mgr.session.aget_subscription_session() as c:
+            offset = 0
+            while True:
+                url = of_env.getattr("subscriptionsActiveEP").format(offset)
+                async with c.requests_async(url=url) as r:
+                    if not (200 <= r.status < 300):
+                        log.error("subscriptions API error %d at offset %d", r.status, offset)
+                        break
+                    data = await r.json_()
+                    subs = data.get("list", [])
+                    if not subs:
+                        break
+                    for sub in subs:
+                        sub_data = sub.get("subscribedByData") or {}
+                        sub_price = sub_data.get("regularPrice")
+                        promo = sub_data.get("lowestPromoClaim")
+                        regular = sub_data.get("regularPrice") if sub_data else None
+                        price = sub_price if sub_price is not None else (
+                            promo if promo is not None else (regular if regular is not None else 0)
+                        )
+                        username = sub.get("username")
+                        if username and price_filter(price):
+                            usernames.append(username)
+                    if data.get("hasMore") is not True:
+                        break
+                    offset += len(subs)
+        return usernames
+
+    try:
+        usernames = asyncio.run(_fetch())
+        # Dedup + strip the manual list (those are already scraped in pass 1)
+        manual = {m.strip().lower() for m in SCRAPE_USERNAMES.split(",") if m.strip()}
+        discovered = sorted({u.lower() for u in usernames} - manual)
+        log.info("discovery [%s]: %d active subs (%d after dedup with manual list)",
+                 label, len(usernames), len(discovered))
+        return discovered
+    except Exception as e:
+        log.error("discovery [%s] failed: %s: %s", label, type(e).__name__, e)
+        return []
+
+
+def _discover_paid_subs():
+    """Discover active paid subscriptions (price > 0, including temp trials
+    where regularPrice > 0 but sub_price may be 0)."""
+    return _discover_subs(lambda p: p > 0, "paid")
+
+
+def _discover_free_subs():
+    """Discover active free subscriptions (price == 0)."""
+    return _discover_subs(lambda p: p == 0, "free")
+
+
+def _run_scraper_filter_parallel():
+    """Pass 2: discover active paid subs via the source API, then scrape them
+    in parallel using the same ThreadPoolExecutor as the manual pass. Falls
+    back to the old single-process filter pass if discovery fails (returns
+    empty list)."""
+    discovered = _discover_paid_subs()
+    if not discovered:
+        log.warning("discovery returned no subs — falling back to legacy filter pass")
+        return _run_scraper_filter()
+    return _run_scraper_discovered_pass("filter", discovered)
+
+
+def _run_scraper_free_parallel():
+    """Pass 4: discover active free subs via the source API, then scrape them
+    in parallel. Same pattern as the paid-subs pass."""
+    discovered = _discover_free_subs()
+    if not discovered:
+        log.info("free-subs discovery returned no subs — free pass skipped")
+        return []
+    return _run_scraper_discovered_pass("free", discovered)
+
+
+def _run_scraper_discovered_pass(label, discovered):
+    """Shared parallel scrape runner for discovered model lists (paid/free
+    subs, pinned list). Uses a background push thread to keep staging clear
+    while scrapers download."""
+    parallelism = int(os.environ.get("M02_SCRAPER_PARALLELISM", "4"))
+    per_model_timeout = int(os.environ.get("M02_SCRAPER_PER_MODEL_TIMEOUT_MIN", "15"))
+    log.info("pass [%s] %d models, parallelism=%d", label, len(discovered), parallelism)
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    stop_push = threading.Event()
+    push_thread = threading.Thread(target=_background_push, args=(stop_push, label), daemon=True)
+    push_thread.start()
+    results = []
+    try:
+        with ThreadPoolExecutor(max_workers=parallelism) as pool:
+            futures = {
+                pool.submit(_run_scraper_pass, "%s:%s" % (label, m), ["--username", m], per_model_timeout): m
+                for m in discovered
+            }
+            for fut in as_completed(futures):
+                model = futures[fut]
+                r = fut.result()
+                results.append((model, r))
+    finally:
+        stop_push.set()
+        push_thread.join(timeout=30)
+    return results
+
+
+def _discover_pinned_list():
+    """Discover members of the configured custom user-list on the source
+    platform. Returns a list of usernames. Uses the scraper's auth machinery —
+    same as paid-sub discovery. The list name is matched case-insensitively
+    against the user's custom lists (listEP -> find by name -> listusersEP ->
+    enumerate users)."""
+    if not PINNED_LIST:
+        log.info("M02_PINNED_LIST empty — pinned-list pass skipped")
+        return []
+    import asyncio
+    mods = _load_scraper_modules()
+    if mods is None:
+        return []
+    mgr = mods["manager"].Manager  # the mainManager instance (has .session)
+    of_env = mods["of_env"]
+
+    async def _fetch():
+        usernames = []
+        async with mgr.session.aget_subscription_session() as c:
+            # 1. Enumerate all custom lists, find the one matching PINNED_LIST
+            list_id = None
+            offset = 0
+            target = PINNED_LIST.lower()
+            while True:
+                url = of_env.getattr("listEP").format(offset)
+                async with c.requests_async(url=url) as r:
+                    if not (200 <= r.status < 300):
+                        log.error("lists API error %d at offset %d", r.status, offset)
+                        break
+                    data = await r.json_()
+                    lists = data.get("list", [])
+                    if not lists:
+                        break
+                    for lst in lists:
+                        if (lst.get("name") or "").lower() == target:
+                            list_id = lst.get("id")
+                            break
+                    if list_id or data.get("hasMore") is not True:
+                        break
+                    offset += len(lists)
+            if list_id is None:
+                log.error("pinned list %r not found in source custom lists", PINNED_LIST)
+                return []
+            # 2. Enumerate users in that list
+            offset = 0
+            while True:
+                url = of_env.getattr("listusersEP").format(list_id, offset)
+                async with c.requests_async(url=url) as r:
+                    if not (200 <= r.status < 300):
+                        log.error("list users API error %d at offset %d", r.status, offset)
+                        break
+                    data = await r.json_()
+                    users = data.get("list", [])
+                    if not users:
+                        break
+                    for u in users:
+                        username = u.get("username")
+                        if username:
+                            usernames.append(username)
+                    if data.get("hasMore") is not True:
+                        break
+                    offset += len(users)
+        return usernames
+
+    try:
+        usernames = asyncio.run(_fetch())
+        # Dedup against manual list (those are already scraped in pass 1)
+        manual = {m.strip().lower() for m in SCRAPE_USERNAMES.split(",") if m.strip()}
+        discovered = sorted({u.lower() for u in usernames} - manual)
+        log.info("pinned list %r: %d members (%d after dedup with manual list)",
+                 PINNED_LIST, len(usernames), len(discovered))
+        return discovered
+    except Exception as e:
+        log.error("pinned list discovery failed: %s: %s", type(e).__name__, e)
+        return []
+
+
+def _run_scraper_pinned_parallel():
+    """Pass 3: scrape members of the pinned custom user-list in parallel. Full
+    backfill — the scraper's dupe-check DB means re-runs only fetch new content.
+    Skipped if M02_PINNED_LIST is empty or the list isn't found."""
+    discovered = _discover_pinned_list()
+    if not discovered:
+        return []
+    return _run_scraper_discovered_pass("pinned", discovered)
 
 
 def _walk_and_push():
@@ -190,14 +486,38 @@ def main():
     if not manual_ok:
         log.warning("manual pass had failures/timeouts; continuing to filter pass")
 
-    # Pass 2: auto-discovery via filter args (e.g. --current-price paid
-    # --active-subscription --username ALL). Only runs if M02_SCRAPE_FILTER_ARGS
-    # is set. Both passes share the staging dir + dupe-check db, so overlap
-    # between the manual list and the filter-discovered models is free —
-    # already-downloaded content is skipped.
-    r2 = _run_scraper_filter()
-    if r2 is not None and r2.returncode != 0:
+    # Pass 2: auto-discovery of active paid subs via the source API, then
+    # scraped in parallel (same ThreadPoolExecutor as the manual pass). Replaces
+    # the old single-process '--username ALL' filter pass which was the
+    # bottleneck. Falls back to the legacy filter pass if discovery fails. Both
+    # passes share the staging dir + dupe-check db, so overlap between the
+    # manual list and the discovered subs is free — already-downloaded content
+    # is skipped.
+    filter_results = _run_scraper_filter_parallel()
+    if isinstance(filter_results, list):
+        filter_ok = all(r is not None and r.returncode == 0 for _, r in filter_results) if filter_results else True
+        if not filter_ok:
+            log.warning("filter pass had failures/timeouts; pushing whatever landed in staging")
+    elif filter_results is not None and getattr(filter_results, "returncode", 0) != 0:
         log.warning("filter pass incomplete; pushing whatever landed in staging")
+
+    # Pass 3: pinned custom user-list — free-tier models pinned for full
+    # backfill. Skipped if M02_PINNED_LIST is empty or the list isn't found.
+    # Shares the staging dir + dupe-check db, so overlap with passes 1+2 is free.
+    pinned_results = _run_scraper_pinned_parallel()
+    if pinned_results:
+        pinned_ok = all(r is not None and r.returncode == 0 for _, r in pinned_results)
+        if not pinned_ok:
+            log.warning("pinned pass had failures/timeouts; pushing whatever landed in staging")
+
+    # Pass 4: auto-discovery of active free subs (price == 0). Same parallel
+    # pattern as paid subs. Shares staging + dupe-check db, so overlap with
+    # passes 1-3 is free.
+    free_results = _run_scraper_free_parallel()
+    if free_results:
+        free_ok = all(r is not None and r.returncode == 0 for _, r in free_results)
+        if not free_ok:
+            log.warning("free pass had failures/timeouts; pushing whatever landed in staging")
 
     pushed, failed, skipped = _walk_and_push()
     log.info("sweep done: pushed=%d failed=%d skipped=%d", pushed, failed, skipped)

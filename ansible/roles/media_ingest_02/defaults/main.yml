@@ -33,19 +33,40 @@ media_ingest_02_collector_client_id: "media-ingest-collector"
 # Scheduled scrape timer (the secondary source is pull-based, not push-based like
 # the primary, so a periodic full sweep is the natural model — mirror the primary's
 # reconcile timer pattern). OnBootSec + OnUnitActiveSec.
-media_ingest_02_scrape_interval: "6h"
+media_ingest_02_scrape_interval: "2h"
 # How many most-recent posts per model to scan each sweep. Bounded so each run is
 # cheap and the timer can fire often. The gallery's stem-dedup means overlap is free.
 media_ingest_02_scrape_lookback: 50
 # tmpfs staging size (RAM-backed). The scraper downloads a whole pass before the
 # wrapper pushes, so staging must hold a full pass worth of media. 4G covers most
 # passes of the manual list + filter discovery; the CT has 8G RAM to back it.
-media_ingest_02_staging_size: "4G"
+media_ingest_02_staging_size: "14G"
 # Per-model timeout (minutes) for the manual pass. The wrapper loops through the
 # model list one at a time, each with its own timeout, so a single stuck model
 # doesn't kill the rest of the list. The dupe-check DB retries timed-out models
 # next tick. 15min is enough for most models on repeat runs.
 media_ingest_02_scraper_per_model_timeout_min: 15
+# Number of models to scrape in parallel during the manual pass. The scraper is
+# I/O bound (network downloads), not CPU bound, so parallelism cuts total sweep
+# time from sum-of-all-models to max-of-any-model. 4 is a safe default that
+# keeps peak RAM (each scraper process ~200MB + tmpfs staging) under the 8G
+# budget. Bump if the box has headroom.
+media_ingest_02_scraper_parallelism: 10
+# Per-scraper-process download concurrency. The scraper reads 'download_sems'
+# from config.json (concurrent downloads per thread) and OFSC_THREADS_DEFAULT
+# from env (number of worker threads). The scraper is I/O bound, so higher
+# values download faster without hitting CPU limits. 8 threads x 8 sems = 64
+# concurrent downloads per scraper process; with parallelism=4 that's up to 256
+# concurrent downloads across all models, well within the 369Mbps pipe.
+media_ingest_02_scraper_threads: 4
+media_ingest_02_scraper_download_sems: 4
+# Name of the upstream source's custom user-list whose members get a full
+# backfill scrape each tick. Used for pinning free-tier models (not paid subs —
+# those are auto-discovered in pass 2). Add a model to this list in the source
+# UI to start scraping them; remove when you want to stop. Empty = skip the
+# pinned-list pass. The list name is case-insensitive and matched against the
+# user's custom lists on the source platform.
+media_ingest_02_pinned_list: ""
 # Which upstream models to scrape. SENSITIVE — the model names reveal which
 # accounts the operator is subscribed to, so they live in the vault
 # (vault_media_ingest_02_scrape_usernames), NOT here. The env template pulls
