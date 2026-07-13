@@ -248,10 +248,10 @@ PRIORITY_MARGIN_OVERRIDES = {
 # A donor room qualifies only if it is at least this many °F COOLER than the
 # beneficiary room itself. Measured relative to the beneficiary (not the absolute
 # setpoint) on purpose: when the setpoint is aggressive the whole house can sit
-# above it, but a room 3°F+ cooler than the struggling room still has plenty of
+# above it, but a room 1.5°F+ cooler than the struggling room still has enough
 # margin to give up some airflow. Donors are throttled to 50% (never closed), so
 # they keep getting half their flow and won't run away from setpoint.
-PRIORITY_DONOR_COOLER_BY = 3.0
+PRIORITY_DONOR_COOLER_BY = 1.5
 # Throttle position for donor rooms (Flair vents are 0/50/100 only).
 PRIORITY_DONOR_POS = 50
 # Never throttle more than this many donor rooms per beneficiary room.
@@ -260,7 +260,7 @@ PRIORITY_MAX_DONORS = 4
 # just lagging, it's losing. Throttle donors all the way to 0% (closed) instead
 # of 50% to dump maximum CFM into it. The backpressure pass still caps total
 # closures at MAX_CLOSED_RATIO, so this can't choke the system.
-PRIORITY_ESCALATE_OVER = 4.0
+PRIORITY_ESCALATE_OVER = 3.0
 PRIORITY_DONOR_POS_ESCALATED = 0
 
 # ── Delivery / capacity handicap (achieved-cooling-rate axis) ──────────────────
