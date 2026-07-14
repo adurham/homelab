@@ -34,7 +34,7 @@ media_gallery_trash_port: 8091
 # Upload service port (add pics + create folders; routed by lb-01 /upload /mkdir
 # /status behind Authentik). Built to handle thousands (batched, coalesced).
 media_gallery_upload_port: 8092
-media_gallery_upload_max_mb: 4096
+media_gallery_upload_max_mb: 16384
 
 # Thumbnail cache tmpfs size (RAM-backed; decrypted thumbs + the transient
 # full-original download used to make a VIDEO poster live here, never on disk).
