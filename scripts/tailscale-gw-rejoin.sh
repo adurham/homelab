@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# tailscale-gw-rejoin.sh — re-enroll tailscale-gw (CT 101) into the tailnet automatically.
+# tailscale-gw-rejoin.sh — re-enroll tailscale-gw (CT 101) into the tailnet.
 #
-# Use when tailscale-gw has fallen out of the tailnet (node key expired, "Logged out",
-# 172.16.0.0/24 subnet route unreachable from the Mac). Symptoms: gallery.chi and other
-# chi.lab.amd-e.com hosts stop resolving from the Mac; SSH to 172.16.0.x times out.
+# BREAK-GLASS ONLY as of 2026-07-14: tailscale-gw's node-key expiry is now
+# DISABLED (via POST /api/v2/device/{id}/key {"keyExpiryDisabled":true}), so it
+# no longer falls out of the tailnet on a 180-day schedule. This script is kept
+# for non-expiry enrollment corruption (coordination-server drop, corrupted
+# state, manual `tailscale logout`, etc.) — symptoms: gallery.chi and other
+# chi.lab.amd-e.com hosts stop resolving from the Mac; SSH to 172.16.0.x times
+# out; `tailscale status` inside CT 101 shows "Logged out".
 #
 # Flow:
 #   1. Read Tailscale API token from macOS keychain (TailscaleAPIToken).
@@ -13,10 +17,12 @@
 #      --hostname=tailscale-gw --snat-subnet-routes=false --reset` inside the CT.
 #   5. Verify: tailscale status shows the node online + Mac can ping 172.16.0.10 (dns-01).
 #
-# The API token expires every 90 days (Tailscale max). Rotate via the admin console
-# (https://login.tailscale.com/admin/settings/keys → generate new API token) and update
-# it in: macOS keychain (security add-generic-password -s TailscaleAPIToken -U -w ...),
-# homelab vault (vault_tailscale_api_token), and 1Password ("Tailscale API Token" item).
+# The API token expires every 90 days (Tailscale max). Since this script is now
+# break-glass only, token rotation is low-priority (not outage-critical). To
+# rotate: generate a new token at https://login.tailscale.com/admin/settings/keys
+# and update all three stores (keychain TailscaleAPIToken, homelab vault
+# vault_tailscale_api_token, 1Password "Tailscale API Token" item). A reminder
+# cron fires 2026-10-05 (a week before the 2026-10-12 expiry).
 #
 # Exit codes: 0 = re-enrolled + verified, 1 = failure (see output).
 
