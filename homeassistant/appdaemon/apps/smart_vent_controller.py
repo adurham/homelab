@@ -155,6 +155,14 @@ MAX_CLOSED_RATIO = 0.60
 # How far a room temp can be from setpoint before we react (°F)
 DEADBAND = 1.0
 
+# Ignore occupancy when a room is this far over setpoint (°F). ecobee remote
+# sensors use PIR motion detection — a room with nobody moving in it reads
+# unoccupied even if it's 80°F and needs cooling. When a room is this hot,
+# treat it as a beneficiary regardless of occupancy. The house is imbalanced
+# (upstairs 5-8°F above main floor) and leaving hot rooms uncooled because
+# nobody is standing in them makes the imbalance worse.
+OCCUPANCY_OVERRIDE_OVER = 3.0
+
 # Hysteresis: once a vent opens, the zone must drop this far BELOW the
 # close threshold before we actually close it. Prevents flapping at setpoint.
 HYSTERESIS = 0.5
@@ -616,12 +624,22 @@ class SmartVentController(hass.Hass):
                 # immediately when someone walks in, so it's back to 100% within
                 # 2 seconds — no stale-sensor risk.
                 #
+                # OCCUPANCY OVERRIDE: when a room is >OCCUPANCY_OVERRIDE_OVER
+                # above setpoint (default 3°F), give it 100% regardless of
+                # occupancy. A hot room needs cooling whether or not someone is
+                # in it — ecobee PIR sensors read unoccupied when nobody is
+                # moving, and starving a hot room makes the house imbalance
+                # worse. This runs BEFORE the unoccupied-throttle below.
+                #
                 # Heating mirror: same logic — an unoccupied cold room that's
                 # still below the heat setpoint gets 50% instead of 100% so its
                 # warm air is banked for occupied rooms that need it.
                 prev = self._last_zone_positions.get(key)
 
-                if need > DEADBAND * 3:
+                if need > OCCUPANCY_OVERRIDE_OVER:
+                    pos = 100
+                    reason = f"hot override ({need:+.1f}) — 100% regardless of occupancy"
+                elif need > DEADBAND * 3:
                     if is_occupied:
                         pos = 100
                         reason = f"high need, occupied ({need:+.1f})"
@@ -975,8 +993,15 @@ class SmartVentController(hass.Hass):
                 if temp is None:
                     continue
                 occ_entity = sensors.get("occupancy")
+                off = off_by(temp)
+                # Occupancy gate: only help occupied rooms, UNLESS the room is
+                # significantly over setpoint (OCCUPANCY_OVERRIDE_OVER). ecobee
+                # PIR sensors read unoccupied when nobody is moving, even if the
+                # room is hot — don't starve a hot room of airflow just because
+                # it's empty.
                 if occ_entity and self.get_state(occ_entity) != "on":
-                    continue  # only help occupied rooms
+                    if off < OCCUPANCY_OVERRIDE_OVER:
+                        continue  # unoccupied and not hot enough to override
                 margin = self._room_margin(key, heating)
                 eff_margin = (PRECOOL_MARGIN
                               if (precool and PRECOOL_MARGIN < margin)
@@ -1133,9 +1158,13 @@ class SmartVentController(hass.Hass):
                 if temp is None:
                     continue
                 occ_entity = sensors.get("occupancy")
+                off = off_by(temp)
+                # Same occupancy override as the priority pass: a hot room
+                # gets fan-assist even if unoccupied (see OCCUPANCY_OVERRIDE_OVER).
                 if occ_entity and self.get_state(occ_entity) != "on":
-                    continue
-                if off_by(temp) < FAN_ASSIST_OVER:
+                    if off < OCCUPANCY_OVERRIDE_OVER:
+                        continue
+                if off < FAN_ASSIST_OVER:
                     continue
                 beneficiaries.append((off_by(temp), key, temp))
 
