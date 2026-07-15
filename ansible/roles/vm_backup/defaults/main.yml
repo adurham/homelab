@@ -1,0 +1,15 @@
+---
+# Vault secrets consumed by this role (provisioned one-time, not managed here):
+#   vault_vm_backup_gdrive_client_id      — Google OAuth client_id (reused from media_gallery)
+#   vault_vm_backup_gdrive_client_secret  — Google OAuth client_secret
+#   vault_vm_backup_gdrive_token          — JSON token blob from `rclone authorize`
+#   vault_vm_backup_crypt_password        — rclone crypt password (plaintext; obscured form used in conf)
+#   vault_vm_backup_crypt_password2       — rclone crypt password2 (salt)
+# All also stored in macOS keychain as VMBackupGDrive* / VMBackupCrypt* for out-of-band recovery.
+
+# GDrive folder layout (under the OAuth user's Drive root):
+#   vm-backup/daily/<timestamp>      — daily snapshots, 90d retention
+#   vm-backup/archive-yearly/<year>  — yearly full-dataset archives, kept indefinitely
+vm_backup_gdrive_folder: "vm-backup"
+vm_backup_daily_retention_days: 90
+vm_backup_state_dir: "/var/lib/vm-backup"

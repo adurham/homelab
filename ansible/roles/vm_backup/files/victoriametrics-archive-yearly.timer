@@ -1,0 +1,11 @@
+[Unit]
+Description=VictoriaMetrics yearly archive timer (Jan 1 04:00 local)
+Requires=victoriametrics-archive-yearly.service
+
+[Timer]
+OnCalendar=*-01-01 04:00:00 America/Chicago
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target

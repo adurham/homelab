@@ -1,0 +1,79 @@
+---
+# VM-to-GDrive backup for VictoriaMetrics on vm-01.
+# Installs rclone, drops an encrypted rclone.conf, deploys three scripts
+# (daily backup, yearly archive, healthcheck watchdog) + systemd timers.
+#
+# Requires vault vars: vault_vm_backup_gdrive_client_id, _client_secret, _token,
+# vault_vm_backup_crypt_password, _crypt_password2 (plaintext), plus the
+# obscured forms _crypt_password_obscured / _crypt_password2_obscured produced
+# by `rclone obscure`. See README.md for one-time setup.
+
+- name: Install rclone
+  ansible.builtin.apt:
+    name: rclone
+    state: present
+    update_cache: true
+
+- name: Ensure rclone config dir exists (root-only)
+  ansible.builtin.file:
+    path: /root/.config/rclone
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Drop rclone config (encrypted GDrive remote)
+  ansible.builtin.template:
+    src: rclone.conf.j2
+    dest: /root/.config/rclone/rclone.conf
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Ensure state dir exists
+  ansible.builtin.file:
+    path: "{{ vm_backup_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install backup scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - vm-backup-daily.sh
+    - vm-archive-yearly.sh
+    - vm-backup-watchdog.sh
+
+- name: Install systemd units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - victoriametrics-backup.service
+    - victoriametrics-backup.timer
+    - victoriametrics-archive-yearly.service
+    - victoriametrics-archive-yearly.timer
+    - victoriametrics-backup-watchdog.service
+    - victoriametrics-backup-watchdog.timer
+  notify: Reload systemd
+
+- name: Enable + start timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - victoriametrics-backup.timer
+    - victoriametrics-archive-yearly.timer
+    - victoriametrics-backup-watchdog.timer
