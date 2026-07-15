@@ -195,9 +195,18 @@
     # Dew-point spread (°F): outdoor minus indoor. Positive = outdoor air is
     # WETTER than inside, so opening windows / pulling in fresh air ADDS
     # moisture. Drives the "don't open windows" alert.
+    #
+    # unit_of_measurement is "°F-delta" (NOT "°F") and device_class is unset.
+    # The HA Prometheus exporter auto-converts any sensor with unit "°F" and
+    # device_class temperature to °C using the ABSOLUTE formula (F-32)*5/9.
+    # This sensor is a DELTA (outdoor - indoor), not an absolute temperature,
+    # so that conversion produces a wrong value (17°F delta -> -8°C instead
+    # of +9.5°C). Using a custom unit string avoids the auto-conversion and
+    # preserves the raw °F delta in VM. Grafana queries must divide by 1.8
+    # to get °C delta if needed.
     - name: "Dew Point Spread"
       unique_id: dew_point_spread
-      unit_of_measurement: "°F"
+      unit_of_measurement: "°F-delta"
       state_class: measurement
       state: >
         {% set o = states('sensor.outdoor_dew_point') | float(-99) %}
