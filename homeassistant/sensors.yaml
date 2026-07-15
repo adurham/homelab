@@ -6,6 +6,20 @@
   method: left
   round: 2
 
+# Grid consumption total (kWh) — Riemann sum of the Emporia whole-house
+# power sensor. Replaces the broken UI template sensor
+# sensor.edgewater_road_grid_consumption (platform=template, restored:true,
+# referencing a deleted source). The Emporia integration provides per-circuit
+# energy_today/energy_this_month windows but NOT a cumulative total; this
+# integration sensor fills that gap for the HA Energy dashboard + VM export.
+- platform: integration
+  source: sensor.edgewater_road_power_minute_average
+  name: "Grid Consumption Total"
+  unique_id: grid_consumption_total
+  unit_prefix: k
+  method: left
+  round: 2
+
 # Sony TV Picture Mode (REST API)
 - platform: rest
   name: "Sony TV Picture Mode"
