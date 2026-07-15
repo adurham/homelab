@@ -161,6 +161,7 @@ Home Assistant configuration deployed to the HA host. Notable subsystems:
 - **Water heater circulator pump** — occupancy-driven, with daily runtime limits and cooldown.
 - **Lighting automations** — cat room, front porch sconces, garage door motion, stair lighting.
 - **Climate control** — Flair vents, Ecobee sensors.
+- **Shelly Gen3 fleet** — 6 devices (pool pump, water-heater circulator, basement exhaust, 3 garage bays) on local MQTT to the HA Mosquitto add-on, Shelly cloud disabled. See `docs/shelly-mqtt.md`.
 - **Deployment** — `homeassistant/deploy_homeassistant.sh` syncs configs and reloads.
 
 ### `scripts/` — utilities
