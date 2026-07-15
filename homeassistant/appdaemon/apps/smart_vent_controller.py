@@ -327,12 +327,18 @@ FAN_ENTITY = "climate.ecobee_thermostat"
 
 # Dry-coil lockout. For several minutes after the compressor stops, the
 # evaporator coil is still wet with condensate. Running the blower over it
-# (fan-assist recirculation) re-evaporates that water back into the house —
-# the exact mechanism behind off-cycle humidity creep. Suppress cooling-
-# direction fan-assist until the coil has had this long to drain out the PVC.
-# Cooling only: heating produces no condensate, so winter recirculation is
-# never gated. Bump to 45 if indoor RH still climbs between cycles.
-FAN_ASSIST_COIL_DRY_MIN = 30.0
+# (fan-assist recirculation) re-evaporates that water back into the house.
+#
+# Set to 5 min (was 30): the bulk of coil condensate drains in the first 2-3
+# min. With dedicated returns in every room, fan-assist is a proper circulation
+# loop (return→supply), not just blowing warm duct air. The house has a 60%
+# dehumidify target + standalone dehumidifiers to handle latent load, so a
+# small amount of coil re-evaporation is acceptable in exchange for pushing
+# banked cold air to hot rooms during the 10-15 min idle gaps.
+#
+# Monitor: if indoor RH climbs >2% between cycles, raise this. If upstairs
+# stays hot with no fan-assist firing, lower it.
+FAN_ASSIST_COIL_DRY_MIN = 5.0
 
 # ── Predictive pre-cool ───────────────────────────────────────────────────────
 # Sun-facing rooms start each afternoon already behind because the morning is
