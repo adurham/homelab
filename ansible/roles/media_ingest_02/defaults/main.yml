@@ -48,18 +48,21 @@ media_ingest_02_staging_size: "14G"
 media_ingest_02_scraper_per_model_timeout_min: 15
 # Number of models to scrape in parallel during the manual pass. The scraper is
 # I/O bound (network downloads), not CPU bound, so parallelism cuts total sweep
-# time from sum-of-all-models to max-of-any-model. 4 is a safe default that
-# keeps peak RAM (each scraper process ~200MB + tmpfs staging) under the 8G
-# budget. Bump if the box has headroom.
-media_ingest_02_scraper_parallelism: 10
+# time from sum-of-all-models to max-of-any-model. Toned down from 10 to 3 on
+# 2026-07-14 after Cloudflare 1015 rate-limited the home egress IP — the CT
+# egresses through the home network's public IP, so a platform-side ban hits
+# every device on the LAN, not just the scraper. Keep conservative.
+media_ingest_02_scraper_parallelism: 3
 # Per-scraper-process download concurrency. The scraper reads 'download_sems'
 # from config.json (concurrent downloads per thread) and OFSC_THREADS_DEFAULT
-# from env (number of worker threads). The scraper is I/O bound, so higher
-# values download faster without hitting CPU limits. 8 threads x 8 sems = 64
-# concurrent downloads per scraper process; with parallelism=4 that's up to 256
-# concurrent downloads across all models, well within the 369Mbps pipe.
-media_ingest_02_scraper_threads: 4
-media_ingest_02_scraper_download_sems: 4
+# from env (number of worker threads). 2 threads x 2 sems = 4 concurrent
+# downloads per scraper process; with parallelism=3 that's up to 12 concurrent
+# downloads across all models — toned down from 10x4x8=320 on 2026-07-14 after
+# Cloudflare 1015. The config.json template MUST use the
+# {{ media_ingest_02_scraper_download_sems }} variable, not a hardcoded value,
+# or this default is silently ignored.
+media_ingest_02_scraper_threads: 2
+media_ingest_02_scraper_download_sems: 2
 # Name of the upstream source's custom user-list whose members get a full
 # backfill scrape each tick. Used for pinning free-tier models (not paid subs —
 # those are auto-discovered in pass 2). Add a model to this list in the source
