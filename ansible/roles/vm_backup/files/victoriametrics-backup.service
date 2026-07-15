@@ -1,0 +1,15 @@
+[Unit]
+Description=VictoriaMetrics daily encrypted GDrive backup
+After=victoriametrics.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vm-backup-daily.sh
+User=root
+TimeoutStartSec=3600
+Restart=on-failure
+RestartSec=300
+
+[Install]
+WantedBy=multi-user.target

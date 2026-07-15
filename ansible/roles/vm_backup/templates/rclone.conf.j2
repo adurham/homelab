@@ -1,0 +1,30 @@
+# Managed by Ansible — roles/vm_backup.
+# Two remotes:
+#   vmbackup_drive: raw Google Drive (OAuth token reused from media_gallery GCP project)
+#   vmbackup_crypt: crypt layer wrapping vmbackup_drive:vm-backup — client-side
+#                   encryption of BOTH filenames and contents. Google only sees ciphertext.
+#
+# BLAST RADIUS: the OAuth client_id/secret are shared with the media_gallery remote
+# (same GCP project "tg-harvester-03393"). A token stolen from vm-01 can read/write
+# ANY folder in the user's Drive (full `drive` scope), including destroying encrypted
+# photos. Accepted posture for homelab (see fact 391 re: user accepting full-drive-scope
+# for tg-harvester). To narrow, create a separate OAuth client + use scope=drive.file.
+#
+# All secret values are vaulted. The crypt passwords are the OBSCURED forms produced
+# by `rclone obscure` (plaintext copies in vault + macOS keychain for recovery).
+
+[vmbackup_drive]
+type = drive
+scope = drive
+client_id = {{ vault_vm_backup_gdrive_client_id }}
+client_secret = {{ vault_vm_backup_gdrive_client_secret }}
+token = {{ vault_vm_backup_gdrive_token }}
+team_drive =
+
+[vmbackup_crypt]
+type = crypt
+remote = vmbackup_drive:{{ vm_backup_gdrive_folder }}
+filename_encryption = standard
+directory_name_encryption = true
+password = {{ vault_vm_backup_crypt_password_obscured }}
+password2 = {{ vault_vm_backup_crypt_password2_obscured }}

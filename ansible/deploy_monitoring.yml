@@ -69,6 +69,10 @@
       ansible.builtin.include_role:
         name: alloy
 
+    - name: Install VM GDrive backup
+      ansible.builtin.include_role:
+        name: vm_backup
+
 - name: Configure Grafana
   hosts: grafana
   gather_facts: true

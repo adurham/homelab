@@ -1,0 +1,15 @@
+[Unit]
+Description=VictoriaMetrics yearly archive to GDrive cold tier
+After=victoriametrics.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vm-archive-yearly.sh
+User=root
+TimeoutStartSec=14400
+Restart=on-failure
+RestartSec=600
+
+[Install]
+WantedBy=multi-user.target
