@@ -1,0 +1,11 @@
+[Unit]
+Description=VictoriaMetrics daily GDrive backup timer
+Requires=victoriametrics-backup.service
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 America/Chicago
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

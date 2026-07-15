@@ -1,0 +1,8 @@
+[Unit]
+Description=Alert if VictoriaMetrics backup hasn't succeeded in 36h
+After=victoriametrics.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vm-backup-watchdog.sh
+User=root
