@@ -1573,7 +1573,10 @@ class SmartVentController(hass.Hass):
         # Stuck-sensor check: pull recent history; a live suction sensor always
         # moves during compressor runtime. If zero variation over the window,
         # the reading is unreliable (worst case: frozen at 47°F while coil ices).
-        hist = self.get_history(COIL_TEMP_SENSOR, duration=COIL_FEEDBACK_STUCK_WINDOW)
+        # AppDaemon's get_history takes start_time/end_time, not a duration kwarg.
+        from datetime import timedelta as _td
+        window_start = self.datetime() - _td(seconds=COIL_FEEDBACK_STUCK_WINDOW)
+        hist = self.get_history(COIL_TEMP_SENSOR, start_time=window_start)
         if hist and hist[0]:
             vals = []
             for h in hist[0]:
