@@ -1132,9 +1132,9 @@
             "steppedLine": false,
             "targets": [
                 {
-                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.kitchen_water_temp_sensor\"} * 1.8) + 32",
+                    "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ac_suction_line_temp\"} * 1.8) + 32",
                     "interval": "",
-                    "legendFormat": "Kitchen",
+                    "legendFormat": "AC Suction Line",
                     "refId": "A"
                 },
                 {
