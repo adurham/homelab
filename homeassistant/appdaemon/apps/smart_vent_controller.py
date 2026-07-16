@@ -181,8 +181,62 @@ HEARTBEAT_ENTITY = "sensor.smart_vent_controller_heartbeat"
 # Summary sensor for the delivery/capacity handicap (achieved-cooling-rate axis).
 DELIVERY_PENALTY_ENTITY = "sensor.smart_vent_delivery_handicap"
 
-# Backpressure: never close more than this fraction of total vents
+# Backpressure: never close more than this fraction of total vents.
 MAX_CLOSED_RATIO = 0.60
+# HARD structural ceiling — never close more than this even when the coil
+# temp says we could. Static pressure at very high closure ratios spikes
+# before the suction sensor can react (it's a lagging signal), risking ECM
+# blower over-ramp, duct leakage, and choked airflow. Feedback lets us be
+# aggressive WITHIN a physically sane envelope, not remove the envelope.
+MAX_CLOSED_RATIO_HARD_CEILING = 0.80
+
+# ── Dynamic backpressure (coil-temperature feedback) ────────────────────────
+# A suction-line temp sensor (sensor.kitchen_water_temp_sensor, strapped to
+# the vapor line at the indoor coil outlet) gives a direct proxy for coil
+# surface temp in cooling mode. Coil ~40-42°F normal; suction picks up a few
+# °F superheat → ~45-48°F normal. Below ~38°F suction the coil is at/near
+# freezing (TXV superheat masks it, so by the time suction reads 35°F the
+# coil is already icing). We scale the max-closed ratio by this signal so we
+# can be aggressive when the coil is healthy and back off automatically as it
+# approaches freeze — replacing the blind static 60% cap with measured data.
+#
+# Threshold ladder (°F suction line, cooling mode only):
+#   >= 50°F  → 80% (hard ceiling)  — coil very healthy, push hard
+#   45-50°F  → 70%                 — normal, still aggressive
+#   42-45°F  → 60%                 — backing off (old static default)
+#   38-42°F  → 40%                 — coil getting cold, open up
+#   < 38°F   → EMERGENCY (latched) — force-open vents, freeze imminent
+#
+# Hysteresis: 2°F between bands (a band's lower edge must be cleared by 2°F
+# before stepping back UP to a more aggressive ratio, so a 46°F reading
+# oscillating with 44°F doesn't toggle 70%↔60%). Dwell: minimum 4 min
+# between ratio changes (suction responds to vent changes with minutes of
+# lag). Emergency is LATCHED — once tripped, requires sustained recovery
+# above 44°F for 5 min before releasing.
+#
+# Gates (all must hold to use the dynamic ratio; else fall back to static 60%):
+#   1. hvac_action == "cooling" (not heating/idle — suction reads warm ambient
+#      when the compressor is off, which would falsely trigger aggressive mode)
+#   2. compressor has been running >= COIL_FEEDBACK_MIN_RUNTIME seconds (avoids
+#      startup transient where suction is still settling / residual heat)
+#   3. sensor state is numeric and last_updated within COIL_FEEDBACK_STALE_SEC
+#   4. sensor is not stuck (some variation over the staleness window — a frozen
+#      reading is the worst-case failure, masking a freezing coil)
+COIL_TEMP_SENSOR = "sensor.kitchen_water_temp_sensor"
+COIL_FEEDBACK_MIN_RUNTIME = 480      # 8 min compressor-on before trusting aggressive ratios
+COIL_FEEDBACK_STALE_SEC = 300        # sensor older than 5 min → fall back to static
+COIL_FEEDBACK_STUCK_WINDOW = 900     # 15 min: if zero variation over this, sensor is stuck
+COIL_FEEDBACK_DWELL_SEC = 240        # min 4 min between ratio changes
+COIL_EMERGENCY_THRESHOLD = 38.0      # °F suction → force-open (latched)
+COIL_EMERGENCY_RECOVER = 44.0        # °F suction sustained 5 min → release latch
+COIL_EMERGENCY_RECOVER_SEC = 300
+# (ratio, lower_edge_with_hysteresis) — stepped, aggressive→conservative
+COIL_RATIO_BANDS = [
+    (0.80, 50.0),   # suction >= 50°F (with 2°F hysteresis on re-entry)
+    (0.70, 45.0),   # 45-50°F
+    (0.60, 42.0),   # 42-45°F
+    (0.40, 38.0),   # 38-42°F
+]
 
 # How far a room temp can be from setpoint before we react (°F)
 DEADBAND = 1.0
@@ -418,6 +472,25 @@ class SmartVentController(hass.Hass):
         self._cooling_ended_at = None
         self._last_hvac_action = None
 
+        # Dynamic-backpressure state (coil-temp feedback). See
+        # _coil_temp_for_backpressure and _apply_backpressure_rooms.
+        # _cooling_started_at: when the compressor last entered cooling (for
+        #   the min-runtime gate that suppresses aggressive ratios at startup).
+        # _coil_ratio_current: the last dynamic ratio we applied (for dwell).
+        # _coil_ratio_changed_at: when we last changed the ratio (dwell gate).
+        # _coil_emergency_latched: True once suction dropped below
+        #   COIL_EMERGENCY_THRESHOLD; stays latched until sustained recovery.
+        # _coil_emergency_since: timestamp suction first rose above recover
+        #   threshold (latch releases after COIL_EMERGENCY_RECOVER_SEC sustained).
+        # _coil_sensor_fail_count: consecutive cycles the sensor was
+        #   unavailable/stale/stuck (for throttling log noise).
+        self._cooling_started_at = None
+        self._coil_ratio_current = None
+        self._coil_ratio_changed_at = None
+        self._coil_emergency_latched = False
+        self._coil_emergency_since = None
+        self._coil_sensor_fail_count = 0
+
         # Run the control loop
         self.run_every(self.control_loop, "now+10", CYCLE_INTERVAL)
 
@@ -508,6 +581,22 @@ class SmartVentController(hass.Hass):
             self._cooling_ended_at = None
         self._last_hvac_action = hvac_action
 
+        # Track cooling-cycle start for the dynamic-backpressure min-runtime
+        # gate. Suction line reads warm ambient when the compressor is off, so
+        # we hold the conservative static ratio until the compressor has run
+        # long enough for the suction signal to be meaningful.
+        if hvac_action == "cooling":
+            if self._cooling_started_at is None:
+                self._cooling_started_at = self.datetime()
+        else:
+            self._cooling_started_at = None
+            # Release the emergency latch when cooling ends — no freeze risk
+            # with the compressor off, and a fresh cycle should start clean.
+            if self._coil_emergency_latched:
+                self.log("Coil emergency latch released (cooling ended)")
+            self._coil_emergency_latched = False
+            self._coil_emergency_since = None
+
         # Refresh measured per-room supply penalties whenever air is moving;
         # duct temps are only meaningful with airflow. These drive each room's
         # activation margin (handicapped rooms react earlier) automatically. The
@@ -565,8 +654,10 @@ class SmartVentController(hass.Hass):
             room_positions, mode, hvac_action, target_cool, target_heat
         )
 
-        # Apply backpressure protection
-        room_positions = self._apply_backpressure_rooms(room_positions)
+        # Apply backpressure protection (dynamic coil-temp feedback when
+        # available, static cap otherwise). Pass hvac_action for the cooling
+        # gate and compressor-runtime gate.
+        room_positions = self._apply_backpressure_rooms(room_positions, hvac_action)
         # Set vents per room
         for (zone_name, room_name), position in room_positions.items():
             room = ZONES[zone_name]["rooms"][room_name]
@@ -1369,11 +1460,119 @@ class SmartVentController(hass.Hass):
 
     # ── Backpressure protection ───────────────────────────────────────────────
 
-    def _apply_backpressure_rooms(self, room_positions):
-        """Ensure we don't close more than MAX_CLOSED_RATIO of total vents."""
+    def _coil_temp_for_backpressure(self, hvac_action):
+        """Read the suction-line coil temp and apply all feedback gates.
 
+        Returns (coil_temp_f, reason) where coil_temp_f is the suction-line
+        temperature in °F, or None if a gate failed (caller falls back to the
+        static MAX_CLOSED_RATIO). reason explains which gate held or failed,
+        for logging. Also maintains the stuck-sensor detection and the
+        emergency latch state.
+
+        Gates (all must hold to return a real temperature):
+          1. hvac_action == "cooling" — suction reads warm ambient when the
+             compressor is off; using it would falsely trigger aggressive mode.
+          2. compressor has run >= COIL_FEEDBACK_MIN_RUNTIME — startup
+             transient, suction still settling / carrying residual heat.
+          3. sensor state numeric and last_updated within STALE_SEC.
+          4. sensor not stuck — some variation over STUCK_WINDOW of runtime.
+        """
+        if hvac_action != "cooling":
+            return None, "not cooling"
+        if self._cooling_started_at is None:
+            return None, "no cooling-start timestamp"
+        runtime = (self.datetime() - self._cooling_started_at).total_seconds()
+        if runtime < COIL_FEEDBACK_MIN_RUNTIME:
+            return None, f"compressor runtime {runtime:.0f}s < {COIL_FEEDBACK_MIN_RUNTIME}"
+
+        state = self.get_state(COIL_TEMP_SENSOR)
+        if state is None or state in ("unavailable", "unknown", ""):
+            self._coil_sensor_fail_count += 1
+            if self._coil_sensor_fail_count <= 2:
+                self.log(f"Coil sensor {COIL_TEMP_SENSOR} unavailable; "
+                         f"backpressure falls back to static {MAX_CLOSED_RATIO}")
+            return None, "sensor unavailable"
+        try:
+            temp = float(state)
+        except (ValueError, TypeError):
+            self._coil_sensor_fail_count += 1
+            return None, f"sensor non-numeric: {state!r}"
+
+        # Freshness check
+        age = self.get_state(COIL_TEMP_SENSOR, attribute="last_updated")
+        if age:
+            try:
+                age_s = (self.datetime() - self.parse_datetime(age)).total_seconds()
+                if age_s > COIL_FEEDBACK_STALE_SEC:
+                    self._coil_sensor_fail_count += 1
+                    if self._coil_sensor_fail_count <= 2:
+                        self.log(f"Coil sensor stale ({age_s:.0f}s old); "
+                                 f"backpressure falls back to static {MAX_CLOSED_RATIO}")
+                    return None, f"sensor stale {age_s:.0f}s"
+            except Exception:
+                pass  # don't fail closed on a parse error
+
+        # Stuck-sensor check: pull recent history; a live suction sensor always
+        # moves during compressor runtime. If zero variation over the window,
+        # the reading is unreliable (worst case: frozen at 47°F while coil ices).
+        hist = self.get_history(COIL_TEMP_SENSOR, duration=COIL_FEEDBACK_STUCK_WINDOW)
+        if hist and hist[0]:
+            vals = []
+            for h in hist[0]:
+                try:
+                    vals.append(float(h["state"]))
+                except (ValueError, TypeError):
+                    continue
+            if vals and (max(vals) - min(vals)) < 0.1:
+                self._coil_sensor_fail_count += 1
+                if self._coil_sensor_fail_count <= 2:
+                    self.log(f"Coil sensor stuck ({len(vals)} samples, zero "
+                             f"variation over {COIL_FEEDBACK_STUCK_WINDOW}s); "
+                             f"backpressure falls back to static {MAX_CLOSED_RATIO}")
+                return None, "sensor stuck"
+
+        self._coil_sensor_fail_count = 0
+        return temp, f"runtime {runtime:.0f}s, suction {temp:.1f}F"
+
+    def _coil_ratio_for_temp(self, temp):
+        """Map a suction-line temp to a max-closed ratio, with hysteresis.
+
+        Uses the current ratio to decide band transitions: stepping DOWN to a
+        more conservative ratio happens at the band's lower edge; stepping UP
+        to a more aggressive ratio requires clearing the edge by 2°F (so a
+        reading oscillating across a boundary doesn't toggle).
+        """
+        cur = self._coil_ratio_current
+        # Find the highest-aggressive band whose threshold the temp clears,
+        # applying 2°F hysteresis when stepping back up from a lower band.
+        chosen = MAX_CLOSED_RATIO  # most conservative if nothing matches
+        for ratio, edge in COIL_RATIO_BANDS:
+            # Hysteresis: if we're currently at a lower (more conservative)
+            # ratio than this band, require edge + 2°F to step up to it.
+            if cur is not None and ratio > cur:
+                need = edge + 2.0
+            else:
+                need = edge
+            if temp >= need:
+                chosen = ratio
+                break
+        return chosen
+
+    def _apply_backpressure_rooms(self, room_positions, hvac_action=None):
+        """Ensure we don't close more vents than the coil can safely handle.
+
+        With coil-temperature feedback available (cooling mode, compressor run
+        long enough, sensor fresh and not stuck), the max-closed ratio scales
+        with suction-line temp — aggressive when the coil is healthy, backing
+        off as it approaches freeze. Without feedback, falls back to the static
+        MAX_CLOSED_RATIO (the original blind cap).
+
+        Emergency: if suction drops below COIL_EMERGENCY_THRESHOLD, force-open
+        closed rooms (latched — requires sustained recovery to release). This
+        bypasses mode intent (Cool Upstairs etc.) because freeze protection
+        trumps redirection.
+        """
         total_vents = len(_get_all_vents())
-        max_closed = int(total_vents * MAX_CLOSED_RATIO)
 
         # Count vents that would be closed
         closed_count = 0
@@ -1381,11 +1580,78 @@ class SmartVentController(hass.Hass):
             if pos == 0:
                 closed_count += len(ZONES[zone_name]["rooms"][room_name].get("vents", []))
 
+        # Try to get dynamic ratio from coil feedback
+        coil_temp, coil_reason = self._coil_temp_for_backpressure(hvac_action)
+
+        # Emergency latch: check first, bypasses everything
+        if coil_temp is not None:
+            if coil_temp < COIL_EMERGENCY_THRESHOLD:
+                if not self._coil_emergency_latched:
+                    self._coil_emergency_latched = True
+                    self.log(f"*** COIL FREEZE EMERGENCY: suction {coil_temp:.1f}F < "
+                             f"{COIL_EMERGENCY_THRESHOLD}F — force-opening closed vents "
+                             f"(latched until sustained recovery above "
+                             f"{COIL_EMERGENCY_RECOVER}F for {COIL_EMERGENCY_RECOVER_SEC}s) ***")
+                self._coil_emergency_since = None  # not recovering yet
+            elif self._coil_emergency_latched:
+                # Track sustained recovery
+                if coil_temp >= COIL_EMERGENCY_RECOVER:
+                    if self._coil_emergency_since is None:
+                        self._coil_emergency_since = self.datetime()
+                    recovered = (self.datetime() - self._coil_emergency_since).total_seconds()
+                    if recovered >= COIL_EMERGENCY_RECOVER_SEC:
+                        self.log(f"Coil emergency latch released (suction "
+                                 f"{coil_temp:.1f}F >= {COIL_EMERGENCY_RECOVER}F sustained "
+                                 f"{recovered:.0f}s)")
+                        self._coil_emergency_latched = False
+                        self._coil_emergency_since = None
+                else:
+                    self._coil_emergency_since = None  # dipped back down
+
+        if self._coil_emergency_latched:
+            # Force-open ALL closed rooms to 50% — freeze protection trumps mode
+            opened = 0
+            for key, pos in list(room_positions.items()):
+                if pos == 0:
+                    room_positions[key] = 50
+                    n = len(ZONES[key[0]]["rooms"][key[1]].get("vents", []))
+                    opened += n
+                    self.log(f"  EMERGENCY opened {key[0]}/{key[1]} ({n} vents) -> 50%")
+            if opened:
+                self.log(f"  Emergency backpressure: opened {opened} vents")
+            return room_positions
+
+        # Determine the max-closed ratio to apply
+        if coil_temp is not None:
+            new_ratio = self._coil_ratio_for_temp(coil_temp)
+            new_ratio = min(new_ratio, MAX_CLOSED_RATIO_HARD_CEILING)
+            # Dwell gate: don't change the ratio more often than DWELL_SEC
+            now = self.datetime()
+            if (self._coil_ratio_current is not None
+                    and self._coil_ratio_changed_at is not None
+                    and abs(new_ratio - self._coil_ratio_current) > 0.001
+                    and (now - self._coil_ratio_changed_at).total_seconds() < COIL_FEEDBACK_DWELL_SEC):
+                # Within dwell window — hold the current ratio
+                new_ratio = self._coil_ratio_current
+            if self._coil_ratio_current != new_ratio:
+                if self._coil_ratio_current is not None:
+                    self.log(f"Coil backpressure ratio: {self._coil_ratio_current:.0%} -> "
+                             f"{new_ratio:.0%} (suction {coil_temp:.1f}F, {coil_reason})")
+                self._coil_ratio_current = new_ratio
+                self._coil_ratio_changed_at = now
+            max_closed = int(total_vents * new_ratio)
+            bp_label = f"dynamic {new_ratio:.0%} (suction {coil_temp:.1f}F)"
+        else:
+            # No feedback — static fallback
+            max_closed = int(total_vents * MAX_CLOSED_RATIO)
+            new_ratio = MAX_CLOSED_RATIO
+            bp_label = f"static {MAX_CLOSED_RATIO:.0%} ({coil_reason})"
+
         if closed_count <= max_closed:
             return room_positions
 
         self.log(f"Backpressure: {closed_count} vents would close, "
-                 f"max allowed {max_closed}. Opening rooms to 50%.")
+                 f"max allowed {max_closed} ({bp_label}). Opening rooms to 50%.")
 
         # Open rooms with fewest vents first until under limit
         closed_rooms = [
