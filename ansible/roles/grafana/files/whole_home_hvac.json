@@ -1,0 +1,2994 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeTimeRange": false,
+      "keepTime": true,
+      "tags": [
+        "hvac"
+      ],
+      "targetBlank": false,
+      "title": "HVAC Dashboards",
+      "tooltip": "",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "General \u2014 Whole House",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": "VictoriaMetrics",
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "title": "House Average vs Setpoint + Stage 2 Trigger",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 3,
+            "fillOpacity": 15,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 73
+              },
+              {
+                "color": "orange",
+                "value": 74
+              },
+              {
+                "color": "red",
+                "value": 75
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cool setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stage 2 trigger (+2F)"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    4,
+                    4
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_unit_celsius{entity=\"sensor.house_average_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "House avg",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Cool setpoint",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32 + 2",
+          "interval": "",
+          "legendFormat": "Stage 2 trigger (+2F)",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "AC Suction Line (coil freeze feedback)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 3,
+            "fillOpacity": 15,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 38
+              },
+              {
+                "color": "yellow",
+                "value": 42
+              },
+              {
+                "color": "green",
+                "value": 45
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ac_suction_line_temp\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Suction line",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "38",
+          "interval": "",
+          "legendFormat": "EMERGENCY",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "45",
+          "interval": "",
+          "legendFormat": "Normal",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Compressor Stage + AC Power",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1000
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stage 2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stage 1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == 2) * 2200",
+          "interval": "",
+          "legendFormat": "Stage 2",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == 1) * 1100",
+          "interval": "",
+          "legendFormat": "Stage 1",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_power_w{entity=\"sensor.edgewater_road_power_minute_average_9\"}",
+          "interval": "",
+          "legendFormat": "AC power",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "All Rooms vs Cool Setpoint (drift overview)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cool setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*guest_bedroom_1_temperature.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 4
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=~\"sensor.(guest_bedroom_1|guest_bedroom_2|game_room|cat_room|living_room|kitchen|dining_room|hallway|main_bedroom|main_bathroom|laundry_room|half_bathroom|guest_bathroom|salon|7wq7)_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "{{entity}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Cool setpoint",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Upstairs (2nd Floor)",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "datasource": "VictoriaMetrics",
+      "collapsed": false
+    },
+    {
+      "id": 7,
+      "title": "Guest Bedroom 1",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8d6d_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8136_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct C",
+          "refId": "C"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8d6d_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8136_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent G",
+          "refId": "G"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Guest Bedroom 2",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 19
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_2_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_2_1ec7_duct_temperature_2\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_2_1ec7_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Game Room",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_0c83_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_889a_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct C",
+          "refId": "C"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_89ae_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct D",
+          "refId": "D"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_0c83_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_889a_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent G",
+          "refId": "G"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_89ae_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent H",
+          "refId": "H"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Cat Room",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_3075_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_b58e_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct C",
+          "refId": "C"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_3075_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b58e_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent G",
+          "refId": "G"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Guest Bathroom",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 37
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_e5a3_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_e5a3_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Downstairs (1st Floor)",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "datasource": "VictoriaMetrics",
+      "collapsed": false
+    },
+    {
+      "id": 13,
+      "title": "Living Room",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 47
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_fc56_duct_temperature_2\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_5d8e_duct_temperature_2\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct C",
+          "refId": "C"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_fc56_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_5d8e_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent G",
+          "refId": "G"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Kitchen",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 47
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.kitchen_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.kitchen_d124_duct_temperature_2\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.kitchen_d124_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Dining Room",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.dining_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.dining_room_7a28_duct_temperature_2\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.dining_room_7a28_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Hallway",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.hallway_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.hallway_907e_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Main Bedroom",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 65
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_883f_duct_temperature_2\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_a96d_duct_temperature_2\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct C",
+          "refId": "C"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_5c2b_duct_temperature_2\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct D",
+          "refId": "D"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_883f_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_a96d_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent G",
+          "refId": "G"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_5c2b_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent H",
+          "refId": "H"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Main Bathroom",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 65
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bathroom_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bathroom_f586_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "Laundry Room",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 74
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.laundry_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.laundry_room_d189_duct_temperature_2\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.laundry_room_d189_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Half Bathroom",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 74
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.half_bathroom_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "title": "Basement",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 83
+      },
+      "datasource": "VictoriaMetrics",
+      "collapsed": false
+    },
+    {
+      "id": 22,
+      "title": "Basement",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 84
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.7wq7_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.basement_4d79_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Duct B",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.basement_4d79_vent_position\"}",
+          "interval": "",
+          "legendFormat": "Vent F",
+          "refId": "F"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "title": "Salon",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 84
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 65
+              },
+              {
+                "color": "yellow",
+                "value": 72
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Setpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Vent .*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.salon_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Room temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Setpoint",
+          "refId": "Z"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "homeassistant",
+    "hvac",
+    "flair",
+    "whole-home"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Whole Home HVAC",
+  "uid": "whole-home-hvac",
+  "version": 1,
+  "weekStart": ""
+}
