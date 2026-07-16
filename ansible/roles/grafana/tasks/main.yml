@@ -304,6 +304,15 @@
     mode: '0644'
   notify: Restart Grafana
 
+- name: Deploy HVAC Coil & Staging Dashboard
+  ansible.builtin.copy:
+    src: hvac_coil_staging.json
+    dest: /var/lib/grafana/dashboards/hvac_coil_staging.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
 - name: Deploy Humidity & Moisture Dashboard
   ansible.builtin.copy:
     src: humidity_moisture.json

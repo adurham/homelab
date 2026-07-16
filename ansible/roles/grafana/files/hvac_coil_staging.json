@@ -1,0 +1,381 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeTimeRange": false,
+      "keepTime": true,
+      "tags": ["hvac"],
+      "targetBlank": false,
+      "title": "HVAC Dashboards",
+      "tooltip": "",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "AC Suction Line Temp (coil freeze feedback)",
+      "type": "timeseries",
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 0},
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tempF",
+          "custom": {"lineWidth": 3, "fillOpacity": 15, "spanNulls": true, "showPoints": "never"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "orange", "value": 38},
+              {"color": "yellow", "value": 42},
+              {"color": "green", "value": 45},
+              {"color": "yellow", "value": 55}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ac_suction_line_temp\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Suction line",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "38",
+          "interval": "",
+          "legendFormat": "EMERGENCY 38F (freeze imminent)",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "42",
+          "interval": "",
+          "legendFormat": "Backoff 42F (40% max closed)",
+          "refId": "C"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "45",
+          "interval": "",
+          "legendFormat": "Normal 45F (60% max closed)",
+          "refId": "D"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "50",
+          "interval": "",
+          "legendFormat": "Healthy 50F (80% max closed)",
+          "refId": "E"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Compressor Stage + HVAC Action",
+      "type": "timeseries",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 9},
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"lineWidth": 2, "fillOpacity": 20, "spanNulls": true, "showPoints": "never", "drawStyle": "line", "stacking": {"mode": "normal", "group": "A"}},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 2}]}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "Stage 2 cooling"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]},
+          {"matcher": {"id": "byName", "options": "Stage 1 cooling"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]},
+          {"matcher": {"id": "byName", "options": "Idle/fan/off"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == 2",
+          "interval": "",
+          "legendFormat": "Stage 2 cooling",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == 1) * 1",
+          "interval": "",
+          "legendFormat": "Stage 1 cooling",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_climate_action{entity=\"climate.ecobee_thermostat\",action!=\"cooling\"}",
+          "interval": "",
+          "legendFormat": "Idle/fan/off",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "AC Power Draw (stage 2 = ~2kW, stage 1 = ~1kW)",
+      "type": "timeseries",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 9},
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "custom": {"lineWidth": 2, "fillOpacity": 15, "spanNulls": true, "showPoints": "never"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}, {"color": "orange", "value": 1000}, {"color": "red", "value": 1800}]}
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_power_w{entity=\"sensor.edgewater_road_power_minute_average_9\"}",
+          "interval": "",
+          "legendFormat": "AC power",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "GB1 Focus — room temp + duct supply temps + setpoint (the problem room)",
+      "type": "timeseries",
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 16},
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tempF",
+          "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": true, "showPoints": "never"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}, {"color": "green", "value": 65}, {"color": "yellow", "value": 72}, {"color": "orange", "value": 75}, {"color": "red", "value": 80}]}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "GB1 room"}, "properties": [{"id": "custom.lineWidth", "value": 4}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]},
+          {"matcher": {"id": "byName", "options": "Cool setpoint"}, "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 10]}}, {"id": "custom.lineWidth", "value": 1}, {"id": "custom.fillOpacity", "value": 0}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-blue"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "GB1 room",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8d6d_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "GB1 duct 8d6d (supply air)",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8136_duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "GB1 duct 8136 (supply air)",
+          "refId": "C"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Cool setpoint",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "House Average vs Setpoint (the staging trigger signal)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 25},
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tempF",
+          "custom": {"lineWidth": 3, "fillOpacity": 15, "spanNulls": true, "showPoints": "never"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 73}, {"color": "orange", "value": 74}, {"color": "red", "value": 75}]}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "Cool setpoint"}, "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 10]}}, {"id": "custom.lineWidth", "value": 1}, {"id": "custom.fillOpacity", "value": 0}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-blue"}}]},
+          {"matcher": {"id": "byName", "options": "Stage 2 trigger (+2F)"}, "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [4, 4]}}, {"id": "custom.lineWidth", "value": 1}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_unit_celsius{entity=\"sensor.house_average_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "House avg",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Cool setpoint",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temperature_high_celsius{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32 + 2",
+          "interval": "",
+          "legendFormat": "Stage 2 trigger (+2F)",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Delivery Handicap (max room structural cooling deficit)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 25},
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tempF",
+          "custom": {"lineWidth": 2, "fillOpacity": 20, "spanNulls": true, "showPoints": "never"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "orange", "value": 1.5}, {"color": "red", "value": 2}]}
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_state{entity=\"sensor.smart_vent_delivery_handicap\"}",
+          "interval": "",
+          "legendFormat": "Delivery handicap",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "All Room Temps vs Setpoint (drift from target)",
+      "type": "timeseries",
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 33},
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tempF",
+          "custom": {"lineWidth": 2, "fillOpacity": 5, "spanNulls": true, "showPoints": "never"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}, {"color": "green", "value": 65}, {"color": "yellow", "value": 72}, {"color": "orange", "value": 75}, {"color": "red", "value": 80}]}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "Cool setpoint"}, "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 10]}}, {"id": "custom.lineWidth", "value": 1}, {"id": "custom.fillOpacity", "value": 0}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-blue"}}]},
+          {"matcher": {"id": "byRegexp", "options": ".*Guest Bedroom 1.*"}, "properties": [{"id": "custom.lineWidth", "value": 4}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=~\"sensor.(guest_bedroom_1|guest_bedroom_2|game_room|cat_room|living_room|kitchen|main_bedroom|dining_room|laundry_room|hallway|main_bathroom|guest_bathroom|salon|7wq7)_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "{{entity}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_climate_target_temp_high{entity=\"climate.ecobee_thermostat\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Cool setpoint",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Indoor Humidity + Dew Point (capacity-limit signal)",
+      "type": "timeseries",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 42},
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {"lineWidth": 2, "fillOpacity": 15, "spanNulls": true, "showPoints": "never"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "orange", "value": 58}, {"color": "red", "value": 60}]}
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_humidity_percent{entity=\"sensor.indoor_humidity_live\"}",
+          "interval": "",
+          "legendFormat": "Indoor RH",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "GB1 Duct vs Other Upstairs Ducts (airflow equity check)",
+      "type": "timeseries",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 42},
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tempF",
+          "custom": {"lineWidth": 2, "fillOpacity": 5, "spanNulls": true, "showPoints": "never"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}, {"color": "green", "value": 50}, {"color": "yellow", "value": 58}, {"color": "orange", "value": 62}, {"color": "red", "value": 70}]}
+        },
+        "overrides": [
+          {"matcher": {"id": "byRegexp", "options": ".*Guest Bedroom 1.*"}, "properties": [{"id": "custom.lineWidth", "value": 4}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=~\"sensor.(guest_bedroom_1|guest_bedroom_2|game_room|cat_room).*duct_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "{{entity}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["homeassistant", "hvac", "flair", "coil"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "HVAC Coil & Staging",
+  "uid": "hvac-coil-staging",
+  "version": 1,
+  "weekStart": ""
+}
