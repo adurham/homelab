@@ -1029,7 +1029,7 @@ class SmartVentController(hass.Hass):
 
         # Build the beneficiary list: every occupied room past its (possibly
         # pre-conditioning-lowered) activation margin. Worst-first.
-        beneficiaries = []  # (off, key, temp, escalated)
+        beneficiaries = []  # (off, key, temp, escalated, is_occupied)
         for zone_name, zone in ZONES.items():
             for room_name, sensors in zone["rooms"].items():
                 key = (zone_name, room_name)
@@ -1037,13 +1037,14 @@ class SmartVentController(hass.Hass):
                 if temp is None:
                     continue
                 occ_entity = sensors.get("occupancy")
+                is_occupied = (not occ_entity) or self.get_state(occ_entity) == "on"
                 off = off_by(temp)
                 # Occupancy gate: only help occupied rooms, UNLESS the room is
                 # significantly over setpoint (OCCUPANCY_OVERRIDE_OVER). ecobee
-                # PIR sensors read unoccupied when nobody is moving, even if the
-                # room is hot — don't starve a hot room of airflow just because
-                # it's empty.
-                if occ_entity and self.get_state(occ_entity) != "on":
+                # PIR sensors read unoccupied when nobody is moving, even if
+                # the room is hot — don't starve a hot room of airflow just
+                # because it's empty.
+                if occ_entity and not is_occupied:
                     if off < OCCUPANCY_OVERRIDE_OVER:
                         continue  # unoccupied and not hot enough to override
                 # donor_only rooms never become beneficiaries — they can be
@@ -1065,15 +1066,20 @@ class SmartVentController(hass.Hass):
                 escalated = (off >= PRIORITY_ESCALATE_OVER
                              or self._delivery_penalty.get(key, 0.0)
                              >= DELIVERY_ESCALATE_PENALTY)
-                beneficiaries.append((off, key, temp, escalated))
+                beneficiaries.append((off, key, temp, escalated, is_occupied))
 
         if not beneficiaries:
             return room_positions
 
-        beneficiaries.sort(reverse=True)  # largest deviation first
+        # Sort: OCCUPIED beneficiaries first, then largest deviation first.
+        # An occupied room that's struggling wins donor airflow over an empty
+        # room with a larger deviation — the empty room still gets its own
+        # vents at 100% (OCCUPANCY_OVERRIDE), but it shouldn't steal donor
+        # CFM from an occupied room that also needs help.
+        beneficiaries.sort(key=lambda b: (b[4], b[0]), reverse=True)
         beneficiary_keys = {b[1] for b in beneficiaries}
 
-        for off, key, temp, escalated in beneficiaries:
+        for off, key, temp, escalated, is_occupied in beneficiaries:
             zone_name, room_name = key
             donor_pos = (PRIORITY_DONOR_POS_ESCALATED if escalated
                          else PRIORITY_DONOR_POS)
