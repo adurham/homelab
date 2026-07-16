@@ -676,28 +676,28 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8d6d_duct_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct 8d6d",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_8136_duct_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct C",
+          "legendFormat": "Duct 8136",
           "refId": "C"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8d6d_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent 8d6d",
           "refId": "F"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8136_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent G",
+          "legendFormat": "Vent 8136",
           "refId": "G"
         }
       ]
@@ -847,14 +847,14 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_2_1ec7_duct_temperature_2\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct 1ec7",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_2_1ec7_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent 1ec7",
           "refId": "F"
         }
       ]
@@ -1004,42 +1004,42 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_0c83_duct_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct 0c83",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_889a_duct_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct C",
+          "legendFormat": "Duct 889a",
           "refId": "C"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_89ae_duct_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct D",
+          "legendFormat": "Duct 89ae",
           "refId": "D"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_0c83_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent 0c83",
           "refId": "F"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_889a_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent G",
+          "legendFormat": "Vent 889a",
           "refId": "G"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_89ae_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent H",
+          "legendFormat": "Vent 89ae",
           "refId": "H"
         }
       ]
@@ -1189,28 +1189,28 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_3075_duct_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct 3075",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_b58e_duct_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct C",
+          "legendFormat": "Duct b58e",
           "refId": "C"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_3075_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent 3075",
           "refId": "F"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b58e_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent G",
+          "legendFormat": "Vent b58e",
           "refId": "G"
         }
       ]
@@ -1360,14 +1360,14 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_e5a3_duct_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct e5a3",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_e5a3_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent e5a3",
           "refId": "F"
         }
       ]
@@ -1530,28 +1530,28 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_fc56_duct_temperature_2\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct fc56",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_5d8e_duct_temperature_2\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct C",
+          "legendFormat": "Duct 5d8e",
           "refId": "C"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_fc56_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent fc56",
           "refId": "F"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_5d8e_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent G",
+          "legendFormat": "Vent 5d8e",
           "refId": "G"
         }
       ]
@@ -1701,14 +1701,14 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.kitchen_d124_duct_temperature_2\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct d124",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.kitchen_d124_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent d124",
           "refId": "F"
         }
       ]
@@ -1858,14 +1858,14 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.dining_room_7a28_duct_temperature_2\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct 7a28",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.dining_room_7a28_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent 7a28",
           "refId": "F"
         }
       ]
@@ -2015,7 +2015,7 @@
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.hallway_907e_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent 907e",
           "refId": "F"
         }
       ]
@@ -2165,42 +2165,42 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_883f_duct_temperature_2\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct 883f",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_a96d_duct_temperature_2\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct C",
+          "legendFormat": "Duct a96d",
           "refId": "C"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_5c2b_duct_temperature_2\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct D",
+          "legendFormat": "Duct 5c2b",
           "refId": "D"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_883f_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent 883f",
           "refId": "F"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_a96d_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent G",
+          "legendFormat": "Vent a96d",
           "refId": "G"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_5c2b_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent H",
+          "legendFormat": "Vent 5c2b",
           "refId": "H"
         }
       ]
@@ -2350,7 +2350,7 @@
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bathroom_f586_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent f586",
           "refId": "F"
         }
       ]
@@ -2500,14 +2500,14 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.laundry_room_d189_duct_temperature_2\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct d189",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.laundry_room_d189_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent d189",
           "refId": "F"
         }
       ]
@@ -2813,14 +2813,14 @@
           "datasource": "VictoriaMetrics",
           "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.basement_4d79_duct_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "Duct B",
+          "legendFormat": "Duct 4d79",
           "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
           "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.basement_4d79_vent_position\"}",
           "interval": "",
-          "legendFormat": "Vent F",
+          "legendFormat": "Vent 4d79",
           "refId": "F"
         }
       ]
