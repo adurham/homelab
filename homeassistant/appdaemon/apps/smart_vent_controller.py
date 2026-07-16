@@ -58,6 +58,15 @@ ZONES = {
                 "vents": [
                     "cover.guest_bathroom_e5a3_vent",
                 ],
+                # No dedicated return duct + closed door + 2nd story: cold supply
+                # air pools at the floor and leaks out the door gap instead of
+                # mixing to the ceiling where the sensor sits. Over-delivering
+                # (100%) wastes cold air the room can't circulate and causes the
+                # controller to cycle 0<->100 as the stratified sensor oscillates.
+                # Cap at 50% so the room gets steady half-flow instead of slamming
+                # open/closed. The 50% position is physically held by the Flair
+                # damper (verified 2026-07-15).
+                "max_vent_pct": 50,
             },
         },
     },
@@ -538,6 +547,12 @@ class SmartVentController(hass.Hass):
         # Set vents per room
         for (zone_name, room_name), position in room_positions.items():
             room = ZONES[zone_name]["rooms"][room_name]
+            # Per-room max-vent cap (e.g. no-return rooms that can't mix more
+            # than half-flow). Clamp here so every code path (Auto, Manual,
+            # priority, fan-assist) respects it without per-branch edits.
+            max_pct = room.get("max_vent_pct")
+            if max_pct is not None and position > max_pct:
+                position = max_pct
             for vent in room.get("vents", []):
                 self._set_vent(vent, position)
 
