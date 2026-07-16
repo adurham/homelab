@@ -249,6 +249,25 @@ DEADBAND = 1.0
 # nobody is standing in them makes the imbalance worse.
 OCCUPANCY_OVERRIDE_OVER = 3.0
 
+# ── Per-floor unoccupied drift targets (cooling season, data-driven) ───────
+# Empirical targets from 3 days of cooling-cycle drift data (Jul 13-16):
+#   - Downstairs rooms already hold +1-2°F (Living Room p50 +1.6, Dining +0.3).
+#     Main Bedroom is overcooled (p50 -0.6) — we can sacrifice it harder.
+#   - Upstairs rooms run much hotter (GB1 p50 +4.8, Game Room +3.7, GB2 +2.3).
+#     The duct/solar physics there can't meet downstairs targets, so we accept
+#     more drift and instead sacrifice empty upstairs rooms to feed occupied ones.
+# These control two things in _auto_calculate:
+#   1. When an unoccupied room gets throttled to 50% (start sacrificing its
+#      airflow to occupied rooms) — the throttle point, in °F over setpoint.
+#   2. When an unoccupied room gets full 100% airflow despite being empty
+#      (the per-floor hot-override; below OCCUPANCY_OVERRIDE_OVER only, which
+#      remains the absolute floor for any room).
+# Occupied rooms always get 100% at +1°F (DEADBAND) regardless of floor.
+UNOCC_THROTTLE_DOWNSTAIRS = 2.0   # empty 1F room -> 50% (was +1F)
+UNOCC_THROTTLE_UPSTAIRS   = 3.0   # empty 2F room -> 50% (was +1F)
+UNOCC_HOT_OVERRIDE_DOWN   = 3.0   # empty 1F room -> 100% at +3F
+UNOCC_HOT_OVERRIDE_UP     = 5.0   # empty 2F room -> 100% at +5F (solar load)
+
 # Hysteresis: once a vent opens, the zone must drop this far BELOW the
 # close threshold before we actually close it. Prevents flapping at setpoint.
 HYSTERESIS = 0.5
@@ -349,7 +368,11 @@ PRIORITY_DONOR_COOLER_BY = 1.5
 # Throttle position for donor rooms (Flair vents are 0/50/100 only).
 PRIORITY_DONOR_POS = 50
 # Never throttle more than this many donor rooms per beneficiary room.
-PRIORITY_MAX_DONORS = 4
+# Raised from 4 to 8 — with dynamic backpressure (coil-temp feedback) now
+# allowing up to 80% of vents closed, we can concentrate airflow harder on
+# the worst occupied room. The backpressure safety net still caps total
+# closures, so this just lets the priority pass find more donors.
+PRIORITY_MAX_DONORS = 8
 # Escalation: when a beneficiary is THIS far over the cool setpoint, it's not
 # just lagging, it's losing. Throttle donors all the way to 0% (closed) instead
 # of 50% to dump maximum CFM into it. The backpressure pass still caps total
@@ -751,29 +774,50 @@ class SmartVentController(hass.Hass):
                 # Unoccupied rooms near/below setpoint should close —
                 # no point conditioning an empty room that's comfortable.
                 #
-                # UNOCCUPIED THROTTLE: when a room is >1°F over setpoint AND
-                # unoccupied, cap at 50% instead of 100%. That room still gets
-                # *some* airflow (doesn't run away) but frees ~half its CFM for
-                # the priority pass to push toward an OCCUPIED room that's stuck
-                # (e.g. the Living Room). The on_occupancy_change callback fires
-                # immediately when someone walks in, so it's back to 100% within
-                # 2 seconds — no stale-sensor risk.
+                # UNOCCUPIED THROTTLE (per-floor, data-driven): empty rooms
+                # start sacrificing airflow (throttle to 50%) at their floor's
+                # drift target — downstairs at UNOCC_THROTTLE_DOWNSTAIRS (+2°F),
+                # upstairs at UNOCC_THROTTLE_UPSTAIRS (+3°F). The 1st floor has
+                # less heat load so we keep it tighter; the 2nd floor's solar
+                # load means empty rooms there are allowed to drift further so
+                # their cold air feeds the occupied hot rooms (GB1, Game Room).
+                # The on_occupancy_change callback fires immediately when
+                # someone walks in, so it's back to 100% within 2 seconds.
                 #
                 # OCCUPANCY OVERRIDE: when a room is >OCCUPANCY_OVERRIDE_OVER
-                # above setpoint (default 3°F), give it 100% regardless of
-                # occupancy. A hot room needs cooling whether or not someone is
-                # in it — ecobee PIR sensors read unoccupied when nobody is
-                # moving, and starving a hot room makes the house imbalance
-                # worse. This runs BEFORE the unoccupied-throttle below.
+                # above setpoint (absolute floor, default 3°F), give it 100%
+                # regardless of occupancy. A hot room needs cooling whether or
+                # not someone is in it — ecobee PIR sensors read unoccupied
+                # when nobody is moving, and starving a hot room makes the
+                # house imbalance worse. Below that floor, per-floor overrides
+                # apply to unoccupied rooms only.
                 #
                 # Heating mirror: same logic — an unoccupied cold room that's
                 # still below the heat setpoint gets 50% instead of 100% so its
                 # warm air is banked for occupied rooms that need it.
                 prev = self._last_zone_positions.get(key)
 
+                # Per-floor unoccupied thresholds (cooling only)
+                if is_cooling:
+                    if zone_name == "upstairs":
+                        unocc_throttle = UNOCC_THROTTLE_UPSTAIRS
+                        unocc_hot_override = UNOCC_HOT_OVERRIDE_UP
+                    else:  # downstairs + basement
+                        unocc_throttle = UNOCC_THROTTLE_DOWNSTAIRS
+                        unocc_hot_override = UNOCC_HOT_OVERRIDE_DOWN
+                else:  # heating — keep flat thresholds (not the focus of this tuning)
+                    unocc_throttle = DEADBAND
+                    unocc_hot_override = OCCUPANCY_OVERRIDE_OVER
+
                 if need > OCCUPANCY_OVERRIDE_OVER:
                     pos = 100
                     reason = f"hot override ({need:+.1f}) — 100% regardless of occupancy"
+                elif need > unocc_hot_override and not is_occupied:
+                    # Unoccupied and past the per-floor hot-override (but under
+                    # the absolute OCCUPANCY_OVERRIDE_OVER) — give full airflow;
+                    # the room is hot enough that cooling it matters even empty.
+                    pos = 100
+                    reason = f"hot, unoccupied ({need:+.1f}) — 100% (floor override)"
                 elif need > DEADBAND * 3:
                     if is_occupied:
                         pos = 100
@@ -786,8 +830,15 @@ class SmartVentController(hass.Hass):
                         pos = 100
                         reason = f"needs airflow, occupied ({need:+.1f})"
                     else:
-                        pos = 50
-                        reason = f"needs airflow, unoccupied ({need:+.1f}) — 50%"
+                        # Per-floor unoccupied throttle: sacrifice empty rooms
+                        # at their floor's drift target.
+                        if need > unocc_throttle:
+                            pos = 50
+                            reason = (f"needs airflow, unoccupied ({need:+.1f}) "
+                                      f"— 50% (floor throttle {unocc_throttle:+.0f})")
+                        else:
+                            pos = 50
+                            reason = f"needs airflow, unoccupied ({need:+.1f}) — 50%"
                 elif need > -DEADBAND:
                     if is_occupied:
                         pos = 50
