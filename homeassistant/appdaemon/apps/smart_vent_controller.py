@@ -80,6 +80,15 @@ ZONES = {
                     "cover.main_bedroom_a96d_vent_2",
                     "cover.main_bedroom_5c2b_vent_2",
                 ],
+                # donor_only: this room can be a DONOR (throttled to redirect
+                # flow to a hotter room) but never a BENEFICIARY (it never
+                # steals airflow from other rooms for itself). Main Bedroom
+                # is typically unoccupied during the day; even if someone
+                # walks in and it warms up, we don't want it throttling
+                # occupied rooms (Living Room, Kitchen, etc.) to feed itself.
+                # Its own vent positions still follow normal temp/occupancy
+                # logic. 2026-07-16.
+                "donor_only": True,
             },
             "Main Bathroom": {
                 "temp": "sensor.main_bathroom_temperature",
@@ -102,6 +111,12 @@ ZONES = {
                 "vents": [
                     "cover.hallway_907e_vent_2",
                 ],
+                # donor_only: the hallway/foyer is a pass-through space, not
+                # a destination room. It can be a donor (throttled to feed a
+                # hotter occupied room) but never a beneficiary (it never
+                # steals airflow from occupied rooms for itself). Its vent
+                # still opens/closes normally based on its own temp. 2026-07-16.
+                "donor_only": True,
             },
             "Living Room": {
                 "temp": "sensor.living_room_temperature",
@@ -1031,6 +1046,10 @@ class SmartVentController(hass.Hass):
                 if occ_entity and self.get_state(occ_entity) != "on":
                     if off < OCCUPANCY_OVERRIDE_OVER:
                         continue  # unoccupied and not hot enough to override
+                # donor_only rooms never become beneficiaries — they can be
+                # throttled as donors but never steal airflow for themselves.
+                if sensors.get("donor_only"):
+                    continue
                 margin = self._room_margin(key, heating)
                 eff_margin = (PRECOOL_MARGIN
                               if (precool and PRECOOL_MARGIN < margin)
