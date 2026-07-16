@@ -553,7 +553,7 @@ class SmartVentController(hass.Hass):
         # when heating. Must run BEFORE backpressure so backpressure remains the
         # final safety net.
         room_positions = self._apply_priority_rooms(
-            room_positions, hvac_action, target_cool, target_heat
+            room_positions, hvac_action, target_cool, target_heat, mode
         )
 
         # Fan-assist redistribution: when the system is idle but a room is still
@@ -993,7 +993,7 @@ class SmartVentController(hass.Hass):
         return max(PRIORITY_MARGIN_MIN, min(PRIORITY_MARGIN_BASE, margin))
 
     def _apply_priority_rooms(self, room_positions, hvac_action,
-                              target_cool, target_heat=None):
+                              target_cool, target_heat=None, mode=None):
         """Redirect CFM toward ANY struggling room by throttling rooms that are
         already comfortable. Symmetric across heating and cooling.
 
@@ -1009,7 +1009,13 @@ class SmartVentController(hass.Hass):
         A beneficiary is never also a donor. If the whole house is uniformly off
         there are no eligible donors and this is a no-op. Mutates and returns
         room_positions.
+
+        SKIPPED in Cool Upstairs / Cool Downstairs modes — those are explicit
+        whole-house redirections and the priority pass would re-pin hot rooms
+        in the closed zone back to 100% as beneficiaries, defeating the mode.
         """
+        if mode in ("Cool Upstairs", "Cool Downstairs"):
+            return room_positions
         if hvac_action == "cooling" and target_cool is not None:
             heating = False
             setpoint = target_cool
