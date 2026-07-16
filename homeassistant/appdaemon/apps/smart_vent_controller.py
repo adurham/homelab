@@ -1195,6 +1195,13 @@ class SmartVentController(hass.Hass):
                 if occ_entity and not is_occupied:
                     if off < OCCUPANCY_OVERRIDE_OVER:
                         continue  # unoccupied and not hot enough to override
+                    # Hot enough to override the PIR false-negative. Treat as
+                    # occupied for sort purposes too — a room this hot is a
+                    # priority regardless of what the motion sensor says, and
+                    # the occupied-first sort would otherwise put it behind
+                    # less-hot but occupied rooms (e.g. GB1 at +8F empty
+                    # losing donors to Living Room at +5F occupied).
+                    is_occupied = True
                 # donor_only rooms never become beneficiaries — they can be
                 # throttled as donors but never steal airflow for themselves.
                 if sensors.get("donor_only"):
