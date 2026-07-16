@@ -222,7 +222,7 @@ MAX_CLOSED_RATIO_HARD_CEILING = 0.80
 #   3. sensor state is numeric and last_updated within COIL_FEEDBACK_STALE_SEC
 #   4. sensor is not stuck (some variation over the staleness window — a frozen
 #      reading is the worst-case failure, masking a freezing coil)
-COIL_TEMP_SENSOR = "sensor.kitchen_water_temp_sensor"
+COIL_TEMP_SENSOR = "sensor.ac_suction_line_temp"
 COIL_FEEDBACK_MIN_RUNTIME = 480      # 8 min compressor-on before trusting aggressive ratios
 COIL_FEEDBACK_STALE_SEC = 300        # sensor older than 5 min → fall back to static
 COIL_FEEDBACK_STUCK_WINDOW = 900     # 15 min: if zero variation over this, sensor is stuck
