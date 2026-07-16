@@ -87,6 +87,14 @@ ZONES = {
                 "vents": [
                     "cover.main_bathroom_f586_vent_2",
                 ],
+                # Vent f586 is effectively disconnected — weakest battery
+                # (2.42V), worst RSSI (-80), and its duct temp reads ~98°F
+                # (stagnant attic air, not supply). Hard-cap to 0% so the
+                # controller never commands it open, regardless of room temp
+                # or HVAC state. Reuses the max_vent_pct clamp (applied at the
+                # single set-vents chokepoint, so Auto/Manual/priority/
+                # fan-assist/equalize all respect it). 2026-07-16.
+                "max_vent_pct": 0,
             },
             "Hallway": {
                 "temp": "sensor.hallway_temperature",
