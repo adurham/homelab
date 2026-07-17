@@ -63,6 +63,9 @@
     - platform: homeassistant
       event: start
       id: resync
+    - platform: time_pattern
+      minutes: "/10"
+      id: resync
 
   action:
     - choose:
