@@ -469,7 +469,83 @@ def _walk_and_push():
     return pushed, failed, skipped
 
 
+def _clear_stale_staging():
+    """Guard against the tmpfs-OOM trap: a file that fails to push (e.g. a
+    connection timeout on an oversized download) is deliberately NOT deleted
+    by _walk_and_push so it can retry next tick. But since tmpfs usage counts
+    as cgroup memory, a single large orphaned file (seen: an 8.8GB stuck video
+    that sat for 3+ days, 2026-07-15 to 2026-07-18) can push staging close to
+    the memory ceiling, causing every subsequent tick to get OOM-killed within
+    ~10s -- too fast for the retry logic (or even its own error log) to ever
+    run, so the file never clears and the tick-kill loop repeats forever.
+    Fix: at the START of every sweep, before anything else runs, delete any
+    staging file older than MAX_STAGING_FILE_AGE_SEC (default 2x the timer
+    interval). This is safe and lossless -- per this wrapper's own dupe-check
+    contract (see module docstring), anything dropped here is simply
+    re-downloaded on the next sweep."""
+    max_age = int(os.environ.get("M02_MAX_STAGING_FILE_AGE_SEC", str(4 * 3600)))
+    if not STAGING.exists():
+        return
+    now = dt.datetime.now().timestamp()
+    cleared = 0
+    cleared_bytes = 0
+    for model_dir in sorted(STAGING.iterdir()):
+        if not model_dir.is_dir():
+            continue
+        for fpath in sorted(model_dir.iterdir()):
+            if not fpath.is_file():
+                continue
+            try:
+                st = fpath.stat()
+            except OSError:
+                continue
+            age = now - st.st_mtime
+            if age > max_age:
+                size = st.st_size
+                try:
+                    fpath.unlink()
+                    cleared += 1
+                    cleared_bytes += size
+                    log.warning(
+                        "cleared stale staging file %s (age=%.0fmin, size=%.1fMB) "
+                        "-- will re-download next sweep",
+                        fpath, age / 60, size / 1e6,
+                    )
+                except OSError as e:
+                    log.error("failed to clear stale staging file %s: %s", fpath, e)
+        try:
+            if not any(model_dir.iterdir()):
+                model_dir.rmdir()
+        except OSError:
+            pass
+    if cleared:
+        log.warning("stale staging sweep: cleared %d file(s), %.1fMB total",
+                    cleared, cleared_bytes / 1e6)
+
+
+def _check_staging_usage():
+    """Log a loud warning if staging tmpfs usage is high enough to risk an
+    OOM trap on the next sweep, so this shows up clearly in logs/monitoring
+    instead of silently degrading for days (as happened 2026-07-15/18)."""
+    import shutil
+    if not STAGING.exists():
+        return
+    try:
+        usage = shutil.disk_usage(STAGING)
+    except OSError:
+        return
+    pct = usage.used / usage.total * 100 if usage.total else 0
+    if pct >= 50:
+        log.warning("staging tmpfs at %.1f%% (%.1fGB/%.1fGB) -- risk of OOM if this grows",
+                    pct, usage.used / 1e9, usage.total / 1e9)
+    else:
+        log.info("staging tmpfs at %.1f%% (%.1fGB/%.1fGB)",
+                  pct, usage.used / 1e9, usage.total / 1e9)
+
+
 def main():
+    _clear_stale_staging()
+    _check_staging_usage()
     _check_auth()
     try:
         ex = store_client.get_excluded()
