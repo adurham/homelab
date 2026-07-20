@@ -1,17 +1,21 @@
 # {{ ansible_managed }}
 # Frigate config — all Nest cameras, CPU detection.
 #
-# Stream path per camera: HA go2rtc add-on (Nest WebRTC->stream) -> Frigate
-# camera consumes the HA go2rtc's MP4 HTTP output DIRECTLY.
+# Stream path per camera: Frigate's bundled go2rtc opens a Nest WebRTC session
+# directly (nest: source), and the detect role consumes the MP4-over-HTTP
+# output from Frigate's own go2rtc on localhost.
 #
-# WHY MP4-over-HTTP, directly from the HA go2rtc (no Frigate-side go2rtc hop):
-# the go2rtc RTSP output for a Nest WebRTC source drops the H264 SPS/PPS
-# parameter sets, so ffmpeg can't decode it ("non-existing PPS" /
-# "decode_slice_header error" / "unspecified size"). go2rtc's MP4 muxer (avc1)
-# inserts the parameter sets inband, so ffmpeg decodes cleanly at native
-# 1080p. An intermediate Frigate-side go2rtc RTSP restream RE-INTRODUCES the
-# corruption (RTSP transport drops the params again) — so consume the HA MP4
-# endpoint straight. Verified 2026-05-31.
+# WHY MP4-over-HTTP (not RTSP): the go2rtc RTSP output for a Nest WebRTC source
+# drops the H264 SPS/PPS parameter sets, so ffmpeg can't decode it ("non-existing
+# PPS" / "decode_slice_header error" / "unspecified size"). go2rtc's MP4 muxer
+# (avc1) inserts the parameter sets inband, so ffmpeg decodes cleanly at native
+# 1080p. Verified 2026-05-31.
+#
+# WHY a custom go2rtc binary: stock go2rtc 1.9.10 (Frigate's bundled version) has
+# a bug in the Nest stream-extend timer (pkg/nest/api.go StartExtendStreamTimer)
+# — it fires ONCE and never re-arms, so each Nest WebRTC session dies ~5 min in.
+# The patched binary re-arms the timer in a loop, keeping the stream alive
+# indefinitely. Mounted at /config/go2rtc inside the Frigate container.
 
 mqtt:
 {% if frigate_mqtt_enabled %}
@@ -23,7 +27,6 @@ mqtt:
   password: {{ frigate_mqtt_password }}
 {% endif %}
 {% else %}
-  # No broker confirmed in the repo; see roles/frigate_host/defaults/main.yml.
   enabled: false
 {% endif %}
 
@@ -31,23 +34,25 @@ detectors:
   cpu1:
     type: cpu
 
-# Live-view (MSE) restream. Frigate's UI prefers go2rtc MSE/WebRTC over the
-# jsmpeg fallback whenever a go2rtc stream exists whose name matches the camera.
-# jsmpeg blanks tiles intermittently; MSE is stable.
-#
-# Source = the SAME MP4-over-HTTP endpoint the detect role uses (carries inband
-# SPS/PPS). We must NOT restream the HA go2rtc RTSP output: for these Nest
-# WebRTC sources RTSP drops the H264 SPS/PPS and the MSE producer ends up with
-# recv:0 / undecodable H264. The ffmpeg source below ingests the MP4 (valid
-# inband params) and copies the H264 (#video=copy) into Frigate's bundled
-# go2rtc — verified the bundled go2rtc then serves decodable MP4/MSE
-# (ffmpeg decode exit 0, ~1.3 MB in a 12 s pull). Verified 2026-06-02.
+# Nest WebRTC sources defined directly in Frigate's bundled go2rtc.
+# Detection consumes MP4-over-HTTP from localhost (carries inband SPS/PPS).
+# WebRTC candidates must advertise the host LAN IP so Google's SDM API can
+# send UDP packets back (Docker bridge IP is unreachable from the internet).
+# Preload ensures nest sources start connecting at startup (serialized by
+# dialMu in client.go, so 6 cameras connect one at a time without 429s).
 go2rtc:
   streams:
 {% for name, label in frigate_cameras.items() %}
     {{ name }}:
-      - "ffmpeg:http://{{ frigate_go2rtc_host }}:1984/api/stream.mp4?src={{ name }}#video=copy"
+      - "nest:?client_id={{ nest_client_id }}&client_secret={{ nest_client_secret }}&refresh_token={{ nest_refresh_token }}&project_id={{ nest_project_id }}&device_id={{ nest_camera_ids[name] }}"
 {% endfor %}
+  preload:
+{% for name, label in frigate_cameras.items() %}
+    {{ name }}: ""
+{% endfor %}
+  webrtc:
+    candidates:
+      - {{ frigate_lan_ip }}:8555
 
 cameras:
 {% for name, label in frigate_cameras.items() %}
@@ -55,18 +60,22 @@ cameras:
     friendly_name: "{{ label }}"
     ffmpeg:
       inputs:
-        # Read from Frigate's OWN bundled go2rtc (127.0.0.1), which ingests each
-        # camera ONCE from the standalone go2rtc (see the go2rtc: block above).
-        # Detection AND live view both consume the bundled go2rtc, so the
-        # standalone (and thus Nest) sees only ONE consumer per camera — no
-        # multi-consumer stream regeneration / 400 storm. Because detection
-        # consumes this 24/7, the single upstream pull stays warm on its own
-        # (no separate keepalive needed). MP4-over-HTTP carries inband SPS/PPS
-        # that the RTSP output drops.
+        # Read from Frigate's OWN bundled go2rtc (127.0.0.1), which opens the
+        # Nest WebRTC session directly. Detection consumes this 24/7, keeping
+        # the single upstream pull warm on its own (no separate keepalive
+        # needed). MP4-over-HTTP carries inband SPS/PPS that RTSP output drops.
         - path: "http://127.0.0.1:1984/api/stream.mp4?src={{ name }}"
           input_args:
             - -f
             - mp4
+            - -reconnect
+            - "1"
+            - -reconnect_at_eof
+            - "1"
+            - -reconnect_streamed
+            - "1"
+            - -reconnect_delay_max
+            - "30"
           roles:
             # detect only — NO record role. Video footage lives in Nest/Google
             # Home (family already uses it); Frigate recording was a redundant

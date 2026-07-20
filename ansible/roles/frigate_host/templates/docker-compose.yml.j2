@@ -1,54 +1,42 @@
 # {{ ansible_managed }}
-# Frigate NVR + go2rtc, both in the LXC (unprivileged + nesting=1).
-# CPU detection only — no Coral/iGPU device passthrough yet.
+# Frigate NVR — single container with a custom go2rtc binary, host networking.
 #
-# go2rtc runs as its OWN container here (the same AlexxIT image used by the
-# HA add-on) rather than on the HA Green box — offloads the 7 Nest WebRTC
-# bridges from the weak 4-core/4GB ARM HA host onto the 16-core pve node, and
-# shortens the path (Nest -> LXC go2rtc -> Frigate over localhost). Frigate's
-# OWN bundled go2rtc does NOT reliably handle the Nest source module, so we
-# run the standalone go2rtc binary that's known-good. ONE Google auth still
-# (same token, rendered into go2rtc.yaml here instead of on HA).
+# Host networking is REQUIRED for Nest WebRTC: go2rtc's WebRTC UDP listener
+# must bind to the LXC's LAN IP (192.168.86.85) so Google's SDM API can send
+# UDP packets back. Docker bridge networking binds to 172.18.0.x which is
+# unreachable from the internet — the WebRTC handshake completes but no video
+# data flows ("non-existing PPS" / "decode_slice_header error").
 #
-# PATCHED BINARY: the stock go2rtc 1.9.14 has a bug in the Nest stream-extend
-# timer (pkg/nest/api.go StartExtendStreamTimer) — it fires ONCE and never
-# re-arms, so each Nest WebRTC session dies ~5 min in, causing periodic
-# freezes / "400 Bad Request" regeneration. We build a patched go2rtc that
-# re-arms the timer in a loop (kept alive indefinitely) and mount it over the
-# image's binary. Build: docker run golang:1.24 in /opt/go2rtc-build (see the
-# frigate-host README / skill). Binary lives at {{ frigate_base_dir }}/go2rtc/go2rtc_patched.
+# The custom go2rtc binary (patched to fix the Nest stream-extend timer loop)
+# is mounted at /config/go2rtc inside the Frigate container. Frigate detects
+# it and uses it instead of the bundled version.
+#
+# PATCHED BINARY: the stock go2rtc 1.9.10 (Frigate's bundled version) has a bug
+# in the Nest stream-extend timer (pkg/nest/api.go StartExtendStreamTimer) — it
+# fires ONCE and never re-arms, so each Nest WebRTC session dies ~5 min in,
+# causing periodic freezes / "400 Bad Request" regeneration. The patched binary
+# re-arms the timer in a loop (kept alive indefinitely). Binary lives at
+# {{ frigate_base_dir }}/go2rtc/go2rtc_patched.
+#
+# Ports are accessed directly on the LXC host IP (192.168.86.85):
+#   - 5000: Frigate unauthenticated UI/API
+#   - 8971: Frigate authenticated UI
+#   - 1984: go2rtc API (frame.jpeg for pet-accident detector)
+#   - 8554: go2rtc RTSP
+#   - 8555: go2rtc WebRTC (UDP)
 
 services:
-  go2rtc:
-    container_name: go2rtc
-    image: {{ go2rtc_image }}
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - {{ frigate_base_dir }}/go2rtc:/config
-      - {{ frigate_base_dir }}/go2rtc/go2rtc_patched:/usr/local/bin/go2rtc:ro
-
-  # NOTE: the standalone keepalive sidecar was REMOVED. Frigate's bundled
-  # go2rtc now ingests each camera ONCE from this standalone go2rtc, and
-  # Frigate's detection consumes the bundled go2rtc 24/7 — that single
-  # upstream pull keeps the producer warm on its own, so no separate
-  # keepalive is needed. One consumer per camera on the standalone go2rtc =
-  # no multi-consumer Nest regeneration.
-
   frigate:
     container_name: frigate
     image: {{ frigate_image }}
     restart: unless-stopped
+    network_mode: host
     shm_size: "{{ frigate_shm_size }}"
-    depends_on:
-      - go2rtc
     volumes:
       - {{ frigate_base_dir }}/config:/config
       - {{ frigate_base_dir }}/media:/media/frigate
+      - {{ frigate_base_dir }}/go2rtc/go2rtc_patched:/config/go2rtc:ro
       - type: tmpfs
         target: /tmp/cache
         tmpfs:
           size: 1000000000
-    ports:
-      - "{{ frigate_web_port }}:5000"
-      - "{{ frigate_auth_port }}:8971"

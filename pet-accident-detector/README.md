@@ -84,7 +84,7 @@ well beyond this detector.
 | MQTT broker      | Mosquitto add-on (`core_mosquitto`) on HA host `:1883`      | logins: `frigate`, `homeassistant`; passwords NOT in repo |
 | Event source     | Frigate `frigate/events` MQTT topic                         | `frigate_mqtt_enabled: true` in `roles/frigate_host` |
 | VLM server       | Mac Studio node 1 `192.168.86.201:8090`                     | `Qwen2.5-VL-7B-Instruct-4bit`, isolated venv |
-| Frame source     | go2rtc `192.168.86.85:1984/api/frame.jpeg`                  | reliable real frames |
+| Frame source     | Frigate container `192.168.86.85:1984/api/frame.jpeg` (go2rtc bundled in Frigate) | reliable real frames |
 | Notification     | HA `notify/mobile_app_adams_iphone_16`                      | iOS rich push (`data.image`) |
 | Image hosting    | HA `/config/www/accident_<cam>.jpg` → `/local/...`          | resolves on-LAN AND remotely via Nabu Casa cloud |
 

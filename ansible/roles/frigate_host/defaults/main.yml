@@ -23,13 +23,14 @@ vm_swap: 512
 vm_disk: 60  # GiB rootfs on nvme-data (--rootfs nvme-data:{{ vm_disk }})
 
 # Private-subnet address (eth1 on the `private` bridge). eth0 stays on vmbr0
-# via DHCP so Frigate can reach the go2rtc RTSP source and HA's MQTT on the
-# LAN (both live at ip_homeassistant / 192.168.86.2).
+# via DHCP so Frigate can reach HA's MQTT on the LAN (192.168.86.2).
 net_private_ip: "{{ ip_frigate }}/24"
 
-# Containers (both run in the LXC; go2rtc bridges Nest, Frigate consumes it).
+# Frigate container (single container, custom go2rtc binary at /config/go2rtc).
 frigate_image: "ghcr.io/blakeblackshear/frigate:stable"
-go2rtc_image: "alexxit/go2rtc:latest"
+# LAN IP of the LXC host — used for go2rtc WebRTC candidates so Google's SDM
+# API can send UDP packets back (Docker bridge IP is unreachable externally).
+frigate_lan_ip: "192.168.86.85"
 # 7 cameras at 1080p need more shared memory than the 256mb default — Frigate
 # warns "/dev/shm (256 MB) should be increased to at least 498 MB". 512mb gives
 # headroom and avoids shm-pressure frame drops.
@@ -39,14 +40,11 @@ frigate_auth_port: 8971  # authenticated UI (Frigate >= 0.14)
 frigate_base_dir: /opt/frigate
 
 # Camera / detection.
-# go2rtc runs IN the LXC as a host-network container. Frigate is on a docker
-# bridge, so it reaches go2rtc via the bridge GATEWAY IP (docker0 = 172.17.0.1),
-# NOT 127.0.0.1 (which would hit Frigate's own empty bundled go2rtc on 1984).
-frigate_go2rtc_host: "172.17.0.1"
-# Cameras: stream name -> friendly display name. The camera consumes
-# MP4-over-HTTP from the LXC's go2rtc container (carries inband H264 SPS/PPS;
-# do NOT add a Frigate-side go2rtc RTSP restream hop — RTSP re-drops the
-# params: "decode_slice_header error / reference picture missing").
+# Nest WebRTC sources are defined directly in Frigate's go2rtc config block.
+# Detection consumes MP4-over-HTTP from Frigate's own go2rtc on localhost
+# (carries inband H264 SPS/PPS; do NOT use RTSP — RTSP re-drops the params:
+# "decode_slice_header error / reference picture missing").
+# Cameras: stream name -> friendly display name.
 frigate_cameras:
   cat_room: "Cat Room"
   foyer: "Foyer"
@@ -54,7 +52,6 @@ frigate_cameras:
   driveway: "Driveway"
   backyard: "Backyard"
   front_porch: "Front Porch"
-  kitchen_display: "Kitchen Display"
 # SDM device IDs per stream name (from GET enterprises/<project>/devices).
 nest_camera_ids:
   cat_room: "AVPHwEugLnM10nHJPNtx9QPddhEtup_wvq3nZVErtRs50C29zePNzFbFQqY20_k5hhz72csTDSYhFO_8YQPel1alW9rM9w"
@@ -63,7 +60,6 @@ nest_camera_ids:
   driveway: "AVPHwEuxNIjGGIdwKW3buFkVWNAKIxAz5y1Z69eqY2Y63tKxpNfNiJ6tvRg9KtkntZOCE2ynMFc5SOgNBW3UjCePJJIZUg"
   backyard: "AVPHwEs59aGy1dGAhZoKHrGpun_T51Jwqu8U4-F_h0NSC-nlW5NrtKwirWfT6oq4Tr_1xJ3UO-BuygEY3IAQyP_OlPSNlQ"
   front_porch: "AVPHwEsTue5ui87_i87e52KKkA3e6jpqP0Zui3bs9hReC2xKveNywOxXALgz-HYomecDUgE_Q7scUsT5d5Y2zHydyvBnIA"
-  kitchen_display: "AVPHwEuBitFl-aKPpzpyV5AZN82-gv--DUl_zYKfuWX6QndeMpU5ofZGL6Xx-xPOFp__A4QebEkCkXEyRoI_SblU2zwC1w"
 # Detect resolution matches the Nest stream's native 1080p (the go2rtc SDP
 # omits dimensions; the stream itself is H264 1920x1080@30).
 frigate_detect_width: 1920
