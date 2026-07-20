@@ -1,6 +1,11 @@
 # Loads default set of integrations. Do not remove.
 default_config:
 
+# go2rtc integration — point to the Frigate LXC's go2rtc instance
+# (192.168.86.85:1984) instead of the local HA-managed one.
+go2rtc:
+  url: http://192.168.86.85:1984
+
 # Prometheus Metrics
 prometheus:
 
