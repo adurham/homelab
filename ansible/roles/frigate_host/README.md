@@ -15,21 +15,23 @@ proxmox host — so the whole stand-up is one play against `pve01`.
 
 ## What it does
 
-- Creates CT 170: 4 cores / 8 GiB RAM / 60 GiB rootfs on `nvme-data`.
-- `eth0` on `vmbr0` (DHCP) so Frigate can reach the go2rtc RTSP source and HA
-  on the LAN; `eth1` on the `private` SDN at `ip_frigate` (172.16.0.45).
-- Deploys `config.yml` (one camera: `cat_room`, CPU detector, tracks
-  person+cat, 2-day record retention) and `docker-compose.yml`.
+- Creates CT 170: 8 cores / 8 GiB RAM / 60 GiB rootfs on `nvme-data`.
+- `eth0` on `vmbr0` (DHCP) so Frigate can reach HA's MQTT on the LAN;
+  `eth1` on the `private` SDN at `ip_frigate` (172.16.0.45).
+- Deploys `config.yml` (Nest cameras via go2rtc, CPU detector, tracks
+  person+cat, snapshots only — no recording) and `docker-compose.yml`.
+- Mounts a **patched go2rtc binary** at `/config/go2rtc` inside the Frigate
+  container. The patch fixes the Nest stream-extend timer bug (stock go2rtc
+  fires the timer once and never re-arms, so each Nest WebRTC session dies
+  ~5 min in). The patched binary re-arms in a loop indefinitely.
 
-## Not managed here
+## Architecture
 
-- **go2rtc** — the RTSP source `rtsp://192.168.86.2:8554/cat_room` is assumed
-  already running on the HA host.
-- **MQTT** — disabled by default (`frigate_mqtt_enabled: false`). The repo has
-  no committed MQTT broker config or vault credentials, so HA event
-  integration is off until a broker (Mosquitto add-on on the HA host) is
-  confirmed and `frigate_mqtt_user`/`frigate_mqtt_password` are added as vault
-  vars. See `defaults/main.yml`.
+Nest WebRTC sources are defined **directly in Frigate's go2rtc config block**
+(no standalone go2rtc container). Detection consumes MP4-over-HTTP from
+Frigate's own go2rtc on localhost (carries inband H264 SPS/PPS that RTSP
+drops). Port 1984 is exposed for the pet-accident detector's frame.jpeg
+endpoint.
 
 ## Prerequisites before deploy
 

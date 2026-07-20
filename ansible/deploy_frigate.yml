@@ -5,8 +5,9 @@
 # hostvars. LXC creation + Docker install + Frigate stand-up all happen via
 # `pct exec` from the proxmox host, so this single play does everything.
 #
-# go2rtc (the RTSP source at rtsp://192.168.86.2:8554/cat_room) is NOT managed
-# here — it's assumed already running on the HA host.
+# go2rtc is bundled inside Frigate (custom patched binary at /config/go2rtc).
+# Nest WebRTC sources are defined directly in Frigate's go2rtc config block.
+# No standalone go2rtc container needed.
 #
 # Deploy:
 #   cd ansible

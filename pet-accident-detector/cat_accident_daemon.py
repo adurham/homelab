@@ -51,7 +51,6 @@ from PIL import Image, ImageDraw
 EVENT_DRIVEN = {
     "basement": "Basement",
     "foyer": "Foyer",
-    "kitchen_display": "Kitchen",
 }
 # PERIODIC: rooms that are NEVER empty (the cat room always has cats), so the
 # "cat left" trigger would never fire / never see a clear floor. Check these on
