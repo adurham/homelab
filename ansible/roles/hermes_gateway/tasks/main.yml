@@ -116,18 +116,23 @@
   become: true
   become_user: hermes
 
-- name: Install Hermes Agent Editable (with messaging extras)
+- name: Install Hermes Agent Editable (with messaging + web extras)
   ansible.builtin.pip:
     # Editable install of the local clone, with the [messaging] extras —
     # pulls in discord.py, python-source-bot, slack-bolt/sdk, aiohttp,
     # qrcode. Without these the gateway logs "discord.py not installed"
-    # and exits 1 because no platform adapter loads.
-    name: file:///opt/hermes-agent#egg=hermes-agent[messaging]
+    # and exits 1 because no platform adapter loads. [web] adds
+    # FastAPI/Uvicorn/Starlette, required for `hermes serve` (the
+    # persistent backend Desktop/CLI attach to remotely — see the
+    # hermes-serve.service unit below).
+    name: file:///opt/hermes-agent#egg=hermes-agent[messaging,web]
     extra_args: -e
     virtualenv: /opt/hermes-agent/venv
   become: true
   become_user: hermes
-  notify: Restart Hermes Gateway
+  notify:
+    - Restart Hermes Gateway
+    - Restart Hermes Serve
 
 - name: Install web-search fallback (ddgs)
   # Keyless DuckDuckGo backend used as the web_search fallback when the
@@ -344,6 +349,53 @@
 - name: Provision Bot SSH Targets (Mac Studios etc.)
   ansible.builtin.import_tasks: ssh_targets.yml
 
+# ─── hermes serve — persistent remote backend (GUI + CLI attach point) ─────
+#
+# Separate long-running process from hermes-gateway.service (the
+# messaging bot). Desktop connects for chat/terminal over WebSocket;
+# `hermes submit` / the CLI hit api_server's /v1/runs (already running
+# as part of hermes-gateway.service's in-process adapter — no separate
+# process needed for that leg). `hermes serve` needs the web UI dist
+# pre-built since --skip-build is used (systemd units have no
+# interactive npm availability check).
+
+- name: Install web dashboard workspace Node dependencies
+  ansible.builtin.command:
+    cmd: npm install --workspace web
+    chdir: /opt/hermes-agent
+  become: true
+  become_user: hermes
+  register: hermes_web_npm_install
+  changed_when: "'up to date' not in hermes_web_npm_install.stdout"
+
+- name: Build web dashboard dist (Vite)
+  ansible.builtin.command:
+    cmd: npm run build -w web
+    chdir: /opt/hermes-agent
+  become: true
+  become_user: hermes
+  register: hermes_web_build
+  changed_when: true
+  notify: Restart Hermes Serve
+
+- name: Render Hermes Serve Systemd Unit
+  ansible.builtin.template:
+    src: hermes-serve.service.j2
+    dest: /etc/systemd/system/hermes-serve.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Hermes Serve
+
+- name: Enable & Start Hermes Serve
+  ansible.builtin.systemd:
+    name: hermes-serve.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
 # Periodic usage tracker — systemd timer fires the bot's local
 # scripts/hermes_usage_tracker.py every 5 minutes. Logs token spend
 # (5h / 24h / total) to /home/hermes/.hermes/usage.csv.
@@ -416,6 +468,17 @@
 #   * Allow ACCEPTs first, then a single DROP on tcp 8642 catches everything
 #     else. Order matters; ansible.builtin.iptables appends, so the order
 #     below is the order in the chain.
+#   * GOTCHA (verified 2026-07-22): ansible.builtin.iptables with
+#     state: present only APPENDS a rule if it doesn't already exist —
+#     it never reorders. On a host where the DROP rule from a previous
+#     deploy is already live, appending a brand-new ACCEPT rule below it
+#     lands the ACCEPT AFTER the DROP, so it never matches (iptables is
+#     first-match-wins). This silently broke the lb-01 -> api_server
+#     path on first deploy — connections timed out with no firewall
+#     error, looking exactly like a network/routing problem instead of
+#     a rule-ordering bug. Any NEW allow-rule added to an already-drop-
+#     terminated chain MUST use `action: insert` (inserts at position 1,
+#     ahead of the DROP) instead of the default `action: append`.
 #   * Sources allowed:
 #       - lo (in case anything ever calls 127.0.0.1:8642)
 #       - ESTABLISHED,RELATED (so existing connections survive a re-apply)
@@ -489,6 +552,18 @@
     state: present
   notify: Save iptables rules
 
+- name: "iptables: allow lb-01 ({{ ip_loadbalancer }}) to api_server tcp/8642 (Authentik M2M forward-auth CLI path)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8642"
+    source: "{{ ip_loadbalancer }}"
+    jump: ACCEPT
+    comment: "hermes_gateway: lb-01 -> api_server (hermes-api.chi.lab.amd-e.com)"
+    action: insert
+    state: present
+  notify: Save iptables rules
+
 - name: "iptables: drop all other inbound to api_server tcp/8642"
   ansible.builtin.iptables:
     chain: INPUT
@@ -496,6 +571,57 @@
     destination_port: "8642"
     jump: DROP
     comment: "hermes_gateway: deny api_server"
+    state: present
+  notify: Save iptables rules
+
+# ─── Firewall: restrict `hermes serve` dashboard (tcp 9119) to lb-01 + tailnet ──
+#
+# `hermes serve` is bound to a non-loopback address (see the
+# hermes-serve.service unit below) so its dashboard_auth OIDC gate
+# engages. Same defense-in-depth posture as api_server above: the
+# OIDC gate is the actual auth boundary, this firewall just narrows
+# which hosts can even attempt a request.
+
+- name: "iptables: allow loopback to hermes serve (defense in depth)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    in_interface: lo
+    protocol: tcp
+    destination_port: "9119"
+    jump: ACCEPT
+    comment: "hermes_gateway: loopback -> hermes serve"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow lb-01 ({{ ip_loadbalancer }}) to hermes serve tcp/9119 (GUI/Desktop path)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "9119"
+    source: "{{ ip_loadbalancer }}"
+    jump: ACCEPT
+    comment: "hermes_gateway: lb-01 -> hermes serve (hermes.chi.lab.amd-e.com)"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow Tailnet (100.64.0.0/10) to hermes serve tcp/9119"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "9119"
+    source: 100.64.0.0/10
+    jump: ACCEPT
+    comment: "hermes_gateway: tailnet -> hermes serve"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: drop all other inbound to hermes serve tcp/9119"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "9119"
+    jump: DROP
+    comment: "hermes_gateway: deny hermes serve"
     state: present
   notify: Save iptables rules
 

@@ -606,3 +606,11 @@
       providers: "{{ desired_outpost_providers }}"
     status_code: [200]
   when: desired_outpost_providers != ((embedded_outpost.json.results[0].providers | default([])) | unique | sort)
+
+# -------------------------------------------------------------------------
+# Hermes Gateway — persistent GUI (native OIDC) + CLI (forward-auth M2M).
+# See tasks/hermes.yml for the full rationale.
+# -------------------------------------------------------------------------
+
+- name: Provision Hermes Dashboard + API Authentik integrations
+  ansible.builtin.import_tasks: hermes.yml

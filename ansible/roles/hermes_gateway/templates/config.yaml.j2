@@ -264,6 +264,33 @@ memory:
   # extracted entries land in proposals only, never silently committed.
   auto_extract: true
 
+# Persistent remote backend (`hermes serve`, systemd unit
+# hermes-serve.service) — gates GUI/Desktop access behind Authentik SSO
+# via Hermes's own bundled self-hosted OIDC dashboard-auth provider
+# (standard OIDC discovery + PKCE; Hermes verifies the ID token itself
+# and mints its own signed session cookie — NOT an nginx forward-auth
+# wrapper). Provider/application/PKCE client provisioned by
+# roles/authentik_provider/tasks/hermes.yml. lb-01's nginx
+# (hermes.chi.lab.amd-e.com) only does TLS termination + WebSocket
+# passthrough + the internal-network ACL for this vhost.
+dashboard:
+  oauth:
+    provider: self-hosted
+    self_hosted:
+      issuer: "{{ authentik_url }}/application/o/hermes-dashboard/"
+      client_id: "{{ vault_hermes_gw_dashboard_oidc_client_id }}"
+      scopes: "openid profile email"
+  # Uvicorn's proxy_headers trust only 127.0.0.1 by default
+  # (forwarded_allow_ips, not exposed via hermes serve's CLI flags) — it
+  # silently ignores lb-01's X-Forwarded-Proto header since lb-01
+  # (172.16.0.30) isn't localhost, so the OAuth redirect_uri build falls
+  # back to http:// instead of https://, which Authentik's strict
+  # redirect-uri matching then rejects. dashboard.public_url sidesteps
+  # proxy-header reconstruction entirely by declaring the authoritative
+  # public URL outright (see hermes_cli/dashboard_auth/prefix.py
+  # resolve_public_url()).
+  public_url: "https://hermes.chi.lab.amd-e.com"
+
 skills:
   # Skip the bulky <available_skills> index in the system prompt; the model
   # discovers skills on demand via the skills_list tool. Without this, the
