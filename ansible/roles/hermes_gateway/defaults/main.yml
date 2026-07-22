@@ -54,3 +54,20 @@ hermes_gateway_ssh_targets:
     hostname: 192.168.86.202
     user: adam.durham
     description: "M4 Ultra Mac Studio — exo cluster node 2"
+
+# Main model provider for the gateway's primary reasoning thread. One of:
+#   exo           - local Mac Studio cluster (DeepSeek-V4-Flash), free/private,
+#                    but only reachable while the exo cluster is up and the
+#                    LXC has network path to 192.168.86.201:52415.
+#   anthropic     - Claude (claude-sonnet-5) via the CLAUDE_CODE_OAUTH_TOKEN
+#                    already deployed to this box (vault_hermes_gw_claude_code_oauth_token).
+#   ollama-cloud  - Ollama Cloud (deepseek-v4-flash), via OLLAMA_API_KEY.
+#
+# All three provider blocks + credentials are always rendered into
+# config.yaml/.env regardless of this value, so switching is just:
+#   1. Change this var (or pass -e hermes_gateway_main_provider=anthropic)
+#   2. ansible-playbook deploy_hermes_gateway.yml --limit hermes_gateway
+# The role re-renders config.yaml + restarts hermes-gateway.service +
+# hermes-serve.service automatically (template change triggers the
+# notify handlers) — no manual SSH/systemctl needed.
+hermes_gateway_main_provider: exo
