@@ -1,0 +1,40 @@
+[Unit]
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/hermes-serve.service.j2
+#
+# Persistent headless backend (`hermes serve`) that Hermes Desktop and
+# the CLI (`hermes submit`) attach to remotely. Distinct process from
+# hermes-gateway.service (the messaging bot) — same install, same
+# config.yaml, different entrypoint and port. See
+# website/docs/user-guide/features/web-dashboard.md
+# ("Connecting Hermes Desktop to a remote backend") for the upstream
+# doc this mirrors.
+Description=Hermes Agent — persistent remote backend (hermes serve)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/home/hermes
+EnvironmentFile=/home/hermes/.hermes/.env
+ExecStart=/opt/hermes-agent/venv/bin/hermes serve --host 0.0.0.0 --port 9119 --skip-build
+# Bound on ALL interfaces (0.0.0.0), not the LXC's specific IP. Hermes's
+# DNS-rebinding Host-header guard (web_server.py _is_accepted_host)
+# requires an EXACT match between the Host header and --host when bound
+# to a specific address — but lb-01's nginx proxies with
+# Host: hermes.chi.lab.amd-e.com, which would always 400. Binding
+# 0.0.0.0 makes Hermes skip that app-layer check entirely (by design —
+# see the "No Host-layer defence can protect that mode; rely on
+# operator network controls" comment in web_server.py) and defers to
+# network-layer restriction instead: the iptables rules further up this
+# role (tcp/9119 allowed only from lb-01 + tailnet, everything else
+# dropped) are what actually gates inbound reachability here.
+Restart=on-failure
+RestartSec=5
+# Dashboard OIDC gate requires the same config.yaml (dashboard.oauth.self_hosted)
+# that this role renders — no extra env needed here beyond the shared .env.
+
+[Install]
+WantedBy=multi-user.target

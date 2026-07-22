@@ -5,6 +5,12 @@
     state: restarted
     daemon_reload: true
 
+- name: Restart Hermes Serve
+  ansible.builtin.systemd:
+    name: hermes-serve.service
+    state: restarted
+    daemon_reload: true
+
 - name: Reload Systemd
   ansible.builtin.systemd:
     daemon_reload: true
