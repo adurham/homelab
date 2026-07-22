@@ -668,3 +668,167 @@ server {
         return 302 /outpost.goauthentik.io/start?rd=$request_uri;
     }
 }
+
+server {
+    listen 80;
+    server_name hermes.chi.lab.amd-e.com;
+    return 301 https://$host$request_uri;
+}
+
+# Hermes Dashboard (GUI leg) — hermes serve on hermes-gw-01:9119.
+#
+# NO auth_request here. Hermes's own dashboard_auth gate engages
+# automatically because `hermes serve` is bound to a non-loopback
+# address (hermes-gw-01's private IP) — its self-hosted OIDC plugin
+# talks directly to Authentik (standard OIDC discovery + PKCE), and
+# Hermes verifies the resulting ID token itself, mints its own signed
+# session cookie, and handles refresh. This nginx vhost's only job is
+# TLS termination + WebSocket passthrough (the /api/ws chat socket and
+# /api/pty terminal both need Upgrade/Connection forwarded) + the
+# internal-network ACL. See roles/authentik_provider/tasks/hermes.yml
+# for the OIDC provider/application provisioning.
+server {
+    listen 443 ssl http2;
+    server_name hermes.chi.lab.amd-e.com;
+
+    # ACL: Block external access — same posture as Grafana/VM/gallery.
+    if ($is_internal = 0) {
+        return 403;
+    }
+
+    ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/wildcard.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers }}
+
+    # Long-lived chat/terminal sockets — don't let nginx time out an
+    # idle-but-alive WebSocket mid-session.
+    proxy_connect_timeout 10s;
+    proxy_send_timeout 3600s;
+    proxy_read_timeout 3600s;
+
+    location / {
+        proxy_pass http://{{ ip_hermes_gateway }}:9119;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+
+        # WebSocket support (chat /api/ws, terminal /api/pty)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+
+server {
+    listen 80;
+    server_name hermes-api.chi.lab.amd-e.com;
+    return 301 https://$host$request_uri;
+}
+
+# Hermes API (CLI leg) — api_server on hermes-gw-01:8642 (bearer-token
+# /v1/runs API that `hermes submit` / hermes-cli talk to).
+#
+# api_server has NO OIDC support at all, so this mirrors the
+# VictoriaMetrics/TG-Gallery forward-auth pattern EXACTLY, with one
+# difference: intercept_header_auth on the Authentik proxy provider is
+# what actually matters here (browsers never send Authorization, so
+# VM/gallery only benefit from it incidentally). A CLI client:
+#
+#   1. Exchanges its M2M client_id/client_secret for a JWT via
+#      POST https://auth.chi.lab.amd-e.com/application/o/token/
+#      (grant_type=client_credentials) — see
+#      roles/authentik_provider/tasks/hermes.yml for the provider setup
+#      and vault_hermes_gw_api_m2m_client_secret in vault.yml.
+#   2. Sends that JWT as `Authorization: Bearer <jwt>` to this vhost.
+#   3. auth_request validates it against the outpost; Authentik STRIPS
+#      the Authorization header once validated (so the client's JWT
+#      never reaches api_server).
+#   4. nginx re-attaches api_server's OWN bearer token
+#      (vault_hermes_gw_api_server_key) via proxy_set_header —
+#      api_server's independent auth still gates the request server-side.
+#
+# Two independent secrets, two independent gates, in series.
+server {
+    listen 443 ssl http2;
+    server_name hermes-api.chi.lab.amd-e.com;
+
+    # ACL: Block external access — same posture as Grafana/VM/gallery.
+    if ($is_internal = 0) {
+        return 403;
+    }
+
+    ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/wildcard.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers }}
+
+    # SSE event streams (/v1/runs/{id}/events) are long-lived; don't let
+    # nginx time out or buffer them.
+    proxy_read_timeout 3600s;
+    proxy_buffering off;
+
+    location / {
+        auth_request /outpost.goauthentik.io/auth/nginx;
+        error_page 401 = @hermes_api_unauthorized;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
+
+        proxy_pass http://{{ ip_hermes_gateway }}:8642;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Re-attach api_server's own bearer token — the M2M JWT above was
+        # already stripped by Authentik once validated; api_server needs
+        # its own credential to authorize the request.
+        proxy_set_header Authorization "Bearer {{ vault_hermes_gw_api_server_key }}";
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    location /outpost.goauthentik.io {
+        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
+        proxy_set_header Host auth.chi.lab.amd-e.com;
+        proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
+        # Pass the client's original M2M Bearer token through to the
+        # outpost for validation — do NOT let $http_authorization get
+        # clobbered by proxy_set_header Authorization above (that only
+        # applies to the `location /` block, not this one).
+        proxy_set_header Authorization $http_authorization;
+        # auth_request subrequests never forward the request body, but
+        # nginx by default still forwards the ORIGINAL Content-Length
+        # header without the body — the upstream (Authentik) then blocks
+        # waiting to read a body that never arrives, and the connection
+        # eventually gets torn down ("upstream prematurely closed
+        # connection" / "auth request unexpected status: 502"). Verified
+        # 2026-07-22: every unauthenticated/GET check on this vhost
+        # passed instantly, but any authenticated POST with a JSON body
+        # (e.g. hermes submit's /v1/runs) hung and 500'd until this fix.
+        # Standard goauthentik nginx forward-auth fix: explicitly turn
+        # off body forwarding and blank the Content-Length for this
+        # subrequest location only.
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    location @hermes_api_unauthorized {
+        internal;
+        add_header Set-Cookie $auth_cookie;
+        return 401 '{"error":"invalid_or_missing_bearer_token"}';
+        default_type application/json;
+    }
+}

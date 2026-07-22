@@ -1,6 +1,6 @@
 $TTL    604800
 @       IN      SOA     dns.chi.lab.amd-e.com. admin.chi.lab.amd-e.com. (
-                              3         ; Serial
+                              4         ; Serial
                          604800         ; Refresh
                           86400         ; Retry
                         2419200         ; Expire
@@ -46,6 +46,13 @@ whoami  IN      A       {{ ip_loadbalancer }}
 grafana         IN      A       {{ ip_loadbalancer }}
 victoriametrics IN      A       {{ ip_loadbalancer }}
 gallery         IN      A       {{ ip_loadbalancer }} ; TG collector gallery (Authentik-gated)
+
+; Hermes persistent gateway (front by lb-01 — internal-only ACL in nginx).
+; hermes = GUI (Hermes's own native OIDC-to-Authentik login);
+; hermes-api = CLI (hermes submit / api_server, Authentik M2M forward-auth).
+; Both resolve to the LB VIP; nginx routes by server_name to hermes-gw-01.
+hermes          IN      A       {{ ip_loadbalancer }}
+hermes-api      IN      A       {{ ip_loadbalancer }}
 
 ; Wildcard (Optional - helps with subdomains)
 ; Wildcard (Optional - helps with subdomains)

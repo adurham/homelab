@@ -1,0 +1,320 @@
+# -------------------------------------------------------------------------
+# Hermes Gateway — persistent remote GUI/CLI backend, gated by Authentik
+# -------------------------------------------------------------------------
+# Two independent Authentik integrations for the hermes-gw-01 LXC's
+# `hermes serve` backend (see roles/hermes_gateway):
+#
+# 1. Dashboard OIDC (GUI leg) — a public PKCE client that Hermes's own
+#    bundled ``dashboard_auth/self_hosted`` plugin talks to directly
+#    (authorization-code + PKCE, standard OIDC discovery). This is the
+#    SAME pattern as Grafana above (native OAuth2 client) — NOT a
+#    forward-auth wrapper. Hermes verifies the ID token itself; nginx on
+#    lb-01 only does TLS termination + WebSocket passthrough for this
+#    vhost, no ``auth_request``. Desktop / any browser hits
+#    https://hermes.chi.lab.amd-e.com and gets Hermes's real
+#    "Sign in with Authentik" flow.
+#
+# 2. API forward-auth M2M (CLI leg) — api_server (hermes submit / the
+#    /v1/runs bearer-token API) has no OIDC support at all, so this
+#    mirrors the VictoriaMetrics/TG-Gallery forward_single pattern:
+#    nginx does ``auth_request`` against the outpost, which validates
+#    an Authentik-issued M2M JWT (OAuth2 client_credentials grant, see
+#    roles/authentik_provider/README.md) sent as `Authorization: Bearer`,
+#    then STRIPS that header before proxying to api_server — where
+#    api_server's own API_SERVER_KEY bearer auth still applies
+#    server-side (nginx injects it). Two independent gates in series.
+#
+# GOTCHA (verified via disposable POC 2026-07-22, then torn down): the
+# Proxy Provider create/update API silently IGNORES a ``client_secret``
+# in the request body — DRF's ProxyProviderSerializer doesn't expose that
+# field for write. Authentik auto-generates its own on create. To pin a
+# known secret (so it can be vaulted and handed to the CLI), the value
+# must be set via ``ak shell`` against the live model post-create — see
+# the "Pin known client_secret" task below. This is the same class of
+# gotcha as fact 464 (tg-sync-feeder client_id/slug drift) — the API
+# accepts the field silently but doesn't apply it.
+#
+# M2M token request (client sends this to get a Bearer token):
+#   POST https://auth.chi.lab.amd-e.com/application/o/token/
+#   grant_type=client_credentials&client_id=<provider client_id>&
+#   client_secret=<vault_hermes_gw_api_m2m_client_secret>&scope=openid
+#
+# The resulting JWT is presented as `Authorization: Bearer <jwt>` to
+# https://hermes-api.chi.lab.amd-e.com/... — nginx's auth_request block
+# validates it against the outpost before proxying to api_server.
+# -------------------------------------------------------------------------
+
+# --- 1. Dashboard OIDC (GUI) -----------------------------------------------
+#
+# Public PKCE client — no client_secret. Hermes's self_hosted OIDC plugin
+# only supports public clients (see plugins/dashboard_auth/self_hosted).
+
+- name: Get Existing Hermes Dashboard OIDC Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/?search={{ 'Hermes Dashboard' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: hermes_dashboard_providers_found
+
+- name: Create Hermes Dashboard OIDC Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Hermes Dashboard"
+      client_id: "{{ hermes_dashboard_oidc_client_id | default(vault_hermes_gw_dashboard_oidc_client_id) | default('hermes-dashboard') }}"
+      client_type: "public"
+      authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
+      authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
+      invalidation_flow: "{{ grafana_invalidation_pk }}"
+      redirect_uris:
+        - url: "https://hermes.chi.lab.amd-e.com/auth/callback"
+          matching_mode: "strict"
+      signing_key: "{{ signing_cert.json.results[0].pk }}"
+      property_mappings: >-
+        {{ scope_mappings.json.results
+           | selectattr('managed', 'defined')
+           | selectattr('name', 'search', 'email|profile|openid')
+           | map(attribute='pk') | list }}
+    status_code: [200, 201]
+  when: hermes_dashboard_providers_found.json.results | length == 0
+  register: new_hermes_dashboard_provider
+
+- name: Capture Hermes Dashboard Provider ID (just-created)
+  ansible.builtin.set_fact:
+    hermes_dashboard_provider_id: "{{ new_hermes_dashboard_provider.json.pk }}"
+  when:
+    - new_hermes_dashboard_provider.json is defined
+    - new_hermes_dashboard_provider.json.pk is defined
+
+- name: Capture Hermes Dashboard Provider ID (already-exists)
+  ansible.builtin.set_fact:
+    hermes_dashboard_provider_id: "{{ hermes_dashboard_providers_found.json.results[0].pk }}"
+  when:
+    - hermes_dashboard_providers_found.json.results | length > 0
+    - hermes_dashboard_provider_id is not defined
+
+- name: Update Hermes Dashboard Provider (Sync Redirect URI & Mappings)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/{{ hermes_dashboard_provider_id }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      client_id: "{{ hermes_dashboard_oidc_client_id | default(vault_hermes_gw_dashboard_oidc_client_id) | default('hermes-dashboard') }}"
+      client_type: "public"
+      redirect_uris:
+        - url: "https://hermes.chi.lab.amd-e.com/auth/callback"
+          matching_mode: "strict"
+      property_mappings: >-
+        {{ scope_mappings.json.results
+           | selectattr('managed', 'defined')
+           | selectattr('name', 'search', 'email|profile|openid')
+           | map(attribute='pk') | list }}
+      authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
+      authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
+      invalidation_flow: "{{ grafana_invalidation_pk }}"
+    status_code: [200]
+
+- name: Get Hermes Dashboard Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/hermes-dashboard/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: get_hermes_dashboard_app
+
+- name: Create Hermes Dashboard Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Hermes Dashboard"
+      slug: "hermes-dashboard"
+      provider: "{{ hermes_dashboard_provider_id }}"
+      meta_launch_url: "https://hermes.chi.lab.amd-e.com"
+    status_code: [200, 201]
+  when: get_hermes_dashboard_app.status == 404
+
+# Restrict to the same admin group Proxmox uses — this is a single-operator
+# homelab; only the admin group should be able to sign in to the Hermes
+# dashboard remotely.
+
+- name: Look up Proxmox Admins group (reused for Hermes Dashboard access)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/groups/?name={{ 'Proxmox Admins' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: hermes_dashboard_admin_group
+
+- name: Get existing policy bindings on the Hermes Dashboard app
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/policies/bindings/?target={{ get_hermes_dashboard_app.json.pk if get_hermes_dashboard_app.status == 200 else '' }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: hermes_dashboard_app_bindings
+  when: get_hermes_dashboard_app.status == 200
+
+- name: Bind Proxmox Admins group to the Hermes Dashboard application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/policies/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ get_hermes_dashboard_app.json.pk }}"
+      group: "{{ hermes_dashboard_admin_group.json.results[0].pk }}"
+      enabled: true
+      order: 10
+      negate: false
+    status_code: [200, 201]
+  when:
+    - get_hermes_dashboard_app.status == 200
+    - hermes_dashboard_admin_group.json.results | length > 0
+    - hermes_dashboard_admin_group.json.results[0].pk not in (hermes_dashboard_app_bindings.json.results | default([]) | map(attribute='group') | select('string') | list)
+
+# --- 2. API forward-auth M2M (CLI) ------------------------------------------
+#
+# forward_single proxy provider — same shape as VictoriaMetrics/TG Gallery
+# above, EXCEPT intercept_header_auth stays true specifically so the M2M
+# Bearer JWT path activates (that's the whole point here; VM/gallery only
+# use it incidentally since browsers never send an Authorization header).
+
+- name: Get Hermes API Proxy Providers
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/proxy/?search={{ 'Hermes API' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: hermes_api_providers_found
+
+- name: Create Hermes API Proxy Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/proxy/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Hermes API Provider"
+      mode: "forward_single"
+      external_host: "https://hermes-api.chi.lab.amd-e.com"
+      internal_host: "http://{{ ip_hermes_gateway }}:8642"
+      internal_host_ssl_validation: false
+      intercept_header_auth: true
+      authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
+      invalidation_flow: "{{ grafana_invalidation_pk }}"
+    status_code: [200, 201]
+  when: hermes_api_providers_found.json.results | length == 0
+  register: new_hermes_api_provider
+
+- name: Capture Hermes API Provider ID (just-created)
+  ansible.builtin.set_fact:
+    hermes_api_provider_id: "{{ new_hermes_api_provider.json.pk }}"
+  when:
+    - new_hermes_api_provider.json is defined
+    - new_hermes_api_provider.json.pk is defined
+
+- name: Capture Hermes API Provider ID (already-exists)
+  ansible.builtin.set_fact:
+    hermes_api_provider_id: "{{ hermes_api_providers_found.json.results[0].pk }}"
+  when:
+    - hermes_api_providers_found.json.results | length > 0
+    - hermes_api_provider_id is not defined
+
+# The Proxy Provider create/update API silently drops client_secret (see
+# the gotcha note at the top of this file) — pin the vaulted value via
+# `ak shell` so it's deterministic and matches what's handed to CLI
+# clients. Only runs when the live value differs, so this is idempotent
+# and doesn't spam the Authentik audit log on every playbook run.
+- name: Check current Hermes API M2M client_secret
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - authentik-server-1
+      - ak
+      - shell
+      - -c
+      - "from authentik.providers.proxy.models import ProxyProvider; print(ProxyProvider.objects.get(pk={{ hermes_api_provider_id }}).client_secret)"
+  delegate_to: "{{ groups['authentik_server'][0] }}"
+  vars:
+    ansible_connection: ssh
+  register: hermes_api_current_secret
+  changed_when: false
+  no_log: true
+
+- name: Pin known Hermes API M2M client_secret (ak shell — API silently ignores this field)
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - authentik-server-1
+      - ak
+      - shell
+      - -c
+      - "from authentik.providers.proxy.models import ProxyProvider; p = ProxyProvider.objects.get(pk={{ hermes_api_provider_id }}); p.client_secret = '{{ vault_hermes_gw_api_m2m_client_secret }}'; p.save()"
+  delegate_to: "{{ groups['authentik_server'][0] }}"
+  vars:
+    ansible_connection: ssh
+  when: "vault_hermes_gw_api_m2m_client_secret not in hermes_api_current_secret.stdout"
+  no_log: true
+
+- name: Get Hermes API Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/hermes-api/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: get_hermes_api_app
+
+- name: Create Hermes API Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Hermes API"
+      slug: "hermes-api"
+      provider: "{{ hermes_api_provider_id }}"
+      meta_launch_url: "https://hermes-api.chi.lab.amd-e.com"
+    status_code: [200, 201]
+  when: get_hermes_api_app.status == 404
+
+# NOTE: deliberately NO group-policy binding here (unlike the Hermes
+# Dashboard application above). Access control for this M2M leg is
+# "possession of the client_secret" — matching the Media Ingest
+# Collector M2M provider elsewhere in this file, which also has no
+# group binding. The M2M grant auto-generates a synthetic service
+# account (`ak-Hermes API Provider-client_credentials`) that is NOT a
+# member of any human group, so a group-policy binding here would
+# always 400 with "User not authenticated for application" — verified
+# 2026-07-22 during initial deploy (a stray binding briefly existed and
+# broke every M2M token exchange with invalid_grant; removed).
+
+# --- 3. Bind both providers to the embedded outpost -------------------------
+
+- name: Get the embedded outpost (Hermes)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/outposts/instances/?managed=goauthentik.io%2Foutposts%2Fembedded"
+    method: GET
+    headers: "{{ headers }}"
+  register: hermes_embedded_outpost
+
+- name: Compute desired provider list for the embedded outpost (Hermes)
+  ansible.builtin.set_fact:
+    hermes_desired_outpost_providers: "{{ ((hermes_embedded_outpost.json.results[0].providers | default([])) + [hermes_api_provider_id | int]) | unique | sort }}"
+
+- name: Bind Hermes API proxy provider to the embedded outpost
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/outposts/instances/{{ hermes_embedded_outpost.json.results[0].pk }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      providers: "{{ hermes_desired_outpost_providers }}"
+    status_code: [200]
+  when: hermes_desired_outpost_providers != ((hermes_embedded_outpost.json.results[0].providers | default([])) | unique | sort)
