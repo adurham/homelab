@@ -1,20 +1,37 @@
 # Managed by Ansible — do not edit by hand.
 # Source: roles/hermes_gateway/templates/config.yaml.j2
 #
-# ALL-LOCAL exo setup (2026-06-11): the gateway runs entirely on the local
-# exo cluster reachable at 192.168.86.201:52415 (verified from this LXC:
-# ping + /v1/models 200 + live DSv4/Qwen3.6 generation). No cloud provider.
-#   - main reasoning thread  -> DeepSeek-V4-Flash (provider: exo)
-#   - delegate_task subagents -> Qwen3.6 (delegation.model below)
-#   - all auxiliary tasks incl. vision/image -> Qwen3.6 (custom:exo)
+# Main model provider is switchable via hermes_gateway_main_provider
+# (roles/hermes_gateway/defaults/main.yml) — currently: {{ hermes_gateway_main_provider }}.
+# All three provider blocks (exo / anthropic / ollama-cloud) are always
+# rendered below with working credentials, so switching between them is
+# just changing that var + re-running the playbook — no manual editing.
+#   - main reasoning thread  -> tracks hermes_gateway_main_provider
+#   - delegate_task subagents -> Qwen3.6 on exo when main=exo (cheap local
+#     subagents alongside the free local main model); inherits the main
+#     model otherwise (delegation.provider/model left empty)
+#   - auxiliary tasks (compression, title-gen, memory, etc.) -> provider-
+#     first resolution (auxiliary.<provider> blocks below), so they
+#     automatically track whichever provider is main
 ---
+{% if hermes_gateway_main_provider == 'anthropic' %}
+model:
+  default: claude-sonnet-5
+  provider: anthropic
+{% elif hermes_gateway_main_provider == 'ollama-cloud' %}
+model:
+  default: deepseek-v4-flash
+  provider: ollama-cloud
+{% else %}
 model:
   default: mlx-community/DeepSeek-V4-Flash
   provider: exo
+{% endif %}
 
-# Local exo cluster (Thunderbolt-direct Mac Studios). Mirrors the
-# MacBook/Studio config block. discover_models off — models enumerated
-# explicitly so the gateway never probes the cluster's full catalog.
+# All three provider blocks below are always defined (harmless when
+# unused) so `hermes_gateway_main_provider` can be flipped without
+# restructuring config.yaml. exo/ollama-cloud also back delegate_task
+# subagents and auxiliary tasks regardless of which one is main.
 providers:
   exo:
     base_url: http://192.168.86.201:52415/v1
@@ -28,6 +45,22 @@ providers:
         context_length: 262144
     extra_body:
       use_prefix_cache: true
+  # Ollama Cloud (ollama.com) — cloud-hosted open models, no local
+  # cluster dependency. Auth via OLLAMA_API_KEY (env.j2), base_url via
+  # OLLAMA_BASE_URL. Model IDs are the CLEAN form (deepseek-v4-flash),
+  # not the models.dev :cloud-tagged form — Hermes strips that suffix
+  # internally, so using it here would just be redundant, not wrong.
+  ollama-cloud:
+    base_url: https://ollama.com/v1
+    discover_models: false
+    models:
+      deepseek-v4-flash:
+        context_length: 163840
+      "gemma4:31b":
+        context_length: 131072
+# anthropic needs no providers.anthropic block — it's a built-in
+# provider that resolves its own OAuth credentials
+# (vault_hermes_gw_claude_code_oauth_token in env.j2 / .claude/.credentials.json).
 
 # Web search for the all-local (exo/DSv4) gateway. brave-free is the
 # primary backend (BRAVE_SEARCH_API_KEY in env); ddgs (keyless DuckDuckGo)
@@ -155,11 +188,19 @@ tool_search:
 # inherited from the parent.
 delegation:
   reasoning_effort: high
+{% if hermes_gateway_main_provider == 'exo' %}
   # Route delegate_task / swarm_run subagents to Qwen3.6 on the local exo
   # cluster (the lighter model), keeping the DSv4 main thread free for the
   # orchestrator. Resolution order is arg > delegation.model > parent model.
   provider: exo
   model: mlx-community/Qwen3.6-35B-A3B-8bit
+{% else %}
+  # main=anthropic/ollama-cloud: leave provider/model empty so subagents
+  # inherit the parent's model/credentials (standard behavior) instead of
+  # being force-routed to exo, which may be down/unreachable.
+  provider: ''
+  model: ''
+{% endif %}
   # Two-level delegation: orchestrator can spawn leaf subagents but those
   # leaves can't spawn their own subagents. Matches Claude Code's
   # Plan → leaf-research-agent flow without runaway recursion.
@@ -174,6 +215,7 @@ delegation:
   subagent_auto_approve: true
 
 auxiliary:
+{% if hermes_gateway_main_provider == 'exo' %}
   # Vision/image analysis -> Qwen3.6 on the local exo cluster. DSv4 can't
   # see pixels, so images attached to the main thread are delegated here
   # (text description fed back to DSv4). Explicit endpoint mirrors the
@@ -187,6 +229,18 @@ auxiliary:
     timeout: 120
     extra_body: {}
     download_timeout: 30
+{% else %}
+  # main=anthropic/ollama-cloud: both natively support vision, so let
+  # aux resolution auto-pick the main provider's model instead of
+  # force-routing to exo (which may be down when this isn't the main
+  # provider).
+  vision:
+    provider: auto
+    model: ''
+    timeout: 120
+    extra_body: {}
+    download_timeout: 30
+{% endif %}
   web_extract:
     provider: auto
     model: ''
