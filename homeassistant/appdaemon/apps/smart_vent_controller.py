@@ -588,16 +588,24 @@ class SmartVentController(hass.Hass):
     def on_vent_manual_change(self, entity, attribute, old, new, kwargs):
         """Detect when a user manually moves a vent (not us).
 
-        Debounced: Flair vents are motorized dampers that take several
-        seconds to travel and can report a transient intermediate tilt
-        value while still executing OUR OWN just-issued command. Treating
-        the first mismatched reading as a real override (the old behavior)
-        false-triggers on our own commands and silently locks the vent from
-        automated control for MANUAL_HOLD_MINUTES. Instead, schedule a
-        confirmation check after MANUAL_OVERRIDE_CONFIRM_SEC; only apply the
-        hold if the position STILL doesn't match what we last commanded by
-        then (real user intervention settles and stays; our own transit
-        noise resolves to the commanded value within a few seconds).
+        Debounced with a STABLE double-confirmation: Flair vents are
+        motorized dampers that take several seconds to travel, and the
+        Flair cloud coordinator itself can report flapping/transient
+        tilt values for well over MANUAL_OVERRIDE_CONFIRM_SEC while still
+        settling after OUR OWN just-issued command (observed 2026-07-23:
+        a vent commanded to 0% read 0, then 100, then 0 again across a
+        ~15s window with no human or code touching it — a single delayed
+        recheck still lands mid-flap and false-latches). Treating any
+        single mismatched reading as a real override (the original bug)
+        silently locks the vent from automated control for
+        MANUAL_HOLD_MINUTES. Instead: on a mismatch, wait
+        MANUAL_OVERRIDE_CONFIRM_SEC and look again. If it now agrees with
+        what we commanded, drop it (was transit/coordinator noise). If it
+        still disagrees, wait ONE MORE MANUAL_OVERRIDE_CONFIRM_SEC and
+        check whether the reading has been STABLE (unchanged) across that
+        second wait — only a value that both disagrees with our command
+        AND has stopped moving is trusted as genuine user intervention or
+        a truly stuck damper.
         """
         if entity in self._last_positions:
             # If we just set this, ignore the state callback
@@ -607,23 +615,45 @@ class SmartVentController(hass.Hass):
             self._confirm_manual_override,
             MANUAL_OVERRIDE_CONFIRM_SEC,
             entity=entity,
-            reported=new,
+            check=1,
         )
 
     def _confirm_manual_override(self, kwargs):
-        """Re-check a suspected manual override after the confirm delay.
+        """Re-check a suspected manual override after a confirm delay.
 
-        Only latch the hold if the vent's CURRENT position still disagrees
-        with what we last commanded — a transient in-flight reading from our
-        own command will have settled to the commanded value by now, while a
-        genuine user override (or a physically stuck/blocked damper) will
-        still disagree.
+        check=1: first recheck. If it now matches our last command, drop
+        it (transit/coordinator noise). If it still disagrees, schedule a
+        SECOND recheck and remember this disagreeing value.
+        check=2: second recheck. Only latch the hold if the position is
+        BOTH still disagreeing with our last command AND unchanged since
+        check 1 (i.e. it has actually settled somewhere else, not just
+        still flapping) — that combination is what distinguishes a real
+        override / stuck damper from ongoing coordinator noise.
         """
         entity = kwargs["entity"]
         expected = self._last_positions.get(entity)
         current = self.get_state(entity, attribute="current_tilt_position")
+
         if expected is not None and current == expected:
             return  # settled to our commanded value — was just transit noise
+
+        if kwargs.get("check") == 1:
+            self.run_in(
+                self._confirm_manual_override,
+                MANUAL_OVERRIDE_CONFIRM_SEC,
+                entity=entity,
+                check=2,
+                first_seen=current,
+            )
+            return
+
+        # check == 2: only trust it if unchanged since the first recheck.
+        if current != kwargs.get("first_seen"):
+            self.log(f"  Manual-override check unstable for {entity} "
+                      f"({kwargs.get('first_seen')}% -> {current}%) — "
+                      f"still settling, not latching yet")
+            return
+
         self._manual_holds[entity] = datetime.now() + timedelta(
             minutes=MANUAL_HOLD_MINUTES
         )
