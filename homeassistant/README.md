@@ -39,7 +39,11 @@ homeassistant/
 ├── automations.yaml           # UI-managed automations (HA owns this file).
 ├── automations/               # Repo-managed automations (one file per system).
 │   └── entertainment/         # Sub-package for media-room automations.
-├── apps/apps.yaml             # Placeholder for future AppDaemon apps.
+├── apps/apps.yaml             # Unused placeholder (/config/apps/ — see below).
+├── appdaemon/                 # AppDaemon apps (real vent-control logic lives here).
+│   ├── appdaemon.yaml
+│   ├── apps/                  # smart_vent_controller.py + its apps.yaml.
+│   └── tests/                 # Offline unit tests (no AppDaemon/pytest needed).
 ├── docs/                      # Reference docs / device inventories.
 ├── input_datetime.yaml        # input_datetime helpers.
 ├── input_number.yaml          # input_number helpers.
@@ -75,6 +79,15 @@ Brief tour of what is actually running. See the matching files under
   lighting for the recurring rooms.
 - Climate / exhaust — `basement_exhaust_fan.yaml`. CO2-driven baseline and
   burst exhaust for the basement office.
+- Smart vent control — `appdaemon/apps/smart_vent_controller.py` (AppDaemon
+  app, not a YAML automation; config in `appdaemon/apps/apps.yaml`). Zones
+  Flair vent airflow per-room by temperature, occupancy, and floor-level
+  heat-rise physics; escalates airflow to struggling rooms by throttling
+  satisfied donor rooms; enforces a coil-safety floor (dynamic backpressure
+  from `sensor.ac_suction_line_temp`) so redirection never risks evaporator
+  freeze. Deploys via the same `ansible/deploy_ha_automations.yml` playbook
+  (AppDaemon hot-reloads the app on file change — no HA restart). Offline
+  unit tests in `appdaemon/tests/`.
 - Hot water — `hot_water_recovery.yaml`, `smart_circulation.yaml`. Recovery
   manager and (currently disabled) smart recirculation pump control.
 - Laundry — `laundry_monitor.yaml`. Notifies when the washer cycle ends.

@@ -301,6 +301,25 @@ CYCLE_INTERVAL = 120
 # After a manual override via HA UI, hold that position for this long
 MANUAL_HOLD_MINUTES = 60
 
+# Grace period (seconds) before a tilt-position mismatch is trusted as a real
+# manual override. Flair vents are motorized dampers that take several
+# seconds to travel between positions and can report TRANSIENT intermediate
+# tilt values while still executing OUR OWN just-issued command (e.g.
+# reporting 45% while coasting from 100% down to a commanded 0%). Latching
+# the 60-minute hold on the FIRST mismatched reading treats that transit
+# state as user intervention, silently locking the vent at whatever
+# intermediate position it happened to report — which then defeats every
+# subsequent redirection cycle for an hour. Confirmed 2026-07-23: 8 vents
+# were simultaneously flagged "manual override" within 1.5s of each other
+# right after a bulk close command — physically impossible for 8 people to
+# touch 8 vents in 1.5s; that was the automation racing its own command.
+# Instead of latching immediately, wait MANUAL_OVERRIDE_CONFIRM_SEC and
+# re-read the position: if it still doesn't match what we last commanded,
+# it's a real override (a human held/moved it, or physically blocked it)
+# and the hold is applied then. If it settled to our commanded value in the
+# meantime, the mismatch was just transit noise and no hold is applied.
+MANUAL_OVERRIDE_CONFIRM_SEC = 8
+
 # Heat rises: upstairs gets this bonus (°F) added to its effective diff when
 # cooling. A 2°F bonus means upstairs is treated as 2° hotter than measured,
 # so it wins priority over downstairs when both floors are above setpoint.
@@ -567,16 +586,48 @@ class SmartVentController(hass.Hass):
     # ── Event handlers ────────────────────────────────────────────────────────
 
     def on_vent_manual_change(self, entity, attribute, old, new, kwargs):
-        """Detect when a user manually moves a vent (not us)."""
+        """Detect when a user manually moves a vent (not us).
+
+        Debounced: Flair vents are motorized dampers that take several
+        seconds to travel and can report a transient intermediate tilt
+        value while still executing OUR OWN just-issued command. Treating
+        the first mismatched reading as a real override (the old behavior)
+        false-triggers on our own commands and silently locks the vent from
+        automated control for MANUAL_HOLD_MINUTES. Instead, schedule a
+        confirmation check after MANUAL_OVERRIDE_CONFIRM_SEC; only apply the
+        hold if the position STILL doesn't match what we last commanded by
+        then (real user intervention settles and stays; our own transit
+        noise resolves to the commanded value within a few seconds).
+        """
         if entity in self._last_positions:
             # If we just set this, ignore the state callback
             if self._last_positions[entity] == new:
                 return
-        # User moved it manually — hold their position
+        self.run_in(
+            self._confirm_manual_override,
+            MANUAL_OVERRIDE_CONFIRM_SEC,
+            entity=entity,
+            reported=new,
+        )
+
+    def _confirm_manual_override(self, kwargs):
+        """Re-check a suspected manual override after the confirm delay.
+
+        Only latch the hold if the vent's CURRENT position still disagrees
+        with what we last commanded — a transient in-flight reading from our
+        own command will have settled to the commanded value by now, while a
+        genuine user override (or a physically stuck/blocked damper) will
+        still disagree.
+        """
+        entity = kwargs["entity"]
+        expected = self._last_positions.get(entity)
+        current = self.get_state(entity, attribute="current_tilt_position")
+        if expected is not None and current == expected:
+            return  # settled to our commanded value — was just transit noise
         self._manual_holds[entity] = datetime.now() + timedelta(
             minutes=MANUAL_HOLD_MINUTES
         )
-        self.log(f"Manual override detected: {entity} -> {new}%, "
+        self.log(f"Manual override confirmed: {entity} -> {current}%, "
                  f"holding for {MANUAL_HOLD_MINUTES}min")
 
     def on_occupancy_change(self, entity, attribute, old, new, kwargs):
@@ -1155,16 +1206,26 @@ class SmartVentController(hass.Hass):
         factor = 1.0 + (outdoor - HOT_BASE_F) / HOT_SPAN_F
         return min(factor, HOT_FACTOR_MAX)
 
-    def _room_margin(self, key, heating=False):
+    def _room_margin(self, key, heating=False, base_margin=None):
         """Activation margin (°F past the active setpoint) for a room.
 
         Derived from the room's measured supply-air penalty (which is already
         mode-correct from _update_supply_penalties), amplified by how extreme it
         is outside. A handicapped room gets a lower (earlier-engaging) margin
         automatically, in BOTH heating and cooling. Override, if present, wins.
+
+        base_margin lets a caller use a DIFFERENT ceiling than the priority
+        pass's PRIORITY_MARGIN_BASE while still getting the same handicap-
+        driven pull-down — e.g. fan-assist calls this with
+        base_margin=FAN_ASSIST_OVER so an unhandicapped room keeps its
+        original (higher, more conservative) activation gap, while a room
+        with a measured supply or delivery handicap still engages earlier,
+        proportionally, off that same base.
         """
         if key in PRIORITY_MARGIN_OVERRIDES:
             return PRIORITY_MARGIN_OVERRIDES[key]
+        if base_margin is None:
+            base_margin = PRIORITY_MARGIN_BASE
         penalty = self._supply_penalty.get(key, 0.0)
         # Two orthogonal handicap axes both pull the margin down (engage earlier):
         #   - supply penalty: warm/ineffective supply air (GB1), weather-amplified.
@@ -1173,10 +1234,10 @@ class SmartVentController(hass.Hass):
         # accrues when supply penalty is low), so summing them never
         # double-counts the same room on the same cause.
         delivery = self._delivery_penalty.get(key, 0.0)
-        margin = (PRIORITY_MARGIN_BASE
+        margin = (base_margin
                   - PRIORITY_PENALTY_GAIN * penalty * self._weather_factor(heating)
                   - DELIVERY_MARGIN_GAIN * delivery)
-        return max(PRIORITY_MARGIN_MIN, min(PRIORITY_MARGIN_BASE, margin))
+        return max(PRIORITY_MARGIN_MIN, min(base_margin, margin))
 
     def _apply_priority_rooms(self, room_positions, hvac_action,
                               target_cool, target_heat=None, mode=None):
@@ -1411,7 +1472,17 @@ class SmartVentController(hass.Hass):
             return (setpoint - t) if heating else (t - setpoint)
 
         # Beneficiaries: occupied rooms far enough off-target to warrant it.
-        beneficiaries = []  # (off, key, temp)
+        # Activation uses the SAME measured per-room margin as the priority
+        # pass (_room_margin — driven by supply-air penalty and delivery/
+        # capacity handicap), not a flat threshold. Without this, a known-
+        # stuck room (sensor.smart_vent_delivery_handicap already flagging
+        # it) still had to wait for the same flat FAN_ASSIST_OVER=2.0F gap
+        # as every other room before fan-assist would even consider it,
+        # even though the priority pass (active only while the compressor
+        # runs) would have engaged it earlier. The house spends real idle/
+        # fan time between cooling cycles, so this axis needs to be live
+        # here too, not just during active "cooling"/"heating".
+        beneficiaries = []  # (off, key, temp, escalated)
         for zone_name, zone in ZONES.items():
             for room_name, sensors in zone["rooms"].items():
                 key = (zone_name, room_name)
@@ -1425,15 +1496,19 @@ class SmartVentController(hass.Hass):
                 if occ_entity and self.get_state(occ_entity) != "on":
                     if off < OCCUPANCY_OVERRIDE_OVER:
                         continue
-                if off < FAN_ASSIST_OVER:
+                margin = self._room_margin(key, heating, base_margin=FAN_ASSIST_OVER)
+                if off < margin:
                     continue
-                beneficiaries.append((off_by(temp), key, temp))
+                escalated = (off >= PRIORITY_ESCALATE_OVER
+                             or self._delivery_penalty.get(key, 0.0)
+                             >= DELIVERY_ESCALATE_PENALTY)
+                beneficiaries.append((off_by(temp), key, temp, escalated))
 
         beneficiaries.sort(reverse=True)  # worst-off first
         beneficiary_keys = {b[1] for b in beneficiaries}
 
         engaged_any = False
-        for off, key, temp in beneficiaries:
+        for off, key, temp, escalated in beneficiaries:
             zone_name, room_name = key
             # Is there banked oppositely-conditioned air to move? Donors clearly
             # more comfortable than this room and NOT themselves beneficiaries.
@@ -1467,15 +1542,23 @@ class SmartVentController(hass.Hass):
             # heating, coolest when cooling) gives up air most safely.
             donors.sort(key=lambda x: (x[1], -x[2] if heating else x[2]))
             throttled = 0
+            # Escalated (far-over-setpoint or measured delivery-handicap)
+            # beneficiaries get MORE donors thrown at them, same intent as
+            # the priority pass's escalation — a stuck room needs every bit
+            # of banked air we can redirect, not just the standard allotment.
+            max_donors = (PRIORITY_MAX_DONORS * 2 if escalated
+                          else PRIORITY_MAX_DONORS)
             for dkey, docc, dtemp in donors:
-                if throttled >= PRIORITY_MAX_DONORS:
+                if throttled >= max_donors:
                     break
                 room_positions[dkey] = 0
                 throttled += 1
 
             kind = "warm" if heating else "cold"
+            tag = " [ESCALATED]" if escalated else ""
             self.log(f"  FAN-ASSIST {room_name} ({temp:.1f}F, off{off:+.1f}, "
-                     f"{'heat' if heating else 'cool'}, hvac={hvac_action}): "
+                     f"{'heat' if heating else 'cool'}, hvac={hvac_action})"
+                     f"{tag}: "
                      f"blower ON, redirecting banked {kind} air from "
                      f"{throttled} room(s)")
 

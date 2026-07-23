@@ -42,6 +42,8 @@ class FakeController(svc.SmartVentController):
         self.fan_calls = []          # list of fan_mode values set
         self._fan_assist_active = False
         self._cooling_ended_at = None
+        self._supply_penalty = {}
+        self._delivery_penalty = {}
         self.logs = []
 
     # --- HA shims -------------------------------------------------------------
@@ -94,18 +96,18 @@ def run():
     target_heat = 67.0
     results = []
 
-    # Scenario 1: cooling stopped 5 min ago -> WET coil -> must NOT run blower.
-    c = build(hot_room_temp=77.0, donor_temp=68.0, cooling_ended_min_ago=5)
+    # Scenario 1: cooling stopped 2 min ago -> WET coil -> must NOT run blower.
+    c = build(hot_room_temp=77.0, donor_temp=68.0, cooling_ended_min_ago=2)
     c._apply_fan_assist({}, "Auto", "idle", target_cool, target_heat)
     ok1 = (c._fan_mode != "on" and "on" not in c.fan_calls
            and any("coil-dry lockout" in m for m in c.logs))
-    results.append(("wet coil (5m) suppresses blower", ok1))
+    results.append(("wet coil (2m) suppresses blower", ok1))
 
-    # Scenario 2: cooling stopped 35 min ago -> DRY coil -> SHOULD run blower.
-    c = build(hot_room_temp=77.0, donor_temp=68.0, cooling_ended_min_ago=35)
+    # Scenario 2: cooling stopped 10 min ago -> DRY coil -> SHOULD run blower.
+    c = build(hot_room_temp=77.0, donor_temp=68.0, cooling_ended_min_ago=10)
     c._apply_fan_assist({}, "Auto", "idle", target_cool, target_heat)
     ok2 = (c._fan_mode == "on" and "on" in c.fan_calls)
-    results.append(("dry coil (35m) allows blower", ok2))
+    results.append(("dry coil (10m) allows blower", ok2))
 
     # Scenario 3: never cooled this run (_cooling_ended_at None) -> not gated.
     c = build(hot_room_temp=77.0, donor_temp=68.0, cooling_ended_min_ago=None)
@@ -133,11 +135,13 @@ def run():
     ok4 = (c._fan_mode == "on" and not any("coil-dry" in m for m in c.logs))
     results.append(("heating direction never gated", ok4))
 
-    # Scenario 5: lockout boundary exactly at 30m -> dry (>= threshold passes).
-    c = build(hot_room_temp=77.0, donor_temp=68.0, cooling_ended_min_ago=30)
+    # Scenario 5: lockout boundary exactly at FAN_ASSIST_COIL_DRY_MIN -> dry
+    # (>= threshold passes).
+    c = build(hot_room_temp=77.0, donor_temp=68.0,
+              cooling_ended_min_ago=svc.FAN_ASSIST_COIL_DRY_MIN)
     c._apply_fan_assist({}, "Auto", "idle", target_cool, target_heat)
     ok5 = (c._fan_mode == "on")
-    results.append(("boundary 30m allows blower", ok5))
+    results.append((f"boundary {svc.FAN_ASSIST_COIL_DRY_MIN:.0f}m allows blower", ok5))
 
     print("=== Dry-coil lockout unit test ===")
     allok = True
