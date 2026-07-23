@@ -1,12 +1,23 @@
 # Managed by Ansible — do not edit by hand.
 # Source: roles/hermes_gateway/templates/config.yaml.j2
 #
-# ALL-LOCAL exo setup (2026-06-11): the gateway runs entirely on the local
-# exo cluster reachable at 192.168.86.201:52415 (verified from this LXC:
-# ping + /v1/models 200 + live DSv4/Qwen3.6 generation). No cloud provider.
-#   - main reasoning thread  -> DeepSeek-V4-Flash (provider: exo)
-#   - delegate_task subagents -> Qwen3.6 (delegation.model below)
-#   - all auxiliary tasks incl. vision/image -> Qwen3.6 (custom:exo)
+# Main model provider is switchable via hermes_gateway_main_provider
+# (roles/hermes_gateway/defaults/main.yml) — currently: exo.
+#
+# Current split (2026-07-23):
+#   - main reasoning thread  -> DeepSeek-V4-Flash on the local exo cluster
+#     (provider: exo, tracks hermes_gateway_main_provider)
+#   - compression            -> stays on exo/DSv4-Flash too — needs its
+#     1M-token window to compress a context that large; Ollama Cloud's
+#     gemma4 only has a 131K window.
+#   - EVERYTHING ELSE (delegate_task/swarm_run subagents + every other
+#     auxiliary task: vision, web_extract, session_search,
+#     memory_extraction, approval, mcp, title_generation, curator) ->
+#     gemma4 on Ollama Cloud (provider: ollama-cloud, a hermes-agent
+#     BUILT-IN provider — resolves OLLAMA_API_KEY/OLLAMA_BASE_URL from
+#     env automatically, no providers.ollama-cloud config block needed).
+#     Keeps cheap/frequent tasks off the exo cluster's GPU entirely so
+#     they never compete with the main DSv4 thread for compute.
 ---
 model:
   default: mlx-community/DeepSeek-V4-Flash
@@ -17,17 +28,25 @@ model:
 # explicitly so the gateway never probes the cluster's full catalog.
 providers:
   exo:
-    base_url: http://192.168.86.201:52415/v1
+    base_url: {{ hermes_gateway_exo_base_url }}
     api_key: not-needed
     api_mode: chat_completions
     discover_models: false
     models:
-      mlx-community/DeepSeek-V4-Flash:
-        context_length: 1048576
-      mlx-community/Qwen3.6-35B-A3B-8bit:
-        context_length: 262144
+{% for model_id, meta in hermes_gateway_exo_models.items() %}
+      {{ model_id }}:
+        context_length: {{ meta.context_length }}
+{% endfor %}
     extra_body:
       use_prefix_cache: true
+  # Ollama Cloud is a BUILT-IN provider (hermes_cli/auth.py) — it needs
+  # no providers.ollama-cloud config block at all; OLLAMA_API_KEY /
+  # OLLAMA_BASE_URL in env.j2 are all it reads. Listed here only as a
+  # reference of the model catalog var this template draws from.
+  # hermes_gateway_ollama_cloud_models (defaults/main.yml):
+{% for model_id, meta in hermes_gateway_ollama_cloud_models.items() %}
+  #   {{ model_id }}: context_length {{ meta.context_length }}
+{% endfor %}
 
 # Web search for the all-local (exo/DSv4) gateway. brave-free is the
 # primary backend (BRAVE_SEARCH_API_KEY in env); ddgs (keyless DuckDuckGo)
@@ -155,11 +174,11 @@ tool_search:
 # inherited from the parent.
 delegation:
   reasoning_effort: high
-  # Route delegate_task / swarm_run subagents to Qwen3.6 on the local exo
-  # cluster (the lighter model), keeping the DSv4 main thread free for the
-  # orchestrator. Resolution order is arg > delegation.model > parent model.
-  provider: exo
-  model: mlx-community/Qwen3.6-35B-A3B-8bit
+  # Route delegate_task / swarm_run subagents to gemma4 on Ollama Cloud —
+  # keeps the exo cluster's GPU free for the main DSv4 thread only.
+  # Resolution order is arg > delegation.model > parent model.
+  provider: ollama-cloud
+  model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
   # Two-level delegation: orchestrator can spawn leaf subagents but those
   # leaves can't spawn their own subagents. Matches Claude Code's
   # Plan → leaf-research-agent flow without runaway recursion.
@@ -174,43 +193,47 @@ delegation:
   subagent_auto_approve: true
 
 auxiliary:
-  # Vision/image analysis -> Qwen3.6 on the local exo cluster. DSv4 can't
-  # see pixels, so images attached to the main thread are delegated here
-  # (text description fed back to DSv4). Explicit endpoint mirrors the
-  # MacBook/Studio vision config.
+  # Vision/image analysis -> gemma4 on Ollama Cloud (multimodal). DSv4
+  # can't see pixels, so images attached to the main thread are delegated
+  # here (text description fed back to DSv4).
   vision:
-    provider: custom:exo
-    model: mlx-community/Qwen3.6-35B-A3B-8bit
-    base_url: http://192.168.86.201:52415/v1
-    api_key: not-needed
-    api_mode: chat_completions
+    provider: ollama-cloud
+    model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 120
     extra_body: {}
     download_timeout: 30
   web_extract:
-    provider: auto
-    model: ''
+    provider: ollama-cloud
+    model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 360
     extra_body: {}
+  # Compression is the ONE auxiliary task that stays on exo/DSv4-Flash:
+  # it needs a window at least as large as the context being compressed,
+  # and DSv4's 1M-token window is the only one big enough. Explicit
+  # endpoint (not just "provider: exo") so it can't silently follow
+  # hermes_gateway_main_provider if that ever changes away from exo.
   compression:
-    provider: auto
-    model: ''
+    provider: custom:exo
+    model: mlx-community/DeepSeek-V4-Flash
+    base_url: {{ hermes_gateway_exo_base_url }}
+    api_key: not-needed
+    api_mode: chat_completions
     timeout: 120
     extra_body: {}
   session_search:
-    provider: auto
-    model: ''
+    provider: ollama-cloud
+    model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 30
     extra_body: {}
     max_concurrency: 3
   skills_hub:
-    provider: auto
-    model: ''
+    provider: ollama-cloud
+    model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 30
     extra_body: {}
   memory_extraction:
-    provider: auto
-    model: ''
+    provider: ollama-cloud
+    model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 30
     extra_body: {}
     # Phase 2 controls — only consumed by tools/memory_extraction
@@ -230,23 +253,23 @@ auxiliary:
     # human review is genuinely conflicting facts.
     auto_commit_session_end: true
   approval:
-    provider: auto
-    model: ''
+    provider: ollama-cloud
+    model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 30
     extra_body: {}
   mcp:
-    provider: auto
-    model: ''
+    provider: ollama-cloud
+    model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 30
     extra_body: {}
   title_generation:
-    provider: auto
-    model: ''
+    provider: ollama-cloud
+    model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 30
     extra_body: {}
   curator:
-    provider: auto
-    model: ''
+    provider: ollama-cloud
+    model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 600
     extra_body: {}
 
@@ -263,6 +286,33 @@ memory:
   # on a headless gateway; auto_commit_session_end stays false (above) so
   # extracted entries land in proposals only, never silently committed.
   auto_extract: true
+
+# Persistent remote backend (`hermes serve`, systemd unit
+# hermes-serve.service) — gates GUI/Desktop access behind Authentik SSO
+# via Hermes's own bundled self-hosted OIDC dashboard-auth provider
+# (standard OIDC discovery + PKCE; Hermes verifies the ID token itself
+# and mints its own signed session cookie — NOT an nginx forward-auth
+# wrapper). Provider/application/PKCE client provisioned by
+# roles/authentik_provider/tasks/hermes.yml. lb-01's nginx
+# (hermes.chi.lab.amd-e.com) only does TLS termination + WebSocket
+# passthrough + the internal-network ACL for this vhost.
+dashboard:
+  oauth:
+    provider: self-hosted
+    self_hosted:
+      issuer: "https://auth.chi.lab.amd-e.com/application/o/hermes-dashboard/"
+      client_id: "hermes-dashboard"
+      scopes: "openid profile email"
+  # Uvicorn's proxy_headers trust only 127.0.0.1 by default
+  # (forwarded_allow_ips, not exposed via hermes serve's CLI flags) — it
+  # silently ignores lb-01's X-Forwarded-Proto header since lb-01
+  # (172.16.0.30) isn't localhost, so the OAuth redirect_uri build falls
+  # back to http:// instead of https://, which Authentik's strict
+  # redirect-uri matching then rejects. dashboard.public_url sidesteps
+  # proxy-header reconstruction entirely by declaring the authoritative
+  # public URL outright (see hermes_cli/dashboard_auth/prefix.py
+  # resolve_public_url()).
+  public_url: "https://hermes.chi.lab.amd-e.com"
 
 skills:
   # Skip the bulky <available_skills> index in the system prompt; the model

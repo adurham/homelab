@@ -54,3 +54,53 @@ hermes_gateway_ssh_targets:
     hostname: 192.168.86.202
     user: adam.durham
     description: "M4 Ultra Mac Studio — exo cluster node 2"
+
+# Which provider is the MAIN reasoning thread. All three provider blocks
+# (exo / anthropic / ollama-cloud) are always rendered in config.yaml.j2
+# with working credentials, so switching is just this var + a re-run of
+# the play — no manual editing required.
+#
+# Current setup (2026-07-23): exo/DeepSeek-V4-Flash is main + backs
+# compression (needs its 1M-token window); everything else — delegation
+# subagents and every other auxiliary task — routes to gemma4 on Ollama
+# Cloud, so a totally free local model still shoulders the expensive
+# heavy-lifting main thread while cheap/frequent tasks don't compete
+# with it for cluster GPU time.
+hermes_gateway_main_provider: exo
+
+# exo cluster API endpoint — OpenAI-compatible /v1, no auth required.
+# Currently coordinator is m4-1; if you migrate it, change this one var
+# and the next ansible apply re-renders config.yaml so /model picks it up.
+# Port 52415 is exo's default API port (see exo/start_cluster.sh).
+hermes_gateway_exo_base_url: "http://192.168.86.201:52415/v1"
+
+# Models currently loaded on the exo cluster. Hermes /model picker shows
+# exactly this set (discover_models: false in the rendered config.yaml),
+# because exo's /v1/models returns the full ~120-entry catalog rather than
+# the running subset. Verify against the live cluster with:
+#   curl http://192.168.86.201:52415/ollama/api/ps
+# and update this dict to match before re-applying the play.
+# context_length is the per-model override that lands in
+# providers.exo.models.<id>.context_length and is honored by AIAgent
+# startup, /model switch, and gateway /info displays.
+hermes_gateway_exo_models:
+  mlx-community/Qwen3.6-35B-A3B-8bit:
+    context_length: 262144
+  mlx-community/DeepSeek-V4-Flash:
+    context_length: 1048576
+
+# Ollama Cloud (ollama.com) model catalog, keyed the same way as
+# hermes_gateway_exo_models. Model IDs are the CLEAN form
+# (e.g. "gemma4:31b"), matching what Hermes strips models.dev's
+# ":cloud" suffix down to internally.
+hermes_gateway_ollama_cloud_models:
+  "gemma4:31b":
+    context_length: 131072
+  deepseek-v4-flash:
+    context_length: 163840
+
+# The single model (from hermes_gateway_ollama_cloud_models above) that
+# backs delegation subagents and every auxiliary task except compression
+# when hermes_gateway_main_provider is exo. One var to bump if you want
+# to swap gemma4 for a different Ollama Cloud model later.
+hermes_gateway_ollama_cloud_aux_model: "gemma4:31b"
