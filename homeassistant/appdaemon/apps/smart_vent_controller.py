@@ -268,6 +268,29 @@ UNOCC_THROTTLE_UPSTAIRS   = 3.0   # empty 2F room -> 50% (was +1F)
 UNOCC_HOT_OVERRIDE_DOWN   = 3.0   # empty 1F room -> 100% at +3F
 UNOCC_HOT_OVERRIDE_UP     = 5.0   # empty 2F room -> 100% at +5F (solar load)
 
+# ── Per-floor OCCUPIED deadband (cooling season, data-driven 2026-07-17) ───
+# 96h floor-average comparison: downstairs holds a much tighter band than
+# upstairs (mean gap 1.6F; night gap ~1.2F, day gap ~2.0F, widening to 3-5F
+# during peak sun hours). Before this, ANY occupied room >DEADBAND (1°F)
+# over setpoint locked to 100% and became donor-immune, regardless of floor
+# — so an occupied downstairs room a fraction of a degree over setpoint was
+# treated exactly like an occupied upstairs room fighting real solar/duct
+# load. Downstairs' lower heat load means it drifts back on its own; it
+# doesn't need vents open "as long or as wide" as upstairs to stay
+# comfortable. Occupied downstairs now tolerates more real deviation before
+# pinning to 100%; occupied upstairs keeps the original tight (protective)
+# deadband (numerically equal to DEADBAND, so upstairs behavior is
+# unchanged).
+OCC_DEADBAND_DOWNSTAIRS = 1.5
+OCC_DEADBAND_UPSTAIRS   = 1.0
+
+# Cross-floor donor threshold: downstairs rooms need less proven per-cycle
+# margin to qualify as a donor to an UPSTAIRS beneficiary than the flat
+# PRIORITY_DONOR_COOLER_BY requires — downstairs is empirically cooler on
+# average (same 7/17 data), so we don't need to wait for a big instantaneous
+# gap to trust it has spare cold air to give up.
+PRIORITY_DONOR_COOLER_BY_CROSS_FLOOR = 0.75
+
 # Hysteresis: once a vent opens, the zone must drop this far BELOW the
 # close threshold before we actually close it. Prevents flapping at setpoint.
 HYSTERESIS = 0.5
@@ -802,12 +825,15 @@ class SmartVentController(hass.Hass):
                     if zone_name == "upstairs":
                         unocc_throttle = UNOCC_THROTTLE_UPSTAIRS
                         unocc_hot_override = UNOCC_HOT_OVERRIDE_UP
+                        occ_deadband = OCC_DEADBAND_UPSTAIRS
                     else:  # downstairs + basement
                         unocc_throttle = UNOCC_THROTTLE_DOWNSTAIRS
                         unocc_hot_override = UNOCC_HOT_OVERRIDE_DOWN
+                        occ_deadband = OCC_DEADBAND_DOWNSTAIRS
                 else:  # heating — keep flat thresholds (not the focus of this tuning)
                     unocc_throttle = DEADBAND
                     unocc_hot_override = OCCUPANCY_OVERRIDE_OVER
+                    occ_deadband = DEADBAND
 
                 if need > OCCUPANCY_OVERRIDE_OVER:
                     pos = 100
@@ -818,39 +844,47 @@ class SmartVentController(hass.Hass):
                     # the room is hot enough that cooling it matters even empty.
                     pos = 100
                     reason = f"hot, unoccupied ({need:+.1f}) — 100% (floor override)"
-                elif need > DEADBAND * 3:
-                    if is_occupied:
+                elif is_occupied:
+                    # Per-floor OCCUPIED deadband: downstairs tolerates more
+                    # real deviation before locking to 100% (and becoming
+                    # donor-immune) than upstairs does — see OCC_DEADBAND_*
+                    # comment above. Numerically equal to DEADBAND for
+                    # upstairs, so upstairs behavior is unchanged.
+                    if need > occ_deadband:
                         pos = 100
-                        reason = f"high need, occupied ({need:+.1f})"
-                    else:
-                        pos = 50
-                        reason = f"high need, unoccupied ({need:+.1f}) — 50%"
-                elif need > DEADBAND:
-                    if is_occupied:
-                        pos = 100
-                        reason = f"needs airflow, occupied ({need:+.1f})"
-                    else:
-                        # Per-floor unoccupied throttle: sacrifice empty rooms
-                        # at their floor's drift target.
-                        if need > unocc_throttle:
-                            pos = 50
-                            reason = (f"needs airflow, unoccupied ({need:+.1f}) "
-                                      f"— 50% (floor throttle {unocc_throttle:+.0f})")
-                        else:
-                            pos = 50
-                            reason = f"needs airflow, unoccupied ({need:+.1f}) — 50%"
-                elif need > -DEADBAND:
-                    if is_occupied:
+                        reason = (f"needs airflow, occupied ({need:+.1f}) "
+                                  f"— 100% (floor deadband {occ_deadband:+.1f})")
+                    elif need > -DEADBAND:
                         pos = 50
                         reason = f"near setpoint, occupied ({need:+.1f})"
                     else:
-                        # Unoccupied and near setpoint — close it
                         if prev and prev > 0 and need > -(DEADBAND + HYSTERESIS):
                             pos = 50
-                            reason = f"unoccupied hysteresis ({need:+.1f})"
+                            reason = f"hysteresis ({need:+.1f})"
                         else:
                             pos = 0
-                            reason = f"unoccupied, near setpoint ({need:+.1f})"
+                            reason = f"satisfied ({need:+.1f})"
+                elif need > DEADBAND * 3:
+                    pos = 50
+                    reason = f"high need, unoccupied ({need:+.1f}) — 50%"
+                elif need > DEADBAND:
+                    # Per-floor unoccupied throttle: sacrifice empty rooms
+                    # at their floor's drift target.
+                    if need > unocc_throttle:
+                        pos = 50
+                        reason = (f"needs airflow, unoccupied ({need:+.1f}) "
+                                  f"— 50% (floor throttle {unocc_throttle:+.0f})")
+                    else:
+                        pos = 50
+                        reason = f"needs airflow, unoccupied ({need:+.1f}) — 50%"
+                elif need > -DEADBAND:
+                    # Unoccupied and near setpoint — close it
+                    if prev and prev > 0 and need > -(DEADBAND + HYSTERESIS):
+                        pos = 50
+                        reason = f"unoccupied hysteresis ({need:+.1f})"
+                    else:
+                        pos = 0
+                        reason = f"unoccupied, near setpoint ({need:+.1f})"
                 else:
                     if prev and prev > 0 and need > -(DEADBAND + HYSTERESIS):
                         pos = 50
@@ -1067,9 +1101,19 @@ class SmartVentController(hass.Hass):
                         for (zn, rn), p in self._delivery_penalty.items()
                         if p >= 0.01}
             worst = max(self._delivery_penalty.values(), default=0.0)
+            # state must be a string, not a bare 0.0/0. AppDaemon's HTTP
+            # kwarg-cleaning (utils.clean_http_kwargs -> remove_literals)
+            # strips any kwarg whose value is `in (None, False)` — and in
+            # Python 0.0 == False, so a literal 0.0 state gets silently
+            # dropped from the outgoing POST body entirely. HA's REST API
+            # then 400s with "No state specified." Reproduced directly
+            # against /api/states on 2026-07-17: identical payload with
+            # state=0.0 (float) fails, state="0.0" (str) succeeds. Only
+            # bites when the house is fully caught up (worst == 0.0), which
+            # is exactly why it was intermittent instead of constant.
             self.set_state(
                 DELIVERY_PENALTY_ENTITY,
-                state=round(worst, 2),
+                state=str(round(worst, 2)),
                 attributes={
                     # Deliberately NO temperature unit / device_class: HA's
                     # Prometheus export would otherwise classify this as a
@@ -1254,11 +1298,19 @@ class SmartVentController(hass.Hass):
                 if dtemp is None:
                     continue
                 # Donor must have real margin in the helpful direction.
+                # Cross-floor relaxation (cooling only): a downstairs donor
+                # feeding an upstairs beneficiary needs less proven gap than
+                # the flat PRIORITY_DONOR_COOLER_BY — downstairs runs cooler
+                # on average (96h data, 2026-07-17), so we trust it sooner.
+                cooler_by = PRIORITY_DONOR_COOLER_BY
+                if (not heating and zone_name == "upstairs"
+                        and zn == "downstairs"):
+                    cooler_by = PRIORITY_DONOR_COOLER_BY_CROSS_FLOOR
                 if heating:
-                    if dtemp < temp + PRIORITY_DONOR_COOLER_BY:
+                    if dtemp < temp + cooler_by:
                         continue  # not enough warmer than the cold beneficiary
                 else:
-                    if dtemp > temp - PRIORITY_DONOR_COOLER_BY:
+                    if dtemp > temp - cooler_by:
                         continue  # not enough cooler than the hot beneficiary
                 if pos <= donor_pos:
                     continue  # already at/below the chosen throttle position

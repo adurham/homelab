@@ -1,4 +1,11 @@
 ---
-# flair_manager:
-#   module: flair_manager
-#   class: FlairManager
+# Placeholder — HA core's /config/apps/ directory is NOT where AppDaemon apps
+# actually run. The real, deployed AppDaemon app config lives at
+# homeassistant/appdaemon/apps/apps.yaml (deployed to the appdaemon addon's
+# own config dir, /addon_configs/a0d7b954_appdaemon/apps/). This file only
+# exists so the `!include_dir_*` directive in configuration.yaml resolves
+# without warning; it is not loaded by AppDaemon.
+#
+# (2026-07-23: removed a stale commented-out `flair_manager` stanza — that
+# module was deleted long ago; the real vent-control app is
+# smart_vent_controller.py, tracked at appdaemon/apps/.)
