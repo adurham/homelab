@@ -168,6 +168,7 @@ tool_search:
     - ha_list_services
     - ha_call_service
     - text_to_speech
+    - consult
 
 # Subagent (delegate_task / swarm_run) defaults. Mirrors Claude Code's
 # Task tool behavior — orchestrator-style delegation with high reasoning
@@ -272,6 +273,19 @@ auxiliary:
     model: "{{ hermes_gateway_ollama_cloud_aux_model }}"
     timeout: 600
     extra_body: {}
+  # Second-opinion consults (mcp__consult / the `consult` tool) route to
+  # Claude Fable 5 on Anthropic -- the whole point of consult is asking a
+  # SMARTER/different-family reference model, so it must NOT follow the
+  # exo-main / gemma4-aux routing everything else above uses. Explicit
+  # provider+model pin (this auxiliary block is task-first, so a pin here
+  # is honored directly -- no provider-first flattening/pin-vs-block
+  # ambiguity to worry about). Requires CLAUDE_CODE_OAUTH_TOKEN in env.j2
+  # (already set for the Bootstrap Anthropic Credentials task).
+  consult:
+    provider: anthropic
+    model: claude-fable-5
+    timeout: 120
+    extra_body: {}
 
 memory:
   memory_enabled: true
@@ -367,3 +381,4 @@ platform_toolsets:
     - delegation       # delegate_task / swarm_run (deferred — subagent spawning)
     - code_execution   # execute_code              (deferred — sandboxed)
     - image_gen        # image_generate            (deferred)
+    - consult          # consult (second opinion from Fable) (deferred)
