@@ -1,0 +1,3 @@
+smart_vent_controller:
+  module: smart_vent_controller
+  class: SmartVentController

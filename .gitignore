@@ -73,7 +73,7 @@ logs/
 *.temp
 *_temp_*
 temp_*
-test_*
+test_temp_*
 remote_configuration.yaml
 
 # =============================================================================
