@@ -212,8 +212,9 @@ def ensure_thumb(chat, stem) -> Path | None:
                     if local.exists() and local.stat().st_size > 0:
                         rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
                         return local
-            except Exception:  # noqa: BLE001
-                pass  # prefix had no decodable frame (e.g. trailing moov) -> below
+            except Exception as e:  # noqa: BLE001
+                print(f"[thumb] prefix frame decode failed for {chat}/{stem}: {e}", flush=True)
+                # prefix had no decodable frame (e.g. trailing moov) -> below
             finally:
                 try:
                     part.unlink()

@@ -307,8 +307,8 @@ def _rebuild_worker():
             subprocess.run([py, os.path.join(here, "build_manifest.py")],
                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             _last_rebuild[0] = time.time()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[upload] manifest rebuild failed: {e}", flush=True)
 
 
 def rclone(*args):
@@ -334,8 +334,8 @@ def exif_date(path: Path):
                 v = ex.get(tag)
                 if v:
                     return dt.datetime.strptime(str(v), "%Y:%m:%d %H:%M:%S").isoformat()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[upload] exif_date read failed for {path}: {e}", flush=True)
     return None
 
 
@@ -459,8 +459,8 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[ERROR] {p}: {type(e).__name__}: {e}\n{tb}", flush=True)
             try:
                 self._json(500, {"error": f"{type(e).__name__}: {e}", "path": p})
-            except Exception:  # noqa: BLE001 — response already partially sent
-                pass
+            except Exception as e2:  # noqa: BLE001 — response already partially sent
+                print(f"[ERROR] {p}: failed to send 500 response: {e2}", flush=True)
 
     def _rmdir(self, raw):
         """POST /rmdir/<folder> — delete a gallery folder AND its contents
@@ -777,7 +777,6 @@ class Handler(BaseHTTPRequestHandler):
                 break
         if not leaf:
             return self._json(404, {"error": f"item '{stem}' not in '{srcf}'"})
-        ext = os.path.splitext(leaf)[1]
         # ensure dest exists
         rclone("mkdir", f"{SRC}/{destf}")
         # move the original
@@ -853,9 +852,13 @@ class Handler(BaseHTTPRequestHandler):
                     shutil.copyfileobj(item.file, out, CHUNK)
                 sz = tmp.stat().st_size
                 if sz == 0:
-                    errors.append(f"{item.filename}: empty"); tmp.unlink(); continue
+                    errors.append(f"{item.filename}: empty")
+                    tmp.unlink()
+                    continue
                 if sz > MAX_BYTES:
-                    errors.append(f"{item.filename}: too large"); tmp.unlink(); continue
+                    errors.append(f"{item.filename}: too large")
+                    tmp.unlink()
+                    continue
                 date = date_override or exif_date(tmp) or \
                     dt.datetime.fromtimestamp(tmp.stat().st_mtime).isoformat()
                 os.replace(tmp, dest)  # atomic; now visible to the pusher

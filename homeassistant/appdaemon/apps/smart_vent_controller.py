@@ -578,7 +578,7 @@ class SmartVentController(hass.Hass):
 
         # Listen for occupancy changes to react immediately
         for zone in ZONES.values():
-            for room_name, sensors in zone["rooms"].items():
+            for _room_name, sensors in zone["rooms"].items():
                 occ = sensors.get("occupancy")
                 if occ:
                     self.listen_state(self.on_occupancy_change, occ)
@@ -1380,7 +1380,7 @@ class SmartVentController(hass.Hass):
         beneficiaries.sort(key=lambda b: (b[4], b[0]), reverse=True)
         beneficiary_keys = {b[1] for b in beneficiaries}
 
-        for off, key, temp, escalated, is_occupied in beneficiaries:
+        for off, key, temp, escalated, _is_occupied in beneficiaries:
             zone_name, room_name = key
             donor_pos = (PRIORITY_DONOR_POS_ESCALATED if escalated
                          else PRIORITY_DONOR_POS)
@@ -1602,7 +1602,7 @@ class SmartVentController(hass.Hass):
             # — wasted command + log noise for no benefit.
             donor_pos = (PRIORITY_DONOR_POS_ESCALATED if escalated
                          else PRIORITY_DONOR_POS)
-            for dkey, docc, dtemp in donors:
+            for dkey, _docc, _dtemp in donors:
                 if throttled >= max_donors:
                     break
                 room_positions[dkey] = donor_pos
@@ -1634,8 +1634,8 @@ class SmartVentController(hass.Hass):
         """
         worst_hot = 0.0   # most over the cool setpoint
         worst_cold = 0.0  # most under the heat setpoint
-        for zone_name, zone in ZONES.items():
-            for room_name, sensors in zone["rooms"].items():
+        for _zone_name, zone in ZONES.items():
+            for _room_name, sensors in zone["rooms"].items():
                 occ = sensors.get("occupancy")
                 if occ and self.get_state(occ) != "on":
                     continue
@@ -1756,8 +1756,11 @@ class SmartVentController(hass.Hass):
                         self.log(f"Coil sensor stale ({age_s:.0f}s old); "
                                  f"backpressure falls back to static {MAX_CLOSED_RATIO}")
                     return None, f"sensor stale {age_s:.0f}s"
-            except Exception:
-                pass  # don't fail closed on a parse error
+            except Exception as e:
+                self._coil_sensor_fail_count += 1
+                if self._coil_sensor_fail_count <= 2:
+                    self.log(f"Coil sensor freshness check failed to parse "
+                             f"({e}); don't fail closed on a parse error")
 
         # Stuck-sensor check: pull recent history; a live suction sensor always
         # moves during compressor runtime. If zero variation over the window,

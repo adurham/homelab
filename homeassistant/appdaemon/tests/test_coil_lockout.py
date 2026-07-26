@@ -72,8 +72,8 @@ def build(hot_room_temp, donor_temp, cooling_ended_min_ago):
     """One hot occupied upstairs room + one cold occupied basement donor."""
     # Default everyone comfortable & unoccupied.
     temps, occ = {}, {}
-    for zname, zone in svc.ZONES.items():
-        for rname, s in zone["rooms"].items():
+    for _zname, zone in svc.ZONES.items():
+        for _rname, s in zone["rooms"].items():
             temps[s["temp"]] = 72.0
             if s.get("occupancy"):
                 occ[s["occupancy"]] = "off"
@@ -119,8 +119,8 @@ def run():
     # heating has no _cooling_ended_at normally, but prove the gate is cool-only:
     # cold room below heat setpoint, warm donor, cooling_ended 5m ago.
     temps, occ = {}, {}
-    for zname, zone in svc.ZONES.items():
-        for rname, s in zone["rooms"].items():
+    for _zname, zone in svc.ZONES.items():
+        for _rname, s in zone["rooms"].items():
             temps[s["temp"]] = 70.0
             if s.get("occupancy"):
                 occ[s["occupancy"]] = "off"

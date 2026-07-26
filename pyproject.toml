@@ -43,6 +43,19 @@ ignore = [
 "homeassistant/**" = [
     "S310",  # urlopen against config-file URL is fine
 ]
+"scripts/flair_fast_poller.py" = [
+    "S310",  # urlopen against hardcoded https://api.flair.co + config-file HA_URL
+]
+"ansible/roles/media_gallery/files/bulk_ingest.py" = [
+    "S602",  # shell=True for a compound ssh+sudo+python remote pipeline;
+             # operator-invoked local CLI tool, args.ssh comes from the
+             # operator's own CLI args, not untrusted/network input.
+]
+"ansible/roles/media_ingest/files/tg_login_assisted.py" = [
+    "S108",  # /tmp/tg_code default is an operator-overridable env var
+             # (TG_CODE_FILE) for a one-shot manual login flow; not a
+             # long-lived world-writable path an attacker could pre-stage.
+]
 # Local VLM pet-accident detector (runs as a Hermes cron on the Mac, talks to
 # LAN-only go2rtc/VLM/HA endpoints). The flagged patterns are intentional.
 "pet-accident-detector/**" = [

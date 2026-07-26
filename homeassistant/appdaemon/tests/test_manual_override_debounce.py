@@ -25,7 +25,7 @@ Reproduces two real production incidents (2026-07-23):
 """
 import sys
 import types
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ── Stub the appdaemon import chain ────────────────────────────────────────────
 ad = types.ModuleType("appdaemon")
@@ -83,7 +83,7 @@ class FakeController(svc.SmartVentController):
         made BY those callbacks land in a fresh queue for the next wave."""
         pending = self.scheduled
         self.scheduled = []
-        for callback, delay, kwargs in pending:
+        for callback, _delay, kwargs in pending:
             callback(kwargs)
 
     def drain_all(self, max_waves=10):

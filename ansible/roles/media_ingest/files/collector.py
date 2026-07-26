@@ -33,7 +33,6 @@ import datetime as dt
 import logging
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 from telethon import TelegramClient as SourceClient, events
@@ -263,7 +262,8 @@ async def main():
     client.add_event_handler(handle, events.MessageEdited(incoming=True))
     await client.connect()
     if not await client.is_user_authorized():
-        log.error("SESSION NOT AUTHORIZED — run login on this box first."); sys.exit(2)
+        log.error("SESSION NOT AUTHORIZED — run login on this box first.")
+        sys.exit(2)
     me = await client.get_me()
     log.info("Collector collector online as %s (id=%s). Listening...",
              getattr(me, "username", None) or getattr(me, "first_name", "?"), me.id)

@@ -20,7 +20,6 @@ import asyncio
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 from telethon import TelegramClient as SourceClient
@@ -78,7 +77,8 @@ async def do_count(client, filters):
             continue
         try:
             res = await client.get_messages(d.entity, limit=0, filter=InputMessagesFilterPhotoVideo)
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            log(f"  skip {d.name}: {e}")
             continue
         if res.total:
             log(f"  {res.total:6d}  {d.name}")
@@ -120,7 +120,8 @@ async def do_run(client, filters, sleep_s):
                         pushed += 1
                         if pushed % 25 == 0:
                             log(f"   pushed {pushed}; checkpoint {folder}@{maxseen}")
-                            state[key] = maxseen; save_state(state)
+                            state[key] = maxseen
+                            save_state(state)
                 except Exception as e:  # noqa: BLE001
                     log(f"   fail {stem}: {type(e).__name__}: {e}")
                 finally:
@@ -147,7 +148,8 @@ async def main():
     client = SourceClient(SESSION, API_ID, API_HASH)
     await client.connect()
     if not await client.is_user_authorized():
-        log("SESSION NOT AUTHORIZED"); sys.exit(2)
+        log("SESSION NOT AUTHORIZED")
+        sys.exit(2)
     if args.count:
         await do_count(client, args.dialogs)
     else:

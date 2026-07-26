@@ -9,7 +9,7 @@ HASS_URL="${HASS_URL:-http://192.168.86.2:8123}"
 HASS_TOKEN="${HASS_TOKEN:?need HASS_TOKEN}"
 
 LOG_TAG="midea-retry"
-log() { logger -t "$LOG_TAG" -- "$*"; echo "[$(date -Is)] $*"; >&2; }
+log() { logger -t "$LOG_TAG" -- "$*"; echo "[$(date -Is)] $*" >&2; }
 
 # Get Midea credentials from 1Password
 MIDEA_PASS=$(op item get lew43eybfdvuxowz6jbnbzcxwi --field password --reveal 2>/dev/null) || {

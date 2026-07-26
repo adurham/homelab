@@ -17,9 +17,13 @@ Data pushed to HA as sensor.flair_fast_* entities:
 
 Runs as a background loop. Cron-managed or systemd.
 """
-import json, urllib.request, urllib.parse, time, os, sys, logging
+import json
+import urllib.request
+import urllib.parse
+import time
+import sys
+import logging
 from pathlib import Path
-from datetime import datetime, timezone
 
 # --- Config ---
 POLL_INTERVAL = 15  # seconds between Flair API polls
@@ -41,10 +45,14 @@ def load_creds():
     env = Path.home() / ".hermes" / ".env"
     for line in env.read_text().splitlines():
         line = line.strip()
-        if line.startswith("HASS_URL="): HA_URL = line.split("=",1)[1].strip().strip('"').strip("'").rstrip("/")
-        elif line.startswith("HASS_TOKEN="): HA_TOKEN = line.split("=",1)[1].strip().strip('"').strip("'")
-        elif line.startswith("FLAIR_CLIENT_ID="): FLAIR_CLIENT_ID = line.split("=",1)[1].strip()
-        elif line.startswith("FLAIR_CLIENT_SECRET="): FLAIR_CLIENT_SECRET = line.split("=",1)[1].strip()
+        if line.startswith("HASS_URL="):
+            HA_URL = line.split("=", 1)[1].strip().strip('"').strip("'").rstrip("/")
+        elif line.startswith("HASS_TOKEN="):
+            HA_TOKEN = line.split("=", 1)[1].strip().strip('"').strip("'")
+        elif line.startswith("FLAIR_CLIENT_ID="):
+            FLAIR_CLIENT_ID = line.split("=", 1)[1].strip()
+        elif line.startswith("FLAIR_CLIENT_SECRET="):
+            FLAIR_CLIENT_SECRET = line.split("=", 1)[1].strip()
 
 def get_flair_token():
     global FLAIR_TOKEN, FLAIR_TOKEN_EXPIRY
@@ -129,7 +137,6 @@ def c_to_f(c):
 
 def push_to_ha(vents):
     """Push vent data to HA as custom sensors."""
-    now = datetime.now(timezone.utc).isoformat()
     for v in vents:
         # Sanitize name for entity_id
         safe = v["name"].lower().replace(" ", "_").replace("-", "_")

@@ -36,3 +36,14 @@
     name: ssh
     state: reloaded
   failed_when: false
+
+- name: Publish Gallery SPA to encrypted store
+  ansible.builtin.command:
+    cmd: >-
+      rclone
+      --config /home/{{ media_gallery_user }}/.config/rclone/rclone.conf
+      copyto {{ media_gallery_dir }}/gallery_index.html
+      {{ media_gallery_rclone_remote | default('gcrypt:') }}gallery/index.html
+  become: true
+  become_user: "{{ media_gallery_user }}"
+  changed_when: true
