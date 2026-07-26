@@ -6,7 +6,8 @@ controllable clock, then drive _update_delivery_penalties / _room_margin /
 _apply_priority_rooms directly. Exercises the exact GB2 scenario plus the
 double-count and decay guarantees.
 """
-import sys, types
+import sys
+import types
 from datetime import datetime, timedelta
 
 # ---- stub appdaemon module BEFORE importing the controller -------------------
@@ -23,7 +24,7 @@ sys.modules["appdaemon.plugins.hass"] = pkg_hs
 sys.modules["appdaemon.plugins.hass.hassapi"] = hassapi
 
 sys.path.insert(0, "/Users/adam.durham/repos/homelab/homeassistant/appdaemon/apps")
-import smart_vent_controller as svc
+import smart_vent_controller as svc  # noqa: E402
 
 # ---- fake HA backend ---------------------------------------------------------
 class FakeHA(svc.SmartVentController):
@@ -52,8 +53,8 @@ class FakeHA(svc.SmartVentController):
 def fresh():
     ha = FakeHA()
     # set every room's air temp comfortably AT setpoint, vents open, occupancy off
-    for zn, zone in svc.ZONES.items():
-        for rn, s in zone["rooms"].items():
+    for _zn, zone in svc.ZONES.items():
+        for _rn, s in zone["rooms"].items():
             ha.states[s["temp"]] = 72.0
             if s.get("occupancy"):
                 ha.states[s["occupancy"]] = "off"

@@ -42,17 +42,12 @@
         group: root
         mode: '0644'
         validate: "sshd -t -f %s"
-      register: ssh_harden
-
-    - name: Reload sshd if hardening changed
-      ansible.builtin.systemd:
-        name: ssh
-        state: reloaded
-      when: ssh_harden.changed
-      failed_when: false
+      notify: Reload sshd
 
     # ── 2. Cluster firewall config (write once; pmxcfs replicates) ─────────
-    - name: Deploy cluster firewall config (VXLAN allow + mgmt lockdown)
+    # Default `linear` strategy is used throughout this repo (no `strategy:
+    # free` override anywhere) — run_once is safe here.
+    - name: Deploy cluster firewall config (VXLAN allow + mgmt lockdown)  # noqa: run-once[task]
       ansible.builtin.template:
         src: templates/pve_cluster_firewall.fw.j2
         dest: /etc/pve/firewall/cluster.fw
@@ -60,7 +55,7 @@
       run_once: true
       delegate_to: "{{ groups['proxmox_nodes'][0] }}"
 
-    - name: Validate firewall config compiles
+    - name: Validate firewall config compiles  # noqa: run-once[task]
       ansible.builtin.command: pve-firewall compile
       run_once: true
       delegate_to: "{{ groups['proxmox_nodes'][0] }}"
@@ -78,10 +73,17 @@
         name: pve-firewall
         state: restarted
 
-    - name: Verify cluster still quorate after firewall apply
+    - name: Verify cluster still quorate after firewall apply  # noqa: run-once[task]
       ansible.builtin.command: pvecm status
       run_once: true
       delegate_to: "{{ groups['proxmox_nodes'][0] }}"
       register: quorum
       changed_when: false
       failed_when: "'Quorate:' not in quorum.stdout or 'Yes' not in (quorum.stdout | regex_search('Quorate:.*'))"
+
+  handlers:
+    - name: Reload sshd
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded
+      failed_when: false

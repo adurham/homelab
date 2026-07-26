@@ -20,6 +20,12 @@ jobs:
           pip install ansible-core ansible-lint
       - name: Install ansible collections
         run: ansible-galaxy collection install -r ansible/requirements.yml
+      # ansible.cfg points vault_password_file at ansible/.vault_pass, which is
+      # gitignored (never committed). CI doesn't need to decrypt real secrets —
+      # ansible-lint only needs *a* password file to exist so it can parse
+      # vault-encrypted vars files structurally instead of erroring out.
+      - name: Provide a CI-only dummy vault password file
+        run: echo "ci-lint-only-not-a-real-secret" > ansible/.vault_pass
       - name: ansible-lint
         run: ansible-lint --offline
 
@@ -30,6 +36,10 @@ jobs:
       - uses: ludeeus/action-shellcheck@2.0.0
         with:
           severity: warning
+          # .sh.j2 files are Jinja2 templates, not valid bash — the {{ }}
+          # var interpolation trips SC1083 (literal brace). Ansible renders
+          # them before they ever run as a shell script.
+          ignore_paths: '**/*.sh.j2'
         env:
           SHELLCHECK_OPTS: -e SC1091
 
@@ -80,6 +90,8 @@ jobs:
         run: pip install ansible-core
       - name: Install ansible collections
         run: ansible-galaxy collection install -r ansible/requirements.yml
+      - name: Provide a CI-only dummy vault password file
+        run: echo "ci-lint-only-not-a-real-secret" > ansible/.vault_pass
       - name: Validate inventory graph
         working-directory: ansible
         run: ansible-inventory -i inventory --graph

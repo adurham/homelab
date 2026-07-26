@@ -62,8 +62,8 @@ def exif_date(path):
                 v = ex.get(tag)
                 if v:
                     return dt.datetime.strptime(str(v), "%Y:%m:%d %H:%M:%S").isoformat()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        log(f"exif_date read failed for {path}: {e}")
     return None
 
 
@@ -83,10 +83,12 @@ def main():
 
     src = Path(os.path.expanduser(args.src))
     if not src.is_dir():
-        log(f"src not a directory: {src}"); sys.exit(1)
+        log(f"src not a directory: {src}")
+        sys.exit(1)
     folder = "".join(c if c.isalnum() or c in " -_" else "" for c in args.folder).strip().replace(" ", "-")
     if not folder:
-        log("bad folder name"); sys.exit(1)
+        log("bad folder name")
+        sys.exit(1)
 
     files = [p for p in src.rglob("*") if p.is_file() and p.suffix.lower() in (IMAGE_EXT | VIDEO_EXT)]
     log(f"found {len(files)} media files under {src}")
@@ -126,7 +128,8 @@ def main():
     )
     shutil.rmtree(work, ignore_errors=True)
     if r.returncode != 0:
-        log("rclone copy FAILED"); sys.exit(1)
+        log("rclone copy FAILED")
+        sys.exit(1)
     log("upload complete.")
 
     # write the date sidecar and merge into the CT datemap

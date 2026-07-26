@@ -125,13 +125,15 @@ async def run(lookback, dialog_filters, dry_run):
     client = SourceClient(RECONCILE_SESSION, API_ID, API_HASH)
     await client.connect()
     if not await client.is_user_authorized():
-        log.error("SESSION NOT AUTHORIZED — collector login required."); sys.exit(2)
+        log.error("SESSION NOT AUTHORIZED — collector login required.")
+        sys.exit(2)
     dynmap = build_folder_map()
     try:
         excluded = store_client.get_excluded()
     except Exception as e:  # noqa: BLE001
         log.error("excluded fetch failed: %s — aborting to avoid re-adding trash", e)
-        await client.disconnect(); sys.exit(3)
+        await client.disconnect()
+        sys.exit(3)
     log.info("reconcile start: lookback=%d folder_meta=%d excluded=%d dry_run=%s",
              lookback, len(dynmap), len(excluded), dry_run)
 
@@ -167,7 +169,8 @@ async def run(lookback, dialog_filters, dry_run):
             try:
                 path = await msg.download_media(file=str(tmp))
                 if not path or os.path.getsize(path) == 0:
-                    log.warning("empty download %s", stem); continue
+                    log.warning("empty download %s", stem)
+                    continue
                 store_client.push_media(folder, path, stem, date_iso, is_out=False)
                 pushed += 1
                 log.info("PUSHED %s (%s) -> %s", stem, kind, folder)

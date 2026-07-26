@@ -245,8 +245,8 @@ def _trigger_manifest_rebuild():
             [py, os.path.join(here, "build_manifest.py")],
             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[trash] failed to spawn build_manifest.py rebuild: {e}", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
