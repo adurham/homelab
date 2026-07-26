@@ -397,7 +397,7 @@
               },
               {
                 "id": "max",
-                "value": 100
+                "value": 2
               },
               {
                 "id": "custom.lineInterpolation",
@@ -414,8 +414,8 @@
                     "type": "value",
                     "options": {
                       "0": { "text": "Off" },
-                      "50": { "text": "Stage 1" },
-                      "100": { "text": "Stage 2" }
+                      "1": { "text": "Stage 1" },
+                      "2": { "text": "Stage 2" }
                     }
                   }
                 ]
@@ -427,7 +427,7 @@
                   "steps": [
                     { "color": "blue", "value": null },
                     { "color": "orange", "value": 1 },
-                    { "color": "red", "value": 51 }
+                    { "color": "red", "value": 2 }
                   ]
                 }
               }
@@ -453,7 +453,7 @@
       "targets": [
         {
           "datasource": "VictoriaMetrics",
-          "expr": "homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} * 50",
+          "expr": "homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"}",
           "interval": "",
           "legendFormat": "Compressor Stage",
           "refId": "A"
