@@ -40,8 +40,8 @@
     mode: '0755'
 
 - name: Install backup scripts
-  ansible.builtin.copy:
-    src: "{{ item }}"
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
     dest: "/usr/local/bin/{{ item }}"
     owner: root
     group: root

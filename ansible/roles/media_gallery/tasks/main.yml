@@ -256,19 +256,7 @@
     owner: "{{ media_gallery_user }}"
     group: "{{ media_gallery_user }}"
     mode: '0644'
-  register: spa_copy
-
-- name: Publish Gallery SPA into the encrypted store (gcrypt:gallery/index.html)
-  ansible.builtin.command:
-    cmd: >-
-      rclone
-      --config /home/{{ media_gallery_user }}/.config/rclone/rclone.conf
-      copyto {{ media_gallery_dir }}/gallery_index.html
-      {{ media_gallery_rclone_remote | default('gcrypt:') }}gallery/index.html
-  become: true
-  become_user: "{{ media_gallery_user }}"
-  when: spa_copy is changed
-  changed_when: true
+  notify: Publish Gallery SPA to encrypted store
 
 - name: Render Gallery Service Unit
   ansible.builtin.template:

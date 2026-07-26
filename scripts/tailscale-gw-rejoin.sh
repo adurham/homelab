@@ -29,7 +29,6 @@
 set -euo pipefail
 
 CT_ID=101
-TAILSCALE_IP=100.86.168.35
 ADVERTISE_ROUTES="172.16.0.0/24"
 HOSTNAME_TS="tailscale-gw"
 KEYCHAIN_SERVICE="TailscaleAPIToken"

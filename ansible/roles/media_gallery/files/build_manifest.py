@@ -202,7 +202,8 @@ async def main():
         client = SourceClient(SESSION, API_ID, API_HASH)
         await client.connect()
         if not await client.is_user_authorized():
-            log("SESSION NOT AUTHORIZED"); sys.exit(2)
+            log("SESSION NOT AUTHORIZED")
+            sys.exit(2)
         log("Full upstream source scan (building date cache)...")
         dates = await date_map(client)
         dates.update(preserved_uploads)
@@ -214,7 +215,8 @@ async def main():
         client = SourceClient(SESSION, API_ID, API_HASH)
         await client.connect()
         if not await client.is_user_authorized():
-            log("SESSION NOT AUTHORIZED"); sys.exit(2)
+            log("SESSION NOT AUTHORIZED")
+            sys.exit(2)
         new_meta = await fetch_meta_for(client, missing)
         await client.disconnect()
         dates.update(new_meta)
