@@ -370,14 +370,13 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Stage 2"
+              "options": "Compressor Stage"
             },
             "properties": [
               {
                 "id": "color",
                 "value": {
-                  "mode": "fixed",
-                  "fixedColor": "red"
+                  "mode": "thresholds"
                 }
               },
               {
@@ -398,7 +397,7 @@
               },
               {
                 "id": "max",
-                "value": 1
+                "value": 100
               },
               {
                 "id": "custom.lineInterpolation",
@@ -415,80 +414,21 @@
                     "type": "value",
                     "options": {
                       "0": { "text": "Off" },
-                      "1": { "text": "On" }
+                      "50": { "text": "Stage 1" },
+                      "100": { "text": "Stage 2" }
                     }
                   }
                 ]
               },
               {
-                "id": "custom.hideFrom",
+                "id": "thresholds",
                 "value": {
-                  "legend": true,
-                  "tooltip": false,
-                  "viz": false
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Stage 1"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "orange"
-                }
-              },
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "min",
-                "value": 0
-              },
-              {
-                "id": "max",
-                "value": 1
-              },
-              {
-                "id": "custom.lineInterpolation",
-                "value": "stepAfter"
-              },
-              {
-                "id": "custom.fillOpacity",
-                "value": 40
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "0": { "text": "Off" },
-                      "1": { "text": "On" }
-                    }
-                  }
-                ]
-              },
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": true,
-                  "tooltip": false,
-                  "viz": false
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "blue", "value": null },
+                    { "color": "orange", "value": 1 },
+                    { "color": "red", "value": 51 }
+                  ]
                 }
               }
             ]
@@ -513,17 +453,10 @@
       "targets": [
         {
           "datasource": "VictoriaMetrics",
-          "expr": "(homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == bool 2)",
+          "expr": "homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} * 50",
           "interval": "",
-          "legendFormat": "Stage 2",
+          "legendFormat": "Compressor Stage",
           "refId": "A"
-        },
-        {
-          "datasource": "VictoriaMetrics",
-          "expr": "(homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == bool 1)",
-          "interval": "",
-          "legendFormat": "Stage 1",
-          "refId": "B"
         },
         {
           "datasource": "VictoriaMetrics",
