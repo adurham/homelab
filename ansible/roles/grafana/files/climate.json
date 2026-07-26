@@ -61,15 +61,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -118,12 +135,12 @@
                     "refId": "C"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_left_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_left_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_right_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.living_room_right_vent_position\"} / 50",
                     "legendFormat": "Vent Position (B)",
                     "refId": "E"
                 }
@@ -266,15 +283,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -318,7 +352,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.kitchen_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.kitchen_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
@@ -451,15 +485,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -503,7 +554,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.dining_room_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.dining_room_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
@@ -636,15 +687,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -688,7 +756,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.hallway_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.hallway_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
@@ -821,15 +889,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -883,17 +968,17 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_a_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_a_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "E"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_b_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_b_vent_position\"} / 50",
                     "legendFormat": "Vent Position (B)",
                     "refId": "F"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_c_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bedroom_c_vent_position\"} / 50",
                     "legendFormat": "Vent Position (C)",
                     "refId": "G"
                 }
@@ -1046,15 +1131,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -1098,7 +1200,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bathroom_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.main_bathroom_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
@@ -1231,15 +1333,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -1283,7 +1402,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.laundry_room_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.laundry_room_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
@@ -1519,15 +1638,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -1571,7 +1707,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 },
@@ -1581,7 +1717,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_a_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_a_vent_position\"} / 50",
                     "legendFormat": "Vent Position (B)",
                     "refId": "E"
                 }
@@ -1700,15 +1836,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -1762,17 +1915,17 @@
                     "refId": "G"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_a_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_a_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_b_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_b_vent_position\"} / 50",
                     "legendFormat": "Vent Position (B)",
                     "refId": "C"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_c_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_c_vent_position\"} / 50",
                     "legendFormat": "Vent Position (C)",
                     "refId": "F"
                 }
@@ -1901,15 +2054,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -1953,7 +2123,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_b_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_b_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 },
@@ -1963,7 +2133,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_vent_position\"} / 50",
                     "legendFormat": "Vent Position (B)",
                     "refId": "E"
                 }
@@ -2082,15 +2252,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -2134,7 +2321,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_2_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_2_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 }
@@ -2267,15 +2454,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -2319,7 +2523,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "B"
                 }
@@ -2442,15 +2646,32 @@
                             },
                             {
                                 "id": "unit",
-                                "value": "percent"
+                                "value": "none"
+                            },
+                            {
+                                "id": "decimals",
+                                "value": 0
                             },
                             {
                                 "id": "max",
-                                "value": 100
+                                "value": 2
                             },
                             {
                                 "id": "min",
                                 "value": 0
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "type": "value",
+                                        "options": {
+                                            "0": { "text": "0%" },
+                                            "1": { "text": "50%" },
+                                            "2": { "text": "100%" }
+                                        }
+                                    }
+                                ]
                             },
                             {
                                 "id": "custom.axisLabel",
@@ -2494,7 +2715,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.basement_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.basement_vent_position\"} / 50",
                     "legendFormat": "Vent Position (A)",
                     "refId": "B"
                 }
