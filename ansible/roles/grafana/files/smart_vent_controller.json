@@ -138,6 +138,17 @@
      }
     ]
    },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": ["lastNotNull", "mean", "max"]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
    "targets": [
     {
      "expr": "homeassistant_sensor_temperature_celsius{entity=~\"sensor.guest_bedroom_1_temperature|sensor.guest_bedroom_2_temperature|sensor.game_room_temperature|sensor.cat_room_temperature|sensor.guest_bathroom_temperature\"}",
@@ -195,6 +206,17 @@
      }
     }
    },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": ["lastNotNull", "mean", "max"]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
    "targets": [
     {
      "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.guest_bedroom_1_b_vent_position|sensor.guest_bedroom_1_vent_position|sensor.guest_bedroom_2_vent_position|sensor.game_room_c_vent_position|sensor.game_room_b_vent_position|sensor.game_room_a_vent_position|sensor.cat_room_a_vent_position|sensor.cat_room_b_vent_position|sensor.guest_bathroom_vent_position\"}",
@@ -229,6 +251,17 @@
      }
     }
    },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": ["lastNotNull", "mean", "max"]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
    "targets": [
     {
      "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.main_bedroom_c_vent_position|sensor.main_bedroom_a_vent_position|sensor.main_bedroom_b_vent_position|sensor.main_bathroom_vent_position|sensor.hallway_vent_position|sensor.living_room_left_vent_position|sensor.living_room_right_vent_position|sensor.kitchen_vent_position|sensor.dining_room_vent_position|sensor.laundry_room_vent_position|sensor.basement_vent_position\"}",
@@ -259,6 +292,17 @@
      "color": {
       "mode": "palette-classic"
      }
+    }
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": ["lastNotNull", "mean", "max"]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
     }
    },
    "targets": [
@@ -390,8 +434,9 @@
    ],
    "options": {
     "legend": {
-     "displayMode": "list",
-     "placement": "right"
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": ["lastNotNull", "mean", "max"]
     },
     "tooltip": {
      "mode": "single"
@@ -558,7 +603,18 @@
      "legendFormat": "Heat setpoint",
      "refId": "E"
     }
-   ]
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": ["lastNotNull", "mean", "max"]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   }
   },
   {
    "id": 8,
@@ -591,7 +647,18 @@
      "legendFormat": "{{friendly_name}}",
      "refId": "A"
     }
-   ]
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": ["lastNotNull", "mean", "max"]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   }
   },
   {
    "id": 9,
@@ -665,8 +732,9 @@
    ],
    "options": {
     "legend": {
-     "displayMode": "list",
-     "placement": "right"
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": ["lastNotNull", "mean", "max"]
     },
     "tooltip": {
      "mode": "single"
@@ -717,7 +785,18 @@
      "legendFormat": "{{friendly_name}}",
      "refId": "A"
     }
-   ]
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": ["lastNotNull", "mean", "max"]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   }
   },
   {
    "id": 10,
@@ -820,8 +899,9 @@
    },
    "options": {
     "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": ["lastNotNull", "mean", "max"]
     },
     "tooltip": {
      "mode": "multi"
@@ -879,6 +959,7 @@
      "displayMode": "table",
      "placement": "right",
      "calcs": [
+      "lastNotNull",
       "mean",
       "max"
      ]
@@ -959,8 +1040,9 @@
    },
    "options": {
     "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": ["lastNotNull", "mean", "max"]
     },
     "tooltip": {
      "mode": "single"
