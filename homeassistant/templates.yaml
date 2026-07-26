@@ -81,6 +81,31 @@
       unit_of_measurement: "%"
       state: "{{ state_attr('cover.guest_bedroom_1_8136_vent', 'current_tilt_position') | float(0) }}"
 
+    - name: "Guest Bedroom 1 (B) Vent Position"
+      unique_id: guest_bedroom_1_8d6d_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.guest_bedroom_1_8d6d_vent', 'current_tilt_position') | float(0) }}"
+
+    - name: "Game Room (C) Vent Position"
+      unique_id: game_room_889a_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.game_room_889a_vent', 'current_tilt_position') | float(0) }}"
+
+    - name: "Cat Room (A) Vent Position"
+      unique_id: cat_room_b58e_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.cat_room_b58e_vent', 'current_tilt_position') | float(0) }}"
+
+    - name: "Cat Room (B) Vent Position"
+      unique_id: cat_room_3075_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.cat_room_3075_vent', 'current_tilt_position') | float(0) }}"
+
+    - name: "Guest Bathroom Vent Position"
+      unique_id: guest_bathroom_e5a3_vent_position
+      unit_of_measurement: "%"
+      state: "{{ state_attr('cover.guest_bathroom_e5a3_vent', 'current_tilt_position') | float(0) }}"
+
     - name: "Basement Vent Position"
       unique_id: basement_4d79_vent_position
       unit_of_measurement: "%"
