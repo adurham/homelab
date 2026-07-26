@@ -55,7 +55,7 @@
         },
         "overrides": []
       },
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "min", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
         {
           "datasource": "VictoriaMetrics",
@@ -112,7 +112,7 @@
           {"matcher": {"id": "byName", "options": "Idle/fan/off"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}]}
         ]
       },
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
         {
           "datasource": "VictoriaMetrics",
@@ -151,7 +151,7 @@
         },
         "overrides": []
       },
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
         {
           "datasource": "VictoriaMetrics",
@@ -179,7 +179,7 @@
           {"matcher": {"id": "byName", "options": "Cool setpoint"}, "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 10]}}, {"id": "custom.lineWidth", "value": 1}, {"id": "custom.fillOpacity", "value": 0}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-blue"}}]}
         ]
       },
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
         {
           "datasource": "VictoriaMetrics",
@@ -228,7 +228,7 @@
           {"matcher": {"id": "byName", "options": "Stage 2 trigger (+2F)"}, "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [4, 4]}}, {"id": "custom.lineWidth", "value": 1}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]}
         ]
       },
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
         {
           "datasource": "VictoriaMetrics",
@@ -267,7 +267,7 @@
         },
         "overrides": []
       },
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
         {
           "datasource": "VictoriaMetrics",
@@ -295,7 +295,7 @@
           {"matcher": {"id": "byName", "options": "Guest Bedroom 1"}, "properties": [{"id": "custom.lineWidth", "value": 4}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}
         ]
       },
-      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "mean", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
         {"datasource": "VictoriaMetrics", "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_temperature\"} * 1.8) + 32", "interval": "", "legendFormat": "Guest Bedroom 1", "refId": "A"},
         {"datasource": "VictoriaMetrics", "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_2_temperature\"} * 1.8) + 32", "interval": "", "legendFormat": "Guest Bedroom 2", "refId": "C"},
@@ -333,7 +333,7 @@
         },
         "overrides": []
       },
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
         {
           "datasource": "VictoriaMetrics",
@@ -360,7 +360,7 @@
           {"matcher": {"id": "byRegexp", "options": ".*Guest Bedroom 1.*"}, "properties": [{"id": "custom.lineWidth", "value": 4}]}
         ]
       },
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"]}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
         {
           "datasource": "VictoriaMetrics",
