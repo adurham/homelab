@@ -1,0 +1,54 @@
+# HA Host Disk Space Watchdog
+# Added 2026-07-26 after a near-outage: root filesystem (28GB overlay
+# partition on HAOS Green) dropped to ~1.2GB free, blocking
+# `ha store apps install` with "not enough free space". Root cause was
+# 15 unpruned `pre-deploy-*` ansible backups (5.4GB) plus normal Docker
+# image/build-cache growth from add-on updates. The ansible playbook now
+# auto-prunes old pre-deploy backups (see deploy_ha_automations.yml), but
+# Docker image bloat and other slow leaks are NOT self-correcting, so
+# this watchdog gives an early warning before the disk gets anywhere
+# near the point where `ha store apps install` / add-on rebuilds fail.
+#
+# sensor.system_monitor_disk_free (System Monitor integration, GiB) is
+# the same free-space entity mirrored to VictoriaMetrics via the
+# Prometheus exporter — trend history for this incident was pulled from
+# that exact series.
+- alias: "Infrastructure: HA Host Disk Space Watchdog"
+  id: "infrastructure_disk_space_watchdog"
+  description: >-
+    Warn when the HA host's root filesystem free space drops below 3GB
+    (out of 28GB total) — historically ~1.2-1.7GB free is where
+    `ha store apps install` and add-on rebuilds start failing.
+  mode: single
+
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.system_monitor_disk_free
+      below: 3
+      for: "00:10:00"
+
+  action:
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "WARNING: HA Host Disk Space Low"
+        message: >-
+          {{ states('sensor.system_monitor_disk_free') }}GB free on the
+          Home Assistant host (28GB total). Add-on installs/rebuilds may
+          start failing soon. Check `ha backups list` for unpruned
+          pre-deploy backups, and consider `ha supervisor repair`
+          (emergency-only — triggers add-on rebuilds and can leave a
+          stale job lock; follow with `ha supervisor restart` if so).
+        data:
+          push:
+            sound:
+              name: "default"
+              critical: 0
+              volume: 0.8
+
+    - service: persistent_notification.create
+      data:
+        title: "HA Host Disk Space Low"
+        message: >-
+          {{ states('sensor.system_monitor_disk_free') }}GB free
+          (of 28GB). See mobile notification for remediation steps.
+        notification_id: "disk_space_watchdog"

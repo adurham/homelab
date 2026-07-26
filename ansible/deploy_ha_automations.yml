@@ -19,6 +19,14 @@
     ha_root: "{{ playbook_dir }}/../homeassistant"
     ha_restart: false
     ssh_opts: "-o StrictHostKeyChecking=accept-new"
+    # How many pre-deploy backups to retain (most recent N by date). These
+    # backups have NO built-in retention (unlike HA's own daily automatic
+    # backups, which cap at 3 copies via HA's own backup manager) and
+    # accumulate ~330-400MB per deploy run — 15 of them ate 5.4GB of the
+    # 28GB disk and contributed to a near-outage (2026-07-26, freed via
+    # `ha backups remove`). Pruned after every deploy so this can't
+    # silently recur.
+    pre_deploy_backup_keep: 3
     # AppDaemon apps live under the addon's own config dir, NOT /config/apps
     # (that is a placeholder). The addon slug is part of the path. AppDaemon
     # hot-reloads on file change, so no core restart is needed for these.
@@ -53,6 +61,39 @@
       changed_when: ha_backup.rc == 0
       failed_when: ha_backup.rc != 0
 
+    # Prune old pre-deploy-* backups, keeping only the N most recent
+    # (pre_deploy_backup_keep). These backups have no built-in retention
+    # policy and silently accumulated to 5.4GB/15 copies before this task
+    # was added (2026-07-26 disk-space incident). `ha backups list
+    # --raw-json` sorts everything named pre-deploy-* newest first, then
+    # list-slicing (NOT the `first(N)` filter, which only ever returns a
+    # single element in Jinja2) keeps the first N and marks the rest stale.
+    - name: List backups for pruning
+      ansible.builtin.raw: "ha backups list --raw-json"
+      register: backups_list_raw
+      changed_when: false
+
+    - name: Determine stale pre-deploy backups to remove
+      ansible.builtin.set_fact:
+        pre_deploy_slugs_by_age: >-
+          {{
+            (backups_list_raw.stdout | from_json).data.backups
+            | selectattr('name', 'match', '^pre-deploy-')
+            | sort(attribute='date', reverse=true)
+            | map(attribute='slug') | list
+          }}
+
+    - name: Set stale slugs (everything past the keep count)
+      ansible.builtin.set_fact:
+        stale_pre_deploy_slugs: "{{ pre_deploy_slugs_by_age[pre_deploy_backup_keep | int :] }}"
+
+    - name: Remove stale pre-deploy backups
+      ansible.builtin.raw: "ha backups remove {{ item }}"
+      loop: "{{ stale_pre_deploy_slugs }}"
+      register: prune_result
+      changed_when: prune_result.rc == 0
+      when: stale_pre_deploy_slugs | length > 0
+
     - name: Ensure target directories exist
       ansible.builtin.raw: "mkdir -p /config/automations /config/apps {{ appdaemon_apps_dir }}"
       register: mkdir_result
@@ -76,7 +117,7 @@
       # loads it via `!include_dir_merge_list`. This task SSHes in, lists
       # the remote dir, and rm -f any file not present locally.
       ansible.builtin.shell: |
-        set -e
+        set -eo pipefail
         cd {{ ha_root }}/automations
         local_=$(ls *.yaml | sort)
         remote_=$(ssh -p {{ ansible_port }} {{ ssh_opts }} \
