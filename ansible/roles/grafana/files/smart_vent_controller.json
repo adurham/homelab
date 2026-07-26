@@ -197,7 +197,7 @@
    },
    "targets": [
     {
-     "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.guest_bedroom_1_8d6d_vent_position|sensor.guest_bedroom_1_8136_vent_position|sensor.guest_bedroom_2_1ec7_vent_position|sensor.game_room_889a_vent_position|sensor.game_room_89ae_vent_position|sensor.game_room_0c83_vent_position|sensor.cat_room_b58e_vent_position|sensor.cat_room_3075_vent_position|sensor.guest_bathroom_e5a3_vent_position\"}",
+     "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.guest_bedroom_1_b_vent_position|sensor.guest_bedroom_1_vent_position|sensor.guest_bedroom_2_vent_position|sensor.game_room_c_vent_position|sensor.game_room_b_vent_position|sensor.game_room_a_vent_position|sensor.cat_room_a_vent_position|sensor.cat_room_b_vent_position|sensor.guest_bathroom_vent_position\"}",
      "legendFormat": "{{friendly_name}}",
      "refId": "A"
     }
@@ -231,7 +231,7 @@
    },
    "targets": [
     {
-     "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.main_bedroom_883f_vent_position|sensor.main_bedroom_a96d_vent_position|sensor.main_bedroom_5c2b_vent_position|sensor.main_bathroom_f586_vent_position|sensor.hallway_907e_vent_position|sensor.living_room_fc56_vent_position|sensor.living_room_5d8e_vent_position|sensor.kitchen_d124_vent_position|sensor.dining_room_7a28_vent_position|sensor.laundry_room_d189_vent_position|sensor.basement_4d79_vent_position\"}",
+     "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.main_bedroom_c_vent_position|sensor.main_bedroom_a_vent_position|sensor.main_bedroom_b_vent_position|sensor.main_bathroom_vent_position|sensor.hallway_vent_position|sensor.living_room_left_vent_position|sensor.living_room_right_vent_position|sensor.kitchen_vent_position|sensor.dining_room_vent_position|sensor.laundry_room_vent_position|sensor.basement_vent_position\"}",
      "legendFormat": "{{friendly_name}}",
      "refId": "A"
     }

@@ -1562,7 +1562,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_3075_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b_vent_position\"}",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 },
@@ -1572,7 +1572,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b58e_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_a_vent_position\"}",
                     "legendFormat": "Vent Position (B)",
                     "refId": "E"
                 }
@@ -1644,7 +1644,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_3075_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b_vent_position\"}",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 },
@@ -1654,7 +1654,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_b58e_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.cat_room_a_vent_position\"}",
                     "legendFormat": "Vent Position (B)",
                     "refId": "E"
                 }
@@ -1762,7 +1762,7 @@
                     "refId": "C"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_889a_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_c_vent_position\"}",
                     "legendFormat": "Vent Position (C)",
                     "refId": "F"
                 }
@@ -1854,7 +1854,7 @@
                     "refId": "C"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_889a_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.game_room_c_vent_position\"}",
                     "legendFormat": "Vent Position (C)",
                     "refId": "F"
                 }
@@ -1942,7 +1942,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8d6d_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_b_vent_position\"}",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 },
@@ -1952,7 +1952,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8136_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_vent_position\"}",
                     "legendFormat": "Vent Position (B)",
                     "refId": "E"
                 }
@@ -2024,7 +2024,7 @@
                     "refId": "B"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8d6d_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_b_vent_position\"}",
                     "legendFormat": "Vent Position (A)",
                     "refId": "C"
                 },
@@ -2034,7 +2034,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_8136_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bedroom_1_vent_position\"}",
                     "legendFormat": "Vent Position (B)",
                     "refId": "E"
                 }
@@ -2306,7 +2306,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_e5a3_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_vent_position\"}",
                     "legendFormat": "Vent Position (A)",
                     "refId": "B"
                 }
@@ -2378,7 +2378,7 @@
                     "refId": "D"
                 },
                 {
-                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_e5a3_vent_position\"}",
+                    "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.guest_bathroom_vent_position\"}",
                     "legendFormat": "Vent Position (A)",
                     "refId": "B"
                 }
