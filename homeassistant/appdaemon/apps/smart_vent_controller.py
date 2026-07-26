@@ -146,6 +146,17 @@ ZONES = {
                 "vents": [
                     "cover.laundry_room_d189_vent_2",
                 ],
+                # donor_only: occupancy here is a noisy signal, not a meaningful
+                # one — people are in and out in ~10 min bursts (grabbing
+                # laundry), unlike a bedroom or living room where occupancy
+                # means someone is actually settled in the space. Treating a
+                # transient occupancy blip as demand would let the room
+                # compete for airflow it doesn't really need. Laundry Room can
+                # still be a DONOR (throttled to feed a hotter occupied room)
+                # but never a BENEFICIARY (never steals airflow for itself).
+                # Its own vent position still follows normal temp/occupancy
+                # logic. 2026-07-26.
+                "donor_only": True,
             },
         },
     },
