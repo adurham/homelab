@@ -206,9 +206,20 @@
    "datasource": "VictoriaMetrics",
    "fieldConfig": {
     "defaults": {
-     "unit": "percent",
+     "unit": "none",
+     "decimals": 0,
      "min": 0,
-     "max": 100,
+     "max": 2,
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": { "text": "0%" },
+        "1": { "text": "50%" },
+        "2": { "text": "100%" }
+       }
+      }
+     ],
      "custom": {
       "lineWidth": 2,
       "fillOpacity": 20,
@@ -235,7 +246,7 @@
    },
    "targets": [
     {
-     "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.guest_bedroom_1_b_vent_position|sensor.guest_bedroom_1_vent_position|sensor.guest_bedroom_2_vent_position|sensor.game_room_c_vent_position|sensor.game_room_b_vent_position|sensor.game_room_a_vent_position|sensor.cat_room_a_vent_position|sensor.cat_room_b_vent_position|sensor.guest_bathroom_vent_position\"}",
+     "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.guest_bedroom_1_b_vent_position|sensor.guest_bedroom_1_vent_position|sensor.guest_bedroom_2_vent_position|sensor.game_room_c_vent_position|sensor.game_room_b_vent_position|sensor.game_room_a_vent_position|sensor.cat_room_a_vent_position|sensor.cat_room_b_vent_position|sensor.guest_bathroom_vent_position\"} / 50",
      "legendFormat": "{{friendly_name}}",
      "refId": "A"
     }
@@ -254,9 +265,20 @@
    "datasource": "VictoriaMetrics",
    "fieldConfig": {
     "defaults": {
-     "unit": "percent",
+     "unit": "none",
+     "decimals": 0,
      "min": 0,
-     "max": 100,
+     "max": 2,
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": { "text": "0%" },
+        "1": { "text": "50%" },
+        "2": { "text": "100%" }
+       }
+      }
+     ],
      "custom": {
       "lineWidth": 2,
       "fillOpacity": 20,
@@ -280,7 +302,7 @@
    },
    "targets": [
     {
-     "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.main_bedroom_c_vent_position|sensor.main_bedroom_a_vent_position|sensor.main_bedroom_b_vent_position|sensor.main_bathroom_vent_position|sensor.hallway_vent_position|sensor.living_room_left_vent_position|sensor.living_room_right_vent_position|sensor.kitchen_vent_position|sensor.dining_room_vent_position|sensor.laundry_room_vent_position|sensor.basement_vent_position\"}",
+     "expr": "homeassistant_sensor_unit_percent{entity=~\"sensor.main_bedroom_c_vent_position|sensor.main_bedroom_a_vent_position|sensor.main_bedroom_b_vent_position|sensor.main_bathroom_vent_position|sensor.hallway_vent_position|sensor.living_room_left_vent_position|sensor.living_room_right_vent_position|sensor.kitchen_vent_position|sensor.dining_room_vent_position|sensor.laundry_room_vent_position|sensor.basement_vent_position\"} / 50",
      "legendFormat": "{{friendly_name}}",
      "refId": "A"
     }
