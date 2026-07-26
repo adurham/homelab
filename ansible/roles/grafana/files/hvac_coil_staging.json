@@ -299,7 +299,7 @@
       "targets": [
         {
           "datasource": "VictoriaMetrics",
-          "expr": "(homeassistant_sensor_temperature_celsius{entity=~\"sensor.(guest_bedroom_1|guest_bedroom_2|game_room|cat_room|living_room|kitchen|main_bedroom|dining_room|laundry_room|hallway|main_bathroom|guest_bathroom|salon|7wq7)_temperature\"} * 1.8) + 32",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=~\"sensor.(guest_bedroom_1|guest_bedroom_2|game_room|cat_room|living_room|kitchen|main_bedroom|dining_room|laundry_room|hallway|main_bathroom|guest_bathroom|7wq7)_temperature\"} * 1.8) + 32",
           "interval": "",
           "legendFormat": "{{entity}}",
           "refId": "A"
