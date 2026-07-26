@@ -1589,10 +1589,23 @@ class SmartVentController(hass.Hass):
             # of banked air we can redirect, not just the standard allotment.
             max_donors = (PRIORITY_MAX_DONORS * 2 if escalated
                           else PRIORITY_MAX_DONORS)
+            # Donor throttle position mirrors the priority pass: 50% normally
+            # (donor keeps half its own banked air, still gives up real CFM),
+            # fully closed (0%) only when escalated. Previously this always
+            # closed to 0% regardless of escalation — MORE aggressive than
+            # the priority pass despite fan-assist being the lower-stakes,
+            # compressor-off scenario (no freeze risk, no reason to be more
+            # aggressive here than during active cooling). Fixed 2026-07-26:
+            # unconditionally slamming every donor to 0% also fought the
+            # backpressure safety net, which would force-reopen them to 50%
+            # on the very next check anyway once too many vents were closed
+            # — wasted command + log noise for no benefit.
+            donor_pos = (PRIORITY_DONOR_POS_ESCALATED if escalated
+                         else PRIORITY_DONOR_POS)
             for dkey, docc, dtemp in donors:
                 if throttled >= max_donors:
                     break
-                room_positions[dkey] = 0
+                room_positions[dkey] = donor_pos
                 throttled += 1
 
             kind = "warm" if heating else "cold"
