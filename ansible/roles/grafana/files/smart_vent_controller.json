@@ -100,6 +100,14 @@
          "mode": "fixed",
          "fixedColor": "dark-blue"
         }
+       },
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "legend": true,
+         "tooltip": false,
+         "viz": false
+        }
        }
       ]
      },
@@ -132,6 +140,14 @@
         "value": {
          "mode": "fixed",
          "fixedColor": "dark-orange"
+        }
+       },
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "legend": true,
+         "tooltip": false,
+         "viz": false
         }
        }
       ]
@@ -494,6 +510,14 @@
          "mode": "fixed",
          "fixedColor": "dark-blue"
         }
+       },
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "legend": true,
+         "tooltip": false,
+         "viz": false
+        }
        }
       ]
      },
@@ -571,6 +595,14 @@
         "value": {
          "mode": "fixed",
          "fixedColor": "dark-orange"
+        }
+       },
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "legend": true,
+         "tooltip": false,
+         "viz": false
         }
        }
       ]
