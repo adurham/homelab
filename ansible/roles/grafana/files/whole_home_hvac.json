@@ -334,15 +334,19 @@
                 "value": "none"
               },
               {
+                "id": "decimals",
+                "value": 0
+              },
+              {
                 "id": "custom.axisPlacement",
                 "value": "right"
               },
               {
-                "id": "custom.axisSoftMin",
+                "id": "min",
                 "value": 0
               },
               {
-                "id": "custom.axisSoftMax",
+                "id": "max",
                 "value": 1
               },
               {
@@ -385,15 +389,19 @@
                 "value": "none"
               },
               {
+                "id": "decimals",
+                "value": 0
+              },
+              {
                 "id": "custom.axisPlacement",
                 "value": "right"
               },
               {
-                "id": "custom.axisSoftMin",
+                "id": "min",
                 "value": 0
               },
               {
-                "id": "custom.axisSoftMax",
+                "id": "max",
                 "value": 1
               },
               {
