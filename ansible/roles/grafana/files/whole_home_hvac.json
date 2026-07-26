@@ -548,8 +548,8 @@
           },
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": ".*guest_bedroom_1_temperature.*"
+              "id": "byName",
+              "options": "Guest Bedroom 1"
             },
             "properties": [
               {
@@ -584,10 +584,101 @@
       "targets": [
         {
           "datasource": "VictoriaMetrics",
-          "expr": "(homeassistant_sensor_temperature_celsius{entity=~\"sensor.(guest_bedroom_1|guest_bedroom_2|game_room|cat_room|living_room|kitchen|dining_room|hallway|main_bedroom|main_bathroom|laundry_room|half_bathroom|guest_bathroom|7wq7)_temperature\"} * 1.8) + 32",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_1_temperature\"} * 1.8) + 32",
           "interval": "",
-          "legendFormat": "{{entity}}",
+          "legendFormat": "Guest Bedroom 1",
           "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bedroom_2_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Guest Bedroom 2",
+          "refId": "C"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.game_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Game Room",
+          "refId": "D"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.cat_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Cat Room",
+          "refId": "E"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.living_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Living Room",
+          "refId": "F"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.kitchen_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Kitchen",
+          "refId": "G"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.dining_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Dining Room",
+          "refId": "H"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.hallway_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Hallway",
+          "refId": "I"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bedroom_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Main Bedroom",
+          "refId": "J"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.main_bathroom_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Main Bathroom",
+          "refId": "K"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.laundry_room_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Laundry Room",
+          "refId": "L"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.half_bathroom_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Half Bathroom",
+          "refId": "M"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.guest_bathroom_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Guest Bathroom",
+          "refId": "N"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.7wq7_temperature\"} * 1.8) + 32",
+          "interval": "",
+          "legendFormat": "Basement",
+          "refId": "O"
         },
         {
           "datasource": "VictoriaMetrics",
