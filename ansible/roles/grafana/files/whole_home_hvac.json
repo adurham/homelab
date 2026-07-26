@@ -573,6 +573,7 @@
           "placement": "right",
           "calcs": [
             "lastNotNull",
+            "mean",
             "max"
           ]
         },
