@@ -159,6 +159,7 @@
           "placement": "bottom",
           "calcs": [
             "lastNotNull",
+            "mean",
             "max"
           ]
         },
@@ -245,7 +246,9 @@
           "placement": "bottom",
           "calcs": [
             "lastNotNull",
-            "min"
+            "mean",
+            "min",
+            "max"
           ]
         },
         "tooltip": {
@@ -434,6 +437,7 @@
           "placement": "bottom",
           "calcs": [
             "lastNotNull",
+            "mean",
             "max"
           ]
         },
@@ -821,7 +825,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -992,7 +998,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -1149,7 +1157,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -1334,7 +1344,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -1505,7 +1517,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -1675,7 +1689,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -1846,7 +1862,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -2003,7 +2021,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -2160,7 +2180,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -2310,7 +2332,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -2495,7 +2519,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -2645,7 +2671,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -2802,7 +2830,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {
@@ -2958,7 +2988,9 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "mean",
+            "max"
           ]
         },
         "tooltip": {

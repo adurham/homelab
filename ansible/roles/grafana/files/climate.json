@@ -96,8 +96,9 @@
             "id": 1,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -300,8 +301,9 @@
             "id": 2,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -484,8 +486,9 @@
             "id": 3,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -668,8 +671,9 @@
             "id": 4,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -852,8 +856,9 @@
             "id": 5,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -1076,8 +1081,9 @@
             "id": 6,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -1260,8 +1266,9 @@
             "id": 7,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -1406,8 +1413,9 @@
             "id": 8,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -1546,8 +1554,9 @@
             "id": 9,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -1726,8 +1735,9 @@
             "id": 10,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -1926,8 +1936,9 @@
             "id": 11,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -2106,8 +2117,9 @@
             "id": 12,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -2290,8 +2302,9 @@
             "id": 13,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
@@ -2464,8 +2477,9 @@
             "id": 14,
             "options": {
                 "legend": {
-                    "displayMode": "list",
-                    "placement": "bottom"
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": ["lastNotNull", "mean", "max"]
                 }
             },
             "targets": [
