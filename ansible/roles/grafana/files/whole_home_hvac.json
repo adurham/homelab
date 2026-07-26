@@ -328,6 +328,42 @@
                   "mode": "fixed",
                   "fixedColor": "red"
                 }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisSoftMin",
+                "value": 0
+              },
+              {
+                "id": "custom.axisSoftMax",
+                "value": 1
+              },
+              {
+                "id": "custom.lineInterpolation",
+                "value": "stepAfter"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 40
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": { "text": "Off" },
+                      "1": { "text": "On" }
+                    }
+                  }
+                ]
               }
             ]
           },
@@ -343,6 +379,42 @@
                   "mode": "fixed",
                   "fixedColor": "orange"
                 }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisSoftMin",
+                "value": 0
+              },
+              {
+                "id": "custom.axisSoftMax",
+                "value": 1
+              },
+              {
+                "id": "custom.lineInterpolation",
+                "value": "stepAfter"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 40
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": { "text": "Off" },
+                      "1": { "text": "On" }
+                    }
+                  }
+                ]
               }
             ]
           }
@@ -365,14 +437,14 @@
       "targets": [
         {
           "datasource": "VictoriaMetrics",
-          "expr": "(homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == 2) * 2200",
+          "expr": "(homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == bool 2)",
           "interval": "",
           "legendFormat": "Stage 2",
           "refId": "A"
         },
         {
           "datasource": "VictoriaMetrics",
-          "expr": "(homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == 1) * 1100",
+          "expr": "(homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_compressor_cool_stage\"} == bool 1)",
           "interval": "",
           "legendFormat": "Stage 1",
           "refId": "B"
