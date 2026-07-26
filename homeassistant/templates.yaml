@@ -60,12 +60,6 @@
       unit_of_measurement: "%"
       state: "{{ state_attr('cover.main_bathroom_f586_vent_2', 'current_tilt_position') | float(0) }}"
 
-    - name: "Salon Temperature"
-      unique_id: salon_temperature
-      unit_of_measurement: "°F"
-      device_class: temperature
-      state: "{{ states('sensor.basement_heatpump_basement_office_ac_ambient_temp') | float(0) }}"
-
     - name: "Heat Pump Water Heater"
       unique_id: edgewater_road_power_minute_average_water_heater
       unit_of_measurement: "W"
