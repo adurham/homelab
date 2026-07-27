@@ -55,8 +55,24 @@
     - name: Take pre-deploy backup on the HA host
       # NOTE: this HAOS uses `ha backups new`, not `ha core backup`
       # (the latter has no `backup` subcommand on current Supervisor).
+      #
+      # `--folders homeassistant` makes this a PARTIAL backup of just the
+      # HA Core config directory (automations, templates, sensors, etc.) —
+      # the only thing this playbook ever touches or restores from. A full
+      # backup (the old default, no --folders flag) additionally exports
+      # every installed add-on's Docker image to a tarball, which is what
+      # this playbook actually needs to protect against, but at a massive
+      # time cost: on this host the shark2mqtt add-on's image alone (bundles
+      # Chromium/Patchright from its upstream base) took 12-20 minutes to
+      # export, blowing deploy runtime up 15-20x for zero benefit — this
+      # playbook never modifies or restores add-ons. Confirmed 2026-07-26:
+      # partial backup (368MB, HA config + supervisor metadata only)
+      # completes in ~70 seconds vs 15-20 min for a full backup with 17
+      # add-on images. If a real add-on-level backup is ever needed, use
+      # `ha backups new` (full, no --folders) manually — this playbook's
+      # pre-deploy safety net only needs to cover the HA config surface.
       ansible.builtin.raw: >-
-        ha backups new --name pre-deploy-{{ deploy_ts }}
+        ha backups new --name pre-deploy-{{ deploy_ts }} --folders homeassistant
       register: ha_backup
       changed_when: ha_backup.rc == 0
       failed_when: ha_backup.rc != 0
