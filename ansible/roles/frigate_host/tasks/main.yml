@@ -271,6 +271,44 @@
     "systemctl daemon-reload && systemctl enable frigate-recreate.service frigate-keepalive.service"
   changed_when: true
 
+# ── HA node-affinity: prefer target_node, but allow real failover ────────
+# 2026-07-28: the cluster's datacenter-level CRS auto-rebalance
+# (crs.ha=dynamic, ha-auto-rebalance=1 — set independently of this role,
+# affects the whole cluster) was migrating this CT between pve01/pve02
+# purely to balance load, with zero node failure involved. Every one of
+# those migrations briefly interrupts Nest camera recording (docker
+# container state doesn't survive an LXC migration — see
+# frigate-recreate.service above). A NON-STRICT node-affinity rule stops
+# that proactive shuffling (Proxmox always prefers target_node when it's
+# healthy) while leaving real failover intact: per Proxmox's own docs,
+# non-strict means other nodes remain eligible, just lower-priority, so
+# if target_node actually goes down HA still relocates here to pve02/03.
+# STRICT would be wrong — it forbids running anywhere else at all, which
+# would leave Frigate un-recoverable if pve01 really failed.
+- name: Check if Frigate node-affinity HA rule exists
+  ansible.builtin.command: pvesh get /cluster/ha/rules --output-format json
+  register: ha_rules_check
+  changed_when: false
+
+- name: Set node-affinity rule comment
+  ansible.builtin.set_fact:
+    frigate_ha_rule_comment: >-
+      Frigate NVR ({{ inventory_hostname }}). Non-strict: prefer
+      {{ target_node }} to stop CRS auto-rebalance from bouncing it
+      between nodes for no reason (bounces briefly interrupt Nest
+      recording). Real HA failover still works if {{ target_node }}
+      goes down.
+
+- name: Create non-strict node-affinity rule preferring target_node
+  ansible.builtin.command: >
+    pvesh create /cluster/ha/rules/node-affinity/frigate-prefer-{{ target_node }}
+    --resources ct:{{ vmid }}
+    --nodes {{ target_node }}
+    --strict 0
+    --comment "{{ frigate_ha_rule_comment }}"
+  when: "('frigate-prefer-' + target_node) not in (ha_rules_check.stdout | from_json | map(attribute='rule') | list)"
+  changed_when: true
+
 - name: Add Host to Inventory
   ansible.builtin.add_host:
     name: "{{ inventory_hostname }}"
