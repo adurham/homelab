@@ -1,0 +1,50 @@
+[Unit]
+Description=Adblock Proxy Transparent Mode (mitmproxy, exit-node traffic interception)
+After=network-online.target tailscaled.service adblock-proxy.service
+Wants=network-online.target
+Requires=tailscaled.service
+
+[Service]
+Type=simple
+User=mitmproxy
+Group=mitmproxy
+WorkingDirectory=/opt/adblock-proxy
+Environment=HOME=/home/mitmproxy
+# Transparent mode: reads the original destination via SO_ORIGINAL_DST,
+# which requires the iptables REDIRECT rule installed separately (see
+# adblock-transparent.rules.v4.j2 / the "Install Transparent-Redirect
+# iptables Rules" task).
+#
+# SNI-based passthrough is handled INSIDE discord_adblock.py via the
+# tls_clienthello hook, NOT --ignore-hosts here. mitmproxy's own --help
+# says hostname regex matching in --ignore-hosts is unreliable in
+# transparent mode ("recommended to use an IP address range, not the
+# hostname") — confirmed live 2026-07-27: real Discord CDN connections
+# (162.159.x range) passed straight through unfiltered despite a
+# correct, independently-verified regex, because the flag doesn't
+# reliably see the SNI in transparent mode. The tls_clienthello hook is
+# mitmproxy's actual supported per-connection SNI mechanism and doesn't
+# have this limitation.
+#
+# MUST bind 0.0.0.0, NOT 127.0.0.1: iptables REDIRECT rewrites the
+# destination to the address of the interface that RECEIVED the packet
+# (tailscale0's IP), not literally 127.0.0.1. A 127.0.0.1-only bind means
+# every redirected SYN lands on an address nothing is listening on and
+# silently black-holes — confirmed via iptables counters incrementing
+# with zero established connections on 8443 (2026-07-27 post-deploy
+# verification). 0.0.0.0 covers both the tailscale0 IP and loopback.
+ExecStart=/opt/adblock-proxy/venv/bin/mitmdump \
+  --mode transparent \
+  --listen-host 0.0.0.0 \
+  --listen-port 8443 \
+  --set confdir=/home/mitmproxy/.mitmproxy \
+  -s /opt/adblock-proxy/discord_adblock.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/mitmproxy /opt/adblock-proxy
+AmbientCapabilities=CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target

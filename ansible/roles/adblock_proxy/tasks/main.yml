@@ -1,0 +1,268 @@
+---
+# Configures adblock-proxy-01 (CT 118) — personal-device MITM ad-stripping
+# proxy. Devices opt in individually via explicit HTTPS proxy settings
+# pointed at this host's Tailscale IP; NOT transparent/network-wide, NOT
+# reachable from the home LAN. The host LXC itself is created by
+# roles/adblock_proxy_host; this role handles the application layer.
+
+- name: Install Base OS Packages
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-pip
+      - python3-venv
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create mitmproxy System User
+  ansible.builtin.user:
+    name: mitmproxy
+    system: true
+    shell: /usr/sbin/nologin
+    home: /home/mitmproxy
+    create_home: true
+
+- name: Ensure /opt/adblock-proxy Directory Exists
+  ansible.builtin.file:
+    path: /opt/adblock-proxy
+    state: directory
+    owner: mitmproxy
+    group: mitmproxy
+    mode: '0755'
+
+- name: Create mitmproxy Virtualenv (Python 3)
+  ansible.builtin.command: python3 -m venv /opt/adblock-proxy/venv
+  args:
+    creates: /opt/adblock-proxy/venv/bin/python
+
+# ─── Tailscale (explicit-proxy is served ONLY over the tailnet) ───────────
+# mitmdump binds to the CT's tailscale0 IP, not eth0/private-SDN — devices
+# must be on the tailnet to reach it at all. No `tailscale serve`/TLS
+# termination needed here: Tailscale's own WireGuard transport already
+# encrypts the link, and mitmproxy does its own TLS termination for the
+# proxied HTTPS traffic on top of that. Runs BEFORE the mitmproxy service
+# is installed/started since the systemd unit's ExecStart needs the
+# resolved Tailscale IP to bind to.
+
+- name: Install Tailscale on Adblock Proxy
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://tailscale.com/install.sh | sh
+  args:
+    creates: /usr/bin/tailscale
+    executable: /bin/bash
+
+- name: Check Tailscale auth state on Adblock Proxy
+  ansible.builtin.command: tailscale status --self --peers=false
+  register: adblock_proxy_tailscale_status
+  failed_when: false
+  changed_when: false
+
+- name: Fail with manual-step instructions if Tailscale is not authed
+  ansible.builtin.fail:
+    msg: |
+      Tailscale on adblock-proxy-01 is installed but not authed. Run the
+      following on pve03 to authorize the CT (browser link will print):
+
+          ssh root@pve03 'pct exec 118 -- tailscale up --hostname=adblock-proxy-01'
+
+      Then re-run this playbook. After auth, the mitmproxy service will
+      bind to the resolved tailscale0 interface IP.
+  when: adblock_proxy_tailscale_status.rc != 0 or 'Logged out' in adblock_proxy_tailscale_status.stdout
+
+# ─── Exit-node mode (2026-07-27) ───────────────────────────────────────────
+# Advertises this CT as a Tailscale exit node so a phone can route ALL its
+# traffic (WiFi + cellular) through here with one toggle in the Tailscale
+# app, instead of per-network manual HTTP proxy settings (iOS's Global HTTP
+# Proxy MDM payload requires a *supervised* device, a non-starter for a
+# personal iPhone). Must be separately approved server-side via the
+# Tailscale admin console or API (POST /api/v2/device/{id}/routes with
+# routes:["0.0.0.0/0","::/0"]) — advertising alone does not enable it.
+- name: Persist IPv4/IPv6 forwarding (required for exit-node mode)
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-tailscale.conf
+    content: |
+      net.ipv4.ip_forward = 1
+      net.ipv6.conf.all.forwarding = 1
+    owner: root
+    group: root
+    mode: '0644'
+  register: adblock_proxy_sysctl
+  notify: Reload Sysctl (Adblock Proxy)
+
+- name: Advertise Adblock Proxy as a Tailscale exit node
+  ansible.builtin.command: tailscale up --hostname=adblock-proxy-01 --advertise-exit-node --reset
+  changed_when: true
+  # tailscaled persists this in its own state file (not the systemd unit),
+  # so it's safe to re-run idempotently; --reset just re-applies flags.
+
+- name: Get Adblock Proxy Tailscale IPv4
+  ansible.builtin.command: tailscale ip -4
+  register: adblock_proxy_ts_ip
+  changed_when: false
+
+- name: Install mitmproxy in Virtualenv
+  ansible.builtin.pip:
+    name: mitmproxy
+    virtualenv: /opt/adblock-proxy/venv
+    state: present
+
+- name: Fix Ownership of Virtualenv
+  ansible.builtin.file:
+    path: /opt/adblock-proxy/venv
+    state: directory
+    owner: mitmproxy
+    group: mitmproxy
+    recurse: true
+
+# ─── Discord ad/quest/promo stripping addon ────────────────────────────────
+# Filters known Discord Quest/Discovery/Promotion API response paths so the
+# client renders no ad content, while every other discord.com/discordapp.net
+# request (login, messages, CDN, voice gateway, etc.) passes through
+# untouched. Endpoint list is a living document — see the addon's own
+# comment block for how to extend it after a mitmweb capture session.
+- name: Deploy Discord Ad-Stripping mitmproxy Addon
+  ansible.builtin.template:
+    src: discord_adblock.py.j2
+    dest: /opt/adblock-proxy/discord_adblock.py
+    owner: mitmproxy
+    group: mitmproxy
+    mode: '0644'
+  notify:
+    - Restart Adblock Proxy
+    - Restart Adblock Proxy Transparent
+
+- name: Install Adblock Proxy Systemd Unit (explicit proxy, port 8080)
+  ansible.builtin.template:
+    src: adblock-proxy.service.j2
+    dest: /etc/systemd/system/adblock-proxy.service
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    adblock_proxy_listen_host: "{{ adblock_proxy_ts_ip.stdout | trim }}"
+  notify: Restart Adblock Proxy
+
+- name: Enable & Start Adblock Proxy (explicit proxy)
+  ansible.builtin.systemd:
+    name: adblock-proxy
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# ─── Transparent mode (exit-node path) ─────────────────────────────────────
+# Devices that route through this host as a Tailscale exit node (phone,
+# WiFi + cellular) never set a proxy explicitly — their HTTPS traffic just
+# arrives on tailscale0 and gets NAT-redirected here. mitmproxy peeks the
+# TLS SNI per-connection and only decrypts/filters Discord hostnames;
+# everything else (banking apps, iMessage, etc.) is relayed as opaque TCP
+# so cert pinning elsewhere on the phone never breaks.
+- name: Install netfilter-persistent (transparent-redirect rules)
+  ansible.builtin.apt:
+    name:
+      - iptables
+      - iptables-persistent
+      - netfilter-persistent
+    state: present
+
+- name: Install Adblock Proxy Transparent Systemd Unit (port 8443, local-only)
+  ansible.builtin.template:
+    src: adblock-proxy-transparent.service.j2
+    dest: /etc/systemd/system/adblock-proxy-transparent.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Adblock Proxy Transparent
+
+- name: Install Transparent-Redirect iptables Rules (exit-node HTTPS -> mitmproxy)
+  ansible.builtin.template:
+    src: adblock-transparent.rules.v4.j2
+    dest: /etc/iptables/rules.v4
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Apply Transparent-Redirect iptables Rules
+
+- name: Enable & Start Adblock Proxy Transparent
+  ansible.builtin.systemd:
+    name: adblock-proxy-transparent
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# ─── DNS-level ad/tracker blocking (exit-node path only) ───────────────────
+# The Discord SNI filter above only covers Discord. Every other app on a
+# phone routing through this exit node gets zero ad/tracker blocking
+# without this. Rather than standing up a second DNS blocklist stack
+# here, this points the CT's OWN resolver at the AdGuard Home instance
+# that already runs the home LAN's DNS (192.168.86.2, HA add-on — see
+# memory facts 405/417): 7 active blocklists, 800k+ combined rules,
+# verified live and blocking (doubleclick.net -> 0.0.0.0, 2026-07-27).
+#
+# WHY THE CT'S OWN RESOLVER, NOT AN IPTABLES DNAT: exit-node clients'
+# DNS queries do NOT transit the exit node's tailscale0 interface as
+# real UDP/TCP:53 packets — Tailscale tunnels them via an internal
+# mechanism, and the exit node's own tailscaled resolves them using
+# whatever /etc/resolv.conf says (confirmed via tcpdump showing zero
+# packets on tailscale0:53 despite active client DNS queries, and via
+# https://github.com/tailscale/tailscale/issues/17617 — "the tailscaled
+# process then resolves these locally by performing a local query to
+# the default DNS as configured on that exit node"). An iptables
+# PREROUTING rule on tailscale0 — which works perfectly for the HTTPS
+# REDIRECT above — is a structural no-op for DNS and was removed after
+# confirming it never matched a single packet.
+#
+# `tailscale set --accept-dns=false` stops tailscaled from overwriting
+# /etc/resolv.conf with the tailnet's MagicDNS config (100.100.100.100),
+# then resolv.conf is pinned directly at AdGuard.
+- name: Disable Tailscale's own DNS management on Adblock Proxy
+  ansible.builtin.command: tailscale set --accept-dns=false
+  changed_when: true
+
+- name: Point Adblock Proxy's resolver at AdGuard Home
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ ip_homeassistant }}
+      nameserver 1.1.1.1
+    owner: root
+    group: root
+    mode: '0644'
+  # No search domain: this file is consumed by the exit-node DNS proxy
+  # path for arbitrary client queries, not just this CT's own lookups —
+  # a search domain would silently mangle unqualified queries from
+  # exit-node clients.
+
+- name: Show Adblock Proxy Tailscale IP + connection instructions
+  ansible.builtin.debug:
+    msg: |
+      adblock-proxy-01 is up at {{ adblock_proxy_ts_ip.stdout | trim }}:8080
+      (also reachable as adblock-proxy-01.tail19c543.ts.net:8080) and is
+      approved as a Tailscale exit node.
+
+      OPTION A — exit node (covers WiFi + cellular, one toggle):
+        1. Tailscale app -> Exit Node -> adblock-proxy-01
+        2. Discord ads are stripped transparently; DNS-level ad/tracker
+           blocking is enforced via the existing AdGuard Home instance
+           (192.168.86.2, 7 blocklists) for every other app; all other
+           apps' HTTPS traffic passes through as an opaque relay (no TLS
+           interception outside discord.com/discordapp.net/discord.gg/
+           discord.media).
+        NOTE: while active, ALL phone traffic egresses via the homelab's
+        public IP, not just Discord's.
+
+      OPTION B — per-network explicit proxy (WiFi only, no exit-node
+      blast radius):
+        1. Wi-Fi settings -> Configure Proxy -> Manual
+           Server: {{ adblock_proxy_ts_ip.stdout | trim }}   Port: 8080
+        2. Visit http://mitm.it while proxied, install + trust the
+           mitmproxy CA cert for the device's OS.
+        NOTE: Option B does NOT get the AdGuard DNS redirect (scoped to
+        tailscale0 exit-node traffic only) — only the Discord SNI-based
+        filtering applies. On WiFi at home, AdGuard already covers DNS
+        for the whole LAN anyway.
+
+      Both options require trusting the mitmproxy CA cert once
+      (http://mitm.it) before HTTPS traffic decrypts cleanly.

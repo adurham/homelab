@@ -36,7 +36,7 @@
     - pve_private_ip
 
 - name: Install Telemetry Agents
-  hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster
+  hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster:!media_ingest:!media_ingest_02:!media_gallery:!bwt_lab
   gather_facts: true
   # Every host in this play's scope runs Alloy. Any legacy
   # promtail / node_exporter artifacts on existing hosts were cleaned
@@ -44,6 +44,20 @@
   # removed once the migration finished. If a host ever ends up with
   # leftovers again, run `git log -- deploy_monitoring.yml` for the
   # cleanup snippet.
+  #
+  # media_ingest / media_ingest_02 / media_gallery are EXCLUDED
+  # deliberately (2026-07-27) — these hosts run the secondary-source
+  # scraper/gallery pipeline that's obfuscated in this public repo
+  # (vault_media_ingest_02_scraper_pkg, _scrape_usernames, etc. — see
+  # roles/media_ingest_02_host and the git-history-identity-scrub
+  # skill). Their journal logs could leak platform/username details
+  # into the shared Loki instance even though it's internal-only, so
+  # they're kept off the centralized-logging fleet entirely. Alloy WAS
+  # briefly live on media-ingest-01/02 (2026-07-27, ~15min) before this
+  # exclusion landed; the shipped log entries were deleted from Loki via
+  # its /loki/api/v1/delete API, and the alloy service was stopped +
+  # disabled on both hosts. bwt_lab is excluded per user direction
+  # (out of scope for centralized logging, 2026-07-28).
   tasks:
     - name: Install alloy
       ansible.builtin.include_role:

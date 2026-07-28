@@ -44,6 +44,7 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | `vm-01`         | 106  | `172.16.0.42`    | DHCP (`192.168.86.x`) | VictoriaMetrics + blackbox + Loki + Alloy   |
 | `graf-01`       | 107  | `172.16.0.41`    | -                  | Grafana + image renderer                    |
 | `proxy-01`      | 108  | `172.16.0.12`    | -                  | Squid caching proxy                         |
+| `adblock-proxy-01` | 118 | `172.16.0.49`  | -                  | mitmproxy explicit HTTPS proxy for personal-device Discord ad-stripping (Tailscale-only ingress, joins tailnet directly like hermes-gw-01) |
 
 `172.16.0.40` was previously assigned to **both** `mail-01` and `vm-01` (ARP race). Resolved 2026-05-01 — moved `vm-01` to `.42`. See commit `12bb4c2`.
 
@@ -102,6 +103,7 @@ VMIDs 300-313, IPs `172.16.0.60–73`. See `inventory/proxmox.yml` under `tanium
 ## VMID conventions
 
 - **100–113** — core service CTs (authentik, dns-01, ntp-01, etc.)
+- **115–118** — personal/media service CTs (gallery-01, media-ingest-01/02, adblock-proxy-01)
 - **114** — BWT lab service CTs (`bwt-dhcp`)
 - **200–219** — existing `tanium_cluster` placeholders (ts-01/02, tms-01/02, tzs-01/02)
 - **220–249** — BWT lab TanOS VMs (`bwt-ts`, `bwt-zs-01..04`)

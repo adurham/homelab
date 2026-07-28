@@ -47,6 +47,10 @@ ip_hermes_gateway: "172.16.0.50"
 ip_media_gallery: "172.16.0.46"
 ip_media_ingest: "172.16.0.47"
 ip_media_ingest_02: "172.16.0.48"
+# Personal-device MITM ad-stripping proxy (mitmproxy). Explicit-proxy only
+# (devices opt in via Wi-Fi proxy settings pointed at its Tailscale IP), not
+# transparent/network-wide. See roles/adblock_proxy{,_host}.
+ip_adblock_proxy: "172.16.0.49"
 # Frigate NVR (CT 170, pve01). Private-subnet IP for the eth1 interface; eth0
 # is DHCP on the LAN so Frigate can reach the go2rtc RTSP source + HA MQTT.
 ip_frigate: "172.16.0.45"

@@ -1,0 +1,79 @@
+*nat
+:PREROUTING ACCEPT [0:0]
+# Redirect HTTPS from exit-node clients (arriving on tailscale0) to the
+# local mitmproxy transparent listener. mitmproxy inspects the TLS SNI
+# via a tls_clienthello hook in discord_adblock.py and passes anything
+# non-Discord straight through as a raw TCP relay — only Discord's own
+# hostnames get decrypted/filtered. Traffic NOT arriving via tailscale0
+# (i.e. the CT's own outbound traffic) is untouched.
+#
+# NOTE: DNS is NOT handled here. Exit-node clients' DNS queries never
+# transit tailscale0 as real UDP/TCP:53 packets (Tailscale tunnels them
+# internally), so a PREROUTING DNAT rule for port 53 is a structural
+# no-op — confirmed via tcpdump (zero packets matched during active
+# client DNS traffic). DNS-level ad blocking for exit-node clients is
+# instead handled by pointing this CT's OWN /etc/resolv.conf at AdGuard
+# Home (see the "DNS-level ad/tracker blocking" section in tasks/main.yml).
+-A PREROUTING -i tailscale0 -p tcp --dport 443 -j REDIRECT --to-port 8443
+
+# Also redirect plain HTTP (port 80). Needed specifically so
+# http://mitm.it (the cert-install page, visited BEFORE the device
+# trusts anything) actually gets intercepted — mitmproxy special-cases
+# that exact request and serves its own install page instead of
+# proxying it through. Without this rule the phone's HTTP request to
+# mitm.it just reaches the real internet unmodified (confirmed
+# 2026-07-27: phone got the real mitm.it site, which literally says
+# "If you can see this, traffic is not going through mitmproxy").
+# Plain HTTP needs no cert trust to intercept (nothing is encrypted),
+# and discord_adblock.py's request() hook already no-ops on any
+# non-Discord host, so this is safe for the same reason the HTTPS
+# SNI-passthrough is safe.
+-A PREROUTING -i tailscale0 -p tcp --dport 80 -j REDIRECT --to-port 8443
+COMMIT
+
+*filter
+:OUTPUT ACCEPT [0:0]
+# Restrict the CT's OWN outbound traffic (i.e. traffic this box
+# originates itself — logging, health checks, package updates) to
+# exactly what it needs. This is DISTINCT from exit-node relay traffic,
+# which flows through the FORWARD chain (ts-forward, tagged by the
+# Tailscale-managed fwmark) and is untouched by anything here — an exit
+# node's whole job is relaying arbitrary internet traffic on behalf of
+# clients, so OUTPUT restrictions only bound what THIS HOST can reach on
+# its own behalf. Concern: adblock-proxy-01 sits with a foot on both the
+# private SDN (172.16.0.0/24 — dns-01, lb-01, proxmox nodes, etc.) and
+# the LAN (192.168.86.0/24, for AdGuard/HA) — without this, a compromised
+# process here (mitmproxy itself, or the log-shipper cron job) could
+# pivot laterally to any private-subnet or LAN host. Locked down
+# 2026-07-27 in response to a direct ask: "worried about network lateral
+# movement... as long as we lock that down then it's fine to go direct
+# and not through tailscale."
+-A OUTPUT -o lo -j ACCEPT
+-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+# Loki push (adguard-log-shipper.sh + Alloy, once this CT joins the
+# monitoring fleet).
+-A OUTPUT -d {{ ip_vm }} -p tcp --dport 3100 -j ACCEPT
+# VictoriaMetrics remote-write (Alloy node_exporter metrics push).
+-A OUTPUT -d {{ ip_vm }} -p tcp --dport 8428 -j ACCEPT
+# AdGuard Home query log API + Home Assistant core API, both served from
+# the same host.
+-A OUTPUT -d {{ ip_homeassistant }} -p tcp --dport 8123 -j ACCEPT
+-A OUTPUT -d {{ ip_homeassistant }} -p tcp --dport 53 -j ACCEPT
+-A OUTPUT -d {{ ip_homeassistant }} -p udp --dport 53 -j ACCEPT
+# DNS resolution for this CT's own outbound lookups (apt, tailscale
+# control plane, blocklist-adjacent hostnames) — same AdGuard resolver
+# already configured in /etc/resolv.conf, covered by the rule above.
+# Explicit DROP for the rest of the private SDN and LAN — this is the
+# actual lateral-movement lockout. Order matters: these DROPs come
+# AFTER the narrow ACCEPTs above, so dns-01/lb-01/proxmox/etc. are
+# unreachable but AdGuard+Loki still work.
+-A OUTPUT -d {{ net_private_range }} -j DROP
+-A OUTPUT -d {{ net_lan_range }} -j DROP
+# Everything else (the public internet) stays open — required for the
+# CT's own package management, Tailscale control-plane heartbeats, and
+# critically the mitmproxy addon's own re-originated connections to real
+# Discord/other servers after SNI inspection (those ARE this box acting
+# on its own behalf, from mitmproxy's perspective, even though they're
+# serving an exit-node client).
+-A OUTPUT -j ACCEPT
+COMMIT
