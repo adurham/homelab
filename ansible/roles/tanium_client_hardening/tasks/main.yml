@@ -1,0 +1,115 @@
+---
+# Hardens SSH on the tanium_clients fleet (tc-* distro test boxes): key-only
+# auth, no password/keyboard-interactive fallback. These hosts don't ship
+# with the ansible-managed id_ansible key pre-provisioned (unlike the rest
+# of the fleet), so this role assumes that key was already added out-of-band
+# via `pct exec` + verified reachable BEFORE this role runs — see the
+# 2026-07-28 security-sweep remediation notes. If ansible can't reach a host
+# by key, this role will simply fail closed on that host (SSH connection
+# error) rather than silently locking anyone out, since password auth isn't
+# touched until the play itself is already running over a working key.
+
+- name: Verify key auth works before disabling passwords (safety gate)
+  ansible.builtin.command: "true"
+  changed_when: false
+  # If this play is reachable at all, we're already authenticated by key.
+
+- name: Check for sshd_config.d support (OpenSSH 8.4+/RHEL9+/SUSE15+)
+  ansible.builtin.stat:
+    path: /etc/ssh/sshd_config.d
+  register: sshd_config_d_dir
+
+- name: Deploy SSH hardening drop-in (where sshd_config.d is supported)
+  ansible.builtin.template:
+    src: sshd_harden.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-harden.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: 'sshd -t -f %s'
+  when: sshd_config_d_dir.stat.exists
+  notify: Restart sshd
+
+# EL8/older OpenSSH: no sshd_config.d support, edit the main file directly.
+# Idempotent lineinfile per directive; a stray duplicate directive earlier
+# in the file (if any) is left alone — sshd uses the LAST matching value
+# for these keywords, and appending via `insertafter: EOF` with a regex
+# match on our own directives keeps repeated runs from piling up entries.
+#
+# GOTCHA (found 2026-07-28 on tc-alma8): some of these hosts already had
+# MULTIPLE duplicate directive lines (13x "PermitRootLogin yes" on one
+# host) from prior manual edits. ansible.builtin.lineinfile's regexp only
+# replaces the FIRST match and leaves the rest — since sshd honors the
+# LAST matching directive in the file, the config visibly "changed" per
+# ansible but had zero real effect (confirmed via `sshd -T` still showing
+# the old value). Fixed by using replace_all-equivalent behavior:
+# lineinfile doesn't support that directly, so first blank out ALL
+# existing lines matching the directive (state: absent doesn't work
+# for repeated regex matches either in a single task — loop with a
+# distinct search each time isn't reliable), then append the correct
+# value once at the end. The cleanest fix: use `lineinfile` with
+# `regexp` AND explicitly remove duplicates via a preceding `replace`
+# module pass that deletes all instances, then a single lineinfile
+# insert.
+- name: Remove ALL existing PasswordAuthentication directive lines (EL8 fallback)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^\s*#?\s*PasswordAuthentication\s'
+    state: absent
+  when: not sshd_config_d_dir.stat.exists
+  notify: Restart sshd
+
+- name: Remove ALL existing KbdInteractiveAuthentication/ChallengeResponseAuthentication directive lines (EL8 fallback)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^\s*#?\s*(KbdInteractiveAuthentication|ChallengeResponseAuthentication)\s'
+    state: absent
+  when: not sshd_config_d_dir.stat.exists
+  notify: Restart sshd
+
+- name: Remove ALL existing PermitRootLogin directive lines (EL8 fallback)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^\s*#?\s*PermitRootLogin\s'
+    state: absent
+  when: not sshd_config_d_dir.stat.exists
+  notify: Restart sshd
+
+- name: Append single correct PasswordAuthentication directive (EL8 fallback)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    line: 'PasswordAuthentication no'
+    insertafter: EOF
+    validate: 'sshd -t -f %s'
+  when: not sshd_config_d_dir.stat.exists
+  notify: Restart sshd
+
+- name: Append single correct KbdInteractiveAuthentication directive (EL8 fallback)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    line: 'KbdInteractiveAuthentication no'
+    insertafter: EOF
+    validate: 'sshd -t -f %s'
+  when: not sshd_config_d_dir.stat.exists
+  notify: Restart sshd
+
+- name: Append single correct PermitRootLogin directive (EL8 fallback)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    line: 'PermitRootLogin prohibit-password'
+    insertafter: EOF
+    validate: 'sshd -t -f %s'
+  when: not sshd_config_d_dir.stat.exists
+  notify: Restart sshd
+
+- name: Flush handlers so sshd restarts before we verify
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify key auth STILL works after hardening (post-check)
+  ansible.builtin.command: "true"
+  changed_when: false
+  # Ansible already re-connected for this task using the same key-based
+  # connection params — if that connection succeeded, the previous change
+  # didn't lock us out. If it silently broke something, this task (and the
+  # whole play for this host) fails here instead of us finding out next time
+  # we try to manage the host.

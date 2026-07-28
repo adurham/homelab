@@ -1,0 +1,42 @@
+---
+# Adds a minimal default-deny nftables baseline to graf-01 and tc-rhel9 —
+# the two hosts found in the 2026-07-28 security sweep with NO host-level
+# firewall at all (not even a stub table). Defense-in-depth on top of the
+# Proxmox cluster/SDN firewall, which already gates access at the
+# hypervisor level via the pve_mgmt IPSet — most of the fleet relies on
+# that alone; these two get an explicit host firewall per direct request.
+
+- name: Apply nftables baseline to graf-01
+  hosts: graf-01
+  gather_facts: true
+  vars:
+    # SSH (22, mgmt), node_exporter scrape (9100, from vm-01), Grafana UI
+    # (3000), grafana-image-renderer (8081, loopback-only in practice but
+    # kept explicit rather than assuming). Sources scoped to the private
+    # SDN + LAN + tailnet, matching the pve_mgmt IPSet's own scope.
+    host_nftables_allowed_tcp_ports:
+      - 22
+      - 9100
+      - 3000
+      - 8081
+    host_nftables_allowed_sources:
+      - "172.16.0.0/24"
+      - "192.168.86.0/24"
+      - "100.64.0.0/10"
+  roles:
+    - host_nftables_baseline
+
+- name: Apply nftables baseline to tc-rhel9
+  hosts: tc-rhel9
+  gather_facts: true
+  vars:
+    # SSH only — this host serves nothing else (confirmed via ss -tlnp
+    # during the 2026-07-28 sweep: port 22 was the only listener).
+    host_nftables_allowed_tcp_ports:
+      - 22
+    host_nftables_allowed_sources:
+      - "172.16.0.0/24"
+      - "192.168.86.0/24"
+      - "100.64.0.0/10"
+  roles:
+    - host_nftables_baseline

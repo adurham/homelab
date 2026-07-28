@@ -1,0 +1,39 @@
+#!/usr/sbin/nft -f
+# Managed by Ansible — host_nftables_baseline role. Minimal default-deny
+# INPUT baseline: allow loopback, established/related, ICMP, and only the
+# TCP ports this specific host actually needs to serve — everything else
+# dropped. This is DEFENSE IN DEPTH on top of the Proxmox cluster/SDN
+# firewall (which already gates :22 etc. to the pve_mgmt IPSet at the
+# hypervisor level) — most of the fleet relies on that perimeter alone
+# with no host-level firewall; this host gets one anyway per direct
+# request (2026-07-28 security sweep remediation).
+#
+# allowed_tcp_ports: {{ host_nftables_allowed_tcp_ports }}
+# allowed_sources:   {{ host_nftables_allowed_sources }}
+
+table inet baseline_filter {
+	chain input {
+		type filter hook input priority filter; policy drop;
+
+		iif "lo" accept
+		ct state established,related accept
+		ct state invalid drop
+
+		icmp type { echo-request, destination-unreachable, time-exceeded } accept
+		icmpv6 type { echo-request, destination-unreachable, time-exceeded, nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert } accept
+
+{% for port in host_nftables_allowed_tcp_ports %}
+{% for source in host_nftables_allowed_sources %}
+		ip saddr {{ source }} tcp dport {{ port }} accept
+{% endfor %}
+{% endfor %}
+	}
+
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+	}
+
+	chain output {
+		type filter hook output priority filter; policy accept;
+	}
+}
