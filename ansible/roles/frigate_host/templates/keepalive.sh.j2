@@ -1,0 +1,39 @@
+#!/bin/sh
+# Ansible managed
+#
+# Holds ONE persistent go2rtc MP4 consumer per camera stream, keeping each
+# Nest WebRTC producer warm so cold-start/reconnect delays and dropped
+# frames don't hit viewers or Frigate's detector. Runs inside the frigate
+# container (see frigate-keepalive.service on the host, which docker execs
+# this). Quiet fail-loop with backoff — an offline camera just retries
+# instead of spamming logs (see go2rtc.yaml's note on why `preload:` isn't
+# used instead).
+#
+# Reconstructed 2026-07-28: the previous version of this file had its shell
+# variable expansions stripped out entirely (`CAMS=cat_room foyer ...` with
+# no quotes/parens, `for cam in ;` iterating nothing, a hardcoded literal
+# unix timestamp instead of $(date +%s)) — it had been a silent no-op loop
+# since it was first written and never actually kept anything warm.
+
+CAMS="cat_room foyer basement driveway backyard front_porch kitchen_display"
+
+for cam in $CAMS; do
+  (
+    backoff=2
+    while true; do
+      start=$(date +%s)
+      ffmpeg -nostdin -loglevel quiet -f mp4 \
+        -i "http://127.0.0.1:1984/api/stream.mp4?src=${cam}" \
+        -c copy -f null - >/dev/null 2>&1
+      ran=$(( $(date +%s) - start ))
+      if [ "$ran" -ge 30 ]; then
+        backoff=2
+      else
+        backoff=$(( backoff * 2 ))
+        [ "$backoff" -gt 60 ] && backoff=60
+      fi
+      sleep "$backoff"
+    done
+  ) &
+done
+wait
