@@ -1,0 +1,5 @@
+---
+- name: Restart AdGuard Log Shipper Timer
+  ansible.builtin.systemd:
+    name: adguard-log-shipper.timer
+    state: restarted

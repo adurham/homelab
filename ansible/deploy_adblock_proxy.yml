@@ -1,0 +1,21 @@
+---
+# Two-stage deploy of the personal-device MITM ad-stripping proxy:
+#   1. adblock_proxy_host runs on pve03 to create the LXC (vmid 118,
+#      ip_adblock_proxy, hostname adblock-proxy-01) and inject SSH keys.
+#   2. adblock_proxy runs against the new CT to install mitmproxy, deploy
+#      the Discord ad-stripping addon, join Tailscale, and bring up the
+#      systemd unit. Explicit-proxy only — devices opt in per-device via
+#      Wi-Fi proxy settings pointed at this host's Tailscale IP; never
+#      transparent, never network-wide.
+
+- name: Provision Adblock Proxy Container
+  hosts: pve03
+  gather_facts: false
+  roles:
+    - adblock_proxy_host
+
+- name: Deploy Adblock Proxy Service
+  hosts: adblock_proxy
+  gather_facts: true
+  roles:
+    - adblock_proxy

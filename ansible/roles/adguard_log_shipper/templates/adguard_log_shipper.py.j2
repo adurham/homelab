@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""
+AdGuard Home query-log shipper -> Loki.
+
+WHY THIS EXISTS: AdGuard Home's query log retention is configured for
+1 day (control panel -> Settings -> retention), and its API is only
+reachable at the AdGuard control port (45158) from INSIDE Home
+Assistant's Docker host network, or via the browser-oriented ingress
+proxy path (session-cookie based, meant for the HA frontend, not a
+long-running service). Home Assistant's own network is isolated at the
+container level from adblock-proxy-01, which sits on both the private
+SDN (for Loki) and the LAN (for HA's core :8123 API) — see the
+"DNS-level ad/tracker blocking" section of roles/adblock_proxy for the
+established reachability facts this design relies on.
+
+AUTH: HA's ingress-session mechanism is normally minted by the frontend
+JS after a browser login, not exposed as a plain REST call a script can
+POST to directly (confirmed empirically: POST with a bearer token to
+/api/hassio/ingress/session returns 401; only the WebSocket API's
+`supervisor/api` command with method=post against /ingress/session
+works, using the long-lived HASS token as the WS auth credential). This
+script re-establishes that WebSocket session on every run rather than
+caching it — simpler than tracking session expiry, and cheap enough at
+a 1-minute poll interval.
+
+DEDUP / GAP-SAFETY: AdGuard's querylog endpoint returns newest-first
+with `older_than` cursor pagination. At observed query rates
+(~200+/min), a single limit=500 fetch only covers ~2 minutes — a
+shipper outage or slow run could silently lose entries between runs.
+This script pages backward with `older_than` until it reaches
+last-shipped or exhausts a page cap, so an outage gets backfilled
+(bounded by AdGuard's own 1-day log retention) rather than silently
+dropped.
+"""
+import asyncio
+import json
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+
+import websockets
+
+HA_HOST = "192.168.86.2"
+HA_PORT = 8123
+ADGUARD_INGRESS_PATH = "/api/hassio_ingress/iRwC5wuecKuGw8GYY2qIa_gQ2ENTb7658rUOCoyS-x4"
+LOKI_URL = "http://172.16.0.42:3100/loki/api/v1/push"
+STATE_FILE = Path("/var/lib/adguard-log-shipper/state.json")
+TOKEN_FILE = Path("/etc/adguard-log-shipper/hass_token")
+MAX_PAGES_PER_RUN = 30  # 30 * 500 = 15k entries backfill ceiling per run
+PAGE_LIMIT = 500
+
+
+async def get_ingress_session(token: str) -> str:
+    """Mint a fresh HA ingress session via the WebSocket API. See module
+    docstring for why this can't just be a REST POST with a bearer token."""
+    uri = f"ws://{HA_HOST}:{HA_PORT}/api/websocket"
+    async with websockets.connect(uri) as ws:
+        await ws.recv()  # auth_required hello
+        await ws.send(json.dumps({"type": "auth", "access_token": token}))
+        auth_result = json.loads(await ws.recv())
+        if auth_result.get("type") != "auth_ok":
+            raise RuntimeError(f"HA auth failed: {auth_result}")
+        await ws.send(
+            json.dumps(
+                {
+                    "id": 1,
+                    "type": "supervisor/api",
+                    "endpoint": "/ingress/session",
+                    "method": "post",
+                }
+            )
+        )
+        msg = json.loads(await ws.recv())
+        return msg["result"]["session"]
+
+
+def fetch_querylog_page(session: str, older_than: str = "") -> dict:
+    url = f"http://{HA_HOST}:{HA_PORT}{ADGUARD_INGRESS_PATH}/control/querylog?limit={PAGE_LIMIT}"
+    if older_than:
+        url += f"&older_than={urllib.parse.quote(older_than, safe='')}"
+    req = urllib.request.Request(url, headers={"Cookie": f"ingress_session={session}"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
+def load_state() -> dict:
+    if STATE_FILE.exists():
+        return json.loads(STATE_FILE.read_text())
+    return {"last_shipped_time": ""}
+
+
+def save_state(state: dict) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state))
+
+
+def parse_adguard_time(ts: str) -> datetime:
+    """AdGuard's `time` field is RFC3339 with a variable-precision
+    fractional-seconds component (observed: anywhere from 6 to 9
+    digits — nanosecond precision, not the 3-or-6-digit
+    milli/microsecond precision datetime.fromisoformat accepts on
+    Python 3.10). Pad-or-truncate to exactly 6 digits (microseconds)
+    before parsing; losing sub-microsecond precision is irrelevant for
+    a log timestamp. Caught live:
+    '2026-07-27T21:39:24.011848961-05:00' (9 fractional digits) raised
+    ValueError on the untruncated string."""
+    match = re.match(r"^(.*)\.(\d+)([+-]\d{2}:\d{2})$", ts)
+    if match:
+        base, frac, offset = match.groups()
+        frac = (frac + "000000")[:6]
+        ts = f"{base}.{frac}{offset}"
+    return datetime.fromisoformat(ts)
+
+
+def push_to_loki(entries: list) -> None:
+    if not entries:
+        return
+    values = []
+    for e in entries:
+        # See parse_adguard_time() for the fractional-seconds-precision
+        # gotcha. datetime.fromisoformat parses the explicit UTC offset
+        # correctly on Python 3.10+ (only the bare "Z" suffix needs
+        # 3.11); .timestamp() then converts to a true UTC unix epoch
+        # regardless of this host's own local timezone. An earlier
+        # version used time.strptime/time.mktime on a truncated
+        # (offset-stripped) string, which silently treated the
+        # CDT-labeled time as this CT's local time (UTC) — a real ~5h
+        # skew bug, caught by querying Loki right after first deploy
+        # and finding zero results in the expected window (entries
+        # existed, just timestamped 5h into the future).
+        dt = parse_adguard_time(e["time"])
+        ts_ns = str(int(dt.timestamp() * 1_000_000_000))
+        values.append([ts_ns, json.dumps(e)])
+
+    payload = {
+        "streams": [
+            {
+                "stream": {"job": "adguard", "host": "homeassistant"},
+                "values": values,
+            }
+        ]
+    }
+    req = urllib.request.Request(
+        LOKI_URL,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        if resp.status not in (200, 204):
+            raise RuntimeError(f"Loki push returned {resp.status}")
+
+
+async def main() -> None:
+    token = TOKEN_FILE.read_text().strip()
+    session = await get_ingress_session(token)
+    state = load_state()
+    last_shipped_time = state.get("last_shipped_time", "")
+
+    all_new = []
+    older_than = ""
+    caught_up = False
+    for _page in range(MAX_PAGES_PER_RUN):
+        data = fetch_querylog_page(session, older_than)
+        entries = data.get("data", [])
+        if not entries:
+            break
+        for e in entries:
+            if last_shipped_time and e["time"] <= last_shipped_time:
+                caught_up = True
+                break
+            all_new.append(e)
+        if caught_up:
+            break
+        older_than = data.get("oldest", "")
+        if not older_than:
+            break
+
+    if not all_new:
+        print("no new entries")
+        return
+
+    # AdGuard returns newest-first; ship oldest-first so Loki's stream
+    # timestamps stay monotonically increasing.
+    all_new.reverse()
+    push_to_loki(all_new)
+    save_state({"last_shipped_time": all_new[-1]["time"]})
+    print(f"shipped {len(all_new)} entries")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

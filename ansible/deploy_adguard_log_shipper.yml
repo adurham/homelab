@@ -1,0 +1,14 @@
+---
+# Ships AdGuard Home's query log (otherwise capped at 1-day retention,
+# and only reachable via HA's browser-oriented ingress session or from
+# inside HA's own Docker network) into Loki for durable 30-day
+# retention. Runs on adblock-proxy-01 since it already has direct
+# network reachability to both HA (LAN, for the AdGuard API) and Loki
+# (private SDN) — see roles/adguard_log_shipper's task file for the
+# full reachability rationale.
+
+- name: Deploy AdGuard Log Shipper
+  hosts: adblock_proxy
+  gather_facts: true
+  roles:
+    - adguard_log_shipper

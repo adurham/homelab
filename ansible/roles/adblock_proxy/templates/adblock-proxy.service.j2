@@ -1,0 +1,28 @@
+[Unit]
+Description=Adblock Proxy (mitmproxy, explicit HTTPS proxy for personal devices)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+Requires=tailscaled.service
+
+[Service]
+Type=simple
+User=mitmproxy
+Group=mitmproxy
+WorkingDirectory=/opt/adblock-proxy
+Environment=HOME=/home/mitmproxy
+# Binds ONLY to the tailscale0 interface IP — unreachable from eth0/private
+# SDN or any LAN. This is the opt-in boundary: a device must be on the
+# tailnet to even establish a TCP connection to the proxy.
+ExecStart=/opt/adblock-proxy/venv/bin/mitmdump \
+  --listen-host {{ adblock_proxy_listen_host }} \
+  --listen-port 8080 \
+  --set confdir=/home/mitmproxy/.mitmproxy \
+  -s /opt/adblock-proxy/discord_adblock.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/mitmproxy /opt/adblock-proxy
+
+[Install]
+WantedBy=multi-user.target

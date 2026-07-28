@@ -1,0 +1,152 @@
+---
+# Provisions the LXC for the personal-device MITM ad-stripping proxy
+# (mitmproxy, explicit HTTPS proxy — NOT transparent/network-wide).
+# Mirrors the hermes_gateway_host role pattern: pveam template fetch ->
+# cluster-wide existence check -> pct create -> inject SSH key -> join
+# Tailscale directly (same as hermes-gw-01) -> add to in-memory inventory.
+
+- name: Update Template Database
+  ansible.builtin.command: pveam update
+  changed_when: false
+
+- name: Download Ubuntu 22.04 Template
+  ansible.builtin.command: pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+  args:
+    creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+
+# Resolve the node CT 118 lives on now (HA-aware). Sets ct_exists + ct_node;
+# node-local `pct` ops below delegate to ct_node so they follow HA migrations.
+- name: Resolve owning node for Adblock Proxy CT
+  ansible.builtin.include_role:
+    name: resolve_ct_node
+  vars:
+    ct_vmid: 118
+
+- name: Create Adblock Proxy Container
+  ansible.builtin.command: >
+    pct create 118 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+    --hostname adblock-proxy-01
+    --cores 2 --memory 2048 --swap 1024
+    --rootfs nvme-data:8
+    --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_adblock_proxy }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
+    --unprivileged 1
+    --features nesting=1
+    --password "{{ vault_adblock_proxy_root_pass }}"
+    --start 1
+    --onboot 1
+  no_log: true
+  when: not ct_exists
+
+# Bumped from the original 1 core/512MB to 2 cores/2GB (2026-07-27) once
+# real usage showed multiple devices (phone + Mac) routing simultaneously
+# through the exit node. Actual load stayed low even at 1c/512M (~1% CPU,
+# ~180MB RSS for both mitmproxy instances combined — non-Discord SNI
+# traffic is a cheap opaque TCP relay, no TLS work at all) but headroom
+# is cheap and this removes any doubt as usage grows. Applied live via
+# `pct set` (both cores and memory hot-resize for LXC, no reboot needed)
+# — this task keeps it enforced on every idempotent re-run, matching the
+# loadbalancer_host/monitoring_host pattern for config drift.
+- name: Ensure Adblock Proxy Container is Sized Correctly (2 cores / 2GB)
+  ansible.builtin.command: pct set 118 --cores 2 --memory 2048 --swap 1024
+  delegate_to: "{{ ct_node }}"
+  changed_when: true
+
+- name: Ensure Adblock Proxy Container is Running
+  ansible.builtin.command: pct start 118
+  delegate_to: "{{ ct_node }}"
+  register: adblock_proxy_start
+  failed_when: adblock_proxy_start.rc != 0 and ("already running" not in adblock_proxy_start.stderr and "already running" not in adblock_proxy_start.stdout)
+  changed_when: adblock_proxy_start.rc == 0
+
+- name: Wait for Adblock Proxy Container IP
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 118 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+  delegate_to: "{{ ct_node }}"
+  register: ip_check
+  until: ip_check.rc == 0
+  retries: 20
+  delay: 3
+  changed_when: false
+
+- name: Update Apt Cache in Adblock Proxy Container
+  ansible.builtin.command: pct exec 118 -- apt-get update
+  delegate_to: "{{ ct_node }}"
+  when: not ct_exists
+  changed_when: true
+
+- name: Install Python3 in Adblock Proxy Container
+  ansible.builtin.command: pct exec 118 -- apt-get install -y python3
+  delegate_to: "{{ ct_node }}"
+  when: not ct_exists
+  changed_when: true
+
+- name: Inject SSH Key into Adblock Proxy Container (via pipe)
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 118 -- mkdir -p /root/.ssh
+    cat /root/.ssh/authorized_keys | pct exec 118 -- sh -c "cat > /root/.ssh/authorized_keys"
+    pct exec 118 -- chmod 700 /root/.ssh
+    pct exec 118 -- chmod 600 /root/.ssh/authorized_keys
+  delegate_to: "{{ ct_node }}"
+  when: not ct_exists
+  changed_when: true
+
+# openssh-server ships in the Ubuntu LXC template but isn't enabled by
+# default. Without this the CT is only reachable via `pct exec` from the
+# proxmox host — direct SSH from ansible against the CT's IP fails.
+- name: Ensure SSH is enabled and running
+  ansible.builtin.command: pct exec 118 -- systemctl enable --now ssh
+  delegate_to: "{{ ct_node }}"
+  changed_when: false
+
+# TUN device passthrough so Tailscale can run inside the unprivileged CT.
+# Mirrors hermes-gw-01's config (hermes_gateway_host role) and
+# tailscale-gw's. Without these two lines, /dev/net/tun isn't visible
+# inside the container and `tailscale up` fails with "device or resource
+# busy" / "no such device".
+#
+# Both edits are idempotent via lineinfile; the LXC must be restarted for
+# them to take effect (handled by the restart task below, which only
+# fires when the conf actually changed).
+
+- name: Allow tun device cgroup in Adblock Proxy LXC config
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/118.conf
+    line: 'lxc.cgroup2.devices.allow: c 10:200 rwm'
+    state: present
+    create: false
+  register: adblock_proxy_tun_cgroup
+
+- name: Mount tun device in Adblock Proxy LXC config
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/118.conf
+    line: 'lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file'
+    state: present
+    create: false
+  register: adblock_proxy_tun_mount
+
+- name: Restart Adblock Proxy Container for TUN access
+  ansible.builtin.command: pct reboot 118
+  delegate_to: "{{ ct_node }}"
+  when: adblock_proxy_tun_cgroup.changed or adblock_proxy_tun_mount.changed
+  changed_when: true
+
+- name: Wait for Adblock Proxy Container SSH after TUN restart
+  ansible.builtin.wait_for:
+    host: "{{ hostvars['adblock-proxy-01'].ansible_host | default(ip_adblock_proxy) }}"
+    port: 22
+    timeout: 60
+  when: adblock_proxy_tun_cgroup.changed or adblock_proxy_tun_mount.changed
+  delegate_to: localhost
+
+- name: Add Adblock Proxy Host to In-Memory Inventory
+  # Reach via Tailscale directly (same pattern as hermes-gw-01) — personal
+  # devices connect to this proxy from anywhere on the tailnet, not just
+  # the home LAN, so it joins Tailscale itself rather than being reached
+  # via the tailscale-gw subnet router.
+  ansible.builtin.add_host:
+    name: adblock-proxy-01
+    ansible_host: adblock-proxy-01.tail19c543.ts.net
+    ansible_user: root
+    groups: adblock_proxy

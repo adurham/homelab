@@ -1,0 +1,122 @@
+---
+# Configures the AdGuard Home query-log -> Loki shipper on
+# adblock-proxy-01. See templates/adguard_log_shipper.py.j2 for the full
+# rationale (HA container network isolation, ingress-session mechanics,
+# gap-safety design). Runs as its own venv + systemd timer, independent
+# of the mitmproxy stack this CT primarily hosts.
+
+- name: Create adguard-log-shipper System User
+  ansible.builtin.user:
+    name: adguard-log-shipper
+    system: true
+    shell: /usr/sbin/nologin
+    home: /home/adguard-log-shipper
+    create_home: true
+
+- name: Ensure /opt/adguard-log-shipper Directory Exists
+  ansible.builtin.file:
+    path: /opt/adguard-log-shipper
+    state: directory
+    owner: adguard-log-shipper
+    group: adguard-log-shipper
+    mode: '0755'
+
+- name: Create adguard-log-shipper Virtualenv
+  ansible.builtin.command: python3 -m venv /opt/adguard-log-shipper/venv
+  args:
+    creates: /opt/adguard-log-shipper/venv/bin/python
+
+- name: Install websockets in Virtualenv
+  ansible.builtin.pip:
+    name: websockets
+    virtualenv: /opt/adguard-log-shipper/venv
+    state: present
+
+- name: Fix Ownership of Virtualenv
+  ansible.builtin.file:
+    path: /opt/adguard-log-shipper/venv
+    state: directory
+    owner: adguard-log-shipper
+    group: adguard-log-shipper
+    recurse: true
+
+- name: Ensure /var/lib/adguard-log-shipper State Directory Exists
+  ansible.builtin.file:
+    path: /var/lib/adguard-log-shipper
+    state: directory
+    owner: adguard-log-shipper
+    group: adguard-log-shipper
+    mode: '0750'
+
+- name: Ensure /etc/adguard-log-shipper Directory Exists
+  ansible.builtin.file:
+    path: /etc/adguard-log-shipper
+    state: directory
+    owner: root
+    group: adguard-log-shipper
+    mode: '0750'
+
+- name: Deploy Home Assistant Long-Lived Token for Shipper
+  ansible.builtin.copy:
+    content: "{{ vault_hermes_gw_hass_token }}"
+    dest: /etc/adguard-log-shipper/hass_token
+    owner: root
+    group: adguard-log-shipper
+    mode: '0640'
+  no_log: true
+  # Reuses the same long-lived HA token already vaulted for the
+  # hermes_gateway role (vault_hermes_gw_hass_token) rather than minting
+  # a second one — one fewer credential to rotate.
+
+- name: Deploy AdGuard Log Shipper Script
+  ansible.builtin.template:
+    src: adguard_log_shipper.py.j2
+    dest: /opt/adguard-log-shipper/adguard_log_shipper.py
+    owner: adguard-log-shipper
+    group: adguard-log-shipper
+    mode: '0750'
+
+- name: Install AdGuard Log Shipper Systemd Service + Timer
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.name }}"
+    content: "{{ item.content }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - name: adguard-log-shipper.service
+      content: |
+        [Unit]
+        Description=Ship AdGuard Home query log to Loki
+        After=network-online.target
+
+        [Service]
+        Type=oneshot
+        User=adguard-log-shipper
+        Group=adguard-log-shipper
+        ExecStart=/opt/adguard-log-shipper/venv/bin/python3 /opt/adguard-log-shipper/adguard_log_shipper.py
+        # AdGuard's 1-day retention + the shipper's own backfill logic
+        # tolerate the occasional missed run; a hard timeout keeps a
+        # stuck WebSocket auth from blocking the next scheduled run.
+        TimeoutStartSec=60
+    - name: adguard-log-shipper.timer
+      content: |
+        [Unit]
+        Description=Run the AdGuard log shipper every minute
+
+        [Timer]
+        OnBootSec=30s
+        OnUnitActiveSec=60s
+        AccuracySec=5s
+
+        [Install]
+        WantedBy=timers.target
+  register: adguard_log_shipper_units
+  notify: Restart AdGuard Log Shipper Timer
+
+- name: Enable & Start AdGuard Log Shipper Timer
+  ansible.builtin.systemd:
+    name: adguard-log-shipper.timer
+    state: started
+    enabled: true
+    daemon_reload: true

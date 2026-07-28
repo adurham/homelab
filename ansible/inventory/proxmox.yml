@@ -160,6 +160,20 @@ all:
       vars:
         ansible_user: root
 
+    # Personal-device MITM ad-stripping proxy (mitmproxy explicit HTTPS
+    # proxy). Devices opt in individually via Wi-Fi proxy settings pointed
+    # at its Tailscale hostname — NOT transparent/network-wide. Joins the
+    # tailnet directly (mirrors hermes-gw-01's pattern) since personal
+    # devices reach it over Tailscale from anywhere, not just the home LAN.
+    adblock_proxy:
+      hosts:
+        adblock-proxy-01:
+          ansible_host: adblock-proxy-01.tail19c543.ts.net
+          vmid: 118
+          target_node: pve03
+      vars:
+        ansible_user: root
+
     # Parent group for all CTs on the 172.16.0.0/24 private subnet that need
     # to be reached through the personal MacBook (Tailscale jump host) when
     # ansible is invoked from the work MacBook. The actual ProxyCommand lives
