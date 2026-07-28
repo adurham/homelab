@@ -58,10 +58,27 @@ all:
     # Frigate NVR (Docker-in-LXC, CPU object detection). eth0 on vmbr0 (DHCP)
     # so it can reach the go2rtc RTSP source + HA on the LAN; eth1 on the
     # `private` SDN at ip_frigate. See roles/frigate_host + deploy_frigate.yml.
+    #
+    # ansible_host uses the LAN IP (dhcp-assigned, via a static DHCP
+    # reservation — see docs/ipam.md), NOT ip_frigate/172.16.0.45, as a
+    # deliberate workaround: TCP to the private-SDN IP consistently times
+    # out at the SYN stage specifically when reached from the primary
+    # workstation's Tailscale client, even though Tailscale's own `ping`
+    # confirms a healthy direct path and OTHER private-SDN hosts (vm-01,
+    # dns-01, etc.) are reachable fine over the same subnet from the same
+    # machine. Root cause not found (checked tailscale-gw's iptables,
+    # Proxmox's cluster/SDN firewall rules incl. the pve_mgmt IPSet, and
+    # pve01's PRIVATE-MONITORING-IN hardening chain — none show an
+    # explicit block) — user's own read (2026-07-28) is this is a
+    # side-effect of one of the private-subnet hardening passes and
+    # "probably a bit excessive." LAN IP sidesteps it entirely for
+    # ansible/monitoring purposes; frigate-01 itself is confirmed healthy
+    # and low-load. Re-investigate the private-SDN path if this ever
+    # needs revisiting (e.g. if the LAN IP becomes unavailable).
     frigate_server:
       hosts:
         frigate-01:
-          ansible_host: "{{ ip_frigate }}"
+          ansible_host: 192.168.86.85
           vmid: 170
           target_node: pve01
           template: debian-12-standard_12.12-1_amd64.tar.zst
