@@ -1,0 +1,14 @@
+---
+# Hardens SSH (key-only, no password/keyboard-interactive) on the
+# tanium_clients fleet — remediates the 2026-07-28 security-sweep finding:
+# 9 of these hosts allowed PermitRootLogin yes + PasswordAuthentication yes
+# with no per-CT firewall as a backstop. id_ansible's public key was
+# provisioned to each host's authorized_keys out-of-band via `pct exec`
+# (these hosts didn't have it before, unlike the rest of the fleet) and
+# verified reachable by key BEFORE this playbook's first real run.
+
+- name: Harden SSH on Tanium client test hosts
+  hosts: tanium_clients
+  gather_facts: true
+  roles:
+    - tanium_client_hardening
