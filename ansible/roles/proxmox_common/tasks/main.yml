@@ -58,3 +58,18 @@
     - rpcbind.service
     - rpcbind.socket
   failed_when: false  # idempotent: already-masked / not-installed both ok
+
+- name: Persist overlay kernel module load at boot (host-level, for LXC docker/containerd guests)
+  # 2026-07-28: power blip rebooted pve01 without the overlay module auto-loading
+  # (no /etc/modules-load.d entry existed on any node). Unprivileged LXCs can't
+  # modprobe themselves, so frigate-01's containerd hung retrying modprobe
+  # overlay forever -> docker never started -> Nest cameras dark for 45h until
+  # manually caught. This makes the module load unconditionally on every boot
+  # on all 3 pve nodes, closing that specific failure mode fleet-wide.
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/overlay.conf
+    content: |
+      overlay
+    owner: root
+    group: root
+    mode: "0644"
