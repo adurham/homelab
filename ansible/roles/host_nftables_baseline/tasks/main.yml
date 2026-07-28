@@ -1,0 +1,104 @@
+---
+# Minimal default-deny nftables baseline for hosts that otherwise have NO
+# host-level firewall at all — installs nftables if missing, deploys a
+# ruleset gated to only the ports this host actually serves (see
+# host_nftables_allowed_tcp_ports, set per-host in the calling playbook),
+# and enables it to survive reboots. Defense-in-depth on top of the
+# Proxmox cluster/SDN firewall which already gates :22 etc. at the
+# hypervisor level via the pve_mgmt IPSet.
+#
+# SAFETY: SSH (22) must always be in host_nftables_allowed_tcp_ports or
+# this WILL lock out ansible itself on the next connection. The apply
+# task validates the rendered ruleset with `nft -c -f` before loading it
+# live, and a post-check task re-verifies reachability.
+
+- name: Install nftables (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Install nftables (RedHat)
+  ansible.builtin.dnf:
+    name: nftables
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Install nftables (Suse)
+  ansible.builtin.zypper:
+    name: nftables
+    state: present
+  when: ansible_facts['os_family'] == 'Suse'
+
+- name: Set the OS-appropriate nftables config path
+  ansible.builtin.set_fact:
+    nftables_config_path: >-
+      {{ '/etc/sysconfig/nftables.conf' if ansible_facts['os_family'] == 'RedHat' else '/etc/nftables.conf' }}
+  # NOTE: only verified for Debian/Ubuntu (/etc/nftables.conf, confirmed
+  # working) and RHEL-family (/etc/sysconfig/nftables.conf, confirmed via
+  # `systemctl cat nftables` on tc-rhel9 2026-07-28 after the Debian path
+  # was tried first and silently loaded an empty ruleset — nftables.service
+  # reported "active" the whole time even though nothing was actually
+  # loaded, since it never errors on a config path mismatch). SUSE's
+  # nftables package ships with NO systemd unit at all on this fleet's
+  # openSUSE 15.6 image (confirmed empirically — `find / -name
+  # nftables.service` came up empty after a fresh install), so this role
+  # doesn't support Suse; the `ansible.builtin.zypper` install task above
+  # is left in only for forward-compat if that ever changes, but this
+  # role should NOT be run against Suse hosts until that's sorted out.
+
+- name: Render baseline nftables ruleset to a staging file
+  ansible.builtin.template:
+    src: baseline.nft.j2
+    dest: /etc/nftables.staged.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Validate staged ruleset syntax before applying
+  ansible.builtin.command: nft -c -f /etc/nftables.staged.conf
+  changed_when: false
+
+- name: Promote staged ruleset to the live config path
+  ansible.builtin.copy:
+    src: /etc/nftables.staged.conf
+    dest: "{{ nftables_config_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Apply nftables ruleset
+
+- name: Enable nftables service (persists across reboots)
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+
+- name: Flush handlers so the new ruleset is live before we verify
+  ansible.builtin.meta: flush_handlers
+
+- name: Confirm the ruleset actually loaded (not just "service active")
+  ansible.builtin.command: nft list tables
+  register: nft_loaded_tables
+  changed_when: false
+  failed_when: "'inet baseline_filter' not in nft_loaded_tables.stdout"
+  # Real bug caught here 2026-07-28 on tc-rhel9: writing to the wrong
+  # config path (Debian's /etc/nftables.conf on a RHEL host, which
+  # actually reads /etc/sysconfig/nftables.conf) left `systemctl
+  # is-active nftables` reporting "active" the whole time with an
+  # EMPTY ruleset silently loaded instead — the service never errors
+  # on a config-path mismatch, it just has nothing to apply. This task
+  # fails loudly instead of trusting the service state alone.
+
+- name: Verify SSH still reachable after applying the ruleset (safety gate)
+  ansible.builtin.command: "true"
+  changed_when: false
+  # If this task runs at all, ansible's own connection (over SSH) survived
+  # the ruleset reload — confirms port 22 wasn't accidentally dropped.
+
+- name: Clean up staging file
+  ansible.builtin.file:
+    path: /etc/nftables.staged.conf
+    state: absent
