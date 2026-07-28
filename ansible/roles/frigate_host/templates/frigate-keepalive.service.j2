@@ -1,0 +1,20 @@
+# Ansible managed
+# Runs keepalive.sh inside the frigate container: holds one persistent
+# go2rtc MP4 consumer per camera so Nest WebRTC producers stay warm
+# (see go2rtc.yaml's comment on why `preload:` isn't used instead).
+[Unit]
+Description=Frigate go2rtc keepalive (runs inside container, survives restarts)
+After=docker.service
+Requires=docker.service
+BindsTo=frigate-recreate.service
+After=frigate-recreate.service
+
+[Service]
+Type=exec
+ExecStartPre=/bin/sh -c "while ! docker ps --filter name=frigate --format '{{ '{{' }}.Names{{ '}}' }}' | grep -q frigate; do sleep 2; done"
+ExecStart=/usr/bin/docker exec frigate /opt/frigate/go2rtc/keepalive.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

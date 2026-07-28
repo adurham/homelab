@@ -1,0 +1,35 @@
+# Ansible managed
+# Force-recreates the Frigate container on CT boot/reboot or migration.
+# Docker's container state (running containers) does NOT survive a
+# Proxmox LXC migration or the LXC restarting — only the rootfs/volumes
+# do (see docker-compose.yml's bind mounts). Without this, a migration
+# or CT reboot leaves docker/containerd running but zero containers,
+# and Frigate/go2rtc/Nest camera feeds silently stay down until someone
+# manually runs `docker compose up -d`.
+#
+# 2026-07-28 hardening: `docker rm -f` returns before containerd's
+# snapshot GC has actually finished releasing the old container's
+# overlayfs snapshot. When two migrations land close together (cluster
+# CRS auto-rebalance bouncing the CT between nodes within minutes),
+# the next recreate's `docker compose up` can collide with a
+# not-yet-cleaned-up snapshot ID and fail outright:
+#   "failed to rename: ... snapshots/N: file exists"
+# leaving Frigate down with the self-heal itself broken. The bounded
+# poll below waits for `docker ps -a` to actually show zero containers
+# named frigate (real container removal confirmed) before proceeding,
+# instead of assuming `docker rm -f`'s success exit code means the
+# containerd-level cleanup is done.
+[Unit]
+Description=Frigate container recreate (survives LXC reboot RWLayer corruption)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/bin/docker rm -f frigate
+ExecStartPre=-{{ frigate_base_dir }}/cleanup-orphan-snapshots.sh
+ExecStart=/usr/bin/docker compose -f {{ frigate_base_dir }}/docker-compose.yml up -d --force-recreate frigate
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

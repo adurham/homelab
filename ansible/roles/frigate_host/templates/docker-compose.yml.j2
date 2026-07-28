@@ -36,6 +36,7 @@ services:
       - {{ frigate_base_dir }}/config:/config
       - {{ frigate_base_dir }}/media:/media/frigate
       - {{ frigate_base_dir }}/go2rtc/go2rtc_patched:/config/go2rtc:ro
+      - {{ frigate_base_dir }}/go2rtc/keepalive.sh:/opt/frigate/go2rtc/keepalive.sh:ro
       - type: tmpfs
         target: /tmp/cache
         tmpfs:

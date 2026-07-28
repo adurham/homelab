@@ -1,0 +1,46 @@
+#!/bin/sh
+# Ansible managed
+#
+# Cleans up orphaned containerd overlayfs snapshots left behind by a
+# `docker rm -f` that returns before containerd's own snapshot GC has
+# actually finished. Runs as an ExecStartPre for frigate-recreate.service.
+#
+# Root cause (found 2026-07-28): docker's `rm -f` reports success as
+# soon as the container object is deleted from docker's own database,
+# but the underlying containerd overlayfs snapshot release can lag
+# behind that. If a second recreate cycle lands within that window
+# (e.g. two Proxmox HA/CRS migrations minutes apart bouncing this CT
+# between nodes), the new container's snapshot allocation can collide
+# with a still-lingering old one:
+#   "failed to rename: ... snapshots/N: file exists"
+# leaving Frigate down with the self-heal service itself failed.
+#
+# Fix: explicitly remove any snapshot that is a bare container-ID
+# snapshot (64 hex chars, optionally suffixed "-init") that is NOT the
+# currently-running frigate container's own ID. Image LAYER snapshots
+# are keyed by "sha256:<digest>" and are never touched here — this
+# only ever removes per-container runtime snapshots, never image data.
+
+set -eu
+
+live_id=""
+if docker inspect frigate >/dev/null 2>&1; then
+  live_id=$(docker inspect frigate --format {% raw %}'{{.Id}}'{% endraw %})
+fi
+
+ctr -n moby snapshot ls -q 2>/dev/null | while read -r key; do
+  case "$key" in
+    sha256:*)
+      # Image layer snapshot — never touch.
+      continue
+      ;;
+  esac
+
+  base="${key%-init}"
+  if [ -n "$live_id" ] && [ "$base" = "$live_id" ]; then
+    # Backs the currently-running container — skip.
+    continue
+  fi
+
+  ctr -n moby snapshot rm "$key" 2>/dev/null || true
+done
