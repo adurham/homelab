@@ -42,6 +42,17 @@ input_text:
     name: "Living Room Active Scene"
     initial: "none"
 
+input_boolean:
+  # Tracks whether the Frigate NVR watchdog has an active unresolved
+  # alert. persistent_notification entities are NOT real state-machine
+  # objects on this HA instance (states() on them always returns
+  # "unknown" — confirmed 2026-07-28), so they can't be used to gate
+  # "only send recovery notice if we actually alerted" logic. This
+  # input_boolean is a real, queryable substitute for that purpose.
+  frigate_watchdog_alerted:
+    name: "Frigate Watchdog Alerted"
+    initial: false
+
 timer:
   garage_lights_motion_timeout:
     name: "Garage Lights Motion Timeout"

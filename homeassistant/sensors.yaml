@@ -30,3 +30,20 @@
   payload: '{"method": "getPictureQualitySettings", "version": "1.0", "params": [{"target": "pictureMode"}], "id": 1}'
   value_template: "{{ value_json.result[0][0].currentValue }}"
   scan_interval: 10
+
+# Frigate NVR reachability (CT 170, frigate-01 on pve01).
+# 2026-07-28: after a power blip, Proxmox reported the LXC as "running"
+# for 45 hours while containerd inside it was crash-looping (corrupted
+# bbolt metadata DB) and docker/Frigate/go2rtc were completely dead —
+# Nest cameras went dark with no alert until manually caught. Container
+# "running" state is NOT a reliable health signal; poll Frigate's own
+# HTTP API directly instead. entity value is the Frigate version string
+# when healthy; the REST sensor goes `unavailable` on any connection
+# failure/timeout, which is what the paired watchdog automation keys on.
+- platform: rest
+  name: "Frigate API Reachable"
+  unique_id: frigate_api_reachable
+  resource: http://192.168.86.85:5000/api/version
+  scan_interval: 60
+  timeout: 10
+  value_template: "{{ value }}"
