@@ -1,0 +1,11 @@
+---
+# Ships Home Assistant's host/core/supervisor/add-on journal logs into
+# Loki for durable retention. Runs on adblock-proxy-01, which already
+# has direct LAN reachability to HA — see roles/ha_log_shipper's task
+# file and template for the full design rationale.
+
+- name: Deploy Home Assistant Log Shipper
+  hosts: adblock_proxy
+  gather_facts: true
+  roles:
+    - ha_log_shipper

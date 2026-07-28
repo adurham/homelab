@@ -1,0 +1,5 @@
+---
+- name: Restart HA Log Shipper Timer
+  ansible.builtin.systemd:
+    name: ha-log-shipper.timer
+    state: restarted

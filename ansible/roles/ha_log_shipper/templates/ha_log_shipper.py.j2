@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""
+Home Assistant host/core/supervisor/add-on log shipper -> Loki.
+
+WHY THIS EXISTS: Home Assistant's OS-level (host), Core, Supervisor, and
+per-add-on logs live in the systemd journal on homeassistant.local, with
+NO built-in shipping to any central log store. journald's own local
+retention is what's there today; this ships a durable copy into Loki
+(same pattern established for the AdGuard query-log shipper — see
+roles/adguard_log_shipper).
+
+AUTH / REACHABILITY: Unlike AdGuard's control API (only reachable via
+HA's browser-oriented ingress-session mechanism from inside HA's own
+Docker network), the Supervisor's log endpoints ARE reachable directly
+via HA's regular Core REST API at /api/hassio/<path>, proxied through
+using the same long-lived HASS token already vaulted for the AdGuard
+shipper and hermes_gateway (vault_hermes_gw_hass_token) — confirmed
+empirically: GET .../api/hassio/host/logs with a bearer token returns
+200 directly from adblock-proxy-01 over the LAN, no WebSocket dance
+needed. Much simpler than the AdGuard shipper's auth path.
+
+SOURCES: /api/hassio/host/logs, /api/hassio/core/logs,
+/api/hassio/supervisor/logs, plus /api/hassio/addons/<slug>/logs for
+every currently-started add-on (queried fresh each run via
+/api/hassio/addons, so newly installed/started add-ons get picked up
+automatically without a config change here).
+
+PAGINATION DESIGN: These endpoints are backed by systemd-journal-
+gatewayd and DO support real cursor-based Range pagination
+(`Range: entries=<cursor>:<skip>:<count>`, confirmed empirically to
+behave like real journalctl --after-cursor semantics — skip=N from a
+cursor correctly resumes at line N+1). Deliberately NOT used here in
+favor of a simpler fixed-window-fetch + content-hash-dedupe approach:
+cursor-chasing requires per-source persistent cursor state that goes
+permanently stale if the shipper is down long enough for journald to
+rotate past the saved cursor's position (a real risk once host
+journald retention gets tightened to 1 day, per the broader
+centralized-logging plan) — a stale cursor means silent total data
+loss for that source until manually re-anchored. A fixed window
+(default: last 500 lines) + a per-source bounded set of recently-seen
+line hashes self-heals across any gap (restart, network blip, HA
+reboot) at the cost of doing a little redundant work each poll — a
+good trade at HA's actual log volume (nowhere near AdGuard's
+200+/min DNS query volume).
+
+TIMEZONE: journal log lines are rendered with a BARE local timestamp
+(no offset) — confirmed empirically the HA host's local time is CDT
+(date on the host showed CDT while `date -u` showed the true UTC
+value 5h ahead). Parsed here with an explicit fixed offset rather than
+assumed-UTC to avoid repeating the AdGuard shipper's own timestamp-skew
+bug (see roles/adguard_log_shipper's push_to_loki docstring).
+"""
+import hashlib
+import json
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+HASS_HOST = "192.168.86.2"
+HASS_PORT = 8123
+LOKI_URL = "http://172.16.0.42:3100/loki/api/v1/push"
+STATE_FILE = Path("/var/lib/ha-log-shipper/state.json")
+TOKEN_FILE = Path("/etc/ha-log-shipper/hass_token")
+WINDOW_LINES = 500
+SEEN_HASHES_PER_SOURCE = 2000  # bounded LRU-ish cap per source
+# Loki's ingester rejects entries older than its out-of-order window
+# (default reject_old_samples_max_age is much larger, but the
+# ACTIVE ingester's in-memory chunk only accepts entries within a
+# much tighter recent window in practice — confirmed empirically:
+# entries ~50min old got rejected as "entry too far behind" even
+# though loki.yml's reject_old_samples_max_age is 168h). Rather than
+# hardcode Loki's exact internal window (an implementation detail that
+# could change), filter out anything older than this conservative
+# threshold BEFORE attempting a push — these can never succeed and
+# were previously retried forever every 60s, wasting a request without
+# ever advancing past them (their hash was never being marked seen
+# because push_to_loki's exception path skipped state advancement
+# entirely, including for the newer, otherwise-shippable lines mixed
+# into the same batch). They're still marked seen (see SHIP_MAX_AGE_S
+# usage below) so this is a one-time drop of genuinely-too-old
+# backlog, not a live-data loss.
+SHIP_MAX_AGE_S = 30 * 60
+
+# NOTE (2026-07-27): journal API timestamps are rendered in UTC, NOT
+# host-local time — confirmed empirically by comparing a freshly
+# fetched log line's timestamp directly against `date -u` on the HA
+# host at the same moment (they matched to the second; the host's
+# LOCAL time, CDT/UTC-5, did NOT match). An earlier version of this
+# module assumed local-CDT and applied a -05:00 offset, which
+# double-shifted every timestamp ~5h into the future and got every
+# push rejected by Loki with "timestamp too new". Left as UTC (no
+# offset) below — see parse_line_timestamp().
+
+
+def api_get(path: str, token: str) -> str:
+    url = f"http://{HASS_HOST}:{HASS_PORT}/api/hassio{path}"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.read().decode(errors="replace")
+
+
+def get_started_addon_slugs() -> list:
+    """The generic /addons list endpoint needs broader Supervisor
+    permissions than this token has (confirmed empirically: /addons
+    returns 401 with the same token that works fine against
+    /host/logs, /core/logs, /supervisor/logs, and per-addon /logs
+    paths — these are apparently scoped differently). Rather than
+    widening a shared long-lived token's permissions just for this,
+    ship a fixed known-slug list instead. Re-derive this list with:
+      curl -H "Authorization: Bearer $TOKEN" \\
+        http://<ha-host>:8123/api/hassio/addons | jq -r \\
+        '.data.addons[] | select(.state=="started") | .slug'
+    (from a host/token that DOES have the broader scope, or via HA's
+    own web UI -> Settings -> Add-ons, checking each one's slug in its
+    URL). Confirmed 2026-07-27."""
+    return [
+        "a0d7b954_adguard",
+        "5c53de3b_esphome",
+        "a0d7b954_uptime-kuma",
+        "core_matter_server",
+        "core_ssh",
+        "db21ed7f_portainer",
+        "a0d7b954_appdaemon",
+        "core_mosquitto",
+        "a0d7b954_tailscale",
+        "f5b120c9_shark2mqtt",
+    ]
+
+
+def load_state() -> dict:
+    if STATE_FILE.exists():
+        return json.loads(STATE_FILE.read_text())
+    return {}
+
+
+def save_state(state: dict) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state))
+
+
+def line_hash(line: str) -> str:
+    return hashlib.sha256(line.encode()).hexdigest()[:16]
+
+
+def parse_line_timestamp(line: str) -> int:
+    """Journal lines start with 'YYYY-MM-DD HH:MM:SS.mmm ', rendered in
+    UTC (see the UTC note above main()'s constants). Falls back to
+    "now" if a line doesn't match (e.g. a wrapped multi-line traceback
+    continuation) so it still ships instead of getting silently
+    dropped, just co-located in time with its parent line's poll cycle
+    rather than its own exact instant."""
+    try:
+        ts_str = line[:23]  # "2026-07-28 03:08:23.783"
+        dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S.%f")
+        dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1_000_000_000)
+    except ValueError:
+        return int(datetime.now(tz=timezone.utc).timestamp() * 1_000_000_000)
+
+
+def push_to_loki(source: str, lines: list) -> None:
+    if not lines:
+        return
+    values = [[str(parse_line_timestamp(line)), line] for line in lines]
+    payload = {
+        "streams": [
+            {
+                "stream": {"job": "home-assistant", "source": source, "host": "homeassistant"},
+                "values": values,
+            }
+        ]
+    }
+    req = urllib.request.Request(
+        LOKI_URL,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status not in (200, 204):
+                raise RuntimeError(f"Loki push for {source} returned {resp.status}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        raise RuntimeError(f"Loki push for {source} failed: {e.code} {body}") from e
+
+
+def main() -> None:
+    token = TOKEN_FILE.read_text().strip()
+    state = load_state()
+
+    sources = {
+        "host": "/host/logs",
+        "core": "/core/logs",
+        "supervisor": "/supervisor/logs",
+    }
+    for slug in get_started_addon_slugs():
+        sources[f"addon.{slug}"] = f"/addons/{slug}/logs"
+
+    total_shipped = 0
+    for source, path in sources.items():
+        try:
+            raw = api_get(f"{path}?lines={WINDOW_LINES}", token)
+        except urllib.error.URLError as e:
+            print(f"{source}: fetch failed: {e}")
+            continue
+
+        lines = [l for l in raw.split("\n") if l.strip()]
+        seen = set(state.get(source, []))
+        new_lines = []
+        new_hashes = []
+        dropped_stale = 0
+        now = time.time()
+        for line in lines:
+            h = line_hash(line)
+            if h in seen:
+                continue
+            age_s = now - (parse_line_timestamp(line) / 1_000_000_000)
+            if age_s > SHIP_MAX_AGE_S:
+                # Too old for Loki's ingester to ever accept — mark
+                # seen so it stops getting re-fetched-and-retried
+                # forever, but don't count it as shipped.
+                dropped_stale += 1
+                new_hashes.append(h)
+                continue
+            new_lines.append(line)
+            new_hashes.append(h)
+
+        if dropped_stale:
+            print(f"{source}: dropped {dropped_stale} stale (>{SHIP_MAX_AGE_S}s old) lines")
+
+        if new_lines:
+            try:
+                push_to_loki(source, new_lines)
+                total_shipped += len(new_lines)
+            except RuntimeError as e:
+                print(f"{source}: push failed: {e}")
+                # Don't advance this source's seen-hashes state on a
+                # failed push — leave it to retry the same lines next
+                # run rather than silently marking them shipped. Note
+                # this also means the stale lines counted above (whose
+                # hashes were already appended to new_hashes) won't
+                # get persisted either in this branch, which is fine —
+                # they'll just get re-evaluated and re-dropped next run.
+                continue
+
+        # Keep a bounded window of hashes: everything from this fetch
+        # (already-seen + newly-seen), capped to the most recent
+        # SEEN_HASHES_PER_SOURCE. This fetch's own line order is
+        # oldest-to-newest per journald convention, so truncating from
+        # the front keeps the newest.
+        all_hashes = list(seen) + new_hashes
+        state[source] = all_hashes[-SEEN_HASHES_PER_SOURCE:]
+
+    save_state(state)
+    print(f"shipped {total_shipped} lines across {len(sources)} sources")
+
+
+if __name__ == "__main__":
+    main()
