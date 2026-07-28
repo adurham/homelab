@@ -160,3 +160,33 @@
   loop:
     - "/tmp/alloy-{{ alloy_version }}.deb"
     - "/tmp/alloy-{{ alloy_version }}.rpm"
+
+# Local journald retention tightened to 1 day now that this host ships
+# its journal to Loki (30-day retention there — see roles/loki). Only
+# applied AFTER alloy is confirmed started above, so there's no window
+# where local logs are trimmed before a durable copy exists elsewhere.
+# journald.conf.d drop-in (not editing journald.conf directly) so this
+# survives package upgrades and is trivially reversible.
+- name: Ensure /etc/systemd/journald.conf.d exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Tighten local journald retention (durable copy lives in Loki)
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/10-alloy-shipped-retention.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # Managed by ansible — see roles/alloy/tasks/main.yml.
+      # This host's journal is shipped to Loki (30-day retention there).
+      # Local retention only needs to cover the gap between an alloy
+      # outage and its own restart, not long-term storage.
+      [Journal]
+      MaxRetentionSec=1day
+      SystemMaxUse=500M
+  notify: Restart journald
