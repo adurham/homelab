@@ -550,15 +550,16 @@ def _check_staging_usage():
 
 
 def _like_base_cmd():
-    """Build the base scraper invocation for liking (action=like, posts=timeline).
+    """Build the base scraper invocation for liking (action=like, like-area=timeline).
     Shares the binary path, config, and neg-filter with the download base cmd
-    but uses --action like and --posts timeline instead."""
+    but uses --action like and --like-area timeline instead. --like-area avoids
+    downloading media (unlike --posts which can trigger downloads)."""
     bin_name = os.environ.get("M02_SCRAPER_BIN", "scraper")
     return [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", bin_name),
         "--config", CONFIG_FILE,
         "--action", "like",
-        "--posts", "timeline",
+        "--like-area", "timeline",
         "--neg-filter", r"(#(?:ad|ads|AD|advertising|sponsored|promotion)|trial|discount|exclusive\s+offer|giveaway|limited\s+time|\Buser\s+promo|shoutout|endorsement)",
     ]
 
@@ -637,9 +638,10 @@ def _run_like_pass():
         return
 
     if state.get("backlog_mode", True):
-        # Backlog mode: one model per sweep. Likes up to remaining cap worth
+        # Backlog mode: one model per sweep. Likes up to per-model cap worth
         # of that model's unliked timeline posts (no time filter = all unliked
-        # posts). Once we've cycled through all models, switch to daily mode.
+        # posts). --max-post-count capped at LIKE_PER_MODEL_CAP so we don't
+        # paginate through the entire timeline for one model.
         idx = state.get("backlog_index", 0)
         if idx >= len(models):
             log.info("like pass: cycled through all models — switching to daily mode")
@@ -657,7 +659,7 @@ def _run_like_pass():
             state["backlog_index"] += 1
             _write_like_state(state)
             cmd = _like_base_cmd() + [
-                "--max-post-count", str(remaining),
+                "--max-post-count", str(min(remaining, LIKE_PER_MODEL_CAP)),
                 "--username", model,
             ]
             try:
