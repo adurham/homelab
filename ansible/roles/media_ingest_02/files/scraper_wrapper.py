@@ -651,6 +651,11 @@ def _run_like_pass():
             log.info("like pass [backlog:%s] daily_used=%d/%d, idx=%d/%d",
                      model, state.get("daily_likes_used", 0), LIKE_DAILY_CAP,
                      idx + 1, len(models))
+            # Persist state BEFORE running the subprocess — advance the index now
+            # so that even if systemd kills us (service timeout), the next sweep
+            # moves to the next model instead of retrying the same one.
+            state["backlog_index"] += 1
+            _write_like_state(state)
             cmd = _like_base_cmd() + [
                 "--max-post-count", str(remaining),
                 "--username", model,
@@ -665,8 +670,6 @@ def _run_like_pass():
             actual = _count_likes_from_output(r)
             log.info("like pass [backlog:%s] exit=%d, liked=%d", model, r.returncode, actual)
             state["daily_likes_used"] = state.get("daily_likes_used", 0) + actual
-            # Advance to next model (even on failure) so we don't get stuck
-            state["backlog_index"] += 1
             _write_like_state(state)
             return  # one model per sweep
 
@@ -687,6 +690,8 @@ def _run_like_pass():
             "--username", model,
         ]
         log.info("like pass [daily:%s] cap=%d, remaining=%d", model, cap, remaining - likes_used)
+        # Persist state before each daily model too — saves progress if killed
+        _write_like_state(state)
         try:
             r = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=15 * 60)
         except subprocess.TimeoutExpired:
