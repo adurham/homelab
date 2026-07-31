@@ -564,7 +564,7 @@ def _like_base_cmd():
 
 
 def _count_likes_from_output(r):
-    """Try to count how many posts were actually liked by parsing ofscraper's
+    """Try to count how many posts were actually liked by parsing the scraper's
     stdout/stderr output. Returns the number of likes performed, or 0 if
     undetermined."""
     import re
