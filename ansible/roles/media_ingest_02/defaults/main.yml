@@ -74,3 +74,10 @@ media_ingest_02_pinned_list: ""
 # accounts the operator is subscribed to, so they live in the vault
 # (vault_media_ingest_02_scrape_usernames), NOT here. The env template pulls
 # them from the vault at render time.
+
+# Like pass — timeline posts from active subscriptions. Runs after all downloads
+# and pushes. Disabled by default; set to "true" to enable.
+media_ingest_02_likes_enabled: "false"
+media_ingest_02_likes_daily_cap: 500
+media_ingest_02_likes_per_model_cap: 50
+media_ingest_02_likes_per_model_timeout: 900  # 15 min in seconds

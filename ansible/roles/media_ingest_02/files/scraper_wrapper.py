@@ -65,6 +65,12 @@ logging.basicConfig(level=logging.INFO,
                     handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler(sys.stdout)])
 log = logging.getLogger("media-ingest-02")
 
+# Like pass configuration
+LIKE_ENABLED = os.environ.get("M02_LIKES_ENABLED", "").lower() in ("1", "true", "yes")
+LIKE_DAILY_CAP = int(os.environ.get("M02_LIKES_DAILY_CAP", "500"))
+LIKE_PER_MODEL_CAP = int(os.environ.get("M02_LIKES_PER_MODEL_CAP", "50"))
+LIKE_STATE_FILE = Path(os.environ.get("M02_LIKE_STATE_FILE", str(STAGING.parent / "like_state.json")))
+
 
 def _check_auth():
     """Verify auth.json exists and is readable before invoking the scraper. The
@@ -543,6 +549,164 @@ def _check_staging_usage():
                   pct, usage.used / 1e9, usage.total / 1e9)
 
 
+def _like_base_cmd():
+    """Build the base scraper invocation for liking (action=like, posts=timeline).
+    Shares the binary path, config, and neg-filter with the download base cmd
+    but uses --action like and --posts timeline instead."""
+    bin_name = os.environ.get("M02_SCRAPER_BIN", "scraper")
+    return [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", bin_name),
+        "--config", CONFIG_FILE,
+        "--action", "like",
+        "--posts", "timeline",
+        "--neg-filter", r"(#(?:ad|ads|AD|advertising|sponsored|promotion)|trial|discount|exclusive\s+offer|giveaway|limited\s+time|\Buser\s+promo|shoutout|endorsement)",
+    ]
+
+
+def _count_likes_from_output(r):
+    """Try to count how many posts were actually liked by parsing ofscraper's
+    stdout/stderr output. Returns the number of likes performed, or 0 if
+    undetermined."""
+    import re
+    output = (r.stdout or "") + (r.stderr or "")
+    # Look for explicit "Liked X posts" or "liked X" patterns
+    for pattern in [r"[Ll]iked\s+(\d+)\s+posts?", r"(\d+)\s+posts?\s+liked"]:
+        m = re.search(pattern, output, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+    # Fallback: count "Liking" action lines
+    count = output.count("Liking") + output.count("liking")
+    if count > 0:
+        return count
+    return 0
+
+
+def _write_like_state(state):
+    """Persist like state to JSON file."""
+    import json
+    try:
+        LIKE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LIKE_STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True))
+    except OSError as e:
+        log.error("failed to write like state: %s", e)
+
+
+LIKE_PER_MODEL_TIMEOUT = int(os.environ.get("M02_LIKES_PER_MODEL_TIMEOUT", str(15 * 60)))
+
+
+def _run_like_pass():
+    """Like timeline posts from active subscriptions. Runs after all download
+    passes. Works through one model's backlog per sweep (round-robin), up to
+    the daily cap, then switches to daily mode (last 24h only) once all models'
+    backlogs are caught up. Tracks state in LIKE_STATE_FILE so progress
+    survives restarts and timer ticks."""
+    if not LIKE_ENABLED:
+        log.info("like pass skipped — disabled (M02_LIKES_ENABLED)")
+        return
+
+    import json
+
+    # Read/init state
+    state = {}
+    if LIKE_STATE_FILE.exists():
+        try:
+            state = json.loads(LIKE_STATE_FILE.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            log.warning("like_state.json corrupt (%s) — resetting", e)
+
+    today = dt.date.today().isoformat()
+    if state.get("date") != today:
+        log.info("like state: new day %s (was %s), resetting daily counter",
+                 today, state.get("date", "never"))
+        state["date"] = today
+        state["daily_likes_used"] = 0
+        state.setdefault("backlog_mode", True)
+        state.setdefault("backlog_index", 0)
+
+    if state.get("daily_likes_used", 0) >= LIKE_DAILY_CAP:
+        log.info("like pass skipped — daily cap %d already used", LIKE_DAILY_CAP)
+        _write_like_state(state)
+        return
+
+    remaining = LIKE_DAILY_CAP - state.get("daily_likes_used", 0)
+
+    # Build active model list (manual list only — explicit subs the user chose)
+    models = [m.strip() for m in SCRAPE_USERNAMES.split(",") if m.strip()]
+    if not models:
+        log.info("like pass skipped — no models configured")
+        return
+
+    if state.get("backlog_mode", True):
+        # Backlog mode: one model per sweep. Likes up to remaining cap worth
+        # of that model's unliked timeline posts (no time filter = all unliked
+        # posts). Once we've cycled through all models, switch to daily mode.
+        idx = state.get("backlog_index", 0)
+        if idx >= len(models):
+            log.info("like pass: cycled through all models — switching to daily mode")
+            state["backlog_mode"] = False
+            state["backlog_index"] = 0
+            _write_like_state(state)
+        else:
+            model = models[idx]
+            log.info("like pass [backlog:%s] daily_used=%d/%d, idx=%d/%d",
+                     model, state.get("daily_likes_used", 0), LIKE_DAILY_CAP,
+                     idx + 1, len(models))
+            cmd = _like_base_cmd() + [
+                "--max-post-count", str(remaining),
+                "--username", model,
+            ]
+            try:
+                r = subprocess.run(cmd, check=False, capture_output=True, text=True,
+                                   timeout=LIKE_PER_MODEL_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                log.warning("like pass [backlog:%s] timed out after %dmin",
+                            model, LIKE_PER_MODEL_TIMEOUT)
+                return
+            actual = _count_likes_from_output(r)
+            log.info("like pass [backlog:%s] exit=%d, liked=%d", model, r.returncode, actual)
+            state["daily_likes_used"] = state.get("daily_likes_used", 0) + actual
+            # Advance to next model (even on failure) so we don't get stuck
+            state["backlog_index"] += 1
+            _write_like_state(state)
+            return  # one model per sweep
+
+    # Daily mode: like last 24h from all active models
+    remaining = LIKE_DAILY_CAP - state.get("daily_likes_used", 0)
+    if remaining <= 0:
+        return
+    yesterday = (dt.datetime.now() - dt.timedelta(days=1)).strftime("%m/%d/%Y")
+    per_model = max(1, remaining // len(models))
+    likes_used = 0
+    for model in models:
+        if likes_used >= remaining:
+            break
+        cap = min(per_model, remaining - likes_used)
+        cmd = _like_base_cmd() + [
+            "--after", yesterday,
+            "--max-post-count", str(cap),
+            "--username", model,
+        ]
+        log.info("like pass [daily:%s] cap=%d, remaining=%d", model, cap, remaining - likes_used)
+        try:
+            r = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=15 * 60)
+        except subprocess.TimeoutExpired:
+            log.warning("like pass [daily:%s] timed out after 15min", model)
+            continue
+        if r.returncode != 0:
+            log.warning("like pass [daily:%s] exit %d: %s", model, r.returncode, (r.stderr or "")[-500:])
+        actual = _count_likes_from_output(r)
+        if actual > 0:
+            log.info("like pass [daily:%s] liked %d posts", model, actual)
+        likes_used += actual
+        if likes_used >= remaining:
+            break
+
+    state["daily_likes_used"] = state.get("daily_likes_used", 0) + likes_used
+    _write_like_state(state)
+    log.info("like pass done: %d likes used today (%d/%d)",
+             state["daily_likes_used"], state["daily_likes_used"], LIKE_DAILY_CAP)
+
+
 def main():
     _clear_stale_staging()
     _check_staging_usage()
@@ -597,6 +761,12 @@ def main():
 
     pushed, failed, skipped = _walk_and_push()
     log.info("sweep done: pushed=%d failed=%d skipped=%d", pushed, failed, skipped)
+
+    # Pass 5: like timeline posts from active subscriptions. Runs after all
+    # downloads and pushes are complete. Only targets the manual model list
+    # (explicit subs), not auto-discovered free subs. See _run_like_pass() for
+    # the backlog/daily mode state machine.
+    _run_like_pass()
 
 
 if __name__ == "__main__":
