@@ -1,0 +1,71 @@
+---
+# NETGEAR GS108Ev4 "Plus/Easy Smart" switch -- no SSH/SNMP/API, CGI-form
+# only. This role wraps files/gs108ev4_client.py (a hand-rolled requests
+# client reverse-engineered from the switch's login.js auth scheme) via
+# ansible.builtin.script / command, since there's no native Ansible
+# network module for this device tier.
+#
+# STATUS (2026-08-03): skeleton only. discover_forms() has NOT been run
+# against the live switch yet -- we don't have its password (printed on
+# the physical label, not yet transcribed). DO NOT run set_static_ip or
+# set_port_qos in anger until:
+#   1. netgear_gs108ev4_password is populated (vault) from the real label.
+#   2. `ansible-playbook ... --tags netgear_switch_discover` has been run
+#      once and its output inspected to confirm/fix CGI field names in
+#      files/gs108ev4_client.py.
+#
+# Root problem this fixes (see docs/ipam.md + memory fact 1157): the
+# switch never acquired a DHCP lease on 192.168.86.0/24 and sits at its
+# factory fallback 192.168.0.239. This role's first real job is just
+# getting it a permanent LAN IP so it's reachable like everything else;
+# VLAN/QoS segregation of Proxmox replication traffic is a follow-up
+# once the switch is under control and its exact form fields are known.
+
+- name: Ensure requests is available for the switch CGI client
+  ansible.builtin.pip:
+    name: requests
+    state: present
+  delegate_to: localhost
+  run_once: true
+
+- name: Copy GS108Ev4 CGI client to a scratch location
+  ansible.builtin.copy:
+    src: gs108ev4_client.py
+    dest: /tmp/gs108ev4_client.py
+    mode: "0755"
+  delegate_to: localhost
+  run_once: true
+
+- name: (discover) Log in and dump reachable admin pages for field-name inspection
+  ansible.builtin.command:
+    cmd: >
+      python3 /tmp/gs108ev4_client.py
+      --host {{ netgear_gs108ev4_current_ip }}
+      --password {{ netgear_gs108ev4_password }}
+      --discover
+  delegate_to: localhost
+  run_once: true
+  register: discover_result
+  tags: [netgear_switch_discover, never]
+
+- name: (discover) Show discovery output
+  ansible.builtin.debug:
+    var: discover_result.stdout_lines
+  tags: [netgear_switch_discover, never]
+
+# --- Real config tasks below are intentionally NOT wired up yet -- the
+# gs108ev4_client.py set_static_ip()/set_port_qos_priority() methods raise
+# NotImplementedError until field names are verified live. Uncomment and
+# fill in once files/gs108ev4_client.py has been updated post-discovery.
+#
+# - name: Set switch static IP (moves it off the 192.168.0.239 fallback)
+#   ansible.builtin.command:
+#     cmd: >
+#       python3 /tmp/gs108ev4_client.py
+#       --host {{ netgear_gs108ev4_current_ip }}
+#       --password {{ netgear_gs108ev4_password }}
+#       --set-ip {{ netgear_gs108ev4_target_ip }}
+#       --netmask {{ netgear_gs108ev4_target_netmask }}
+#       --gateway {{ netgear_gs108ev4_target_gateway }}
+#   delegate_to: localhost
+#   run_once: true

@@ -1,0 +1,20 @@
+---
+# Current reachable address -- the switch's factory-default fallback IP,
+# reachable only from a host on the 192.168.0.0/24 subnet (e.g. via a
+# temporary `ifconfig en0 alias 192.168.0.210 netmask 255.255.255.0` on a
+# device physically behind it, like macstudio-m4-1). NOT reachable on the
+# real 192.168.86.0/24 LAN until set_static_ip has been run successfully.
+netgear_gs108ev4_current_ip: "192.168.0.239"
+
+# Target permanent LAN address once brought under management. Pick a free
+# IP per docs/ipam.md conventions and update that file when this changes
+# from a placeholder.
+netgear_gs108ev4_target_ip: "192.168.86.199"
+netgear_gs108ev4_target_netmask: "255.255.255.0"
+netgear_gs108ev4_target_gateway: "192.168.86.1"
+
+# Vault-encrypted; populate from the physical label on the bottom of the
+# switch (GS108E-400NAS / GS108Ev4). See group_vars/all/vault.yml --
+# CHANGEME placeholder as of 2026-08-03, transcribe the real value once
+# the label is accessible.
+netgear_gs108ev4_password: "{{ vault_netgear_gs108ev4_password }}"

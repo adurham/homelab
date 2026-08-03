@@ -11,6 +11,31 @@ sync when adding/removing/moving CTs or VMs.
 | Private (VXLAN) | `172.16.0.0/24`   | `private` | SDN private subnet for service traffic   |
 | BWT Lab (VXLAN) | `10.99.0.0/24`    | `bwt`     | Isolated subnet for Tanium bandwidth-throttle repro (NEC 00271560 et al) |
 
+## Physical switch chain (LAN, non-Proxmox)
+
+Physical topology upstream of pve01/02/03 and the exo cluster Mac Studios:
+
+```
+AT&T BGW (IP Passthrough)
+  -> Google Nest Wifi Pro (main unit)
+       -> NETGEAR GS108Ev4 (GS108E-400NAS, 8-port managed) — see below
+            -> TP-Link 8-port switch (unmanaged)
+                 -> TP-Link 5-port switch (unmanaged)
+```
+
+| Device | Model | LAN IP | Notes |
+| :--- | :--- | :--- | :--- |
+| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | `192.168.86.199` (target — see below) | 8-port "Easy Smart" managed switch, directly upstream of pve01/02/03 + macstudio-m4-1/2. No SSH/SNMP/API — CGI web-form config only. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
+
+**Status (2026-08-03):** discovered sitting at its factory-default fallback
+IP `192.168.0.239/24` — never acquired a DHCP lease on the real LAN. Root
+cause of a home-network throughput investigation (see warm memory /
+`netgear_switch_diagnosis_handoff.md`). Target static IP `192.168.86.199`
+is a placeholder pending the actual bring-up (needs the switch's per-unit
+default password from its bottom label to log in for the first time).
+Update this table with the real IP once assigned via
+`ansible/roles/netgear_gs108ev4/`.
+
 - `172.16.0.1` is `tailscale-gw` — both the SDN VNet gateway and the Tailscale subnet router advertising `172.16.0.0/24` over Tailscale. CTs on `private` use it as their default route only when they need outbound to non-LAN destinations.
 - `10.99.0.3` is `tailscale-gw` eth2 on the `bwt` bridge — same CT (101) carries the BWT-lab subnet router, advertising `10.99.0.0/24` over Tailscale.
 - MTU on `private` and `bwt` is 1450 (1500 minus VXLAN overhead — `net_private_mtu` / `net_bwt_mtu` in `ansible/group_vars/all/vars.yml`).
