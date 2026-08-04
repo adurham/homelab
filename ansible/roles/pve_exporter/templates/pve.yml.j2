@@ -1,0 +1,11 @@
+default:
+  user: "{{ vault_pve_exporter_token_id.split('!')[0] }}"
+  token_name: "{{ vault_pve_exporter_token_id.split('!')[1] }}"
+  token_value: "{{ vault_pve_exporter_token_secret }}"
+  # verify_ssl: true is safe (not the usual homelab cop-out) because
+  # roles/victoriametrics/templates/prometheus.yml.j2 scrapes each pve
+  # node by its ACME-issued FQDN (pve01.chi.lab.amd-e.com etc, matching
+  # roles/proxmox_acme's real Let's Encrypt cert CN) rather than a bare
+  # IP -- verified live 2026-08-04: `curl -v https://pve01.chi.lab.amd-e.com:8006/...`
+  # from vm-01 returns "SSL certificate verify ok."
+  verify_ssl: true
