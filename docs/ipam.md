@@ -285,10 +285,25 @@ Three independent paths feed vm-01, covering different layers:
   Verify: `curl http://172.16.0.42:8428/api/v1/series?match[]=system_cpu`.
   Deliberately does NOT cover storage-pool usage, HA resource state,
   replication job status/duration, or backup job status — pvestatd's
-  native export doesn't expose those. `prometheus-pve-exporter` (pull,
-  via a scoped API token) would add that layer if/when wanted, e.g. to
-  alert on the 2026-08-04 replication-burst root-cause fix or the
-  frigate HA node-affinity rule — deliberately deferred, not built.
+  native export doesn't expose those.
+- **prometheus-pve-exporter (added 2026-08-04, same day)** — pulled the
+  layer the native export above doesn't carry. Python venv service on
+  vm-01 (`ansible/roles/pve_exporter/`, port 9221), scraping the Proxmox
+  API via a dedicated read-only token (`pve-exporter@pve`, PVEAuditor
+  role, vaulted as `vault_pve_exporter_token_id`/`_secret` — NOT the
+  full-privilege `root@pam!hermes-automation` token used elsewhere).
+  Scrape config in `roles/victoriametrics/templates/prometheus.yml.j2`
+  (job `pve_exporter`), one target per pve node by its ACME FQDN (so
+  `verify_ssl: true` actually validates). Gets
+  `pve_replication_duration_seconds` /
+  `pve_replication_last_sync_timestamp_seconds` /
+  `pve_replication_failed_syncs` (replication job status/duration),
+  `pve_ha_state` (HA resource state), `pve_not_backed_up_info` /
+  `pve_not_backed_up_total` (backup job coverage), and
+  `pve_disk_usage_bytes{id=~"storage/.*"}` / `pve_disk_size_bytes`
+  (storage pool usage) — directly usable for alerting on the 2026-08-04
+  replication-burst root-cause fix and the frigate HA node-affinity
+  rule. Verify: `curl http://172.16.0.42:8428/api/v1/query?query=up{job="pve_exporter"}`.
 
 ## Tanium cluster
 

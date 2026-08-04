@@ -79,6 +79,13 @@
   hosts: victoriametrics
   gather_facts: true
   tasks:
+    - name: Install pve_exporter
+      # Installed before victoriametrics so the prometheus.yml.j2 scrape
+      # target it defines (job 'pve_exporter') is live immediately
+      # instead of showing "down" for one deploy cycle.
+      ansible.builtin.include_role:
+        name: pve_exporter
+
     - name: Install victoriametrics
       ansible.builtin.include_role:
         name: victoriametrics
