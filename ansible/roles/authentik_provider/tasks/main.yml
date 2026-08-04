@@ -147,6 +147,12 @@
 # Tanium Integration (SAML)
 # -------------------------------------------------------------------------
 
+# Fix the hand-created Tanium SCIM/SAML property mappings' known bug
+# (bare `user` -> `request.user`) before anything else touches them.
+# See tasks/tanium_mapping_fix.yml for the full incident writeup.
+- name: Fix known-buggy Tanium property mapping expressions
+  ansible.builtin.import_tasks: tanium_mapping_fix.yml
+
 - name: Get Existing Tanium Provider
   ansible.builtin.uri:
     url: "{{ authentik_url }}/api/v3/providers/saml/?search=Tanium"

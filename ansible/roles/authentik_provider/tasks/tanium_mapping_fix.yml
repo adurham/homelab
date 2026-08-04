@@ -1,0 +1,76 @@
+# -------------------------------------------------------------------------
+# Tanium SCIM/SAML property-mapping bugfix (found live 2026-08-04).
+#
+# The Tanium SCIM ("SCIM Mapping: Tanium User Email") and SAML ("Tanium
+# Explicit Email NameID") property mappings were hand-created directly in
+# the Authentik UI — never codified in ansible — using a bare `user`
+# variable. Authentik's actual execution context for provider property
+# mappings only exposes `request.user` (confirmed against Authentik's own
+# built-in default SCIM mapping, which correctly reads
+# request.user.name). The bare `user` reference raised
+# `NameError: name 'user' is not defined` on every evaluation.
+#
+# Blast radius: the SCIM mapping runs on Authentik's internal sync
+# schedule (every 4h, confirmed from the event log), so this had been
+# throwing property_mapping_exception + configuration_error events
+# continuously since 2026-01-15 — 1,200+ of each by 2026-08-04. The
+# Tanium user directory sync had likely never successfully pushed a
+# single user/group since it was set up. The SAML mapping has the same
+# bug but only fires on interactive Tanium SSO login, so it barely
+# showed up in the event count.
+#
+# This task pins the corrected expression on both mappings by name
+# search (search-by-name matches the existing pattern used throughout
+# this role) so a UI regression gets corrected on the next playbook run.
+# It does NOT create the Tanium SCIM/SAML providers themselves — those
+# remain hand-managed in the UI; only the two known-buggy expressions on
+# them are enforced here.
+# -------------------------------------------------------------------------
+
+- name: Find Tanium SCIM User Email property mapping
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/all/?search={{ 'SCIM Mapping: Tanium User Email' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: tanium_scim_email_mapping
+
+- name: Fix Tanium SCIM User Email mapping (bare 'user' -> 'request.user')
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/provider/scim/{{ tanium_scim_email_mapping.json.results[0].pk }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      expression: |-
+        return {
+            "userName": request.user.email,
+            "displayName": request.user.name,
+            "externalId": str(request.user.uid),
+            "active": request.user.is_active,
+            "emails": [
+                {
+                    "value": request.user.email,
+                    "primary": True
+                }
+            ]
+        }
+    status_code: [200]
+  when: tanium_scim_email_mapping.json.results | length > 0
+
+- name: Find Tanium Explicit Email NameID (SAML) property mapping
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/all/?search={{ 'Tanium Explicit Email NameID' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: tanium_saml_email_mapping
+
+- name: Fix Tanium SAML Explicit Email NameID mapping (bare 'user' -> 'request.user')
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/provider/saml/{{ tanium_saml_email_mapping.json.results[0].pk }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      expression: "return request.user.email"
+    status_code: [200]
+  when: tanium_saml_email_mapping.json.results | length > 0
