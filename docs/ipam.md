@@ -10,6 +10,7 @@ sync when adding/removing/moving CTs or VMs.
 | LAN             | `192.168.86.0/24` | `vmbr0` | Home LAN — DHCP from the Nest router       |
 | Private (VXLAN) | `172.16.0.0/24`   | `private` | SDN private subnet for service traffic   |
 | BWT Lab (VXLAN) | `10.99.0.0/24`    | `bwt`     | Isolated subnet for Tanium bandwidth-throttle repro (NEC 00271560 et al) |
+| PVE Sync (VLAN 20) | `172.20.0.0/24` | `vmbr0.20` | Isolated L2 segment for corosync + ZFS replication, physically confined to switch ports 3/4/5 — see below |
 
 ## Physical switch chain (LAN, non-Proxmox)
 
@@ -107,6 +108,91 @@ resolved without touching the switch at all.
 - `172.16.0.1` is `tailscale-gw` — both the SDN VNet gateway and the Tailscale subnet router advertising `172.16.0.0/24` over Tailscale. CTs on `private` use it as their default route only when they need outbound to non-LAN destinations.
 - `10.99.0.3` is `tailscale-gw` eth2 on the `bwt` bridge — same CT (101) carries the BWT-lab subnet router, advertising `10.99.0.0/24` over Tailscale.
 - MTU on `private` and `bwt` is 1450 (1500 minus VXLAN overhead — `net_private_mtu` / `net_bwt_mtu` in `ansible/group_vars/all/vars.yml`).
+
+## PVE Sync network (VLAN 20, 172.20.0.0/24) — isolated corosync + replication
+
+Built 2026-08-04 alongside the replication-schedule root-cause fix, as a
+belt-and-suspenders layer: corosync/replication traffic is now on its own
+L2 segment, physically confined to switch ports 3/4/5, invisible to every
+other device on the LAN (no gateway, not routed, Google Home/Nest Wifi
+Pro never sees it exist). Same physical wire as the LAN (each pve node has
+only one NIC) so this does NOT add bandwidth capacity — the replication-
+schedule fix already solved the bandwidth-contention problem; this adds
+isolation on top.
+
+**Switch side:** Advanced 802.1Q VLAN mode, VLAN 20 "pve-sync" created,
+ports 3/4/5 set Tagged (T) for VLAN 20 while staying Untagged/PVID=1 for
+the default LAN VLAN (confirmed via PVID Table: ports 3/4/5 show `1*, 20`,
+all other ports show `1*` only). Every other port is Excluded (E) from
+VLAN 20 entirely.
+
+**Proxmox side (`/etc/network/interfaces` on each node):**
+```
+auto vmbr0
+iface vmbr0 inet static
+	address 192.168.86.1X/24
+	gateway 192.168.86.1
+	bridge-ports nic0
+	bridge-stp off
+	bridge-fd 0
+	bridge-vlan-aware yes
+	bridge-vids 20          # REQUIRED -- without this, vmbr0.20 exists but nic0
+	                        # never egresses tagged VLAN 20 frames; symptom is
+	                        # `bridge vlan show dev nic0` listing only vlan 1,
+	                        # ping/ssh across the VLAN just times out silently.
+
+auto vmbr0.20
+iface vmbr0.20 inet static
+	address 172.20.0.1X/24   # .11=pve01, .12=pve02, .13=pve03, no gateway
+```
+
+**Firewall (`/etc/pve/firewall/cluster.fw`):** Proxmox's cluster firewall
+is enabled with default-deny-style rules gated on trusted IPSETs — adding
+the VLAN alone isn't enough, traffic gets silently dropped unless
+explicitly allowed. Added:
+```
+[IPSET pve_sync_vlan]
+172.20.0.11
+172.20.0.12
+172.20.0.13
+
+IN ACCEPT -source +pve_sync_vlan -p udp -dport 5405 -log nolog # corosync
+IN ACCEPT -source +pve_sync_vlan -p tcp -dport 22 -log nolog   # ZFS replication (SSH transport)
+```
+Scoped narrowly (just corosync + SSH, not a broad subnet-wide ACCEPT) per
+user preference, since isolation is the whole point of this network.
+
+**Replication traffic redirect (`/etc/pve/datacenter.cfg`):**
+```
+replication: secure,network=172.20.0.0/24
+```
+This is the actual Proxmox-native mechanism (`man pvesr`, NETWORK section)
+for repointing replication traffic onto a dedicated network — no per-job
+config needed, applies cluster-wide immediately.
+
+**Corosync:** NOT yet added as a second ring (`link1`) on this network —
+still single-ring on the LAN (`link0`). This is the one remaining piece
+and deliberately deferred: adding/changing corosync links on a live
+cluster risks quorum loss if misconfigured, needs explicit user go-ahead,
+and should be done as a second ring alongside `link0` (never replacing
+it outright) so the cluster keeps running on the LAN ring as a fallback
+if anything about the new link is wrong.
+
+**Verified end-to-end (2026-08-04):**
+- `bridge vlan show dev nic0` on all 3 nodes: `1 PVID Egress Untagged` +
+  tagged `20`.
+- SSH between all 3 node pairs over 172.20.0.x succeeded.
+- `tcpdump -i vmbr0.20 -n tcp port 22` on pve02 during a live replication
+  job captured tens of MB of real ZFS replication data flowing pve03→pve02
+  over the isolated network.
+- Simultaneously, VictoriaMetrics showed `vmbr0` (LAN interface) on pve02
+  at ~5.5 MB/s baseline — the replication burst never touched the LAN
+  interface at all, confirming isolation actually works, not just that
+  the interface exists.
+- `pvecm status` checked after every single step (switch VLAN creation,
+  each node's `ifreload -a`, the firewall change, the datacenter.cfg
+  change) — cluster stayed `Quorate: Yes, Nodes: 3` throughout, zero
+  disruption.
 
 ## Proxmox nodes (dual-homed)
 
