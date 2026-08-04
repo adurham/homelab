@@ -43,6 +43,7 @@ prometheus.remote_write "vm" {
 // Same labels promtail produced — host, job, unit, severity, nodename —
 // so existing log alerts (log_oom_kill, log_ssh_brute_force, etc.) keep
 // working post-cutover.
+{% if alloy_ship_logs | default(true) %}
 loki.relabel "journal" {
     forward_to = []
     rule {
@@ -74,3 +75,11 @@ loki.write "vm" {
         url = "{{ loki_url }}"
     }
 }
+{% else %}
+// Log shipping deliberately disabled on this host (alloy_ship_logs:
+// false) -- see roles/alloy/README.md "Metrics-only hosts". Journal
+// content (which could contain sensitive process/command-line detail)
+// never leaves this box; only the metrics block above (prometheus.exporter.unix
+// host resource counters -- CPU/mem/disk/net, no process names or
+// command-lines) is shipped.
+{% endif %}
