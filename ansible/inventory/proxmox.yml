@@ -4,10 +4,13 @@ all:
       hosts:
         pve01:
           ansible_host: 192.168.86.11
+          pve_sync_vlan_ip: "172.20.0.11"
         pve02:
           ansible_host: 192.168.86.12
+          pve_sync_vlan_ip: "172.20.0.12"
         pve03:
           ansible_host: 192.168.86.13
+          pve_sync_vlan_ip: "172.20.0.13"
       vars:
         ansible_user: root
         # Usage: ansible-playbook -i ansible/inventory/proxmox.yml ... --ask-pass
