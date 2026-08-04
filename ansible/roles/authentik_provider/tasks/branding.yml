@@ -1,0 +1,48 @@
+# -------------------------------------------------------------------------
+# AMD-Enterprises branding (2026-08-04). Replaces the stock Authentik
+# wordmark/favicon on the default brand with a custom logo + favicon so
+# the login/library pages read "AMD-Enterprises" instead of "authentik".
+#
+# Authentik's branding_logo/branding_favicon fields accept a data: URI
+# directly (confirmed live) — no separate file-upload endpoint needed,
+# unlike application icons which require the set_icon/ multipart
+# endpoint (see tasks/bookmarks.yml for that gotcha). So this task just
+# base64-encodes the local SVG assets and PATCHes the brand record.
+#
+# branding_title was already "AMD-Enterprises" (set outside ansible,
+# pre-existing) — left as-is, only logo/favicon are managed here.
+# -------------------------------------------------------------------------
+
+- name: Get default brand
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/brands/"
+    method: GET
+    headers: "{{ headers }}"
+  register: all_brands
+
+- name: Select the default brand record
+  ansible.builtin.set_fact:
+    default_brand:
+      json:
+        results: "{{ all_brands.json.results | selectattr('default') | list }}"
+
+- name: Read AMD-Enterprises logo SVG
+  ansible.builtin.set_fact:
+    amd_enterprises_logo_b64: "{{ lookup('file', role_path + '/files/amd_enterprises_logo.svg') | b64encode }}"
+
+- name: Read AMD-Enterprises favicon SVG
+  ansible.builtin.set_fact:
+    amd_enterprises_favicon_b64: "{{ lookup('file', role_path + '/files/amd_enterprises_favicon.svg') | b64encode }}"
+
+- name: Apply AMD-Enterprises branding to default brand
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/brands/{{ default_brand.json.results[0].brand_uuid }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      branding_title: "AMD-Enterprises"
+      branding_logo: "data:image/svg+xml;base64,{{ amd_enterprises_logo_b64 }}"
+      branding_favicon: "data:image/svg+xml;base64,{{ amd_enterprises_favicon_b64 }}"
+    status_code: [200]
+  when: default_brand.json.results | length > 0
