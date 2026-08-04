@@ -42,11 +42,26 @@ drop the real link and are trustworthy for this test):
 | 3 | `pve03` (192.168.86.13) | `ip link set nic0 down`, kernel dmesg `NIC Link is Down`, 2x clean repeat |
 | 4 | `pve02` (192.168.86.12) | same method, 1x clean |
 | 5 | `pve01` (192.168.86.11) | same method, 2x clean (1st attempt had a false negative from too-coarse SSH polling — use ≥1.5s poll interval and a ≥10s down window) |
-| 1, 2, 6, 7, 8 | unknown — NOT macstudio-m4-1/m4-2 (confirmed via `networksetup -setnetworkserviceenabled Ethernet off`, 2x clean negative each, zero counter effect) | — |
+| 7 | `macstudio-m4-2` (192.168.86.202) | confirmed by physically unplugging the cable — port showed "AVAILABLE" (down) and .202 stopped responding to ping |
+| 8 | `macstudio-m4-1` (192.168.86.201) | same, physical unplug — port "AVAILABLE" and .201 stopped responding |
+| 1, 2, 6 | unknown (likely uplink + 1-2 spares) | — |
 
-Both Mac Studios are confirmed **not** physically on this switch — they
-reach the LAN via a different path (likely one of the downstream unmanaged
-TP-Link switches, or a separate run). QoS priority (802.1P mode) currently
+**IMPORTANT CORRECTION:** an earlier version of this doc (same day) claimed
+both Mac Studios were confirmed NOT on this switch, based on
+`networksetup -setnetworkserviceenabled Ethernet off/on` toggle tests
+showing zero effect on any port counter. That conclusion was **wrong** —
+a physical cable-unplug test immediately afterward showed both Mac Studios
+ARE on this switch (ports 7 and 8). Lesson: `networksetup ... off` is
+**not reliable enough for this test either** — like `ifconfig down`, it
+does not reliably drop the physical PHY link on these Mac Studios (Apple
+Silicon / Thunderbolt-adjacent NIC hardware may power-manage the PHY
+differently than the e1000e-based Proxmox NICs, where the same class of
+test DID correlate correctly via kernel dmesg `NIC Link is Down`). For
+Mac hardware, only a genuine physical unplug is trustworthy for this kind
+of port-mapping test — do not trust `ifconfig down` or `networksetup off`
+as a proxy for "physical link down" on macOS, on any NIC.
+
+QoS priority (802.1P mode) currently
 sits at Medium on all 8 ports — bumping ports 3/4/5 to Critical (to protect
 Proxmox replication/corosync traffic on the shared uplink) requires the
 actual web UI; the priority-submit CGI endpoint/field names couldn't be
