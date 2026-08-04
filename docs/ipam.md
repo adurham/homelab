@@ -323,6 +323,31 @@ Three independent paths feed vm-01, covering different layers:
   against each, populate `windows_exporter_scrape_targets` in
   `roles/victoriametrics/defaults/main.yml`, redeploy
   `deploy_monitoring.yml --limit victoriametrics`.
+- **Alloy metrics-only mode for media_ingest/media_ingest_02/media_gallery
+  (added 2026-08-05)** — closes the last real gap: these 3 CTs run a
+  secondary-source scraper/gallery pipeline deliberately obfuscated in
+  this public repo (`vault_media_ingest_02_scraper_pkg`,
+  `_scrape_usernames`, telethon private-chat detail — see
+  `roles/media_ingest_02_host` and the `git-history-identity-scrub`
+  skill), so they were fully excluded from Alloy 2026-07-27 through
+  2026-08-04 to keep that detail out of the shared Loki instance —
+  meaning zero perf visibility on them the whole time. Fixed by adding
+  `alloy_ship_logs: false` (per-host `vars:` in `inventory/proxmox.yml`,
+  see `roles/alloy/README.md` "Metrics-only hosts") — the template
+  conditionally drops the entire `loki.source.journal`/`loki.write`
+  block when set, so ONLY the `prometheus.exporter.unix` block (CPU/
+  mem/disk/net counters, no process names, no command-lines, no
+  journal content) ships. Verified live 2026-08-05: `up{job=
+  "node_exporter",instance=~"media-ingest.*|tg-harvester.*"}`==1 for
+  all 3, AND `curl .../loki/api/v1/label/host/values` confirmed to
+  carry zero entries for any of them before or after the change. Also
+  fixed a real (pre-existing, unrelated) inventory bug found along the
+  way: `gallery-01`'s `ansible_host` used the private-subnet IP with
+  the default jump-host `ProxyCommand`, which times out for this CT
+  specifically since it joined the tailnet directly (renamed from
+  `tg-harvester-01`, see warm memory fact 397) — added a per-host
+  override to reach it via its real tailnet IP (100.83.114.12)
+  directly, no jump.
 
 ## Tanium cluster
 

@@ -25,6 +25,33 @@ appliances.
 - `alloy_external_labels` — empty by default; override to `{agent: alloy}`
   when running a parallel deploy alongside the legacy stack.
 
+## Metrics-only hosts
+
+`alloy_ship_logs` (default `true`, set per-host in
+`inventory/proxmox.yml`) toggles whether `config.alloy.j2` renders the
+`loki.source.journal`/`loki.write` blocks at all. When `false`, only
+the `prometheus.exporter.unix` metrics block ships — plain host
+resource counters (CPU/mem/disk/net), no process names, no
+command-lines, no journal content whatsoever.
+
+Used for `media_ingest`/`media_ingest_02`/`media_gallery` (added
+2026-08-05): these CTs run a secondary-source scraper/gallery pipeline
+that's deliberately obfuscated in this public repo (see
+`roles/media_ingest_02_host` and the `git-history-identity-scrub`
+skill) — platform/username/chat details could leak into the shared
+Loki instance via process output or error traces if journal shipping
+were enabled, even though Loki is internal-only. Metrics don't carry
+that risk (a CPU/network counter can't reference a username), so those
+three hosts get real perf visibility (previously zero — they were
+excluded from Alloy entirely 2026-07-27 through 2026-08-04) without
+reopening the log-leak concern that got them excluded in the first
+place.
+
+Set `alloy_ship_logs: false` under a host's `vars:` in
+`inventory/proxmox.yml` (NOT globally in `defaults/main.yml` — this is
+a per-host security decision, not a fleet default) to apply the same
+pattern to a future sensitive host.
+
 ## Where it's invoked
 
 `deploy_monitoring.yml` plays 2 (Install Telemetry Agents), 3 (Configure
