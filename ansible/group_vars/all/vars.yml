@@ -72,6 +72,16 @@ alert_email_to: "amdnative@icloud.com"
 # Used for SDN Peering and Corosync
 proxmox_cluster_peers: "192.168.86.11,192.168.86.12,192.168.86.13"
 
+# PVE Sync VLAN (802.1Q VLAN 20 on the physical switch, ports 3/4/5 only) —
+# isolated L2 segment for corosync (link1, preferred over LAN link0) and
+# ZFS replication traffic. No gateway, not routed — invisible to the rest
+# of the LAN by design. Built 2026-08-04, see docs/ipam.md "PVE Sync
+# network" section for the full switch+firewall+corosync+replication
+# config and how it was verified. Per-node IPs set as pve_sync_vlan_ip
+# host_vars in inventory/proxmox.yml (172.20.0.11/12/13).
+net_pve_sync_vlan_id: 20
+net_pve_sync_vlan_range: "172.20.0.0/24"
+
 # BWT Lab (Bandwidth Throttle reproduction lab) — isolated SDN VNet
 # for reproducing Tanium platform bandwidth-throttle enforcement issues
 # (NEC 00271560 and similar). Disjoint from `private` so the main lab is

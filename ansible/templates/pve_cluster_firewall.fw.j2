@@ -28,6 +28,16 @@ enable: 1
 {{ ip }}
 {% endfor %}
 
+{# Isolated PVE Sync VLAN (802.1Q VLAN 20, switch ports 3/4/5 only) — see
+   docs/ipam.md "PVE Sync network". Corosync link1 + ZFS replication live
+   here; the firewall drops anything not in a trusted IPSET by default,
+   so this MUST stay defined or that traffic silently breaks even though
+   the VLAN/interface config is otherwise correct. #}
+[IPSET pve_sync_vlan] # Isolated VLAN 20 (172.20.0.0/24) for corosync + ZFS replication, physically isolated to switch ports 3/4/5
+{% for ip in pve_sync_vlan_ips %}
+{{ ip }}
+{% endfor %}
+
 [RULES]
 
 {# CRITICAL: the 'private'/'bwt' networks are a VXLAN SDN zone. Inter-CT
@@ -36,6 +46,12 @@ enable: 1
    transport and breaks ALL cross-node SDN traffic (e.g. lb-01 -> Authentik).
    This rule MUST stay at the top of [RULES]. #}
 IN ACCEPT -source +pve_nodes -p udp -dport 4789 -log nolog # VXLAN SDN transport between nodes
+
+{# Corosync (link1) + ZFS replication (SSH transport) on the isolated PVE
+   Sync VLAN. Scoped narrowly to just these two ports, not a broad
+   subnet-wide ACCEPT, since isolation is the whole point of this network. #}
+IN ACCEPT -source +pve_sync_vlan -p udp -dport 5405 -log nolog # corosync on isolated pve-sync VLAN
+IN ACCEPT -source +pve_sync_vlan -p tcp -dport 22 -log nolog # ZFS replication (pvesr/pve-zsync over SSH) on isolated pve-sync VLAN
 
 {# Management lockdown: SSH + UI only from trusted sources, drop the rest. #}
 IN ACCEPT -source +pve_mgmt -p tcp -dport 22 -log nolog # SSH from trusted mgmt

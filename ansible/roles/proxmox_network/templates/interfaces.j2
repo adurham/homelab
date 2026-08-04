@@ -12,5 +12,19 @@ iface vmbr0 inet static
 	bridge-stp off
 	bridge-fd 0
 	bridge-vlan-aware yes
+	bridge-vids {{ net_pve_sync_vlan_id }}
 
 source /etc/network/interfaces.d/*
+
+{% if hostvars[inventory_hostname].pve_sync_vlan_ip is defined %}
+# Isolated PVE Sync VLAN ({{ net_pve_sync_vlan_id }}) for corosync (link1,
+# preferred over the LAN link0) + ZFS replication. No gateway -- not
+# routed, invisible to the rest of the LAN by design. Physically confined
+# to switch ports 3/4/5 (see docs/ipam.md "PVE Sync network"). The
+# bridge-vids line above on vmbr0 is REQUIRED for this to actually work
+# -- without it the VLAN exists on the bridge but never egresses the
+# physical port, and traffic silently times out.
+auto vmbr0.{{ net_pve_sync_vlan_id }}
+iface vmbr0.{{ net_pve_sync_vlan_id }} inet static
+	address {{ hostvars[inventory_hostname].pve_sync_vlan_ip }}/24
+{% endif %}
