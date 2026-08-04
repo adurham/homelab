@@ -1,0 +1,24 @@
+// Managed by Ansible — roles/pve_unattended_upgrades.
+// Applies Debian security updates automatically; deliberately EXCLUDES
+// Proxmox's own kernel/package stack, which needs planned, staggered
+// reboots verified against cluster quorum -- never auto-updated blind.
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+};
+
+// Never touch Proxmox kernel or core PVE packages automatically.
+Unattended-Upgrade::Package-Blacklist {
+{% for pkg in pve_unattended_upgrades_blacklist %}
+        "{{ pkg }}";
+{% endfor %}
+};
+
+// Never reboot automatically -- this is a live cluster.
+Unattended-Upgrade::Automatic-Reboot "false";
+
+// Remove unused dependencies after upgrades, standard hygiene.
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Log to syslog for visibility (Grafana/VictoriaMetrics already scrape
+// journald -- makes upgrade activity queryable there too).
+Unattended-Upgrade::SyslogEnable "true";

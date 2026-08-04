@@ -1,0 +1,9 @@
+---
+pve_unattended_upgrades_blacklist:
+  - "proxmox-kernel*"
+  - "pve-kernel*"
+  - "pve-manager"
+  - "pve-cluster"
+  - "corosync"
+  - "pve-firewall"
+  - "pve-ha-manager"
