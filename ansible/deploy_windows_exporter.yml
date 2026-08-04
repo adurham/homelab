@@ -1,0 +1,37 @@
+---
+# Applies roles/windows_exporter to one or more Windows hosts over WinRM.
+# Two uses:
+#   1. Golden-template creation (see ansible/docs/windows_template_guide.md)
+#      -- run once against the source VM before Sysprep so every clone
+#      inherits windows_exporter pre-installed.
+#   2. Retrofit onto an already-cloned VM that predates this role.
+#
+# Requires WinRM already enabled (ansible/files/enable_winrm.ps1, wired
+# into the golden template's Unattend.xml FirstLogonCommands) and a
+# reachable IP -- pass via -i "host," -e ansible_host=<ip> for a VM not
+# yet in static inventory (see the "Windows VMs" section of
+# docs/ipam.md for the win-sql-01/win-ts-01/win-tms-01/win-tzs-01 gap
+# this closes once they're powered on and reachable).
+#
+# Usage:
+#   ansible-playbook ansible/deploy_windows_exporter.yml \
+#     -i "win-target," \
+#     -e ansible_host=<vm-ip> \
+#     -e ansible_user=Administrator \
+#     -e "ansible_password={{ vault_win_admin_password }}" \
+#     --vault-password-file .vault_pass
+
+- name: Install windows_exporter
+  hosts: all
+  gather_facts: false
+  vars:
+    # Matches the existing WinRM config baked into the golden template
+    # (ansible/files/enable_winrm.ps1): Enable-PSRemoting's default HTTP
+    # listener on 5985, Basic auth, AllowUnencrypted=true. NOT HTTPS/5986
+    # -- that script never configures a TLS listener or cert.
+    ansible_connection: winrm
+    ansible_winrm_transport: basic
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+  roles:
+    - windows_exporter

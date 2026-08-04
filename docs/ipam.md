@@ -304,6 +304,25 @@ Three independent paths feed vm-01, covering different layers:
   (storage pool usage) — directly usable for alerting on the 2026-08-04
   replication-burst root-cause fix and the frigate HA node-affinity
   rule. Verify: `curl http://172.16.0.42:8428/api/v1/query?query=up{job="pve_exporter"}`.
+- **windows_exporter (added 2026-08-04, same day) — BUILT, NOT YET
+  DEPLOYED** — closes the remaining gap: the Windows VMs
+  (`win-sql-01`/`win-ts-01`/`win-tms-01`/`win-tzs-01`, VMIDs 250-253,
+  see "VMID conventions" below) run neither Alloy (its install role has
+  no Windows package logic) nor anything else, so they had zero
+  in-guest metrics — only the hypervisor-level view from
+  `pve_metrics_export`/`pve_exporter` above. `ansible/roles/windows_exporter/`
+  installs `prometheus-community/windows_exporter` via WinRM
+  (`ansible/deploy_windows_exporter.yml`), baked into the golden
+  Windows Server template build (`ansible/docs/windows_template_guide.md`
+  step "E") so future clones ship with it pre-installed. Scrape config
+  in `prometheus.yml.j2` (job `windows_exporter`) reads from
+  `windows_exporter_scrape_targets` — currently empty, since all 4 VMs
+  are powered off with no assigned static IP. **Next step once these
+  VMs are turned back on:** assign static IPs (see "VMID conventions"
+  below — none currently allocated), run `deploy_windows_exporter.yml`
+  against each, populate `windows_exporter_scrape_targets` in
+  `roles/victoriametrics/defaults/main.yml`, redeploy
+  `deploy_monitoring.yml --limit victoriametrics`.
 
 ## Tanium cluster
 
