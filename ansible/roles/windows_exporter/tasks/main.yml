@@ -1,0 +1,52 @@
+---
+# windows_exporter: installed via WinRM (ansible.windows collection,
+# already present -- confirmed via `ansible-galaxy collection list`).
+# win_package handles MSI install/upgrade/removal idempotently (checks
+# installed product version against the target, no separate "is it
+# already installed" task needed like the Linux venv-install pattern).
+
+- name: Download windows_exporter MSI to a temp path on the target
+  ansible.windows.win_get_url:
+    url: "{{ windows_exporter_msi_url }}"
+    dest: "C:\\Windows\\Temp\\windows_exporter-{{ windows_exporter_version }}-amd64.msi"
+
+- name: Open firewall for windows_exporter metrics port
+  community.windows.win_firewall_rule:
+    name: "windows_exporter (Prometheus)"
+    localport: "{{ windows_exporter_listen_port }}"
+    action: allow
+    direction: in
+    protocol: tcp
+    state: present
+    enabled: true
+
+- name: Install windows_exporter MSI (idempotent -- skips if service already exists)
+  ansible.windows.win_package:
+    path: "C:\\Windows\\Temp\\windows_exporter-{{ windows_exporter_version }}-amd64.msi"
+    arguments:
+      - "ENABLED_COLLECTORS=[defaults],{{ windows_exporter_extra_collectors | join(',') }}"
+      - "LISTEN_ADDR={{ windows_exporter_listen_addr }}"
+      - "LISTEN_PORT={{ windows_exporter_listen_port }}"
+    creates_service: windows_exporter
+    state: present
+  register: windows_exporter_install
+  # creates_service (not product_id) is the idempotency check -- the
+  # MSI's real ProductCode GUID isn't knowable without installing it
+  # once first, and win_package's docs are explicit that creates_service
+  # exists for exactly this case. windows_exporter's service is named
+  # "windows_exporter" per its own README/docs and every third-party
+  # install guide found during research -- not independently verified
+  # against the MSI's WiX source, so double-check
+  # `Get-Service windows_exporter` after the first real install on a
+  # live VM and adjust the name here if it's actually different.
+
+- name: Ensure windows_exporter service is running
+  ansible.windows.win_service:
+    name: windows_exporter
+    state: started
+    start_mode: auto
+
+- name: Clean up downloaded MSI
+  ansible.windows.win_file:
+    path: "C:\\Windows\\Temp\\windows_exporter-{{ windows_exporter_version }}-amd64.msi"
+    state: absent

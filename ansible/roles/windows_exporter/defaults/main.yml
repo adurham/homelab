@@ -1,0 +1,26 @@
+---
+# windows_exporter: prometheus-community/windows_exporter, installed via
+# ansible.windows.win_package over WinRM. Baked into the golden Windows
+# Server template (build_windows_template.yml) so every VM cloned from
+# it already ships with metrics wired up -- closes the gap structurally
+# at the template level rather than needing a per-VM retrofit. See
+# roles/windows_exporter/README.md.
+windows_exporter_version: "0.30.5"
+windows_exporter_msi_url: >-
+  https://github.com/prometheus-community/windows_exporter/releases/download/v{{ windows_exporter_version }}/windows_exporter-{{ windows_exporter_version }}-amd64.msi
+windows_exporter_listen_addr: "0.0.0.0"
+windows_exporter_listen_port: 9182
+
+# Collectors beyond the exporter's [defaults] set (cpu, cs, logical_disk,
+# net, os, service, system, textfile, memory). `process` added
+# explicitly: per-process CPU/mem is directly useful on these VMs
+# (win-sql-01, win-ts-01, win-tms-01, win-tzs-01 -- names suggesting
+# SQL Server + Windows-hosted Tanium test roles, matching the existing
+# ts-01/tms-01/tzs-01 naming convention used for the Linux Tanium
+# appliances) where "is the service actually alive and using
+# resources" matters more than aggregate host stats. NOT enabling `iis`
+# or other role-specific collectors here -- unconfirmed what's actually
+# installed on these VMs since they're currently powered off; add later
+# once verified, rather than guessing.
+windows_exporter_extra_collectors:
+  - process
