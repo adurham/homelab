@@ -1,31 +1,20 @@
 ---
-# Brings the NETGEAR GS108Ev4 "Plus/Easy Smart" switch (directly upstream
-# of pve01/02/03 + the two Mac Studios in the exo cluster) under
-# repo-managed control, matching the rest of the homelab's infra-as-code
-# convention.
+# NETGEAR GS108Ev4 switch (upstream of pve01/02/03 + the two Mac Studios).
+# Config is managed MANUALLY via the switch's web UI, not by this
+# playbook -- see roles/netgear_gs108ev4/tasks/main.yml for the current
+# live config and why automation was deliberately not pursued, and
+# docs/ipam.md "PVE Sync network" for the full history.
 #
-# This switch has no SSH/SNMP/API -- config is via CGI form POSTs only,
-# handled by roles/netgear_gs108ev4/files/gs108ev4_client.py. Runs against
-# `localhost` (the Ansible controller), not a remote host, since the
-# client script makes direct HTTP calls to the switch's web UI.
-#
-# STATUS: skeleton -- see roles/netgear_gs108ev4/tasks/main.yml for what's
-# actually wired up vs. pending manual field-name verification.
-#
-# One-time discovery run (after transcribing the switch's label password
-# into group_vars/all/vault.yml as vault_netgear_gs108ev4_password):
-#   cd ansible
-#   ansible-playbook manage_netgear_switch.yml --tags netgear_switch_discover
-#
-# NOTE: the switch is only reachable at its current IP (192.168.0.239,
-# factory fallback) from a host on the 192.168.0.0/24 subnet. Add a
-# temporary alias first, e.g. on macstudio-m4-1 (physically behind the
-# switch):
-#   ssh macstudio-m4-1 "sudo ifconfig en0 alias 192.168.0.210 netmask 255.255.255.0"
-# then either run this playbook FROM that host, or point
-# netgear_gs108ev4_current_ip/set an SSH tunnel -- TBD once discovery
-# confirms the actual reachability path from the ansible controller.
-- name: Manage NETGEAR GS108Ev4 switch (Proxmox/Mac Studio uplink)
+# Running this playbook is a no-op (prints the current-state summary via
+# the role's debug task) unless you explicitly pass
+# --tags netgear_switch_discover, which re-runs the historical CGI
+# discovery tooling -- untested against the switch's current (rotated)
+# password, kept for reference only. Pass the password via -e if you
+# ever actually need it:
+#   ansible-playbook manage_netgear_switch.yml \
+#     --tags netgear_switch_discover \
+#     -e netgear_gs108ev4_password='<from 1Password>'
+- name: NETGEAR GS108Ev4 switch (no-op status check; manual config)
   hosts: localhost
   connection: local
   gather_facts: false
