@@ -8,6 +8,10 @@
   roles:
     - role: proxmox_common
     - role: proxmox_network
+    - role: pve_unattended_upgrades
+      # Debian security updates only, auto-installed, never auto-rebooted.
+      # PVE kernel/core packages are blacklisted -- those get planned,
+      # staggered manual updates verified against cluster quorum.
     # - role: proxmox_cluster # MISSING ROLE
       # Ensure cluster is set up before adding storage that depends on cluster-wide config?
       # Actually pvesm requires /etc/pve which is writable only if cluster is quorate or local mode.
