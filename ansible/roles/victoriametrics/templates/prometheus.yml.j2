@@ -59,6 +59,37 @@ scrape_configs:
 {% endfor %}
 
   # ---------------------------------------------------------------------
+  # prometheus-pve-exporter (roles/pve_exporter, co-located with VM on
+  # vm-01, port 9221). Complements roles/pve_metrics_export (pvestatd's
+  # native InfluxDB push, which only covers node+guest resource usage):
+  # this covers replication job status/duration, HA resource state,
+  # backup job coverage, and storage pool usage -- pulled via the
+  # Proxmox API rather than pushed. Each node is its own scrape target
+  # (cluster=1&node=1 per the exporter's own README pattern) so
+  # node-local collectors (replication, backup-info) run once per node
+  # instead of only reflecting whichever node vm-01 happens to hit.
+  # ---------------------------------------------------------------------
+  - job_name: 'pve_exporter'
+    metrics_path: /pve
+    params:
+      module: [default]
+      cluster: ['1']
+      node: ['1']
+    static_configs:
+{% for host in groups['proxmox_nodes'] | default([]) %}
+      - targets: ['{{ host }}.{{ proxmox_domain_base | default("chi.lab.amd-e.com") }}']
+        labels:
+          instance: '{{ host }}'
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: '127.0.0.1:{{ pve_exporter_listen_port | default(9221) }}'
+
+  # ---------------------------------------------------------------------
   # Loki's own metrics. Loki exposes /metrics on the same port (3100) it
   # uses for the push API. Lets us alert on Loki's internal health
   # (ingestion errors, write failures) before logs stop flowing.

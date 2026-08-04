@@ -1,0 +1,96 @@
+---
+# pve_exporter: prometheus-pve-exporter, installed on vm-01 (co-located
+# with VictoriaMetrics -- pulls from the Proxmox API over the private
+# SDN, same network path pvestatd's push already uses). venv install,
+# same pattern as roles/adguard_log_shipper.
+
+- name: Install python3-venv (required for venv creation on Debian)
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+    update_cache: true
+
+- name: Create pve-exporter System User
+  ansible.builtin.user:
+    name: pve-exporter
+    system: true
+    shell: /usr/sbin/nologin
+    home: /home/pve-exporter
+    create_home: true
+
+- name: Ensure /opt/pve-exporter Directory Exists
+  ansible.builtin.file:
+    path: /opt/pve-exporter
+    state: directory
+    owner: pve-exporter
+    group: pve-exporter
+    mode: '0755'
+
+- name: Create pve-exporter Virtualenv
+  ansible.builtin.command: python3 -m venv /opt/pve-exporter/venv
+  args:
+    creates: /opt/pve-exporter/venv/bin/python
+
+- name: Install prometheus-pve-exporter in Virtualenv
+  ansible.builtin.pip:
+    name: "prometheus-pve-exporter=={{ pve_exporter_version }}"
+    virtualenv: /opt/pve-exporter/venv
+    state: present
+
+- name: Fix Ownership of Virtualenv
+  ansible.builtin.file:
+    path: /opt/pve-exporter/venv
+    state: directory
+    owner: pve-exporter
+    group: pve-exporter
+    recurse: true
+
+- name: Ensure /etc/pve-exporter Directory Exists
+  ansible.builtin.file:
+    path: /etc/pve-exporter
+    state: directory
+    owner: root
+    group: pve-exporter
+    mode: '0750'
+
+- name: Deploy pve-exporter Config (contains vaulted API token)
+  ansible.builtin.template:
+    src: pve.yml.j2
+    dest: /etc/pve-exporter/pve.yml
+    owner: root
+    group: pve-exporter
+    mode: '0640'
+  no_log: true
+  notify: Restart pve-exporter
+
+- name: Install pve-exporter Systemd Service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/pve-exporter.service
+    content: |
+      [Unit]
+      Description=Prometheus exporter for Proxmox VE
+      Documentation=https://github.com/prometheus-pve/prometheus-pve-exporter
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Restart=always
+      User=pve-exporter
+      Group=pve-exporter
+      ExecStart=/opt/pve-exporter/venv/bin/pve_exporter \
+        --config.file /etc/pve-exporter/pve.yml \
+        --web.listen-address {{ pve_exporter_listen_addr }}:{{ pve_exporter_listen_port }}
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart pve-exporter
+
+- name: Enable & Start pve-exporter
+  ansible.builtin.systemd:
+    name: pve-exporter
+    state: started
+    enabled: true
+    daemon_reload: true

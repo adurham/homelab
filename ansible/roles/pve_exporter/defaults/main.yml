@@ -1,0 +1,21 @@
+---
+# prometheus-pve-exporter: installed on vm-01 (co-located with
+# VictoriaMetrics), scrapes the Proxmox API cluster-wide via a read-only
+# token. See roles/pve_exporter/README.md.
+#
+# Verified against prometheus-pve-exporter 3.9.0 source
+# (pve_exporter/cli.py): all collectors we actually want (replication,
+# backup-info, resources, status) are enabled BY DEFAULT with no CLI
+# flags needed -- only --no-collector.X flags exist to *disable* one.
+# So there's no extra_collectors var here; the systemd unit passes no
+# --collector.* flags at all and gets everything.
+#
+# The scrape target list (one target per proxmox_nodes host, FQDN not
+# bare IP so verify_ssl: true validates against the real ACME cert) is
+# templated directly into roles/victoriametrics/templates/prometheus.yml.j2
+# from the `groups['proxmox_nodes']` + `proxmox_domain_base` vars --
+# not duplicated here, since target selection happens at Prometheus
+# scrape-config time (URL query param), not in this role's own config.
+pve_exporter_version: "3.9.0"
+pve_exporter_listen_addr: "127.0.0.1"
+pve_exporter_listen_port: 9221
