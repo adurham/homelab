@@ -147,11 +147,26 @@ all:
     media_gallery:
       hosts:
         gallery-01:
-          ansible_host: "{{ ip_media_gallery }}"
+          # CT joined the tailnet directly (renamed from tg-harvester-01 to
+          # gallery-01 at the ansible/role level 2026-06-03, but the OS
+          # hostname/tailnet name stayed tg-harvester-01 -- see warm memory
+          # fact 397). The private_subnet group's default ProxyCommand
+          # (jump via personal MacBook's Tailscale IP) flakes for this
+          # specific host once it peers directly -- same quirk documented
+          # for hermes-gw-01. Override to reach it directly over Tailscale
+          # instead of inheriting the jump path.
+          ansible_host: 100.83.114.12
+          ansible_ssh_common_args: ""
           vmid: 115
           target_node: pve02
       vars:
         ansible_user: root
+        # Metrics-only Alloy (added 2026-08-05) -- see media_ingest below
+        # for the full rationale. Telethon (Telegram client library) error
+        # traces/logs on this host could reference private chat/channel
+        # names -- journal shipping stays off; host resource counters
+        # (CPU/mem/disk/net) are safe and now centralized.
+        alloy_ship_logs: false
 
     media_ingest:
       hosts:
@@ -164,6 +179,14 @@ all:
           target_node: pve02
       vars:
         ansible_user: root
+        # Metrics-only Alloy (added 2026-08-05): host resource counters
+        # (CPU/mem/disk/net -- no process names, no command-lines) are
+        # safe to centralize. Journal logs are NOT -- this CT's
+        # process/scraper activity could reference platform/username
+        # details (see roles/media_ingest_02 for the concrete example),
+        # so log shipping stays off. See roles/alloy/README.md
+        # "Metrics-only hosts".
+        alloy_ship_logs: false
 
     # Secondary source gallery collector — mirrors media_ingest but scrapes a
     # different upstream source platform on a pull-based (timer) cadence instead
@@ -179,6 +202,14 @@ all:
           target_node: pve02
       vars:
         ansible_user: root
+        # Metrics-only Alloy (added 2026-08-05) -- see media_ingest above.
+        # This CT specifically has vault_media_ingest_02_scrape_usernames
+        # and vault_media_ingest_02_scraper_pkg/_bin (see
+        # roles/media_ingest_02_host, group_vars/all/vault.yml) --
+        # exactly the kind of detail that could leak via journal/process
+        # logs if log shipping were ever enabled here. Metrics-only is
+        # a hard requirement for this host, not just a default.
+        alloy_ship_logs: false
 
     # Personal-device MITM ad-stripping proxy (mitmproxy explicit HTTPS
     # proxy). Devices opt in individually via Wi-Fi proxy settings pointed

@@ -48,7 +48,7 @@
     - pve_metrics_export
 
 - name: Install Telemetry Agents
-  hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster:!media_ingest:!media_ingest_02:!media_gallery:!bwt_lab
+  hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster:!bwt_lab
   gather_facts: true
   # Every host in this play's scope runs Alloy. Any legacy
   # promtail / node_exporter artifacts on existing hosts were cleaned
@@ -57,19 +57,23 @@
   # leftovers again, run `git log -- deploy_monitoring.yml` for the
   # cleanup snippet.
   #
-  # media_ingest / media_ingest_02 / media_gallery are EXCLUDED
-  # deliberately (2026-07-27) — these hosts run the secondary-source
-  # scraper/gallery pipeline that's obfuscated in this public repo
-  # (vault_media_ingest_02_scraper_pkg, _scrape_usernames, etc. — see
-  # roles/media_ingest_02_host and the git-history-identity-scrub
-  # skill). Their journal logs could leak platform/username details
-  # into the shared Loki instance even though it's internal-only, so
-  # they're kept off the centralized-logging fleet entirely. Alloy WAS
-  # briefly live on media-ingest-01/02 (2026-07-27, ~15min) before this
-  # exclusion landed; the shipped log entries were deleted from Loki via
-  # its /loki/api/v1/delete API, and the alloy service was stopped +
-  # disabled on both hosts. bwt_lab is excluded per user direction
-  # (out of scope for centralized logging, 2026-07-28).
+  # media_ingest / media_ingest_02 / media_gallery run Alloy in
+  # METRICS-ONLY mode (alloy_ship_logs: false, set per-host in
+  # inventory/proxmox.yml) since 2026-08-05 -- host resource counters
+  # (CPU/mem/disk/net) are safe to centralize, but these hosts run the
+  # secondary-source scraper/gallery pipeline that's obfuscated in this
+  # public repo (vault_media_ingest_02_scraper_pkg, _scrape_usernames,
+  # etc. -- see roles/media_ingest_02_host and the
+  # git-history-identity-scrub skill), so journal logs (which could
+  # reference platform/username/chat details in process output or error
+  # traces) still never leave these CTs. Fully excluded from Alloy
+  # 2026-07-27 through 2026-08-04; see roles/alloy/README.md
+  # "Metrics-only hosts" for the mechanism. Alloy was briefly live
+  # (unfiltered, logs included) on media-ingest-01/02 for ~15min on
+  # 2026-07-27 before that original exclusion landed; the shipped log
+  # entries were deleted from Loki via its /loki/api/v1/delete API.
+  # bwt_lab is fully excluded per user direction (deleted 2026-08-05,
+  # was out of scope for centralized logging even before that).
   tasks:
     - name: Install alloy
       ansible.builtin.include_role:
