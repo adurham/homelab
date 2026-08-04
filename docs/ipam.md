@@ -25,16 +25,34 @@ AT&T BGW (IP Passthrough)
 
 | Device | Model | LAN IP | Notes |
 | :--- | :--- | :--- | :--- |
-| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | `192.168.86.199` (target — see below) | 8-port "Easy Smart" managed switch, directly upstream of pve01/02/03 + macstudio-m4-1/2. No SSH/SNMP/API — CGI web-form config only. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
+| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | `192.168.86.62` (DHCP reservation) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only (login password: see label / vault). Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. MAC `28:94:01:77:1d:80`. |
 
-**Status (2026-08-03):** discovered sitting at its factory-default fallback
-IP `192.168.0.239/24` — never acquired a DHCP lease on the real LAN. Root
-cause of a home-network throughput investigation (see warm memory /
-`netgear_switch_diagnosis_handoff.md`). Target static IP `192.168.86.199`
-is a placeholder pending the actual bring-up (needs the switch's per-unit
-default password from its bottom label to log in for the first time).
-Update this table with the real IP once assigned via
-`ansible/roles/netgear_gs108ev4/`.
+**Status (2026-08-04):** switch reachable at `192.168.86.62` via a DHCP
+reservation (added directly in AdGuard, not yet mirrored into the Ansible
+role). Port mapping confirmed via live link-toggle tests (bring interface
+down/up on each host, watch for the corresponding port's traffic counters
+on `/portStatistics.cgi` to freeze — NOT via UP/DOWN status labels, which
+are unreliable on macOS since `ifconfig down` only sets an administrative
+flag and doesn't reliably drop the physical PHY link; Linux's
+`ip link set down` / `networksetup -setnetworkserviceenabled ... off` do
+drop the real link and are trustworthy for this test):
+
+| Port | Device | Confirmed via |
+| :--- | :--- | :--- |
+| 3 | `pve03` (192.168.86.13) | `ip link set nic0 down`, kernel dmesg `NIC Link is Down`, 2x clean repeat |
+| 4 | `pve02` (192.168.86.12) | same method, 1x clean |
+| 5 | `pve01` (192.168.86.11) | same method, 2x clean (1st attempt had a false negative from too-coarse SSH polling — use ≥1.5s poll interval and a ≥10s down window) |
+| 1, 2, 6, 7, 8 | unknown — NOT macstudio-m4-1/m4-2 (confirmed via `networksetup -setnetworkserviceenabled Ethernet off`, 2x clean negative each, zero counter effect) | — |
+
+Both Mac Studios are confirmed **not** physically on this switch — they
+reach the LAN via a different path (likely one of the downstream unmanaged
+TP-Link switches, or a separate run). QoS priority (802.1P mode) currently
+sits at Medium on all 8 ports — bumping ports 3/4/5 to Critical (to protect
+Proxmox replication/corosync traffic on the shared uplink) requires the
+actual web UI; the priority-submit CGI endpoint/field names couldn't be
+found in the switch's shipped JS bundles (`page.js`/`page2.js`/`function.js`/
+`en.js`) despite full deobfuscation — do this manually via Switching → QoS
+→ Priority rather than guessing POST fields against production infra.
 
 - `172.16.0.1` is `tailscale-gw` — both the SDN VNet gateway and the Tailscale subnet router advertising `172.16.0.0/24` over Tailscale. CTs on `private` use it as their default route only when they need outbound to non-LAN destinations.
 - `10.99.0.3` is `tailscale-gw` eth2 on the `bwt` bridge — same CT (101) carries the BWT-lab subnet router, advertising `10.99.0.0/24` over Tailscale.
