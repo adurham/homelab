@@ -27,3 +27,19 @@ exo_scrape_targets:
     address: 192.168.86.201:52415
   - name: macstudio-m4-2
     address: 192.168.86.202:52415
+
+# In-guest windows_exporter targets (roles/windows_exporter, port 9182).
+# Empty by default -- win-sql-01/win-ts-01/win-tms-01/win-tzs-01 are
+# currently powered off with no static IP assigned (see docs/ipam.md
+# "Windows VMs" section). Populate once each VM is booted, has a real
+# IP, and roles/windows_exporter has actually been run against it:
+#   windows_exporter_scrape_targets:
+#     - name: win-sql-01
+#       address: <vm-ip>
+#     - name: win-ts-01
+#       address: <vm-ip>
+#     - name: win-tms-01
+#       address: <vm-ip>
+#     - name: win-tzs-01
+#       address: <vm-ip>
+windows_exporter_scrape_targets: []

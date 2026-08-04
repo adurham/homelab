@@ -1,0 +1,5 @@
+---
+- name: Restart windows_exporter service
+  ansible.windows.win_service:
+    name: windows_exporter
+    state: restarted

@@ -66,6 +66,41 @@ ansible-playbook -i ansible/inventory/proxmox.yml ansible/build_windows_template
 
 - Run Windows Update to patch the system to the latest level. Reboot as required.
 
+### E. Install windows_exporter (Prometheus metrics)
+
+Closes the "no in-guest perf metrics on Windows VMs" gap -- everything
+else in the fleet (Linux LXCs/VMs via Alloy, Proxmox itself via
+pve_metrics_export/pve_exporter) already has this; Windows VMs had
+neither Alloy nor an equivalent until this step.
+
+With WinRM already enabled (step C above baked it in via
+`enable_winrm.ps1`/`Unattend.xml`), run from the ansible control host
+against the VM's current IP:
+
+```bash
+cd ~/repos/homelab
+ansible-playbook ansible/deploy_windows_exporter.yml \
+  -i "win-2022-source," \
+  -e ansible_host=<vm-ip> \
+  -e ansible_user=Administrator \
+  -e "ansible_password={{ vault_win_admin_password }}" \
+  --vault-password-file .vault_pass
+```
+
+Installs `prometheus-community/windows_exporter` (roles/windows_exporter)
+via silent MSI, opens the Windows Firewall for :9182, starts the
+service set to auto-start. Doing this BEFORE Sysprep means every VM
+cloned from this template inherits windows_exporter pre-installed --
+no per-VM retrofit needed. Verify before continuing:
+`Invoke-WebRequest http://localhost:9182/metrics` from inside the VM,
+or `curl http://<vm-ip>:9182/metrics` from the ansible host.
+
+Once a real clone is running with a stable IP, add it to
+`windows_exporter_scrape_targets` in
+`ansible/roles/victoriametrics/defaults/main.yml` (or override at
+inventory level) and redeploy `deploy_monitoring.yml --limit
+victoriametrics` to pick it up in VictoriaMetrics.
+
 ## 5. Sysprep and Template Conversion
 
 To ensure unique SIDs when cloning, we must Sysprep the machine.

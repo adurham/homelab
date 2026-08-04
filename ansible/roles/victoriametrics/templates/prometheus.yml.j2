@@ -90,6 +90,23 @@ scrape_configs:
         replacement: '127.0.0.1:{{ pve_exporter_listen_port | default(9221) }}'
 
   # ---------------------------------------------------------------------
+  # windows_exporter (roles/windows_exporter, port 9182, in-guest --
+  # baked into the golden Windows Server template). Targets come from
+  # windows_exporter_scrape_targets (roles/victoriametrics/defaults),
+  # same empty-by-default/populate-later pattern as exo_scrape_targets.
+  # Empty until win-sql-01/win-ts-01/win-tms-01/win-tzs-01 (currently
+  # powered off, no static IP assigned yet) are booted and the role has
+  # actually been run against them -- see docs/ipam.md "Windows VMs".
+  # ---------------------------------------------------------------------
+  - job_name: 'windows_exporter'
+    static_configs:
+{% for target in windows_exporter_scrape_targets | default([]) %}
+      - targets: ['{{ target.address }}:9182']
+        labels:
+          instance: '{{ target.name }}'
+{% endfor %}
+
+  # ---------------------------------------------------------------------
   # Loki's own metrics. Loki exposes /metrics on the same port (3100) it
   # uses for the push API. Lets us alert on Loki's internal health
   # (ingestion errors, write failures) before logs stop flowing.
