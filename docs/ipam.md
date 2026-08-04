@@ -172,27 +172,55 @@ config needed, applies cluster-wide immediately.
 
 **Corosync:** NOT yet added as a second ring (`link1`) on this network —
 still single-ring on the LAN (`link0`). This is the one remaining piece
-and deliberately deferred: adding/changing corosync links on a live
-cluster risks quorum loss if misconfigured, needs explicit user go-ahead,
-and should be done as a second ring alongside `link0` (never replacing
-it outright) so the cluster keeps running on the LAN ring as a fallback
-if anything about the new link is wrong.
+**Corosync: added as a second ring, DONE and verified (2026-08-04).**
+`link1` added on the isolated VLAN with `knet_link_priority` set so it's
+preferred over the LAN (`link0`) — corosync actively uses the isolated
+link, LAN stays configured as automatic failover only.
 
-**Verified end-to-end (2026-08-04):**
-- `bridge vlan show dev nic0` on all 3 nodes: `1 PVID Egress Untagged` +
-  tagged `20`.
-- SSH between all 3 node pairs over 172.20.0.x succeeded.
-- `tcpdump -i vmbr0.20 -n tcp port 22` on pve02 during a live replication
-  job captured tens of MB of real ZFS replication data flowing pve03→pve02
-  over the isolated network.
-- Simultaneously, VictoriaMetrics showed `vmbr0` (LAN interface) on pve02
-  at ~5.5 MB/s baseline — the replication burst never touched the LAN
-  interface at all, confirming isolation actually works, not just that
-  the interface exists.
-- `pvecm status` checked after every single step (switch VLAN creation,
-  each node's `ifreload -a`, the firewall change, the datacenter.cfg
-  change) — cluster stayed `Quorate: Yes, Nodes: 3` throughout, zero
-  disruption.
+`/etc/pve/corosync.conf` changes (config_version bumped 3→4):
+```
+nodelist {
+  node {
+    name: pve01
+    ...
+    ring0_addr: 192.168.86.11
+    ring1_addr: 172.20.0.11     # added
+  }
+  ... (same pattern for pve02/pve03)
+}
+
+totem {
+  ...
+  interface {
+    linknumber: 0
+    knet_link_priority: 5      # LAN — lower priority, failover only
+  }
+  interface {
+    linknumber: 1
+    knet_link_priority: 10     # VLAN 20 — higher priority, preferred
+  }
+  ...
+}
+```
+
+**Apply mechanism note (corrected from an earlier wrong assumption):**
+the documented Proxmox pattern is NOT "write to `corosync.conf.new` and
+pmxcfs auto-swaps it" — that file sitting on disk does nothing on its own.
+The actual mechanism (per `man pvecm`) is: copy to `.new`, edit `.new`,
+then explicitly `mv corosync.conf.new corosync.conf` yourself. That `mv`
+is what pmxcfs picks up and hot-applies to the running corosync cluster-
+wide, no restart needed. Backup the working config first regardless
+(`cp corosync.conf corosync.conf.bak`).
+
+**Verified priority actually works (not just configured):** raw packet
+counts from a short tcpdump window were NOT a reliable signal (passive-
+mode keepalives on the non-primary link created noise). The real proof:
+`corosync-cmapctl -m stats` per-link byte counters, diffed over a ~60s
+window post-change — `link0.tx_data_bytes` delta was exactly 0 (fully
+idle) while `link1.tx_data_bytes` grew by ~2.75MB in the same window.
+`corosync-cfgtool -s` / `-n` on all 3 nodes confirmed both links enabled
++ connected to every peer. `pvecm status` confirmed `Quorate: Yes, Nodes: 3`
+before, during, and after the corosync.conf swap — zero disruption.
 
 ## Proxmox nodes (dual-homed)
 
