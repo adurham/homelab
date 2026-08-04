@@ -1,0 +1,10 @@
+---
+# pve's built-in external metric server (pvestatd) pushes node + guest
+# resource metrics (cpu/mem/disk/net, per-VM/CT) straight to VictoriaMetrics
+# via the InfluxDB v2 line-protocol endpoint VM already exposes natively
+# (/api/v2/write) -- no new software on the VM side, same host:port Alloy
+# already remote_writes to. See roles/pve_metrics_export/README.md.
+pve_metrics_id: vm-01-influx
+pve_metrics_server: "{{ ip_vm }}"
+pve_metrics_port: 8428
+pve_metrics_bucket: proxmox
