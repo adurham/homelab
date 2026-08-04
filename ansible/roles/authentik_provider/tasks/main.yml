@@ -614,3 +614,12 @@
 
 - name: Provision Hermes Dashboard + API Authentik integrations
   ansible.builtin.import_tasks: hermes.yml
+
+# -------------------------------------------------------------------------
+# MyApps-style launcher: group + icon curation on all apps above, plus
+# bookmark-only tiles for services without their own SSO integration.
+# See tasks/bookmarks.yml for the full rationale.
+# -------------------------------------------------------------------------
+
+- name: Provision application launcher bookmarks + icons/groups
+  ansible.builtin.import_tasks: bookmarks.yml
