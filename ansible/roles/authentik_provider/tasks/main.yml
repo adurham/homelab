@@ -629,3 +629,11 @@
 
 - name: Provision application launcher bookmarks + icons/groups
   ansible.builtin.import_tasks: bookmarks.yml
+
+# -------------------------------------------------------------------------
+# AMD-Enterprises brand: logo + favicon on the login/library UI.
+# See tasks/branding.yml for the full rationale.
+# -------------------------------------------------------------------------
+
+- name: Apply AMD-Enterprises branding
+  ansible.builtin.import_tasks: branding.yml
