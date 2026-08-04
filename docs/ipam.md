@@ -348,6 +348,36 @@ Three independent paths feed vm-01, covering different layers:
   `tg-harvester-01`, see warm memory fact 397) — added a per-host
   override to reach it via its real tailnet IP (100.83.114.12)
   directly, no jump.
+- **Upgraded to unit-allowlist log shipping (same day, 2026-08-05,
+  later)** — user asked specifically about log shipping (not just
+  metrics) for these 3 hosts. Audited actual `journalctl` output on all
+  3 live boxes before deciding anything (not guessing from unit names):
+  confirmed the scraper/collector/gallery service units genuinely log
+  sensitive content on nearly every line (media-ingest-02.service logs
+  the literal scrape-target username on every INFO line;
+  media-ingest-collector.service logs chat IDs + person/folder names;
+  media-gallery-*.service logs folder/person names + rclone remote
+  paths) — `alloy_ship_logs: false` (all-or-nothing) stays correct for
+  those units specifically. But ssh/cron/postfix/systemd-journald carry
+  zero sensitive content and ARE useful signal (ssh brute-force
+  attempts, cron failures, mail delivery issues) — so upgraded from the
+  blunt `alloy_ship_logs: false` to `alloy_log_unit_allowlist` (see
+  `roles/alloy/README.md` "Unit-allowlist log shipping"): a
+  `loki.relabel` `action = "keep"` rule inside Alloy itself drops any
+  journal entry whose unit doesn't match the allowlist regex, before it
+  ever leaves the box — not a server-side Loki filter applied after the
+  fact. Hit and fixed a real River (Alloy config language) syntax bug
+  along the way: double-quoted strings need `\\.` for a literal
+  backslash in a regex, easy to get wrong when templating from a plain
+  Jinja var — switched to backtick-quoted raw strings (River's
+  recommended pattern for regexes) so the value renders verbatim.
+  Verified live per-host via direct Loki queries (not just "looks
+  fine"): confirmed the 4 sensitive units
+  (media-ingest-collector.service, media-ingest-02.service,
+  media-gallery-gallery.service, media-gallery-upload.service) return
+  `totalLinesProcessed: 0` in Loki — zero lines ever landed — while
+  `ssh`/`ssh@*`/`cron` units ARE present with real, safe content (SSH
+  session audit trail, no sensitive detail).
 
 ## Tanium cluster
 
