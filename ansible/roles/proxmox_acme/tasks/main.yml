@@ -32,12 +32,24 @@
   # Only runs if user provides the data (API key etc) via vars
 
 - name: Check current certificate issuer
-  ansible.builtin.command: "openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -issuer"
+  # IMPORTANT: check pveproxy-ssl.pem, NOT pve-ssl.pem. pve-ssl.pem is the
+  # internal PVE Cluster Manager CA cert -- it always exists and is always
+  # self-signed by that CA, REGARDLESS of whether a real custom/ACME cert
+  # is active. pveproxy-ssl.pem is the cert actually served on :8006 once
+  # a custom cert (ACME-issued or otherwise) is in place; if it's absent,
+  # pveproxy falls back to pve-ssl.pem. Checking the wrong file here meant
+  # this role tried to re-order a cert on every single run even when nodes
+  # already had valid, unexpired Let's Encrypt certs (discovered 2026-08-04
+  # -- all 3 nodes already had working per-node LE certs via the desec ACME
+  # plugin, each with ~2 months left on them, and the role's stale check
+  # was about to overwrite a healthy state via "Order Certificate" failing
+  # loudly with "Custom certificate exists but 'force' is not set").
+  ansible.builtin.command: "openssl x509 -in /etc/pve/local/pveproxy-ssl.pem -noout -issuer"
   register: cert_issuer
   changed_when: false
-  # If /etc/pve/local/pve-ssl.pem is missing or unreadable, that's a real
-  # problem — but we still want the role to continue so the cert ORDER task
-  # below can repair it. Tolerate non-zero rc, but gate downstream logic on
+  # If pveproxy-ssl.pem is missing (no custom cert active yet), that's a
+  # normal first-run state -- fall through so the ORDER task below can
+  # issue one. Tolerate non-zero rc, but gate downstream logic on
   # `rc == 0` so we don't act on empty stdout.
   failed_when: false
 
