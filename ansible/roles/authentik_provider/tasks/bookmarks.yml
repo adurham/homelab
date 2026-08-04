@@ -1,0 +1,189 @@
+# -------------------------------------------------------------------------
+# MyApps-style launcher: groups + icons on existing SSO apps, plus a
+# handful of "bookmark" applications (no provider — just a tile that
+# deep-links to a service that doesn't do SSO itself, e.g. Home
+# Assistant, or a specific Grafana view like the Loki Explore tab).
+#
+# Authentik's own /if/user/ library page (what a user lands on after
+# login at https://auth.chi.lab.amd-e.com/) is a native "myapps"-style
+# tile grid — this just curates it: icons from walkxcode/dashboard-icons
+# (public CDN, no auth) and a `group` string per tile so the library
+# renders sectioned instead of one flat list. No new infra.
+#
+# A bookmark application (provider omitted entirely) is valid per the
+# Authentik API schema — `provider` is optional on core/applications/.
+# Such tiles are pure links; Authentik does not gate them (there's
+# nothing to forward-auth), so only bookmark non-sensitive URLs here.
+# Anything that needs an actual access gate must be a real forward-auth
+# proxy provider (see the VictoriaMetrics / TG Gallery patterns above).
+#
+# ICON GOTCHA (discovered live, 2026-08-04): PATCHing meta_icon with a
+# plain URL string is silently ignored by the API — it comes back as the
+# OLD value (or null) even on a 200 response. meta_icon only actually
+# updates through the dedicated multipart-upload endpoint
+# POST /api/v3/core/applications/<slug>/set_icon/ with a `file` part.
+# So: download each icon from the CDN to a local tmp file (this play
+# runs on localhost), then upload it via that endpoint.
+#
+# Authentik does NOT overwrite/dedupe on re-upload — every set_icon/ call
+# stores a new file with a random suffix (media/public/application-icons/
+# <slug>_<random>.svg) and orphans the previous one. To keep reruns from
+# slowly filling the authentik CT's disk, we only upload when the app's
+# current meta_icon does not already look like our expected filename
+# prefix (checked below via the existing app fetch's meta_icon field).
+# -------------------------------------------------------------------------
+
+- name: Define icon CDN base (walkxcode/dashboard-icons)
+  ansible.builtin.set_fact:
+    icon_cdn: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg"
+
+- name: Define launcher tile catalogue (existing apps + bookmarks)
+  ansible.builtin.set_fact:
+    launcher_tiles:
+      # Existing SSO-backed applications — group + icon only.
+      - { slug: "proxmox", group: "Infrastructure", icon: "proxmox", bookmark: false }
+      - { slug: "grafana", group: "Monitoring", icon: "grafana", bookmark: false }
+      - { slug: "victoriametrics", group: "Monitoring", icon: "prometheus", bookmark: false }
+      # Tanium has no icon on the dashboard-icons CDN; it already has a
+      # real Tanium logo uploaded manually (Untitled.png) — group only.
+      - { slug: "tanium", group: "Security", icon: "", bookmark: false }
+      - { slug: "tg-gallery", group: "Media", icon: "immich", bookmark: false }
+      - { slug: "hermes-dashboard", group: "Automation", icon: "anthropic", bookmark: false }
+      # Bookmark-only tiles — no provider, just a curated deep link.
+      - slug: "home-assistant"
+        name: "Home Assistant"
+        group: "Home"
+        icon: "home-assistant"
+        bookmark: true
+        launch_url: "http://{{ ip_homeassistant }}:8123"
+      - slug: "loki-logs"
+        name: "Loki Logs"
+        group: "Monitoring"
+        icon: "loki"
+        bookmark: true
+        launch_url: "https://grafana.chi.lab.amd-e.com/explore?left=%7B%22datasource%22:%22loki%22%7D"
+      - slug: "authentik-admin"
+        name: "Authentik Admin"
+        group: "Infrastructure"
+        icon: "authentik"
+        bookmark: true
+        launch_url: "{{ authentik_url }}/if/admin/"
+
+# --- Ensure bookmark-only tiles exist (existing SSO apps already do) ---
+
+- name: Get bookmark applications (existence check)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/{{ item.slug }}/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: bookmark_app_checks
+  loop: "{{ launcher_tiles | selectattr('bookmark') | list }}"
+  loop_control:
+    label: "{{ item.slug }}"
+
+- name: Create missing bookmark applications
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "{{ item.item.name }}"
+      slug: "{{ item.item.slug }}"
+      meta_launch_url: "{{ item.item.launch_url }}"
+      group: "{{ item.item.group }}"
+      open_in_new_tab: true
+    status_code: [200, 201, 400]
+  loop: "{{ bookmark_app_checks.results }}"
+  loop_control:
+    label: "{{ item.item.slug }}"
+  when: item.status == 404
+
+- name: Keep bookmark applications' launch_url/group current on rerun
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/{{ item.item.slug }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      meta_launch_url: "{{ item.item.launch_url }}"
+      group: "{{ item.item.group }}"
+    status_code: [200]
+  loop: "{{ bookmark_app_checks.results }}"
+  loop_control:
+    label: "{{ item.item.slug }}"
+  when: item.status == 200
+
+# --- Curate group on the pre-existing SSO apps (icon handled below for all tiles) ---
+
+- name: Curate group on existing SSO application tiles
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/{{ item.slug }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      group: "{{ item.group }}"
+    status_code: [200, 404]
+  loop: "{{ launcher_tiles | rejectattr('bookmark') | list }}"
+  loop_control:
+    label: "{{ item.slug }}"
+
+# --- Icons: download from CDN then upload via set_icon/ (PATCH meta_icon is a no-op) ---
+# Skip apps that already have an icon whose filename starts with
+# "<slug>_" (our upload naming pattern) — avoids re-uploading identical
+# bytes and orphaning files on every playbook run.
+
+- name: Get current icon state for all launcher tiles
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/{{ item.slug }}/"
+    method: GET
+    headers: "{{ headers }}"
+    status_code: [200, 404]
+  register: current_icon_state
+  loop: "{{ launcher_tiles | selectattr('icon', '!=', '') | list }}"
+  loop_control:
+    label: "{{ item.slug }}"
+
+- name: Ensure local icon cache directory exists
+  ansible.builtin.file:
+    path: /tmp/authentik_launcher_icons
+    state: directory
+    mode: '0755'
+
+- name: Download tile icons from dashboard-icons CDN (only where upload needed)
+  ansible.builtin.get_url:
+    url: "{{ icon_cdn }}/{{ item.item.icon }}.svg"
+    dest: "/tmp/authentik_launcher_icons/{{ item.item.slug }}.svg"
+    mode: '0644'
+    force: true
+  loop: >-
+    {{ current_icon_state.results
+       | selectattr('status', 'equalto', 200)
+       | selectattr('json.meta_icon', 'defined')
+       | list }}
+  loop_control:
+    label: "{{ item.item.slug }}"
+  when: >-
+    item.json.meta_icon is none or
+    ('/application-icons/' + item.item.slug + '_') not in item.json.meta_icon
+  register: icon_downloads
+  failed_when: false
+
+- name: Upload tile icons to Authentik (set_icon multipart endpoint)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/{{ item.item.item.slug }}/set_icon/"
+    method: POST
+    headers:
+      Authorization: "{{ headers.Authorization }}"
+    body_format: form-multipart
+    body:
+      file:
+        filename: "/tmp/authentik_launcher_icons/{{ item.item.item.slug }}.svg"
+        mime_type: "image/svg+xml"
+    status_code: [200]
+  loop: "{{ icon_downloads.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.slug }}"
+  when: item.skipped is not defined and not item.failed
