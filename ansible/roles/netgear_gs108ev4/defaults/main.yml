@@ -1,20 +1,14 @@
 ---
-# Current reachable address -- the switch's factory-default fallback IP,
-# reachable only from a host on the 192.168.0.0/24 subnet (e.g. via a
-# temporary `ifconfig en0 alias 192.168.0.210 netmask 255.255.255.0` on a
-# device physically behind it, like macstudio-m4-1). NOT reachable on the
-# real 192.168.86.0/24 LAN until set_static_ip has been run successfully.
-netgear_gs108ev4_current_ip: "192.168.0.239"
-
-# Target permanent LAN address once brought under management. Pick a free
-# IP per docs/ipam.md conventions and update that file when this changes
-# from a placeholder.
-netgear_gs108ev4_target_ip: "192.168.86.199"
-netgear_gs108ev4_target_netmask: "255.255.255.0"
-netgear_gs108ev4_target_gateway: "192.168.86.1"
-
-# Vault-encrypted; populate from the physical label on the bottom of the
-# switch (GS108E-400NAS / GS108Ev4). See group_vars/all/vault.yml --
-# CHANGEME placeholder as of 2026-08-03, transcribe the real value once
-# the label is accessible.
-netgear_gs108ev4_password: "{{ vault_netgear_gs108ev4_password }}"
+# NETGEAR GS108Ev4 switch config is managed MANUALLY via the switch's web
+# UI (http://192.168.86.62) -- NOT by this Ansible role. See
+# roles/netgear_gs108ev4/tasks/main.yml and docs/ipam.md "PVE Sync
+# network" for the current live config and why automation was
+# deliberately not pursued (password intentionally kept out of this
+# repo/vault after being rotated off the factory default 2026-08-04).
+#
+# These vars exist only so the historical discovery tooling in
+# roles/netgear_gs108ev4/tasks/main.yml (tagged netgear_switch_discover,
+# never runs by default) has something to point at if it's ever revived.
+# netgear_gs108ev4_password is deliberately NOT sourced from the vault --
+# pass it via -e on the CLI if you ever actually run the discover tag.
+netgear_gs108ev4_current_ip: "192.168.86.62"
