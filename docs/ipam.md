@@ -255,6 +255,41 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 
 `172.16.0.40` was previously assigned to **both** `mail-01` and `vm-01` (ARP race). Resolved 2026-05-01 — moved `vm-01` to `.42`. See commit `12bb4c2`.
 
+## Monitoring & metrics ingestion into VictoriaMetrics (vm-01)
+
+Three independent paths feed vm-01, covering different layers:
+
+- **Alloy (pull-replaced push agent)** — runs on every managed host
+  (LXCs, VMs, the pve nodes themselves). Ships generic Debian/RHEL
+  node_exporter-shape host metrics + journal logs via
+  `prometheus.remote_write` / `loki.write` to vm-01/Loki. See
+  `ansible/roles/alloy/`.
+- **Direct Prometheus scrape** — `prometheus.yml.j2` on vm-01 itself
+  scrapes a handful of targets that don't run Alloy: Home Assistant
+  (`/api/prometheus`), the exo inference cluster (both Mac Studios,
+  `:52415/metrics`), Tanium appliances (dedicated hardened
+  `tanium_node_exporter` role), and blackbox-driven HTTPS/TCP probes.
+  See `ansible/roles/victoriametrics/templates/prometheus.yml.j2`.
+- **Proxmox native metric export (added 2026-08-04)** — pvestatd (the
+  daemon that already feeds the Proxmox GUI's RRD graphs every 10s) is
+  registered as an InfluxDB v2 client pointed at vm-01's native
+  `/api/v2/write` endpoint. Gets node + per-guest (VM/CT) CPU/mem/disk/net
+  that Alloy's generic host metrics don't cover (Alloy on a pve node only
+  sees the pve host's own OS, not neighboring guests). Config lives in
+  `/etc/pve/status.cfg` (pmxcfs, cluster-wide, write-once) via
+  `ansible/roles/pve_metrics_export/` (id `vm-01-influx`), invoked from
+  `deploy_monitoring.yml`'s "Register Proxmox's native metric export"
+  play. Series land prefixed by VictoriaMetrics' Influx line-protocol
+  mapping (`system_cpu`, `ballooninfo_free_mem`, `cpustat_avg1`, etc.),
+  labeled `object` (`node`/`qemu`/`lxc`), `vmid`, `host`, `nodename`.
+  Verify: `curl http://172.16.0.42:8428/api/v1/series?match[]=system_cpu`.
+  Deliberately does NOT cover storage-pool usage, HA resource state,
+  replication job status/duration, or backup job status — pvestatd's
+  native export doesn't expose those. `prometheus-pve-exporter` (pull,
+  via a scoped API token) would add that layer if/when wanted, e.g. to
+  alert on the 2026-08-04 replication-burst root-cause fix or the
+  frigate HA node-affinity rule — deliberately deferred, not built.
+
 ## Tanium cluster
 
 | Hostname  | VMID | Private IP       | Role                  |
