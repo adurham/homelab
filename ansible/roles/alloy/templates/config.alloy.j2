@@ -60,6 +60,38 @@ loki.relabel "journal" {
     }
 }
 
+{% if alloy_log_unit_allowlist | default('') %}
+// Unit allowlist (alloy_log_unit_allowlist set on this host -- see
+// roles/alloy/README.md "Metrics-only hosts / unit allowlist"). Only
+// journal entries from units matching this regex are forwarded to
+// Loki; everything else (the actual scraper/collector/gallery service
+// units, which is where the sensitive content lives) is dropped here,
+// inside Alloy, before ever leaving this box -- not filtered
+// server-side after the fact.
+loki.relabel "unit_filter" {
+    forward_to = [loki.write.vm.receiver]
+    rule {
+        action        = "keep"
+        source_labels = ["unit"]
+        // Backtick-quoted raw string -- River's double-quoted strings
+        // require backslashes to be escaped (\\.), which is easy to get
+        // wrong when the regex is templated from a plain YAML/Jinja var
+        // (as it is here). Backticks pass the regex through verbatim,
+        // matching how Alloy's own docs recommend writing regexes.
+        regex         = `{{ alloy_log_unit_allowlist }}`
+    }
+}
+
+loki.source.journal "system" {
+    max_age       = "12h"
+    labels        = {
+        host = constants.hostname,
+        job  = "systemd-journal",
+    }
+    forward_to    = [loki.relabel.unit_filter.receiver]
+    relabel_rules = loki.relabel.journal.rules
+}
+{% else %}
 loki.source.journal "system" {
     max_age       = "12h"
     labels        = {
@@ -69,6 +101,7 @@ loki.source.journal "system" {
     forward_to    = [loki.write.vm.receiver]
     relabel_rules = loki.relabel.journal.rules
 }
+{% endif %}
 
 loki.write "vm" {
     endpoint {

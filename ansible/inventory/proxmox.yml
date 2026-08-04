@@ -161,12 +161,14 @@ all:
           target_node: pve02
       vars:
         ansible_user: root
-        # Metrics-only Alloy (added 2026-08-05) -- see media_ingest below
-        # for the full rationale. Telethon (Telegram client library) error
-        # traces/logs on this host could reference private chat/channel
-        # names -- journal shipping stays off; host resource counters
-        # (CPU/mem/disk/net) are safe and now centralized.
-        alloy_ship_logs: false
+        # Unit-allowlist log shipping (added 2026-08-05) -- see
+        # roles/alloy/README.md "Metrics-only hosts / unit allowlist".
+        # Verified live (journalctl) 2026-08-05: media-gallery-*.service
+        # units (gallery/thumb/trash/upload) log folder names, person
+        # names, and rclone remote paths on nearly every line -- NEVER
+        # allowlisted. ssh/cron/postfix/systemd-journald are safe,
+        # content-free infra signal -- allowlisted.
+        alloy_log_unit_allowlist: '^(ssh(@.*)?|cron|postfix(@.*)?|systemd-journald)\.service$'
 
     media_ingest:
       hosts:
@@ -179,14 +181,13 @@ all:
           target_node: pve02
       vars:
         ansible_user: root
-        # Metrics-only Alloy (added 2026-08-05): host resource counters
-        # (CPU/mem/disk/net -- no process names, no command-lines) are
-        # safe to centralize. Journal logs are NOT -- this CT's
-        # process/scraper activity could reference platform/username
-        # details (see roles/media_ingest_02 for the concrete example),
-        # so log shipping stays off. See roles/alloy/README.md
-        # "Metrics-only hosts".
-        alloy_ship_logs: false
+        # Unit-allowlist log shipping (added 2026-08-05) -- see
+        # roles/alloy/README.md "Metrics-only hosts / unit allowlist".
+        # Verified live (journalctl) 2026-08-05: media-ingest-collector.service
+        # logs chat IDs + folder names (person names) on nearly every
+        # line -- NEVER allowlisted. ssh/cron/postfix/systemd-journald
+        # are safe, content-free infra signal -- allowlisted.
+        alloy_log_unit_allowlist: '^(ssh(@.*)?|cron|postfix(@.*)?|systemd-journald)\.service$'
 
     # Secondary source gallery collector — mirrors media_ingest but scrapes a
     # different upstream source platform on a pull-based (timer) cadence instead
@@ -202,14 +203,17 @@ all:
           target_node: pve02
       vars:
         ansible_user: root
-        # Metrics-only Alloy (added 2026-08-05) -- see media_ingest above.
+        # Unit-allowlist log shipping (added 2026-08-05) -- see
+        # roles/alloy/README.md "Metrics-only hosts / unit allowlist".
         # This CT specifically has vault_media_ingest_02_scrape_usernames
         # and vault_media_ingest_02_scraper_pkg/_bin (see
-        # roles/media_ingest_02_host, group_vars/all/vault.yml) --
-        # exactly the kind of detail that could leak via journal/process
-        # logs if log shipping were ever enabled here. Metrics-only is
-        # a hard requirement for this host, not just a default.
-        alloy_ship_logs: false
+        # roles/media_ingest_02_host, group_vars/all/vault.yml). Verified
+        # live (journalctl) 2026-08-05: media-ingest-02.service logs the
+        # literal scrape-target username on EVERY line -- NEVER
+        # allowlisted, no exceptions. ssh/cron/postfix/systemd-journald/
+        # kill-switch (a firewall-status unit -- "block all non-private
+        # egress on eth0", no sensitive content) are safe -- allowlisted.
+        alloy_log_unit_allowlist: '^(ssh(@.*)?|cron|postfix(@.*)?|systemd-journald|kill-switch)\.service$'
 
     # Personal-device MITM ad-stripping proxy (mitmproxy explicit HTTPS
     # proxy). Devices opt in individually via Wi-Fi proxy settings pointed
