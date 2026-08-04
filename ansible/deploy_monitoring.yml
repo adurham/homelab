@@ -35,6 +35,18 @@
   roles:
     - pve_private_ip
 
+- name: Register Proxmox's native metric export to VictoriaMetrics
+  # pvestatd already collects node + per-guest (VM/CT) resource metrics
+  # for the GUI's RRD graphs every 10s -- this points that existing
+  # collector at VM's InfluxDB v2 write endpoint instead of just the
+  # GUI, no new agent. Cluster-wide config (pmxcfs), so one node applies
+  # it for the whole cluster; safe to run against all proxmox_nodes since
+  # the task is idempotent (checks /cluster/metrics/server first).
+  hosts: proxmox_nodes
+  gather_facts: false
+  roles:
+    - pve_metrics_export
+
 - name: Install Telemetry Agents
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster:!media_ingest:!media_ingest_02:!media_gallery:!bwt_lab
   gather_facts: true

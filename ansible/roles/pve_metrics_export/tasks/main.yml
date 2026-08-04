@@ -1,0 +1,21 @@
+---
+# Cluster-wide config lives in /etc/pve/status.cfg (replicated by pmxcfs) --
+# write once, matches the pattern used for HA rules in roles/frigate_host.
+- name: Check existing external metric servers
+  ansible.builtin.command: pvesh get /cluster/metrics/server --output-format json  # noqa: run-once[task]
+  register: pve_metrics_check
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+
+- name: Register VictoriaMetrics as an InfluxDB v2 external metric server  # noqa: run-once[task]
+  ansible.builtin.command: >
+    pvesh create /cluster/metrics/server/{{ pve_metrics_id }}
+    --type influxdb
+    --server {{ pve_metrics_server }}
+    --port {{ pve_metrics_port }}
+    --influxdbproto http
+    --bucket {{ pve_metrics_bucket }}
+  when: pve_metrics_id not in (pve_metrics_check.stdout | from_json | map(attribute='id') | list)
+  run_once: true
+  delegate_to: "{{ groups['proxmox_nodes'][0] }}"
