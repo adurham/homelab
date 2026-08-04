@@ -61,13 +61,48 @@ Mac hardware, only a genuine physical unplug is trustworthy for this kind
 of port-mapping test — do not trust `ifconfig down` or `networksetup off`
 as a proxy for "physical link down" on macOS, on any NIC.
 
-QoS priority (802.1P mode) currently
-sits at Medium on all 8 ports — bumping ports 3/4/5 to Critical (to protect
-Proxmox replication/corosync traffic on the shared uplink) requires the
-actual web UI; the priority-submit CGI endpoint/field names couldn't be
-found in the switch's shipped JS bundles (`page.js`/`page2.js`/`function.js`/
-`en.js`) despite full deobfuscation — do this manually via Switching → QoS
-→ Priority rather than guessing POST fields against production infra.
+QoS mode note: the switch's QoS page defaults to **802.1P/DSCP** mode,
+which reads priority from tags already inside packets — useless here since
+Proxmox/replication traffic isn't tagged that way. **Port-based** mode is
+the correct choice for prioritizing ports 3/4/5 directly regardless of
+packet contents; switching QoS Mode to Port-based should expose a Priority
+tab. As of 2026-08-04 this hasn't been applied — see "Root cause found and
+fixed" below; QoS is now considered a secondary belt-and-suspenders step,
+not the primary fix. Login password was changed by the user and stored in
+1Password (no longer the factory default) — I no longer have programmatic
+access to this switch.
+
+### Root cause found and fixed (2026-08-04): synchronized replication bursts
+
+The original throughput-dip investigation (2026-08-03) suspected shared-
+uplink contention between Proxmox sync traffic and other LAN traffic.
+Confirmed via VictoriaMetrics `node_network_transmit_bytes_total{device=
+"vmbr0"}` query_range across pve01/02/03: multiple daily events where
+**all 3 nodes simultaneously spike to a combined 100+ MB/s (800+ Mbps)**
+on their LAN-facing interface for 4-5 minutes at a stretch (e.g. observed
+20-46 MB/s per node, all 3 nodes, at the same timestamps).
+
+Root cause: `/etc/pve/replication.cfg` had 20 replication jobs on a
+`schedule *:N/15` pattern (offsets 0-14) — but 20 jobs into only 15 minute
+slots meant 5 collisions where two jobs fire in the same minute, each
+already rate-limited to 15 MB/s but stacking when combined. This is a
+pmxcfs-managed live cluster file, NOT Ansible-templated — no repo drift
+risk, but also nothing to update in `ansible/` for this fix.
+
+**Fix applied:** rewrote the schedule to `*:N/20` with N assigned 0-19
+sequentially per job (one job per unique minute in a 20-minute cycle
+instead of a 15-minute one) — zero collisions, verified
+`sort(schedules) == [0..19]` before applying. Backup saved on pve03 at
+`/etc/pve/replication.cfg.bak-<timestamp>`. Applied by writing the new
+config directly (no `pvesr` CLI edit-by-edit needed since it's one file);
+`pvescheduler.service` re-reads `replication.cfg` from pmxcfs each cycle,
+no restart required.
+
+**Verified:** post-fix, max single-node vmbr0 throughput over a 15-minute
+window was ~15 MB/s (down from a confirmed 50 MB/s pre-fix peak), with
+zero timestamps where 2+ nodes simultaneously exceeded 20 MB/s (versus
+multiple confirmed multi-node collision windows pre-fix). Root cause
+resolved without touching the switch at all.
 
 - `172.16.0.1` is `tailscale-gw` — both the SDN VNet gateway and the Tailscale subnet router advertising `172.16.0.0/24` over Tailscale. CTs on `private` use it as their default route only when they need outbound to non-LAN destinations.
 - `10.99.0.3` is `tailscale-gw` eth2 on the `bwt` bridge — same CT (101) carries the BWT-lab subnet router, advertising `10.99.0.0/24` over Tailscale.
