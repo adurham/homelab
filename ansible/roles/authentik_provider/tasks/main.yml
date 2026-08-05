@@ -631,6 +631,16 @@
   ansible.builtin.import_tasks: bookmarks.yml
 
 # -------------------------------------------------------------------------
+# Home Assistant — native OIDC SSO (hass-oidc-auth). Runs AFTER bookmarks.yml
+# since it attaches a provider to the "home-assistant" application that
+# bookmarks.yml creates first as a plain bookmark tile.
+# See tasks/home_assistant.yml for the full rationale.
+# -------------------------------------------------------------------------
+
+- name: Provision Home Assistant OIDC integration
+  ansible.builtin.import_tasks: home_assistant.yml
+
+# -------------------------------------------------------------------------
 # AMD-Enterprises brand: logo + favicon on the login/library UI.
 # See tasks/branding.yml for the full rationale.
 # -------------------------------------------------------------------------
