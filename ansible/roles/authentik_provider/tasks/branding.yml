@@ -68,15 +68,25 @@
       branding_default_flow_background: "data:image/svg+xml;base64,{{ amd_enterprises_flow_bg_b64 }}"
       branding_custom_css: "{{ amd_enterprises_custom_css }}"
       # settings.layout.type controls the "My applications" library page
-      # grid: row (default, one column of full-width rows) vs 2-column
-      # vs 3-column (a proper tile grid, more myapps.microsoft.com-like).
-      # Read by web/src/user/LibraryPage's uiConfig via GET
+      # grid: row (default) / 2-column / 3-column. Read by
+      # web/src/user/LibraryPage's uiConfig via GET
       # /api/v3/core/users/me/ (user.settings, brand attrs merged in) —
       # confirmed live: PATCHing this and re-fetching /core/users/me/
       # shows settings.layout.type immediately reflects the new value.
+      #
+      # Tried 3-column and 2-column live (2026-08-04) — both rejected
+      # by the user as "lopsided": Authentik places each app-group
+      # (header + its tiles) as its own grid item, so with narrower
+      # columns, DIFFERENT groups with different app counts land
+      # side-by-side in the same row and their bottoms don't align —
+      # this is inherent to Authentik's layout engine (grid items of
+      # varying content height in the same row), not fixable via CSS.
+      # "row" avoids this entirely: one full-width row per group, tiles
+      # wrap within that row, groups never sit side-by-side. Settled on
+      # "row" as the keeper.
       attributes:
         settings:
           layout:
-            type: "3-column"
+            type: "row"
     status_code: [200]
   when: default_brand.json.results | length > 0
