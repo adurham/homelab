@@ -1,0 +1,110 @@
+# -------------------------------------------------------------------------
+# Home Assistant — native OIDC SSO via the hass-oidc-auth custom component
+# -------------------------------------------------------------------------
+# Home Assistant has NO built-in SSO/OIDC support (core team declined it —
+# see https://github.com/orgs/home-assistant/discussions/48). The fix is
+# the community `hass-oidc-auth` custom_component (HACS, domain auth_oidc),
+# a real OIDC client/RP that plugs into HA's native auth-provider system —
+# this is Path 1 (native OIDC), not a forward-auth wrapper: HA verifies the
+# ID token itself and mints its own session, same class as Grafana/Hermes
+# Dashboard above, not the VictoriaMetrics/TG-Gallery pattern.
+#
+# Public PKCE client — no client_secret to vault or leak. hass-oidc-auth's
+# own docs recommend this for a home setup: "most users will not
+# experience any benefits from using a confidential client... using a
+# client secret introduces the risk of it getting lost/stolen/put on the
+# internet." Redirect URL + PKCE is enough here.
+#
+# The HA-side custom_component install (HACS `hacs/repository/download`
+# websocket call) and the `auth_oidc:` config.yaml block are NOT part of
+# this ansible role — they live in the homeassistant/ subtree and are
+# deployed via ansible/deploy_ha_automations.yml. This file only owns the
+# Authentik-side provider + application wiring.
+# -------------------------------------------------------------------------
+
+- name: Get Existing Home Assistant OIDC Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/?search={{ 'Home Assistant' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: ha_oidc_providers_found
+
+- name: Create Home Assistant OIDC Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "Home Assistant"
+      client_id: "home-assistant"
+      client_type: "public"
+      authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
+      authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
+      invalidation_flow: "{{ grafana_invalidation_pk }}"
+      redirect_uris:
+        - url: "http://{{ ip_homeassistant }}:8123/auth/oidc/callback"
+          matching_mode: "strict"
+        - url: "http://homeassistant.local:8123/auth/oidc/callback"
+          matching_mode: "strict"
+      signing_key: "{{ signing_cert.json.results[0].pk }}"
+      sub_mode: "hashed_user_id"
+      include_claims_in_id_token: true
+      property_mappings: >-
+        {{ scope_mappings.json.results
+           | selectattr('managed', 'defined')
+           | selectattr('name', 'search', 'email|profile|openid')
+           | map(attribute='pk') | list }}
+    status_code: [200, 201]
+  when: ha_oidc_providers_found.json.results | length == 0
+  register: new_ha_oidc_provider
+
+- name: Capture Home Assistant OIDC Provider ID (just-created)
+  ansible.builtin.set_fact:
+    ha_oidc_provider_id: "{{ new_ha_oidc_provider.json.pk }}"
+  when:
+    - new_ha_oidc_provider.json is defined
+    - new_ha_oidc_provider.json.pk is defined
+
+- name: Capture Home Assistant OIDC Provider ID (already-exists)
+  ansible.builtin.set_fact:
+    ha_oidc_provider_id: "{{ ha_oidc_providers_found.json.results[0].pk }}"
+  when:
+    - ha_oidc_providers_found.json.results | length > 0
+    - ha_oidc_provider_id is not defined
+
+- name: Update Home Assistant OIDC Provider (sync redirect URIs & mappings)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/providers/oauth2/{{ ha_oidc_provider_id }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      redirect_uris:
+        - url: "http://{{ ip_homeassistant }}:8123/auth/oidc/callback"
+          matching_mode: "strict"
+        - url: "http://homeassistant.local:8123/auth/oidc/callback"
+          matching_mode: "strict"
+      property_mappings: >-
+        {{ scope_mappings.json.results
+           | selectattr('managed', 'defined')
+           | selectattr('name', 'search', 'email|profile|openid')
+           | map(attribute='pk') | list }}
+    status_code: [200]
+
+# --- Attach the provider to the existing "home-assistant" bookmark app ---
+#
+# The application already exists as a pure bookmark tile (see bookmarks.yml
+# — "own auth, no SSO"). That was true before this file existed; now that
+# HA has real OIDC, attach the provider so the tile becomes a native-SSO
+# app like Grafana/Proxmox, keeping its existing slug/group/icon untouched.
+
+- name: Attach OIDC Provider to Home Assistant Application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/home-assistant/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      provider: "{{ ha_oidc_provider_id | int }}"
+    status_code: [200]

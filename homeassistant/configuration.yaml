@@ -6,6 +6,14 @@ default_config:
 go2rtc:
   url: http://192.168.86.85:1984
 
+# SSO via Authentik (hass-oidc-auth custom component, installed via HACS).
+# Public client (PKCE) — matches hass-oidc-auth's own recommendation for a
+# home setup: no client_secret to store/leak, redirect URL + PKCE is enough.
+# Authentik provider: pk=12, client_id=home-assistant, app slug=home-assistant.
+auth_oidc:
+  client_id: "home-assistant"
+  discovery_url: "https://auth.chi.lab.amd-e.com/application/o/home-assistant/.well-known/openid-configuration"
+
 # Prometheus Metrics
 prometheus:
 
