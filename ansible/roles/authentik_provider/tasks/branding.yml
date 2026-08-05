@@ -1,16 +1,21 @@
 # -------------------------------------------------------------------------
 # AMD-Enterprises branding (2026-08-04). Replaces the stock Authentik
-# wordmark/favicon on the default brand with a custom logo + favicon so
-# the login/library pages read "AMD-Enterprises" instead of "authentik".
+# wordmark/favicon/flow-background/accent-color on the default brand
+# with an AMD-Enterprises look: custom logo + favicon (so the
+# login/library pages read "AMD-Enterprises" instead of "authentik"),
+# a dark navy blueprint-grid flow background for the login pages, and
+# custom CSS overriding the default orange accent with the brand blue
+# (--ak-accent / --pf-global--primary-color--* / link colors).
 #
-# Authentik's branding_logo/branding_favicon fields accept a data: URI
-# directly (confirmed live) — no separate file-upload endpoint needed,
+# Authentik's branding_logo/branding_favicon/branding_default_flow_
+# background/branding_custom_css fields all accept plain values
+# directly via PATCH — images as data: URIs, CSS as a raw string
+# (confirmed live). No separate file-upload endpoint needed here,
 # unlike application icons which require the set_icon/ multipart
-# endpoint (see tasks/bookmarks.yml for that gotcha). So this task just
-# base64-encodes the local SVG assets and PATCHes the brand record.
+# endpoint (see tasks/bookmarks.yml for that gotcha).
 #
 # branding_title was already "AMD-Enterprises" (set outside ansible,
-# pre-existing) — left as-is, only logo/favicon are managed here.
+# pre-existing) — left as-is, only visual assets are managed here.
 # -------------------------------------------------------------------------
 
 - name: Get default brand
@@ -34,6 +39,14 @@
   ansible.builtin.set_fact:
     amd_enterprises_favicon_b64: "{{ lookup('file', role_path + '/files/amd_enterprises_favicon.svg') | b64encode }}"
 
+- name: Read AMD-Enterprises flow background SVG
+  ansible.builtin.set_fact:
+    amd_enterprises_flow_bg_b64: "{{ lookup('file', role_path + '/files/amd_enterprises_flow_bg.svg') | b64encode }}"
+
+- name: Read AMD-Enterprises custom CSS
+  ansible.builtin.set_fact:
+    amd_enterprises_custom_css: "{{ lookup('file', role_path + '/files/amd_enterprises_custom.css') }}"
+
 - name: Apply AMD-Enterprises branding to default brand
   ansible.builtin.uri:
     url: "{{ authentik_url }}/api/v3/core/brands/{{ default_brand.json.results[0].brand_uuid }}/"
@@ -44,5 +57,7 @@
       branding_title: "AMD-Enterprises"
       branding_logo: "data:image/svg+xml;base64,{{ amd_enterprises_logo_b64 }}"
       branding_favicon: "data:image/svg+xml;base64,{{ amd_enterprises_favicon_b64 }}"
+      branding_default_flow_background: "data:image/svg+xml;base64,{{ amd_enterprises_flow_bg_b64 }}"
+      branding_custom_css: "{{ amd_enterprises_custom_css }}"
     status_code: [200]
   when: default_brand.json.results | length > 0
