@@ -1,6 +1,6 @@
 $TTL    604800
 @       IN      SOA     dns.chi.lab.amd-e.com. admin.chi.lab.amd-e.com. (
-                              4         ; Serial
+                              5         ; Serial
                          604800         ; Refresh
                           86400         ; Retry
                         2419200         ; Expire
@@ -46,6 +46,7 @@ whoami  IN      A       {{ ip_loadbalancer }}
 grafana         IN      A       {{ ip_loadbalancer }}
 victoriametrics IN      A       {{ ip_loadbalancer }}
 gallery         IN      A       {{ ip_loadbalancer }} ; TG collector gallery (Authentik-gated)
+homeassistant   IN      A       {{ ip_loadbalancer }} ; HA has its own auth (local + OIDC SSO), no forward-auth wrapper
 
 ; Hermes persistent gateway (front by lb-01 — internal-only ACL in nginx).
 ; hermes = GUI (Hermes's own native OIDC-to-Authentik login);
