@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0f1e"/>
+      <stop offset="55%" stop-color="#0f1830"/>
+      <stop offset="100%" stop-color="#0b1733"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="18%" cy="12%" r="50%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="88%" cy="90%" r="55%">
+      <stop offset="0%" stop-color="#1e3a8a" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#1e3a8a" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+      <path d="M 60 0 L 0 0 0 60" fill="none" stroke="#5b8def" stroke-opacity="0.10" stroke-width="1"/>
+    </pattern>
+    <pattern id="gridBig" width="240" height="240" patternUnits="userSpaceOnUse">
+      <path d="M 240 0 L 0 0 0 240" fill="none" stroke="#5b8def" stroke-opacity="0.16" stroke-width="1.4"/>
+    </pattern>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bgGrad)"/>
+  <rect width="1920" height="1080" fill="url(#grid)"/>
+  <rect width="1920" height="1080" fill="url(#gridBig)"/>
+  <rect width="1920" height="1080" fill="url(#glow1)"/>
+  <rect width="1920" height="1080" fill="url(#glow2)"/>
+  <!-- subtle circuit-style accent traces -->
+  <g stroke="#60a5fa" stroke-opacity="0.28" stroke-width="2" fill="none">
+    <path d="M 0 220 L 340 220 L 400 280 L 780 280"/>
+    <path d="M 1920 760 L 1560 760 L 1500 700 L 1120 700"/>
+    <path d="M 1650 0 L 1650 160 L 1590 220 L 1590 420"/>
+  </g>
+  <g fill="#60a5fa" fill-opacity="0.55">
+    <circle cx="340" cy="220" r="4"/>
+    <circle cx="780" cy="280" r="4"/>
+    <circle cx="1560" cy="760" r="4"/>
+    <circle cx="1120" cy="700" r="4"/>
+    <circle cx="1650" cy="160" r="4"/>
+    <circle cx="1590" cy="420" r="4"/>
+  </g>
+</svg>
