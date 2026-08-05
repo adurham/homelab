@@ -3,9 +3,14 @@
 # wordmark/favicon/flow-background/accent-color on the default brand
 # with an AMD-Enterprises look: custom logo + favicon (so the
 # login/library pages read "AMD-Enterprises" instead of "authentik"),
-# a dark navy blueprint-grid flow background for the login pages, and
-# custom CSS overriding the default orange accent with the brand blue
-# (--ak-accent / --pf-global--primary-color--* / link colors).
+# a dark navy blueprint-grid background applied to BOTH the login flow
+# pages (via branding_default_flow_background) AND the "My
+# applications" library page (via custom CSS body background — see
+# templates/amd_enterprises_custom.css.j2 GOTCHA #2 for why the two
+# need separate mechanisms), and custom CSS overriding the default
+# orange accent with the brand blue (--ak-accent /
+# --pf-global--primary-color--* / link colors — see that same file's
+# GOTCHA #1).
 #
 # Authentik's branding_logo/branding_favicon/branding_default_flow_
 # background/branding_custom_css fields all accept plain values
@@ -43,9 +48,12 @@
   ansible.builtin.set_fact:
     amd_enterprises_flow_bg_b64: "{{ lookup('file', role_path + '/files/amd_enterprises_flow_bg.svg') | b64encode }}"
 
-- name: Read AMD-Enterprises custom CSS
+- name: Render AMD-Enterprises custom CSS (templates in the flow-bg data URI)
   ansible.builtin.set_fact:
-    amd_enterprises_custom_css: "{{ lookup('file', role_path + '/files/amd_enterprises_custom.css') }}"
+    amd_enterprises_custom_css: >-
+      {{ lookup('template', role_path + '/templates/amd_enterprises_custom.css.j2') }}
+  vars:
+    AMD_ENTERPRISES_FLOW_BG_DATA_URI: "data:image/svg+xml;base64,{{ amd_enterprises_flow_bg_b64 }}"
 
 - name: Apply AMD-Enterprises branding to default brand
   ansible.builtin.uri:
