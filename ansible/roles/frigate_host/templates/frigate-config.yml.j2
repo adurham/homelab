@@ -48,20 +48,38 @@ detectors:
 # WebRTC candidates must advertise the host LAN IP so Google's SDM API can
 # send UDP packets back (Docker bridge IP is unreachable from the internet).
 go2rtc:
+  # Overrides go2rtc's own built-in "rtsp" ffmpeg input template (see
+  # internal/ffmpeg/ffmpeg.go defaults["rtsp"] upstream) for EVERY
+  # ffmpeg-sourced stream that resolves via an internal stream name (i.e.
+  # every "<name>: - ffmpeg:<name>_raw#video=copy" remux below) — go2rtc
+  # builds an internal RTSP URL for those and always runs them through this
+  # exact template, so this is the only place in the ffmpeg: producer's own
+  # URL syntax that pre-`-i` flags can be safely injected. Do NOT try to
+  # prefix flags directly in the per-stream "ffmpeg:..." line (see below) —
+  # go2rtc's parseArgs() only recognizes a bare source token (a stream name,
+  # a scheme:// URL, or a device/virtual/tts query) as the first token after
+  # "ffmpeg:"; anything else falls through to the generic "file" input
+  # template, which does `-i <entire string>` verbatim — so a leading
+  # "-fflags ..." gets treated as the literal input filename and fails with
+  # "Error opening input file -fflags." (broke all 6 cameras 2026-08-06,
+  # reverted same day).
+  #
+  # +discardcorrupt+genpts: drop malformed NALs from WebRTC packet loss
+  # instead of failing the remux outright; regenerate PTS so downstream
+  # RTSP/detect doesn't choke on timestamp gaps left by the drops.
+  # -analyzeduration/-probesize 10M: go2rtc's default analyzeduration is 0,
+  # which surfaces as "Could not find codec parameters for stream 0 (Video:
+  # h264, none): unspecified size" -> detect ffmpeg dies outright instead of
+  # just restarting cleanly. Give it enough of the stream to find real
+  # SPS/PPS before giving up.
+  ffmpeg:
+    rtsp: "-fflags nobuffer+discardcorrupt+genpts -flags low_delay -analyzeduration 10M -probesize 10M -timeout {timeout} -user_agent go2rtc/ffmpeg -rtsp_flags prefer_tcp -i {input}"
   streams:
 {% for name, label in frigate_cameras.items() %}
     {{ name }}_raw:
       - "nest:?client_id={{ nest_client_id }}&client_secret={{ nest_client_secret }}&refresh_token={{ nest_refresh_token }}&project_id={{ nest_project_id }}&device_id={{ nest_camera_ids[name] }}"
     {{ name }}:
-      # +discardcorrupt+genpts: drop malformed NALs from WebRTC packet loss
-      # instead of failing the remux outright; regenerate PTS so downstream
-      # RTSP/detect doesn't choke on timestamp gaps left by the drops.
-      # -analyzeduration/-probesize 10M: go2rtc's ffmpeg default analyzeduration
-      # is 0, which surfaces as "Could not find codec parameters for stream 0
-      # (Video: h264, none): unspecified size" -> detect ffmpeg dies outright
-      # instead of just restarting cleanly. Give it enough of the stream to
-      # find real SPS/PPS before giving up.
-      - "ffmpeg:-fflags +discardcorrupt+genpts -analyzeduration 10M -probesize 10M {{ name }}_raw#video=copy"
+      - "ffmpeg:{{ name }}_raw#video=copy"
 {% endfor %}
   preload:
 {% for name, label in frigate_cameras.items() %}
