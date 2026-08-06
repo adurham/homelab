@@ -14,39 +14,25 @@ auth_oidc:
   client_id: "home-assistant"
   discovery_url: "https://auth.chi.lab.amd-e.com/application/o/home-assistant/.well-known/openid-configuration"
 
-# Trust lb-01's reverse-proxy headers for the new
-# homeassistant.chi.lab.amd-e.com vhost (nginx TLS-terminates + forwards
-# X-Forwarded-For/-Proto/-Host; without this HA won't trust them and
-# things like the client IP shown in the frontend/logbook would show
-# lb-01's IP instead of the real client, and some auth flows validate
-# the Host header against what HA thinks it's bound to). HA lives on
-# the plain LAN (192.168.86.2), so lb-01 reaches it via its LAN NIC
-# (192.168.86.86, directly-connected route) — NOT its SDN IP
-# (172.16.0.30), which is a different subnet entirely.
+# NOTE: lb-01's trusted-proxy config for the homeassistant.chi.lab.amd-e.com
+# vhost (X-Forwarded-For/-Proto/-Host trust so client IPs in the
+# frontend/logbook and auth flows are correct — lb-01 reaches HA via its LAN
+# NIC 192.168.86.86, not the SDN IP 172.16.0.30) now lives in HA's
+# storage-backed network config (Settings > System > Network), NOT here.
 #
-# KNOWN BROKEN as of 2026-08-04 on core 2026.8.0b5 (beta): a `ha core
-# restart` unexpectedly auto-upgraded this instance 2026.7.4 -> 2026.8
-# beta mid-session. That release moves trusted_proxies to a new
-# storage-backed network config (Settings > System > Network in the
-# UI) and — per the 2026.8 changelog itself ("Fix trusted proxies type
-# when HTTP config is loaded from storage") — has an active bug where
-# this YAML block gets silently ignored: `ha core logs` still shows
-# "A request from a reverse proxy was received from 192.168.86.86, but
-# your HTTP integration is not set-up for reverse proxies" for every
-# single request through homeassistant.chi.lab.amd-e.com, even after a
-# confirmed clean restart with this exact config on disk (verified via
-# md5sum match + version bump in /api/config). DNS (A record) and the
-# nginx vhost for homeassistant.chi.lab.amd-e.com are both deployed and
-# correct — only this trusted_proxies piece is blocked, pending either
-# (a) 2026.8 going stable with the fix backported, or (b) configuring
-# it via the new UI network settings instead of YAML. The SSO login
-# flow (auth_oidc above) is UNAFFECTED — it's an outbound call from HA
-# to Authentik, not an inbound proxied request, so it doesn't touch
-# trusted_proxies at all.
-http:
-  use_x_forwarded_for: true
-  trusted_proxies:
-    - 192.168.86.86  # lb-01 LAN ingress (directly-connected to HA's subnet)
+# As of HA core 2026.8 stable, the `http:` YAML block is a one-time import
+# only — the "Fix trusted proxies type when HTTP config is loaded from
+# storage" bugfix (2026.8 changelog) landed and storage-based config now
+# works correctly. On 2026-08-06 the pending YAML `http:` block was
+# confirmed migrated and *promoted* to stable via the http/config
+# websocket API (use_x_forwarded_for: true, trusted_proxies:
+# ["192.168.86.86/32"]) and verified live through the reverse proxy
+# (200 from https://homeassistant.chi.lab.amd-e.com/api/). Do not re-add an
+# `http:` block here — HA repairs will flag "yaml_still_present_after
+# migration" and it stops working entirely in 2027.2.0. Manage trusted
+# proxies going forward via Settings > System > Network in the UI, or via
+# the same websocket API (http/config, http/config/configure,
+# http/config/promote).
 
 # Prometheus Metrics
 prometheus:
