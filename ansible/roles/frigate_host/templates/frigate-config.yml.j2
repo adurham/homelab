@@ -53,7 +53,15 @@ go2rtc:
     {{ name }}_raw:
       - "nest:?client_id={{ nest_client_id }}&client_secret={{ nest_client_secret }}&refresh_token={{ nest_refresh_token }}&project_id={{ nest_project_id }}&device_id={{ nest_camera_ids[name] }}"
     {{ name }}:
-      - "ffmpeg:{{ name }}_raw#video=copy"
+      # +discardcorrupt+genpts: drop malformed NALs from WebRTC packet loss
+      # instead of failing the remux outright; regenerate PTS so downstream
+      # RTSP/detect doesn't choke on timestamp gaps left by the drops.
+      # -analyzeduration/-probesize 10M: go2rtc's ffmpeg default analyzeduration
+      # is 0, which surfaces as "Could not find codec parameters for stream 0
+      # (Video: h264, none): unspecified size" -> detect ffmpeg dies outright
+      # instead of just restarting cleanly. Give it enough of the stream to
+      # find real SPS/PPS before giving up.
+      - "ffmpeg:-fflags +discardcorrupt+genpts -analyzeduration 10M -probesize 10M {{ name }}_raw#video=copy"
 {% endfor %}
   preload:
 {% for name, label in frigate_cameras.items() %}
