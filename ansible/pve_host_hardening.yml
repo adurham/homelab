@@ -55,6 +55,37 @@
     # ── 2. Cluster firewall config (write once; pmxcfs replicates) ─────────
     # Default `linear` strategy is used throughout this repo (no `strategy:
     # free` override anywhere) — run_once is safe here.
+    #
+    # SAFETY: this task does a FULL-FILE template overwrite of cluster.fw.
+    # A separate role, bwt_client_isolation, injects its own marker-delimited
+    # block (# BEGIN/END ANSIBLE bwt_client_isolation) into the SAME file via
+    # idempotent in-place editing rather than a template overwrite. Without
+    # this guard, running this playbook after that role has run would
+    # silently delete the BWT block. Preserve-then-reappend keeps both
+    # playbooks safe to run in any order.
+    - name: Check for existing cluster.fw (may not exist on first run)  # noqa: run-once[task]
+      ansible.builtin.stat:
+        path: /etc/pve/firewall/cluster.fw
+      run_once: true
+      delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+      register: cluster_fw_stat
+
+    - name: Read current cluster.fw to check for a bwt_client_isolation block  # noqa: run-once[task]
+      ansible.builtin.slurp:
+        src: /etc/pve/firewall/cluster.fw
+      run_once: true
+      delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+      register: cluster_fw_before
+      when: cluster_fw_stat.stat.exists
+
+    - name: Extract bwt_client_isolation block if present (preserved verbatim)  # noqa: run-once[task]
+      ansible.builtin.set_fact:
+        bwt_block: >-
+          {{ ((cluster_fw_before.content | b64decode)
+             | regex_search('(?s)# BEGIN ANSIBLE bwt_client_isolation.*# END ANSIBLE bwt_client_isolation')) | default('', true) }}
+      run_once: true
+      when: cluster_fw_stat.stat.exists
+
     - name: Deploy cluster firewall config (VXLAN allow + mgmt lockdown)  # noqa: run-once[task]
       ansible.builtin.template:
         src: templates/pve_cluster_firewall.fw.j2
@@ -62,6 +93,26 @@
         mode: '0640'
       run_once: true
       delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+
+    - name: Write preserved bwt_client_isolation block to a temp file, if one existed  # noqa: run-once[task]
+      ansible.builtin.copy:
+        content: "{{ bwt_block }}\n"
+        dest: /tmp/bwt_block_preserve.txt
+        mode: '0640'
+      run_once: true
+      delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+      when: bwt_block is defined and bwt_block | length > 0
+
+    - name: Re-append preserved bwt_client_isolation block, if one existed  # noqa: run-once[task]
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cat /tmp/bwt_block_preserve.txt >> /etc/pve/firewall/cluster.fw
+        rm -f /tmp/bwt_block_preserve.txt
+      register: bwt_reappend
+      changed_when: true
+      run_once: true
+      delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+      when: bwt_block is defined and bwt_block | length > 0
 
     - name: Validate firewall config compiles  # noqa: run-once[task]
       ansible.builtin.command: pve-firewall compile
