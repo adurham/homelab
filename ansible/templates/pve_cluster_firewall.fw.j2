@@ -38,6 +38,14 @@ enable: 1
 {{ ip }}
 {% endfor %}
 
+{# Isolated PVE Migrate VLAN (802.1Q VLAN 21, switch ports 3/4/5 only) — see
+   docs/ipam.md "PVE Migrate network". Live migration traffic (secure/SSH-
+   tunneled) lives here, isolated from the sync VLAN and LAN. #}
+[IPSET pve_migrate_vlan] # Isolated VLAN 21 (172.21.0.0/24) for live migration traffic, physically isolated to switch ports 3/4/5
+{% for ip in pve_migrate_vlan_ips %}
+{{ ip }}
+{% endfor %}
+
 [RULES]
 
 {# CRITICAL: the 'private'/'bwt' networks are a VXLAN SDN zone. Inter-CT
@@ -52,6 +60,7 @@ IN ACCEPT -source +pve_nodes -p udp -dport 4789 -log nolog # VXLAN SDN transport
    subnet-wide ACCEPT, since isolation is the whole point of this network. #}
 IN ACCEPT -source +pve_sync_vlan -p udp -dport 5405 -log nolog # corosync on isolated pve-sync VLAN
 IN ACCEPT -source +pve_sync_vlan -p tcp -dport 22 -log nolog # ZFS replication (pvesr/pve-zsync over SSH) on isolated pve-sync VLAN
+IN ACCEPT -source +pve_migrate_vlan -p tcp -dport 22 -log nolog # Live migration (secure/SSH-tunneled) on isolated pve-migrate VLAN
 
 {# Management lockdown: SSH + UI only from trusted sources, drop the rest. #}
 IN ACCEPT -source +pve_mgmt -p tcp -dport 22 -log nolog # SSH from trusted mgmt
