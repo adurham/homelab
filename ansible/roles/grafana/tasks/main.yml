@@ -175,6 +175,15 @@
       [security]
       admin_password = {{ grafana_admin_password }}
 
+      [analytics]
+      # Stop Grafana's anonymous usage-reporting phone-home to
+      # stats.grafana.org. AdGuard Home was blocking ~27k of these calls
+      # per day (top blocked domain on the network, 800k+/month) --
+      # disabling at the source instead of relying on DNS blocking.
+      reporting_enabled = false
+      check_for_updates = false
+      check_for_plugin_updates = false
+
       [rendering]
       server_url = http://localhost:8081/render
       callback_url = http://localhost:3000/
