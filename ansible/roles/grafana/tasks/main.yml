@@ -340,6 +340,15 @@
     mode: '0644'
   notify: Restart Grafana
 
+- name: Deploy Internet Speed Dashboard
+  ansible.builtin.copy:
+    src: internet_speed.json
+    dest: /var/lib/grafana/dashboards/internet_speed.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
 - name: Create Alerting Provisioning Directory
   ansible.builtin.file:
     path: /etc/grafana/provisioning/alerting
