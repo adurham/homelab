@@ -33,23 +33,18 @@ Environment=HOME=/home/mitmproxy
 # silently black-holes — confirmed via iptables counters incrementing
 # with zero established connections on 8443 (2026-07-27 post-deploy
 # verification). 0.0.0.0 covers both the tailscale0 IP and loopback.
-# Loads discord_adblock.py AND midea_capture.py as two independent -s
-# addons on the same mitmdump instance. mitmproxy supports multiple
-# scripts; each one's tls_clienthello/request/response hooks run
-# independently and only act on the hosts they explicitly check for, so
-# they don't interfere with each other's traffic (Discord addon only
-# touches discord.com/discordapp.net/etc; Midea addon only touches
-# mp-prod.appsmb.com). midea_capture.py is conditionally deployed (see
-# adblock_proxy_midea_capture_enabled in the role) — when disabled, the
-# file is simply absent and this -s flag would error, so the flag itself
-# is templated to only appear when the file is present.
+# Loads discord_adblock.py as the sole -s addon on this mitmdump
+# instance. (2026-08-08: a second addon, midea_capture.py, was
+# temporarily loaded here for a one-off Midea cloud token/key capture
+# attempt -- removed after the approach was abandoned in favor of a
+# second-account cloud login instead. See homelab repo git history
+# around 2026-08-07/08 if that context is ever needed again.)
 ExecStart=/opt/adblock-proxy/venv/bin/mitmdump \
   --mode transparent \
   --listen-host 0.0.0.0 \
   --listen-port 8443 \
   --set confdir=/home/mitmproxy/.mitmproxy \
-  -s /opt/adblock-proxy/discord_adblock.py{% if adblock_proxy_midea_capture_enabled | default(true) %} \
-  -s /opt/adblock-proxy/midea_capture.py{% endif %}
+  -s /opt/adblock-proxy/discord_adblock.py
 
 Restart=on-failure
 RestartSec=5
