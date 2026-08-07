@@ -134,6 +134,37 @@
     - Restart Adblock Proxy
     - Restart Adblock Proxy Transparent
 
+# ─── Midea token/key capture addon (ONE-TIME USE, 2026-08-07) ──────────────
+# Loaded as a second -s script on the SAME transparent-mode mitmdump
+# instance (port 8443) — no new proxy, no new port. See the addon's own
+# docstring for the full rationale (midea-beautiful-air's own cloud login
+# is broken upstream, error 40502/40404; the real MSmartHome phone app
+# still works, so we intercept its traffic once to recover the token/key
+# pair instead of the library's own dead cloud call). Set
+# adblock_proxy_midea_capture_enabled: false in group_vars once the
+# token/key are captured to stop intercepting Midea traffic — this addon
+# has no reason to stay loaded indefinitely.
+- name: Deploy Midea Token/Key Capture mitmproxy Addon
+  ansible.builtin.template:
+    src: midea_capture.py.j2
+    dest: /opt/adblock-proxy/midea_capture.py
+    owner: mitmproxy
+    group: mitmproxy
+    mode: '0644'
+  when: adblock_proxy_midea_capture_enabled | default(true)
+  notify:
+    - Restart Adblock Proxy
+    - Restart Adblock Proxy Transparent
+
+- name: Ensure Midea Capture Log Directory Exists
+  ansible.builtin.file:
+    path: /var/log/mitmproxy
+    state: directory
+    owner: mitmproxy
+    group: mitmproxy
+    mode: '0755'
+  when: adblock_proxy_midea_capture_enabled | default(true)
+
 - name: Install Adblock Proxy Systemd Unit (explicit proxy, port 8080)
   ansible.builtin.template:
     src: adblock-proxy.service.j2
