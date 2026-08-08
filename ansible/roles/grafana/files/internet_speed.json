@@ -1,6 +1,6 @@
 {
   "annotations": {"list": []},
-  "description": "Internet speed (Cloudflare Speed Test via Home Assistant, hourly). Latency/jitter, download/upload by test size, and 90th-percentile summary.",
+  "description": "Internet speed (Cloudflare Speed Test via Home Assistant, hourly, adurham fork with real concurrent multi-connection testing). Max aggregate throughput is the accurate headline number for a gigabit-class connection; 90th-percentile single-stream figures remain useful for spotting per-connection issues like buffer bloat but will under-report true link capacity.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -36,18 +36,18 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_90th_percentile_down\"}",
-          "legendFormat": "90th percentile down",
+          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_max_aggregate_down\"}",
+          "legendFormat": "Max aggregate down",
           "refId": "A"
         },
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_90th_percentile_up\"}",
-          "legendFormat": "90th percentile up",
+          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_max_aggregate_up\"}",
+          "legendFormat": "Max aggregate up",
           "refId": "B"
         }
       ],
-      "title": "Speed (90th percentile) over time",
+      "title": "Speed (max aggregate, concurrent connections) over time",
       "type": "timeseries"
     },
     {
@@ -127,7 +127,7 @@
         "defaults": {
           "unit": "Mbits",
           "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 25}, {"color": "green", "value": 50}]}
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 200}, {"color": "green", "value": 500}]}
         },
         "overrides": []
       },
@@ -145,11 +145,11 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_90th_percentile_down\"}",
+          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_max_aggregate_down\"}",
           "refId": "A"
         }
       ],
-      "title": "Current download",
+      "title": "Current download (max aggregate)",
       "type": "stat"
     },
     {
@@ -158,7 +158,7 @@
         "defaults": {
           "unit": "Mbits",
           "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 10}, {"color": "green", "value": 20}]}
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 100}, {"color": "green", "value": 300}]}
         },
         "overrides": []
       },
@@ -176,11 +176,11 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_90th_percentile_up\"}",
+          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_max_aggregate_up\"}",
           "refId": "A"
         }
       ],
-      "title": "Current upload",
+      "title": "Current upload (max aggregate)",
       "type": "stat"
     },
     {
