@@ -1,6 +1,6 @@
 {
   "annotations": {"list": []},
-  "description": "Internet speed (Cloudflare Speed Test via Home Assistant, hourly, adurham fork with real concurrent multi-connection testing). Max aggregate throughput is the accurate headline number for a gigabit-class connection; 90th-percentile single-stream figures remain useful for spotting per-connection issues like buffer bloat but will under-report true link capacity.",
+  "description": "Internet speed (official Ookla Speedtest CLI via Home Assistant command_line integration, hourly). Real server auto-discovery and genuine multi-connection testing built into the Ookla client itself -- this replaced two earlier broken approaches: HA's built-in speedtestdotnet integration (legacy Python speedtest-cli library's server-discovery API returned only Canadian servers for this connection) and a custom Cloudflare-based integration (speed.cloudflare.com hard rate-limits, HTTP 429, under real concurrent load). Verified against the native macOS Speedtest app on the same network (883/866 Mbps) within normal run-to-run variance.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -22,7 +22,7 @@
         },
         "overrides": [
           {
-            "matcher": {"id": "byRegexp", "options": "/up$/"},
+            "matcher": {"id": "byName", "options": "Upload"},
             "properties": [{"id": "custom.lineStyle", "value": {"dash": [10, 5], "fill": "dash"}}]
           }
         ]
@@ -36,18 +36,18 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_max_aggregate_down\"}",
-          "legendFormat": "Max aggregate down",
+          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.ookla_speedtest\"}",
+          "legendFormat": "Download",
           "refId": "A"
         },
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_max_aggregate_up\"}",
-          "legendFormat": "Max aggregate up",
+          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.ookla_speedtest_upload\"}",
+          "legendFormat": "Upload",
           "refId": "B"
         }
       ],
-      "title": "Speed (max aggregate, concurrent connections) over time",
+      "title": "Speed over time (Ookla, real multi-connection test)",
       "type": "timeseries"
     },
     {
@@ -63,7 +63,7 @@
             "lineWidth": 2,
             "spanNulls": true
           },
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 80}, {"color": "red", "value": 150}]}
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 30}, {"color": "red", "value": 80}]}
         },
         "overrides": []
       },
@@ -76,30 +76,35 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_duration_ms{entity=\"sensor.cloudflare_speed_test_latency\"}",
-          "legendFormat": "Latency",
+          "expr": "homeassistant_sensor_duration_ms{entity=\"sensor.ookla_speedtest_ping\"}",
+          "legendFormat": "Ping",
           "refId": "A"
         },
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_duration_ms{entity=\"sensor.cloudflare_speed_test_jitter\"}",
+          "expr": "homeassistant_sensor_duration_ms{entity=\"sensor.ookla_speedtest_jitter\"}",
           "legendFormat": "Jitter",
           "refId": "B"
         }
       ],
-      "title": "Latency & jitter",
+      "title": "Ping & jitter",
       "type": "timeseries"
     },
     {
       "datasource": {"type": "prometheus", "uid": "victoriametrics"},
       "fieldConfig": {
         "defaults": {
-          "unit": "Mbits",
-          "color": {"mode": "palette-classic"},
+          "unit": "percent",
+          "color": {"mode": "thresholds"},
+          "min": 0,
+          "max": 5,
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.5}, {"color": "red", "value": 1}]},
           "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 60,
-            "lineWidth": 0
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 25,
+            "lineWidth": 1,
+            "spanNulls": true
           }
         },
         "overrides": []
@@ -113,12 +118,12 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=~\"sensor.cloudflare_speed_test_(100kb|1mb|10mb|25mb)_down\"}",
-          "legendFormat": "{{entity}}",
+          "expr": "homeassistant_sensor_unit_percent{entity=\"sensor.ookla_speedtest_packet_loss\"}",
+          "legendFormat": "Packet loss",
           "refId": "A"
         }
       ],
-      "title": "Download by test size",
+      "title": "Packet loss",
       "type": "timeseries"
     },
     {
@@ -127,7 +132,7 @@
         "defaults": {
           "unit": "Mbits",
           "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 200}, {"color": "green", "value": 500}]}
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 400}, {"color": "green", "value": 700}]}
         },
         "overrides": []
       },
@@ -145,11 +150,11 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_max_aggregate_down\"}",
+          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.ookla_speedtest\"}",
           "refId": "A"
         }
       ],
-      "title": "Current download (max aggregate)",
+      "title": "Current download",
       "type": "stat"
     },
     {
@@ -158,7 +163,7 @@
         "defaults": {
           "unit": "Mbits",
           "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 100}, {"color": "green", "value": 300}]}
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 400}, {"color": "green", "value": 700}]}
         },
         "overrides": []
       },
@@ -176,11 +181,11 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.cloudflare_speed_test_max_aggregate_up\"}",
+          "expr": "homeassistant_sensor_data_rate_mbit_per_s{entity=\"sensor.ookla_speedtest_upload\"}",
           "refId": "A"
         }
       ],
-      "title": "Current upload (max aggregate)",
+      "title": "Current upload",
       "type": "stat"
     },
     {
@@ -189,7 +194,7 @@
         "defaults": {
           "unit": "ms",
           "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 80}, {"color": "red", "value": 150}]}
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 30}, {"color": "red", "value": 80}]}
         },
         "overrides": []
       },
@@ -207,11 +212,11 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "homeassistant_sensor_duration_ms{entity=\"sensor.cloudflare_speed_test_latency\"}",
+          "expr": "homeassistant_sensor_duration_ms{entity=\"sensor.ookla_speedtest_ping\"}",
           "refId": "A"
         }
       ],
-      "title": "Current latency",
+      "title": "Current ping",
       "type": "stat"
     },
     {
@@ -238,7 +243,7 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
-          "expr": "time() - homeassistant_last_updated_time_seconds{entity=\"sensor.cloudflare_speed_test_latency\"}",
+          "expr": "time() - homeassistant_last_updated_time_seconds{entity=\"sensor.ookla_speedtest\"}",
           "refId": "A"
         }
       ],
