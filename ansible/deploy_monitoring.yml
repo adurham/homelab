@@ -123,12 +123,14 @@
       ansible.builtin.include_role:
         name: alloy
 
-# Tanium appliances need a different role — common_monitoring's old RHEL
-# path did `nft flush ruleset` which would wipe TanOS's hardened firewall.
-# tanium_node_exporter installs node_exporter with a single targeted
-# iptables INPUT rule (allow vm-01 to scrape :9100), nothing else.
-- name: Install Node Exporter on Tanium appliances
-  hosts: tanium_cluster
-  gather_facts: true
-  roles:
-    - tanium_node_exporter
+# Tanium appliances (tanium_cluster) run NO monitoring agent -- retired
+# 2026-08-09 (see cleanup_tanium_node_exporter.yml and the comment near
+# the top of roles/victoriametrics/templates/prometheus.yml.j2). TanOS's
+# default-deny iptables never actually opened the port the old
+# node_exporter install needed, so that scrape job was silently broken
+# from day one, AND per explicit direction these vendor appliances
+# shouldn't run custom software regardless. Host-down detection for
+# tanium_cluster now comes entirely from the agentless
+# blackbox_tanium_reachable probe (TCP/22) defined in
+# roles/victoriametrics/templates/prometheus.yml.j2 -- no role/play
+# needed here.

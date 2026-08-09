@@ -1,0 +1,85 @@
+---
+# One-time cleanup: removes node_exporter from the Tanium TanOS
+# appliances (roles/tanium_node_exporter, retired 2026-08-09). Root
+# cause: TanOS's default-deny iptables INPUT policy never had a rule
+# opening 9100, so the exporter ran locally but was never reachable from
+# vm-01's scraper -- the resulting host_down alerts had no real signal
+# underneath them. Per explicit direction, these are vendor appliances
+# and shouldn't run any custom software, so host-down detection was
+# replaced with an agentless blackbox TCP probe (job
+# blackbox_tanium_reachable in roles/victoriametrics) instead of opening
+# the firewall for 9100.
+#
+# This playbook is NOT part of deploy_monitoring.yml's regular run --
+# it's a standalone teardown, run once, then this file can be deleted.
+# Safe to re-run (every task is a no-op if already cleaned up).
+- name: Remove node_exporter from Tanium appliances
+  hosts: tanium_cluster
+  gather_facts: false
+  vars:
+    # Was previously sourced from the tanium_node_exporter role's
+    # defaults/main.yml, which we're no longer including now that the
+    # role itself is retired. Same value it always was: vm-01's
+    # private-subnet IP, the only host the old 9100 rule allowed.
+    tanium_node_exporter_scrape_src: "{{ ip_vm }}"
+  tasks:
+    - name: Stop and disable node_exporter service
+      ansible.builtin.systemd:
+        name: node_exporter
+        state: stopped
+        enabled: false
+      become: true
+      failed_when: false
+
+    - name: Remove node_exporter systemd unit
+      ansible.builtin.file:
+        path: /etc/systemd/system/node_exporter.service
+        state: absent
+      become: true
+      register: unit_removed
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+      become: true
+      when: unit_removed.changed
+
+    - name: Remove node_exporter binary
+      ansible.builtin.file:
+        path: /usr/local/bin/node_exporter
+        state: absent
+      become: true
+
+    - name: Check if the 9100 iptables rule exists
+      ansible.builtin.shell: |
+        iptables -C INPUT -p tcp -s {{ tanium_node_exporter_scrape_src }} --dport 9100 -j ACCEPT
+      register: ipt_check
+      failed_when: false
+      changed_when: false
+      become: true
+
+    - name: Remove iptables rule for node_exporter scrape
+      ansible.builtin.shell: |
+        iptables -D INPUT -p tcp -s {{ tanium_node_exporter_scrape_src }} --dport 9100 -j ACCEPT \
+          -m comment --comment "node_exporter from vm-01"
+      when: ipt_check.rc == 0
+      become: true
+
+    - name: Persist iptables rules
+      ansible.builtin.shell: iptables-save > /etc/sysconfig/iptables
+      when: ipt_check.rc == 0
+      become: true
+      args:
+        executable: /bin/bash
+
+    - name: Remove node_exporter system user
+      ansible.builtin.user:
+        name: node_exporter
+        state: absent
+      become: true
+
+    - name: Remove node_exporter system group
+      ansible.builtin.group:
+        name: node_exporter
+        state: absent
+      become: true
