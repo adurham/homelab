@@ -1,0 +1,37 @@
+# Front Door Keypad Battery Reminder (manual check)
+#
+# The Yale/August keypad's battery status is NOT available over local
+# Bluetooth -- confirmed 2026-08-08 by reading the actual yalexs_ble
+# library source (Yale-Libs/yalexs-ble on GitHub): the BLE protocol it
+# uses to talk to the lock has no keypad battery telemetry at all. The
+# keypad only ever reported battery % via August's CLOUD integration,
+# which pulled it from the lock's WiFi-connected telemetry -- a path
+# that's genuinely dead now that WiFi is disabled on these locks (a
+# deliberate choice, not an oversight). This isn't a config gap to fix;
+# it's a real protocol-level limitation of Bluetooth-only lock control.
+#
+# Yale's own spec: ~7 months keypad battery life. This reminds every
+# 90 days (comfortably inside that window) to physically check it,
+# since there's no other way to know.
+- alias: "Reminder: Check Front Door Keypad Battery"
+  id: "reminder_front_door_keypad_battery"
+  description: >-
+    Quarterly reminder to manually check the Front Door keypad's
+    battery -- this can't be monitored locally over Bluetooth (see
+    comment above), only via the disabled August cloud/WiFi path.
+  trigger:
+    - platform: time_pattern
+      hours: "9"
+  condition:
+    - condition: template
+      value_template: >-
+        {{ now().day == 1 and now().month in [1, 4, 7, 10] }}
+  action:
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "Reminder: Check Front Door Keypad Battery"
+        message: >-
+          Quarterly check -- this can't be monitored automatically
+          since WiFi is disabled on the lock (keypad battery only
+          reports via August's cloud path). Yale spec is ~7 months
+          life, so this is a safety-margin check.
