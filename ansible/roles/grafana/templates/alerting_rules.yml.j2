@@ -454,6 +454,73 @@ groups:
           severity: critical
         isPaused: false
 
+      - uid: tati_phone_tracking_stale
+        title: Tati phone WiFi presence tracking stale
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # input_boolean.tati_phone_tracking_stale is set by two HA
+              # automations (tati_phone_tracking_mark_stale / _clear_stale)
+              # that watch person.tati_sharp. The person entity has no
+              # mobile_app/GPS tracker (she doesn't want to install
+              # anything) -- presence is WiFi-only via nmap_tracker
+              # matching her iPhone 16's MAC on the LAN. If iOS ever
+              # rotates the private WiFi address for this network, the
+              # tracker goes stale and person.tati_sharp reads "unknown"
+              # for over an hour, which is what sets this boolean.
+              editorMode: code
+              expr: homeassistant_input_boolean_state{entity="input_boolean.tati_phone_tracking_stale"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        # noDataState=OK (not Alerting): if the HA Prometheus exporter or
+        # the helper itself disappears, that's a separate outage that the
+        # existing host_down / HA-availability rules already cover --
+        # don't double-page for this specific low-priority helper.
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Tati's iPhone WiFi presence tracker has gone stale"
+          description: "person.tati_sharp has read 'unknown' for over an hour and input_boolean.tati_phone_tracking_stale is set. Most likely cause: iOS rotated the private WiFi MAC address for the home network, so the nmap_tracker entity linked to her phone no longer matches. Fix: nmap-scan 192.168.86.0/24, find the new MAC for her iPhone (hostname often still resolves as iphone*.lan or similar), enable/rename that device_tracker entity in HA, then re-link it via person/update on person.tati_sharp. No action needed from her -- this is fully fixable HA-side."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: disk_full
         title: Disk usage high
         condition: C
