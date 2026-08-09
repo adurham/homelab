@@ -3271,6 +3271,345 @@
           "refId": "F"
         }
       ]
+    },
+    {
+      "id": 23,
+      "title": "Ecobee Enhanced \u2014 Weather, Climates & Alerts",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 93
+      }
+    },
+    {
+      "id": 24,
+      "title": "Ecobee's Own Outdoor Weather",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 94
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Dew point"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [10, 10]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "light-blue"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "mean", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_weather_temperature\"} * 1.8) + 32",
+          "legendFormat": "Outdoor temp",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_weather_dew_point\"} * 1.8) + 32",
+          "legendFormat": "Dew point",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "title": "Outdoor Humidity",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 94
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": ["lastNotNull"]
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_humidity_percent{entity=\"sensor.ecobee_edgewater_road_weather_humidity\"}",
+          "legendFormat": "Outdoor humidity",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "title": "Alert Count",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 94
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_alert_count\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "title": "Configured Climates",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 94
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "homeassistant_sensor_state{entity=\"sensor.ecobee_edgewater_road_climate_count\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "title": "Ecobee Schedule Status (last known)",
+      "type": "text",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 98
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Schedule hold status is a text sensor (`sensor.ecobee_edgewater_road_schedule_status`) and does not export a numeric Prometheus gauge, so it can't be graphed here. Check it live in Home Assistant, or add a `binary_sensor`-domain mirror in the `ecobee_enhanced` integration if a Grafana panel is needed."
+      }
+    },
+    {
+      "id": 29,
+      "title": "Remote Sensor Room Temps (all ecobee3 pucks)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 102
+      },
+      "datasource": "VictoriaMetrics",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fahrenheit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "mean", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_edgewater_road_temperature\"} * 1.8) + 32",
+          "legendFormat": "Thermostat (Edgewater Road)",
+          "refId": "A"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_basement_temperature\"} * 1.8) + 32",
+          "legendFormat": "Basement",
+          "refId": "B"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_cat_room_temperature\"} * 1.8) + 32",
+          "legendFormat": "Cat Room",
+          "refId": "C"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_dining_room_temperature\"} * 1.8) + 32",
+          "legendFormat": "Dining Room",
+          "refId": "D"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_game_room_temperature\"} * 1.8) + 32",
+          "legendFormat": "Game Room",
+          "refId": "E"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_guest_bathroom_temperature\"} * 1.8) + 32",
+          "legendFormat": "Guest Bathroom",
+          "refId": "F"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_guest_bedroom_1_temperature\"} * 1.8) + 32",
+          "legendFormat": "Guest Bedroom 1 (ecobee puck)",
+          "refId": "G"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_guest_bedroom_2_temperature\"} * 1.8) + 32",
+          "legendFormat": "Guest Bedroom 2 (ecobee puck)",
+          "refId": "H"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_half_bathroom_temperature\"} * 1.8) + 32",
+          "legendFormat": "Half Bathroom",
+          "refId": "I"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_kitchen_temperature\"} * 1.8) + 32",
+          "legendFormat": "Kitchen (ecobee puck)",
+          "refId": "J"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_laundry_room_temperature\"} * 1.8) + 32",
+          "legendFormat": "Laundry Room",
+          "refId": "K"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_living_room_temperature\"} * 1.8) + 32",
+          "legendFormat": "Living Room (ecobee puck)",
+          "refId": "L"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_main_bathroom_temperature\"} * 1.8) + 32",
+          "legendFormat": "Main Bathroom",
+          "refId": "M"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "expr": "(homeassistant_sensor_temperature_celsius{entity=\"sensor.ecobee_edgewater_road_main_bedroom_temperature\"} * 1.8) + 32",
+          "legendFormat": "Main Bedroom (ecobee puck)",
+          "refId": "N"
+        }
+      ]
     }
   ],
   "refresh": "1m",
