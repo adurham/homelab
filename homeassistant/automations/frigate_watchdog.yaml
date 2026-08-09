@@ -9,25 +9,20 @@
 # sensor.frigate_api_reachable (see sensors.yaml), which the platform
 # marks `unavailable` on any connection failure/timeout.
 #
-# Single automation, two trigger IDs: alert after 5 min down, and clear
-# the persistent notification + send a recovery push once Frigate comes
-# back — but only if the outage actually lasted long enough to have
-# alerted in the first place, so sub-5-minute blips don't spam a
-# "back online" push for an outage nobody was ever told about.
-#
-# Gating uses input_boolean.frigate_watchdog_alerted (see
-# configuration.yaml) rather than checking persistent_notification
-# state directly — verified 2026-07-28 that persistent_notification
-# entities are NOT real state-machine objects on this HA instance
-# (states('persistent_notification.x') always returns "unknown"), so
-# they cannot be used in automation conditions/templates.
+# Push-notification alerting migrated to Grafana (uid: frigate_api_down,
+# roles/grafana/templates/alerting_rules.yml.j2) 2026-08-09, so it goes
+# through the same ack/silence Discord flow as every other infra alert.
+# This automation now only maintains a local persistent_notification --
+# dropped the mobile_app push (both directions) and the
+# input_boolean.frigate_watchdog_alerted gating that existed purely to
+# avoid a spurious "back online" push for an outage that was never
+# critically alerted; with no push left, that gating is moot.
 - alias: "Infrastructure: Frigate NVR Watchdog"
   id: "infrastructure_frigate_watchdog"
   description: >-
-    Alert when Frigate's own API (192.168.86.85:5000) stops responding
-    for 5+ minutes — catches Frigate/go2rtc/docker/containerd dying
-    inside CT 170 even when Proxmox still reports the container itself
-    as running. Sends a matching recovery notice when it comes back.
+    Track Frigate's own API (192.168.86.85:5000) reachability with a
+    local persistent_notification. Push alerting for outages 5+ minutes
+    is in Grafana (uid: frigate_api_down).
   mode: single
 
   trigger:
@@ -41,72 +36,25 @@
       entity_id: sensor.frigate_api_reachable
       from: "unavailable"
 
-  condition:
-    # "down" always proceeds. "up" only proceeds if we actually alerted
-    # (skips sub-5-minute blips that never crossed the alert threshold).
-    - condition: or
-      conditions:
-        - condition: trigger
-          id: "down"
-        - condition: and
-          conditions:
-            - condition: trigger
-              id: "up"
-            - condition: state
-              entity_id: input_boolean.frigate_watchdog_alerted
-              state: "on"
-
   action:
     - choose:
         - conditions:
             - condition: trigger
               id: "down"
           sequence:
-            - service: input_boolean.turn_on
-              target:
-                entity_id: input_boolean.frigate_watchdog_alerted
-
-            - service: notify.mobile_app_adams_iphone_16
-              data:
-                title: "CRITICAL: Frigate NVR Offline"
-                message: >-
-                  Frigate API (192.168.86.85:5000) has not responded
-                  for 5+ minutes. Nest camera feeds are likely down.
-                  Check CT 170 (frigate-01) on pve01:
-                  `pct exec 170 -- docker ps -a`, and
-                  `systemctl status containerd docker` inside the CT.
-                  See the 2026-07-28 incident notes in the homelab repo
-                  for the containerd-corruption failure mode this
-                  already hit once.
-                data:
-                  push:
-                    sound:
-                      name: "default"
-                      critical: 1
-                      volume: 1.0
-
             - service: persistent_notification.create
               data:
                 title: "Frigate NVR Offline"
                 message: >-
                   Frigate API unreachable for 5+ minutes as of
-                  {{ now().strftime('%Y-%m-%d %H:%M:%S') }}. See mobile
-                  notification for remediation steps.
+                  {{ now().strftime('%Y-%m-%d %H:%M:%S') }}. See Grafana
+                  / #infra-alerts for remediation steps.
                 notification_id: "frigate_watchdog"
 
         - conditions:
             - condition: trigger
               id: "up"
           sequence:
-            - service: input_boolean.turn_off
-              target:
-                entity_id: input_boolean.frigate_watchdog_alerted
-
             - service: persistent_notification.dismiss
               data:
                 notification_id: "frigate_watchdog"
-
-            - service: notify.mobile_app_adams_iphone_16
-              data:
-                title: "RESOLVED: Frigate NVR Back Online"
-                message: "Frigate API is responding again. Camera feeds should be restored."

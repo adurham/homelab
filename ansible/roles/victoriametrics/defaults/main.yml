@@ -9,6 +9,14 @@ blackbox_https_targets:
   - https://grafana.chi.lab.amd-e.com
   - https://auth.chi.lab.amd-e.com
   - https://proxmox.chi.lab.amd-e.com
+  # Home Assistant's own cert (core_letsencrypt add-on, DNS-01 via desec).
+  # Added 2026-08-09 to fold the "Infrastructure: Let's Encrypt Cert
+  # Renewal" HA automation's monitoring half into the existing
+  # cert_renewer_wedged/cert_expiring_soon rules instead of a bespoke
+  # check -- the HA automation itself (monthly hassio.addon_start trigger)
+  # still runs unchanged; this just gives it the same Grafana-side
+  # expiry backstop every other cert on this list already has.
+  - https://homeassistant.chi.lab.amd-e.com
 
 # Admin UIs that iframe their own console pane same-origin. Probed with the
 # https_iframe_self_ok module — fails if X-Frame-Options: DENY or

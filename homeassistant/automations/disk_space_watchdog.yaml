@@ -13,12 +13,20 @@
 # the same free-space entity mirrored to VictoriaMetrics via the
 # Prometheus exporter — trend history for this incident was pulled from
 # that exact series.
+#
+# Push-notification alerting migrated to Grafana (uid: ha_host_disk_low,
+# roles/grafana/templates/alerting_rules.yml.j2) 2026-08-09, so it routes
+# through the same ack/silence Discord flow as every other infra alert.
+# Kept the persistent_notification here as a harmless HA-dashboard-local
+# indicator; removed the mobile_app push to avoid double-alerting.
 - alias: "Infrastructure: HA Host Disk Space Watchdog"
   id: "infrastructure_disk_space_watchdog"
   description: >-
     Warn when the HA host's root filesystem free space drops below 3GB
     (out of 28GB total) — historically ~1.2-1.7GB free is where
-    `ha store apps install` and add-on rebuilds start failing.
+    `ha store apps install` and add-on rebuilds start failing. Push
+    alerting is in Grafana (uid: ha_host_disk_low); this just keeps a
+    local persistent_notification.
   mode: single
 
   trigger:
@@ -28,23 +36,6 @@
       for: "00:10:00"
 
   action:
-    - service: notify.mobile_app_adams_iphone_16
-      data:
-        title: "WARNING: HA Host Disk Space Low"
-        message: >-
-          {{ states('sensor.system_monitor_disk_free') }}GB free on the
-          Home Assistant host (28GB total). Add-on installs/rebuilds may
-          start failing soon. Check `ha backups list` for unpruned
-          pre-deploy backups, and consider `ha supervisor repair`
-          (emergency-only — triggers add-on rebuilds and can leave a
-          stale job lock; follow with `ha supervisor restart` if so).
-        data:
-          push:
-            sound:
-              name: "default"
-              critical: 0
-              volume: 0.8
-
     - service: persistent_notification.create
       data:
         title: "HA Host Disk Space Low"

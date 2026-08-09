@@ -25,15 +25,25 @@
 # recurring/flapping failure can't restart-loop the WHOLE AppDaemon addon
 # (which would bounce every app it hosts, not just this one). If the
 # heartbeat is STILL stale after a restart was already tried within the
-# last 15 minutes, escalate to a critical push instead of restarting
+# last 15 minutes, escalate to a critical alert instead of restarting
 # again — this needs a human, not another automatic restart.
+#
+# Push-notification alerting migrated to Grafana (uid:
+# smart_vent_controller_frozen, roles/grafana/templates/
+# alerting_rules.yml.j2 -- already existed as the documented "HA
+# self-heals, Grafana is the independent backstop for when HA can't"
+# pattern) 2026-08-09; this automation's mobile_app pushes were removed
+# so alerting goes through the same ack/silence Discord flow instead of
+# a separate iPhone channel. Self-heal restart logic and the escalation/
+# persistent_notification bookkeeping are UNCHANGED -- only the three
+# notify.mobile_app_adams_iphone_16 calls were dropped.
 - alias: "Infrastructure: Smart Vent Controller Watchdog"
   id: "infrastructure_smart_vent_watchdog"
   description: >-
     Detect a frozen smart_vent_controller AppDaemon thread (heartbeat
     sensor stale >6min = 3 missed 120s cycles), self-heal via add-on
-    restart (rate-limited to 1 per 15min), and escalate to a critical
-    push if the restart doesn't clear it.
+    restart (rate-limited to 1 per 15min). Push alerting for stale
+    heartbeats is in Grafana (uid: smart_vent_controller_frozen).
   mode: single
 
   trigger:
@@ -73,22 +83,6 @@
               data:
                 datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
 
-            - service: notify.mobile_app_adams_iphone_16
-              data:
-                title: "WARNING: Smart Vent Controller Frozen"
-                message: >-
-                  sensor.smart_vent_controller_heartbeat has been stale
-                  for 6+ minutes — the AppDaemon control loop is not
-                  running (vents are frozen at their last position, not
-                  responding to room temp/occupancy). Attempting
-                  self-heal: restarting the AppDaemon add-on.
-                data:
-                  push:
-                    sound:
-                      name: "default"
-                      critical: 0
-                      volume: 0.8
-
             - service: hassio.addon_restart
               data:
                 addon: "a0d7b954_appdaemon"
@@ -111,36 +105,17 @@
               target:
                 entity_id: input_boolean.smart_vent_watchdog_escalated
 
-            - service: notify.mobile_app_adams_iphone_16
-              data:
-                title: "CRITICAL: Smart Vent Controller Still Frozen"
-                message: >-
-                  Heartbeat is still stale after a self-heal restart
-                  attempt ~{{ last_restart_age_min }} min ago. Automatic
-                  recovery failed — needs manual intervention. Check
-                  `ha addons logs a0d7b954_appdaemon` on
-                  homeassistant.local:2222 for a repeating HASS websocket
-                  timeout/hang, and restart manually if needed:
-                  `ha addons restart a0d7b954_appdaemon`.
-                data:
-                  push:
-                    sound:
-                      name: "default"
-                      critical: 1
-                      volume: 1.0
-
             - service: persistent_notification.create
               data:
                 title: "Smart Vent Controller Still Frozen"
                 message: >-
                   Heartbeat stale as of {{ now().strftime('%Y-%m-%d %H:%M:%S') }},
-                  self-heal restart did not clear it. See mobile
-                  notification for remediation steps.
+                  self-heal restart did not clear it. See Grafana /
+                  #infra-alerts for remediation steps.
                 notification_id: "smart_vent_watchdog"
 
-        # Recovered — only send a clear notice if we'd actually escalated
-        # (mirrors the Frigate watchdog pattern: don't notify "back
-        # online" for an outage nobody was ever critically alerted about).
+        # Recovered — only clear the escalated flag/notification if we'd
+        # actually escalated.
         - conditions:
             - condition: template
               value_template: "{{ not hb_stale }}"
@@ -155,8 +130,3 @@
             - service: persistent_notification.dismiss
               data:
                 notification_id: "smart_vent_watchdog"
-
-            - service: notify.mobile_app_adams_iphone_16
-              data:
-                title: "RESOLVED: Smart Vent Controller Back Online"
-                message: "Heartbeat is fresh again. Vent control has resumed."

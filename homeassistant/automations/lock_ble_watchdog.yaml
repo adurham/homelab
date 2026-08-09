@@ -1,0 +1,22 @@
+# Lock (BLE) Connectivity Watchdog -- RETIRED 2026-08-09
+#
+# Alerting fully migrated to Grafana (uid: front_door_lock_offline /
+# garage_door_lock_offline, roles/grafana/templates/
+# alerting_rules.yml.j2), which routes through the same ack/silence
+# Discord flow as every other infra alert. This automation had no
+# self-heal action (yalexs_ble is purely passive and cannot recover a
+# dropped BLE connection on its own -- confirmed 2026-08-08, see prior
+# git history for the full investigation), so there's nothing left here
+# worth keeping HA-side. Left as a disabled stub instead of deleting the
+# file outright so the incident history/investigation notes aren't lost
+# from this location; the input_boolean.*_lock_watchdog_alerted helpers
+# it used to gate on are now unused and can be removed from
+# configuration.yaml whenever convenient.
+- alias: "Locks: BLE Connectivity Watchdog"
+  id: "locks_ble_connectivity_watchdog"
+  description: >-
+    RETIRED -- alerting is in Grafana (uid: front_door_lock_offline /
+    garage_door_lock_offline). Disabled, kept only for history.
+  mode: single
+  trigger: []
+  action: []

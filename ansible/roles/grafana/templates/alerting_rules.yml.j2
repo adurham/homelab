@@ -641,6 +641,388 @@ groups:
           severity: warning
         isPaused: false
 
+      - uid: ha_host_disk_low
+        title: HA host disk space low
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # Migrated from HA automation "Infrastructure: HA Host Disk
+              # Space Watchdog" (automations/disk_space_watchdog.yaml) --
+              # notify.mobile_app call removed there 2026-08-09, alerting
+              # now lives here so it goes through the same ack/silence
+              # Discord flow as every other infra alert instead of a
+              # separate iPhone-push channel. See that file's header
+              # comment for the 2026-07-26 near-outage this watchdog
+              # exists because of (root fs dropped to ~1.2GB free,
+              # blocked `ha store apps install`).
+              editorMode: code
+              expr: homeassistant_sensor_data_size_gib{entity="sensor.system_monitor_disk_free"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [3]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "HA host disk space low"
+          description: "sensor.system_monitor_disk_free on the Home Assistant host has been below 3GB (of 28GB total) for 10+ minutes -- historically ~1.2-1.7GB free is where `ha store apps install` and add-on rebuilds start failing. Check `ha backups list` for unpruned pre-deploy backups, and consider `ha supervisor repair` (emergency-only -- triggers add-on rebuilds and can leave a stale job lock; follow with `ha supervisor restart` if so)."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: adguard_dns_down
+        title: AdGuard Home DNS down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # Migrated from HA automation "Infrastructure: AdGuard Home
+              # Watchdog" (automations/adguard_watchdog.yaml) -- that
+              # automation's OWN trigger entity (binary_sensor.
+              # adguard_home_running) doesn't exist on this HA instance,
+              # so it has been silently dead code, never firing. Its
+              # self-heal action (hassio.addon_restart) is left in place
+              # unchanged in case the entity gets fixed later, but this
+              # Grafana rule is the actual working liveness check --
+              # switch.adguard_home_protection's availability is a real,
+              # currently-populated signal (verified 2026-08-09;
+              # sensor.adguard_raw_status by contrast reads permanently
+              # "unavailable" and is NOT usable for this).
+              editorMode: code
+              expr: homeassistant_entity_available{entity="switch.adguard_home_protection"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "AdGuard Home DNS is offline"
+          description: "switch.adguard_home_protection has been unavailable for 2+ minutes -- AdGuard Home DNS has likely stopped, which can interrupt internet access for the whole LAN. HA's own watchdog automation attempts hassio.addon_restart on its trigger, but that trigger entity (binary_sensor.adguard_home_running) doesn't currently exist so the self-heal never actually runs -- restart manually: `ha addons restart a0d7b954_adguard` (or via the HA UI: Settings > Add-ons > AdGuard Home > Restart)."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: frigate_api_down
+        title: Frigate NVR API down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # Migrated from HA automation "Infrastructure: Frigate NVR
+              # Watchdog" (automations/frigate_watchdog.yaml) --
+              # notify.mobile_app calls removed there 2026-08-09. See
+              # that file's header comment for the 2026-07-28 incident
+              # this exists because of: Proxmox reported CT 170 as
+              # "running" for 45 hours while docker/Frigate/go2rtc were
+              # completely dead inside it (containerd corruption from a
+              # power blip), so Nest camera feeds were dark with zero
+              # alert. Container-alive is not a health signal for what's
+              # running inside it -- watches Frigate's own HTTP API via
+              # sensor.frigate_api_reachable, which HA marks unavailable
+              # on any connection failure/timeout.
+              editorMode: code
+              expr: homeassistant_entity_available{entity="sensor.frigate_api_reachable"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Frigate NVR API is unreachable"
+          description: "Frigate's own API (192.168.86.85:5000) has not responded for 5+ minutes -- Nest camera feeds are likely down. Check CT 170 (frigate-01) on pve01: `pct exec 170 -- docker ps -a`, and `systemctl status containerd docker` inside the CT. See the 2026-07-28 incident notes in the homelab repo (automations/frigate_watchdog.yaml header) for the containerd-corruption failure mode this already hit once."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: front_door_lock_offline
+        title: Front Door lock offline (BLE)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # Migrated from HA automation "Locks: BLE Connectivity
+              # Watchdog" (automations/lock_ble_watchdog.yaml) --
+              # notify.mobile_app calls removed there 2026-08-09. That
+              # file's header explains why this can't self-heal: yalexs_ble
+              # is purely passive (can only connect while the lock is
+              # actively broadcasting), and confirmed 2026-08-08 that
+              # config-entry reload / HA Core restarts / always_connected
+              # mode all fail to recover a dropped connection -- only a
+              # physical wake at the lock itself (thumbturn/keypad/app)
+              # works. This alert exists purely so a Google Home / voice
+              # unlock command doesn't silently fail with no explanation.
+              editorMode: code
+              expr: homeassistant_entity_available{entity="lock.front_door_4"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Front Door lock unreachable over Bluetooth"
+          description: "Front Door lock has not been reachable over Bluetooth for 5+ minutes. Google Home / voice unlock commands will FAIL until it reconnects. yalexs_ble cannot self-recover from a dropped BLE connection -- a physical wake (thumbturn, keypad touch, or the Yale/August app) at the lock itself is required."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: garage_door_lock_offline
+        title: Garage Door lock offline (BLE)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: homeassistant_entity_available{entity="lock.garage_door_3"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Garage Door lock unreachable over Bluetooth"
+          description: "Garage Door lock has not been reachable over Bluetooth for 5+ minutes. Google Home / voice unlock commands will FAIL until it reconnects. yalexs_ble cannot self-recover from a dropped BLE connection -- a physical wake (thumbturn, keypad touch, or the Yale/August app) at the lock itself is required."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: door_lock_battery_low
+        title: Door lock battery low
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # Migrated from HA automation "Locks: Low Battery Alert"
+              # (automations/lock_low_battery.yaml) -- notify.mobile_app
+              # call removed there 2026-08-09. 40% (not the usual
+              # 15-20%) threshold is deliberate: always_connected mode
+              # (enabled 2026-08-08 to reduce BLE reconnect failures,
+              # see lock_ble_watchdog.yaml) trades battery life for
+              # responsiveness, AND low battery independently causes the
+              # same "won't advertise/won't connect" BLE symptom that
+              # always_connected was meant to reduce -- catching this
+              # early avoids it compounding into another dropped-
+              # connection incident. `by (entity)` so Front Door and
+              # Garage Door alert/resolve independently instead of one
+              # instance covering both -- same reasoning as the
+              # multi-series Loki rules earlier in this file.
+              editorMode: code
+              expr: min by (entity) (homeassistant_sensor_battery_percent{entity=~"sensor.front_door_battery_4|sensor.garage_door_battery_3"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [40]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "{{ '{{' }} $labels.entity {{ '}}' }} battery low"
+          description: "{{ '{{' }} $labels.entity {{ '}}' }} is below 40% battery. Replace soon -- always_connected mode (Bluetooth) drains faster than default, and a dying battery causes BLE connection reliability problems before it fully dies."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: disk_full
         title: Disk usage high
         condition: C
