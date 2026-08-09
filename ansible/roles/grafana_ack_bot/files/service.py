@@ -3,8 +3,11 @@
 Standalone service (deliberately NOT part of hermes-agent) that:
   1. Receives Grafana alertmanager webhook POSTs on a local HTTP port.
   2. Posts a formatted alert message to #infra-alerts via the Hermes
-     Discord bot's existing webhook, then adds four reaction emoji: one
-     plain ack (eyes) and three silence-duration options.
+     Discord bot's existing webhook, then adds two reaction emoji: a
+     plain ack (eyes) and a single silence-menu trigger (mute). Reacting
+     to the mute emoji expands the message with three duration reactions
+     (1h/4h/24h) instead of cluttering every alert with all three
+     up front -- see "Two-step silence menu" below.
   3. Listens for reaction-add events on those messages (via the SAME bot
      token's Gateway connection -- reactions are broadcast Gateway
      events, NOT routed through Discord's single global Interactions
@@ -36,6 +39,14 @@ Standalone service (deliberately NOT part of hermes-agent) that:
      native ack primitive, only time-boxed silences (deletable early),
      so the ack path above is the closest honest approximation of EM7
      semantics achievable on Grafana's real API surface.
+  5. Two-step silence menu: the message is posted with only 👀 (ack) and
+     🔇 (open silence menu) reactions. Reacting 🔇 adds the 1️⃣/4️⃣/📅
+     duration reactions to the SAME message and edits it with a "pick a
+     duration" prompt; reacting one of those then behaves exactly like
+     the old flat 4-emoji design. This keeps the steady-state message
+     uncluttered (2 reactions instead of 4) while still surfacing the
+     durations for anyone who actually wants a timed silence instead of
+     an EM7-style ack.
 
 Why a separate service instead of extending hermes-agent's Discord
 adapter: Discord interactions (message components / buttons) are routed
@@ -54,6 +65,7 @@ homelab repo (ansible/roles/grafana_ack_bot/templates/).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -79,6 +91,17 @@ ALLOWED_USER_IDS = {
     int(x) for x in os.environ.get("ALLOWED_USER_IDS", "").split(",") if x.strip()
 }
 HTTP_LISTEN_PORT = int(os.environ.get("HTTP_LISTEN_PORT", "8990"))
+# Where pending-alert state (message_id -> ack/silence context) is
+# persisted to disk. Without this, a service restart (deploy, crash,
+# OOM, host reboot) wipes _pending and every previously-posted alert
+# message becomes permanently un-actionable via reaction -- Discord
+# shows the reactions were added, a user reacts, and the bot silently
+# no-ops with "Reaction on unknown/expired message, ignoring" because
+# it has no memory the message ever existed. Observed in practice
+# 2026-08-09: 6 restarts happened between posting 4 alert messages and
+# the user acking them; only the 2 messages posted after the LAST
+# restart were still tracked, so 4 "acks" silently did nothing.
+STATE_PATH = os.environ.get("STATE_PATH", "/opt/grafana-ack-bot/state.json")
 
 # Plain ack: "a human has seen this", suppresses re-notification UNTIL
 # the alert actually resolves (not a fixed timer) -- EM7-style.
@@ -101,8 +124,8 @@ ACK_WATCH_POLL_INTERVAL_SEC = 30
 ACK_WATCH_MAX_DURATION = timedelta(days=7)
 
 # Timed silence options: actually suppresses re-firing/re-notification.
-# Order matters: this is also the order reactions get added to a fresh
-# alert message.
+# Order matters: this is also the order reactions get added once the
+# silence menu is opened.
 SILENCE_OPTIONS: list[tuple[str, timedelta]] = [
     ("1\N{combining enclosing keycap}", timedelta(hours=1)),
     ("4\N{combining enclosing keycap}", timedelta(hours=4)),
@@ -110,16 +133,48 @@ SILENCE_OPTIONS: list[tuple[str, timedelta]] = [
 ]
 SILENCE_EMOJI = {emoji: duration for emoji, duration in SILENCE_OPTIONS}
 
-# All emoji added to every posted alert message, in display/add order.
-ALL_REACTION_EMOJI: list[str] = [ACK_ONLY_EMOJI] + [e for e, _ in SILENCE_OPTIONS]
+# Single reaction that opens the silence-duration menu (see "Two-step
+# silence menu" in the module docstring). Using the mute speaker instead
+# of one of the duration emoji so it reads unambiguously as "pick a
+# silence length" rather than looking like a 4th duration option.
+SILENCE_MENU_EMOJI = "\N{SPEAKER WITH CANCELLATION STROKE}"
+
+# Reactions added when an alert is first posted: just ack + open-menu.
+# The three duration emoji are added on-demand when the menu is opened,
+# not up front -- keeps the steady-state message to 2 reactions instead
+# of 4.
+INITIAL_REACTION_EMOJI: list[str] = [ACK_ONLY_EMOJI, SILENCE_MENU_EMOJI]
 
 # In-memory map of Discord message_id -> alert context, populated when we
-# post an alert. Lost on restart -- acceptable, since a message older
-# than the process restart just won't be actionable via reaction anymore
-# (still visible/actionable manually in Grafana). Not persisted to keep
-# this service dependency-free (no DB/file needed for a Sunday night
-# iteration; revisit if that gap proves painful in practice).
+# post an alert and mirrored to STATE_PATH after every mutation so a
+# service restart can reload it (see STATE_PATH comment above for why
+# this matters -- losing this silently breaks every already-posted
+# alert's reactions).
 _pending: dict[int, dict] = {}
+
+
+def _load_pending() -> None:
+    if not os.path.exists(STATE_PATH):
+        return
+    try:
+        with open(STATE_PATH, "r") as f:
+            raw = json.load(f)
+    except Exception:
+        log.exception("Failed to load persisted state from %s, starting empty", STATE_PATH)
+        return
+    for key, value in raw.items():
+        _pending[int(key)] = value
+    log.info("Loaded %d pending alert(s) from %s", len(_pending), STATE_PATH)
+
+
+def _save_pending() -> None:
+    tmp_path = STATE_PATH + ".tmp"
+    try:
+        with open(tmp_path, "w") as f:
+            json.dump({str(k): v for k, v in _pending.items()}, f)
+        os.replace(tmp_path, STATE_PATH)
+    except Exception:
+        log.exception("Failed to persist state to %s", STATE_PATH)
 
 # Discord's reaction-add endpoint has a tight per-channel rate limit that
 # is SHARED across concurrent requests -- observed 429s when multiple
@@ -205,9 +260,7 @@ async def _post_alert_message(session: aiohttp.ClientSession, alert: dict) -> No
         lines.append(f"[View in Grafana]({generator_url})")
     lines.append(
         f"React: {ACK_ONLY_EMOJI}=ack (suppress until resolved)  "
-        "1\N{combining enclosing keycap}=silence 1h  "
-        "4\N{combining enclosing keycap}=silence 4h  "
-        "\N{CALENDAR}=silence 24h"
+        f"{SILENCE_MENU_EMOJI}=silence (opens duration menu)"
     )
     content = "\n".join(lines)
 
@@ -219,7 +272,7 @@ async def _post_alert_message(session: aiohttp.ClientSession, alert: dict) -> No
         posted = await resp.json()
     message_id = int(posted["id"])
 
-    for emoji in ALL_REACTION_EMOJI:
+    for emoji in INITIAL_REACTION_EMOJI:
         await _add_reaction_with_retry(session, message_id, emoji)
 
     _pending[message_id] = {
@@ -229,7 +282,9 @@ async def _post_alert_message(session: aiohttp.ClientSession, alert: dict) -> No
         "content": content,
         "acked": False,
         "silenced": False,
+        "menu_open": False,
     }
+    _save_pending()
     log.info("Posted alert %s as message %s with %d matchers", alertname, message_id, len(_pending[message_id]["matchers"]))
 
 
@@ -318,6 +373,26 @@ async def _alert_still_active(session: aiohttp.ClientSession, labels: dict) -> b
     return False
 
 
+# Tasks currently watching for an acked alert's resolution, keyed by
+# message_id. Held here (not just fire-and-forgotten via create_task)
+# for two reasons: (1) asyncio only holds a weak reference to a task
+# with no other referent, so an unreferenced task can be garbage
+# collected mid-flight; (2) lets _resume_ack_watchers() and the ack
+# handler check "is a watcher already running for this message" so a
+# Gateway reconnect (on_ready can fire more than once per process) or a
+# duplicate reaction doesn't spawn two watchers racing to tear down the
+# same silence.
+_ack_watchers: dict[int, asyncio.Task] = {}
+
+
+def _spawn_ack_watcher(message_id: int, silence_id: str, alertname: str, labels: dict, pending: dict) -> None:
+    existing = _ack_watchers.get(message_id)
+    if existing is not None and not existing.done():
+        return
+    task = asyncio.create_task(_watch_for_resolution(message_id, silence_id, alertname, labels, pending))
+    _ack_watchers[message_id] = task
+
+
 async def _watch_for_resolution(
     message_id: int,
     silence_id: str,
@@ -347,6 +422,8 @@ async def _watch_for_resolution(
             resolved_line = f"\n✅ Resolved — {alertname} is no longer firing (ack silence lifted)"
             new_content = pending["content"] + resolved_line
             pending["content"] = new_content
+            pending["resolved"] = True
+            _save_pending()
             await _edit_via_webhook(session, message_id, new_content)
             return
 
@@ -404,6 +481,35 @@ async def _edit_via_webhook(session: aiohttp.ClientSession, message_id: int, new
             log.warning("Failed to edit message via webhook API: %s %s", edit_resp.status, body)
 
 
+def _resume_ack_watchers() -> None:
+    """Re-spawn resolution-watcher tasks for any alert that was acked
+    (has an ack_silence_id) but never saw resolution before the process
+    last stopped. Without this, a restart after an ack silently drops
+    the watcher -- the silence stays in place until its 30-day ceiling
+    but the "resolved" message and early silence teardown never happen.
+
+    Called from on_ready, which discord.py can fire more than once per
+    process (Gateway reconnect/resume) -- _spawn_ack_watcher is a no-op
+    if a watcher for that message_id is already running, so repeat
+    calls are safe and cheap.
+    """
+    resumed = 0
+    for message_id, pending in _pending.items():
+        silence_id = pending.get("ack_silence_id")
+        if not silence_id or pending.get("resolved"):
+            continue
+        try:
+            alertname = pending["alertname"]
+            labels = pending["labels"]
+        except KeyError:
+            log.warning("Skipping malformed pending entry for message %s (missing alertname/labels)", message_id)
+            continue
+        _spawn_ack_watcher(message_id, silence_id, alertname, labels, pending)
+        resumed += 1
+    if resumed:
+        log.info("Resumed %d ack resolution watcher(s) after restart", resumed)
+
+
 class AckBotClient(discord.Client):
     def __init__(self, *args, **kwargs) -> None:
         intents = discord.Intents.none()
@@ -422,6 +528,7 @@ class AckBotClient(discord.Client):
 
     async def on_ready(self) -> None:
         log.info("Reaction listener ready as %s", self.user)
+        _resume_ack_watchers()
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         if payload.channel_id != DISCORD_CHANNEL_ID:
@@ -445,6 +552,7 @@ class AckBotClient(discord.Client):
                 log.info("Message %s already acked, ignoring repeat", payload.message_id)
                 return
             pending["acked"] = True
+            _save_pending()
 
             created_by = f"discord:{payload.user_id}"
             comment = f"Acked via Discord reaction ({emoji_str}) by user {payload.user_id} -- EM7-style, suppressed until resolution"
@@ -466,24 +574,44 @@ class AckBotClient(discord.Client):
                     silence_id, annotation_id, pending["alertname"],
                 )
                 pending["content"] = pending["content"] + ack_line
-                asyncio.create_task(
-                    _watch_for_resolution(
-                        payload.message_id, silence_id, pending["alertname"], pending["labels"], pending
-                    )
+                pending["ack_silence_id"] = silence_id
+                _save_pending()
+                _spawn_ack_watcher(
+                    payload.message_id, silence_id, pending["alertname"], pending["labels"], pending
                 )
             else:
                 ack_line = "\n⚠️ Ack failed — could not create Grafana silence, check service logs"
                 pending["content"] = pending["content"] + ack_line
+                _save_pending()
             await self._edit(payload.message_id, pending["content"])
+            return
+
+        if emoji_str == SILENCE_MENU_EMOJI:
+            if pending.get("silenced") or pending.get("menu_open"):
+                # Either already silenced, or the menu's already open and
+                # the duration emoji are visible -- nothing more to do.
+                return
+            pending["menu_open"] = True
+            pending["content"] = pending["content"] + "\n🔇 Pick a duration below:"
+            _save_pending()
+            await self._edit(payload.message_id, pending["content"])
+            for emoji, _duration in SILENCE_OPTIONS:
+                await _add_reaction_with_retry(self._http_session, payload.message_id, emoji)
             return
 
         duration = SILENCE_EMOJI.get(emoji_str)
         if duration is None:
             return
+        if not pending.get("menu_open"):
+            # Duration emoji reacted before the menu was opened (e.g. a
+            # stale/manually-added reaction) -- ignore, since there's no
+            # menu prompt on the message for this to be answering.
+            return
         if pending.get("silenced"):
             log.info("Message %s already silenced, ignoring additional silence reaction", payload.message_id)
             return
         pending["silenced"] = True
+        _save_pending()
 
         created_by = f"discord:{payload.user_id}"
         comment = f"Silenced via Discord reaction ({emoji_str}) by user {payload.user_id}"
@@ -498,6 +626,7 @@ class AckBotClient(discord.Client):
         else:
             line = "\n⚠️ Silence failed — could not create Grafana silence, check service logs"
         pending["content"] = pending["content"] + line
+        _save_pending()
         await self._edit(payload.message_id, pending["content"])
 
     async def _edit(self, message_id: int, new_content: str) -> None:
@@ -518,6 +647,7 @@ async def run_http_server() -> None:
 
 
 async def main() -> None:
+    _load_pending()
     client = AckBotClient()
     await asyncio.gather(
         client.start(DISCORD_BOT_TOKEN),
