@@ -22,6 +22,12 @@
     # role itself is retired. Same value it always was: vm-01's
     # private-subnet IP, the only host the old 9100 rule allowed.
     tanium_node_exporter_scrape_src: "{{ ip_vm }}"
+  handlers:
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+      become: true
+
   tasks:
     - name: Stop and disable node_exporter service
       ansible.builtin.systemd:
@@ -36,13 +42,7 @@
         path: /etc/systemd/system/node_exporter.service
         state: absent
       become: true
-      register: unit_removed
-
-    - name: Reload systemd daemon
-      ansible.builtin.systemd:
-        daemon_reload: true
-      become: true
-      when: unit_removed.changed
+      notify: Reload systemd daemon
 
     - name: Remove node_exporter binary
       ansible.builtin.file:

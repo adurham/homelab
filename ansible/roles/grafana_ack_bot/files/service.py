@@ -712,7 +712,7 @@ class AckBotClient(discord.Client):
         intents = discord.Intents.none()
         intents.guilds = True
         intents.guild_reactions = True
-        super().__init__(intents=intents, *args, **kwargs)
+        super().__init__(*args, intents=intents, **kwargs)
         self._http_session: aiohttp.ClientSession | None = None
 
     async def setup_hook(self) -> None:
@@ -836,7 +836,7 @@ async def run_http_server() -> None:
     app.router.add_post("/grafana-webhook", handle_grafana_webhook)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", HTTP_LISTEN_PORT)
+    site = web.TCPSite(runner, "0.0.0.0", HTTP_LISTEN_PORT)  # noqa: S104 -- must accept Grafana's webhook POST from another host, not just localhost
     await site.start()
     log.info("HTTP receiver listening on :%d/grafana-webhook", HTTP_LISTEN_PORT)
     # Keep this coroutine alive alongside the Discord client.
