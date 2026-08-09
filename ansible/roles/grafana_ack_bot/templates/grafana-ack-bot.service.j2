@@ -1,0 +1,20 @@
+[Unit]
+Description=Grafana Discord Ack Bot (reaction-based alert silencing)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+EnvironmentFile=/opt/grafana-ack-bot/grafana-ack-bot.env
+ExecStart=/opt/grafana-ack-bot-venv/bin/python3 /opt/grafana-ack-bot/service.py
+WorkingDirectory=/opt/grafana-ack-bot
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
