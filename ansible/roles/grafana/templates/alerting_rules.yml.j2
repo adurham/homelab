@@ -383,6 +383,77 @@ groups:
           severity: critical
         isPaused: false
 
+      - uid: smart_vent_controller_frozen
+        title: Smart Vent Controller heartbeat stale
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # sensor.smart_vent_controller_heartbeat is stamped by the
+              # AppDaemon app at the top of every 120s control_loop cycle.
+              # Age of the metric = how long the loop has actually not run
+              # (not just "the add-on container is alive" — Supervisor
+              # reported the add-on healthy for the full ~4.5h freeze on
+              # 2026-08-08, container-alive was not a real health signal).
+              # Mirrors the existing Grafana dashboard panel expression
+              # (smart_vent_controller.json) which was watch-only until now.
+              expr: time() - homeassistant_sensor_timestamp_seconds{entity="sensor.smart_vent_controller_heartbeat"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [360]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        # noDataState=Alerting (not OK) is deliberate here, unlike most
+        # rules in this file: if the metric itself stops being exported
+        # (HA Prometheus exporter down, entity renamed/removed, HA core
+        # down) that is ALSO a "we've lost visibility into vent control"
+        # condition and must page, not go silent. The local HA watchdog
+        # (automations/smart_vent_watchdog.yaml) self-heals via add-on
+        # restart within minutes for the common case; this Grafana rule
+        # is the independent, multi-channel-routed backstop (HA webhook
+        # push + email fallback + covered by the dead-man's-switch) for
+        # when the HA-local watchdog itself can't run or can't notify.
+        noDataState: Alerting
+        execErrState: Error
+        for: 8m
+        annotations:
+          summary: "Smart Vent Controller control loop has not run in 6+ minutes"
+          description: "sensor.smart_vent_controller_heartbeat age exceeds 360s — the AppDaemon smart_vent_controller app's pinned worker thread is likely frozen (a hung HA service call can block it indefinitely; see 2026-08-08 incident). Vents are stuck at their last commanded position, not responding to room temp or occupancy. The local HA watchdog should self-heal via `ha addons restart a0d7b954_appdaemon`; if this alert is still firing after ~10 min, the self-heal failed and needs manual restart."
+        labels:
+          severity: critical
+        isPaused: false
+
       - uid: disk_full
         title: Disk usage high
         condition: C

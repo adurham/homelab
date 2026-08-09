@@ -1692,8 +1692,12 @@ class SmartVentController(hass.Hass):
             # turn it off later and stomp their setting.
             return
         self.log("  FAN-ASSIST: setting ecobee fan_mode -> on")
+        # Fire-and-forget — see _set_vent for why (2026-08-08 thread-freeze
+        # incident). This callback also blocks the same pinned worker
+        # thread as the vent-position calls.
         self.call_service("climate/set_fan_mode",
-                          entity_id=FAN_ENTITY, fan_mode="on")
+                          entity_id=FAN_ENTITY, fan_mode="on", hass_timeout=8,
+                          callback=self._service_call_done)
         self._fan_assist_active = True
 
     def _release_fan_assist(self):
@@ -1702,7 +1706,8 @@ class SmartVentController(hass.Hass):
             return
         self.log("  FAN-ASSIST: releasing ecobee fan_mode -> auto")
         self.call_service("climate/set_fan_mode",
-                          entity_id=FAN_ENTITY, fan_mode="auto")
+                          entity_id=FAN_ENTITY, fan_mode="auto", hass_timeout=8,
+                          callback=self._service_call_done)
         self._fan_assist_active = False
 
     # ── Backpressure protection ───────────────────────────────────────────────
@@ -1987,9 +1992,37 @@ class SmartVentController(hass.Hass):
             return
 
         self.log(f"Setting {entity} -> {position}%")
+        # FIRE-AND-FORGET via callback=. 2026-08-08 incident: this app runs
+        # on a single pinned AppDaemon worker thread (the default for a
+        # pinned app), shared by control_loop/on_occupancy_change/heartbeat.
+        # By default call_service() BLOCKS that thread waiting on HA's
+        # response. Two hass_timeout warnings earlier that evening fired and
+        # recovered fine, but a later set_cover_tilt_position call went
+        # silent — no exception, no further log lines — and never returned,
+        # which meant every future scheduled callback on this app queued up
+        # behind it forever (the control loop never ran again, the
+        # heartbeat sensor froze, vents held whatever position they had for
+        # ~4.5h until a manual add-on restart un-wedged the thread).
+        # Per AppDaemon's own docs, passing callback= is "the recommended
+        # method for calling services which might take a long time to
+        # complete" — it returns immediately instead of blocking, so a
+        # single hung/orphaned response can no longer freeze the whole app.
+        # hass_timeout is kept too as defense-in-depth even though it's not
+        # the primary fix (it didn't stop the original hang).
         self.call_service(
             "cover/set_cover_tilt_position",
             entity_id=entity,
             tilt_position=position,
+            hass_timeout=8,
+            callback=self._service_call_done,
         )
         self._last_positions[entity] = position
+
+    def _service_call_done(self, *args, **kwargs):
+        """No-op completion callback — see _set_vent for why fire-and-forget
+        matters. Accepts *args/**kwargs defensively since we don't rely on
+        AppDaemon's exact ServiceCallback signature; we only care that this
+        call doesn't block. Left as a hook for future diagnostics (e.g. log
+        non-OK results) without reintroducing a blocking wait.
+        """
+        pass

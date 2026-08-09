@@ -81,6 +81,15 @@ input_boolean:
     name: "Frigate Watchdog Alerted"
     initial: false
 
+  # Tracks whether the Smart Vent Controller heartbeat watchdog currently
+  # has an unresolved "escalated" alert active (i.e. a restart was already
+  # tried and the heartbeat is STILL stale). Gates the "back online" clear
+  # notice the same way frigate_watchdog_alerted does. See
+  # automations/smart_vent_watchdog.yaml.
+  smart_vent_watchdog_escalated:
+    name: "Smart Vent Watchdog Escalated"
+    initial: false
+
 timer:
   garage_lights_motion_timeout:
     name: "Garage Lights Motion Timeout"
