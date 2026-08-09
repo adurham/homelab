@@ -4,5 +4,6 @@ collections:
   - name: community.general
   - name: community.crypto
   - name: ansible.windows
+  - name: community.windows
   - name: ansible.posix
   - name: community.grafana

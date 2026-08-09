@@ -43,6 +43,7 @@ import argparse
 import hashlib
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 import requests
@@ -65,9 +66,11 @@ class GS108Ev4Client:
         i = j = 0
         while i < len(a) or j < len(b):
             if i < len(a):
-                out.append(a[i]); i += 1
+                out.append(a[i])
+                i += 1
             if j < len(b):
-                out.append(b[j]); j += 1
+                out.append(b[j])
+                j += 1
         return "".join(out)
 
     def _get_rand(self):
@@ -84,7 +87,7 @@ class GS108Ev4Client:
     def login(self) -> bool:
         rand = self._get_rand()
         merged = self._merge(self.password, rand)
-        pwd_hash = hashlib.md5(merged.encode()).hexdigest()
+        pwd_hash = hashlib.md5(merged.encode()).hexdigest()  # noqa: S324 -- required by the switch's own login.js hashing scheme, not used for security
         resp = self.session.post(
             f"{self.base}/login.cgi",
             data={"password": pwd_hash},
@@ -99,10 +102,12 @@ class GS108Ev4Client:
             return False
         return True
 
-    def discover_forms(self, out_dir="/tmp/gs108ev4_discovery"):
+    def discover_forms(self, out_dir=None):
         """Dump every plausibly-reachable admin page for manual field-name
         inspection. Run this ONCE after a successful login, before writing
         any set_* logic against guessed field names."""
+        if out_dir is None:
+            out_dir = Path(tempfile.gettempdir()) / "gs108ev4_discovery"  # noqa: S108 -- interactive one-off debug tool, not a shared/predictable-path attack surface
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         candidates = [
             "index.htm", "status.htm", "switch_info.htm",
