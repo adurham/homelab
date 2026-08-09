@@ -1,7 +1,18 @@
 # AdGuard Health Watchdog
+#
+# Self-heal only -- alerting migrated to Grafana (uid: adguard_dns_down,
+# roles/grafana/templates/alerting_rules.yml.j2) 2026-08-09, so this can
+# route through the same ack/silence Discord flow as every other infra
+# alert instead of a separate iPhone-push channel. See that rule's
+# comment for why: this automation's OWN trigger entity
+# (binary_sensor.adguard_home_running) doesn't exist on this HA
+# instance, so the automation itself has been silently dead code, never
+# firing -- the restart action below is kept in case that entity gets
+# fixed later, but the actual working liveness check now lives in
+# Grafana against switch.adguard_home_protection's availability.
 - alias: "Infrastructure: AdGuard Home Watchdog"
   id: "infrastructure_adguard_watchdog"
-  description: "Restart AdGuard and notify if DNS service stops"
+  description: "Restart AdGuard if DNS service stops (alerting is in Grafana, see uid: adguard_dns_down)"
   mode: single
 
   trigger:
@@ -11,19 +22,6 @@
       for: "00:02:00"
 
   action:
-    # 1. NOTIFY (Critical Alert)
-    - service: notify.mobile_app_adams_iphone_16
-      data:
-        title: "CRITICAL: AdGuard Offline"
-        message: "AdGuard Home DNS has stopped. Internet access may be interrupted. Attempting restart..."
-        data:
-          push:
-            sound:
-              name: "default"
-              critical: 1
-              volume: 1.0
-
-    # 2. RESTART (Try to self-heal)
     - service: hassio.addon_restart
       data:
         addon: "a0d7b954_adguard"

@@ -1,0 +1,27 @@
+# Lock Low Battery Alert -- RETIRED 2026-08-09
+#
+# always_connected mode (enabled 2026-08-08 on both locks to reduce
+# BLE reconnect failures -- see the retired lock_ble_watchdog.yaml for
+# the full incident context) trades lock battery life for
+# responsiveness: HA holds a persistent BLE connection instead of
+# waiting for periodic advertisements. Low battery is ALSO an
+# independent, common root cause of the exact "won't advertise/won't
+# connect" failure this always_connected change was meant to reduce --
+# a lock running low on power gets flakier at BLE before it fully
+# dies. Alerting early (40%, not the usual 15-20%) catches this before
+# it compounds into another dropped-connection incident.
+#
+# Alerting fully migrated to Grafana (uid: door_lock_battery_low,
+# roles/grafana/templates/alerting_rules.yml.j2), which routes through
+# the same ack/silence Discord flow as every other infra alert. No
+# self-heal action existed here (nothing to self-heal for a battery
+# level), so disabled as a stub rather than deleted outright to keep
+# the incident-context comment history.
+- alias: "Locks: Low Battery Alert"
+  id: "locks_low_battery_alert"
+  description: >-
+    RETIRED -- alerting is in Grafana (uid: door_lock_battery_low).
+    Disabled, kept only for history.
+  mode: single
+  trigger: []
+  action: []
