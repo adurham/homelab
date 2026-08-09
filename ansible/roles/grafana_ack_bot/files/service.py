@@ -255,6 +255,7 @@ async def _post_alert_message(session: aiohttp.ClientSession, alert: dict) -> No
     labels = alert.get("labels", {})
     alertname = labels.get("alertname", "alert")
     generator_url = alert.get("generatorURL", "")
+    fingerprint = alert.get("fingerprint", "")
     lines = [text]
     if generator_url:
         lines.append(f"[View in Grafana]({generator_url})")
@@ -278,6 +279,17 @@ async def _post_alert_message(session: aiohttp.ClientSession, alert: dict) -> No
     _pending[message_id] = {
         "alertname": alertname,
         "labels": labels,
+        # Grafana's Alertmanager webhook payload gives us a stable
+        # per-instance fingerprint that's identical on the firing and
+        # resolved notification for the same alert instance -- use it to
+        # correlate a resolved webhook back to this message instead of
+        # exact label-dict equality. Label equality is what this used
+        # before 2026-08-09 and is fragile: any difference in Grafana's
+        # internal-label stripping/injection between the firing and
+        # resolved payload (version-dependent, not something we control)
+        # breaks the match and leaves the message stuck in Discord
+        # forever with no way to know it resolved.
+        "fingerprint": fingerprint,
         "matchers": _matchers_for_alert(alert),
         "content": content,
         "acked": False,
@@ -288,6 +300,21 @@ async def _post_alert_message(session: aiohttp.ClientSession, alert: dict) -> No
     log.info("Posted alert %s as message %s with %d matchers", alertname, message_id, len(_pending[message_id]["matchers"]))
 
 
+def _pending_matches_alert(pending: dict, alert: dict) -> bool:
+    """Correlate a Grafana webhook alert (firing or resolved) back to a
+    _pending entry. Prefers the stable per-instance fingerprint Grafana
+    attaches to both the firing and resolved notification for the same
+    alert instance; falls back to exact label-dict equality only for
+    older _pending entries persisted before the fingerprint field was
+    captured (state.json survives service upgrades).
+    """
+    fingerprint = alert.get("fingerprint")
+    pending_fp = pending.get("fingerprint")
+    if fingerprint and pending_fp:
+        return fingerprint == pending_fp
+    return pending.get("labels", {}) == alert.get("labels", {})
+
+
 async def handle_grafana_webhook(request: web.Request) -> web.Response:
     try:
         payload = await request.json()
@@ -296,9 +323,7 @@ async def handle_grafana_webhook(request: web.Request) -> web.Response:
 
     alerts = payload.get("alerts", [])
     firing = [a for a in alerts if a.get("status") == "firing"]
-    if not firing:
-        # Resolved-only batches: nothing to ack, just acknowledge receipt.
-        return web.Response(status=200, text="ok (no firing alerts)")
+    resolved = [a for a in alerts if a.get("status") != "firing"]
 
     async with aiohttp.ClientSession() as session:
         for alert in firing:
@@ -306,6 +331,45 @@ async def handle_grafana_webhook(request: web.Request) -> web.Response:
                 await _post_alert_message(session, alert)
             except Exception:
                 log.exception("Failed to post alert to Discord")
+
+        # Delete the Discord message for any alert that resolved WITHOUT
+        # the acked-resolution watcher already handling it (that path
+        # covers acked alerts via its own polling loop in
+        # _watch_for_resolution). This covers alerts that resolve on
+        # their own before anyone reacts, AND silenced-but-not-acked
+        # alerts (silences don't spin up a resolution watcher). Until
+        # this fix (2026-08-09) resolved payloads were silently dropped
+        # entirely ("Resolved-only batches: nothing to ack, just
+        # acknowledge receipt"), so unacked resolved alerts piled up in
+        # #infra-alerts forever until someone noticed and manually
+        # purged them.
+        #
+        # Deletes ALL matching unacked/unresolved entries (not just the
+        # first) -- a flapping alert whose earlier resolved webhook was
+        # missed can leave more than one stale _pending entry with the
+        # same fingerprint/labels.
+        for alert in resolved:
+            for message_id, pending in list(_pending.items()):
+                if pending.get("resolved") or pending.get("acked"):
+                    continue
+                if not _pending_matches_alert(pending, alert):
+                    continue
+                log.info(
+                    "Alert %s resolved (not ack-watched), deleting message %s",
+                    pending.get("alertname"), message_id,
+                )
+                await _delete_via_webhook(session, message_id)
+                # Re-check after the await: the user could have acked
+                # this exact message while the delete was in flight
+                # (e.g. rate-limited retry taking a few seconds), in
+                # which case an ack watcher now owns this message_id and
+                # popping it here would leak that watcher's silence
+                # (nothing would ever delete it). Only pop if it's still
+                # unacked post-delete.
+                still_pending = _pending.get(message_id)
+                if still_pending is not None and not still_pending.get("acked"):
+                    _pending.pop(message_id, None)
+                    _save_pending()
 
     return web.Response(status=200, text="ok")
 
@@ -350,9 +414,21 @@ async def _delete_silence(session: aiohttp.ClientSession, silence_id: str) -> bo
 async def _alert_still_active(session: aiohttp.ClientSession, labels: dict) -> bool:
     """Check Grafana's Alertmanager active-alerts list for an entry whose
     labels exactly match. Used by the ack watcher to detect resolution --
-    an acked alert instance disappearing from this list (or showing a
-    non-active state) means it resolved and the ack's silence can come
-    down early instead of riding out its 30-day ceiling.
+    an acked alert instance disappearing from this list entirely means it
+    resolved and the ack's silence can come down early instead of riding
+    out its 30-day ceiling.
+
+    IMPORTANT: this must NOT filter on status.state == "active". Once an
+    alert is acked, the ack's OWN silence matches its labels, which flips
+    Alertmanager's status.state for that instance from "active" to
+    "suppressed" almost immediately -- within one poll cycle in practice.
+    An earlier version of this function checked for state == "active"
+    and as a result declared nearly every acked alert "resolved" within
+    ~30s of being acked (misreading its own silence as resolution),
+    regardless of whether the underlying problem was still firing.
+    Presence in this list at all -- active OR suppressed -- means the
+    alert instance is still known to Alertmanager, i.e. NOT resolved;
+    only its total absence from the list means resolved.
     """
     async with session.get(
         f"{GRAFANA_URL}/api/alertmanager/grafana/api/v2/alerts",
@@ -368,7 +444,7 @@ async def _alert_still_active(session: aiohttp.ClientSession, labels: dict) -> b
 
     for a in alerts:
         a_labels = a.get("labels", {})
-        if a_labels == labels and a.get("status", {}).get("state") == "active":
+        if a_labels == labels:
             return True
     return False
 
@@ -401,9 +477,11 @@ async def _watch_for_resolution(
     pending: dict,
 ) -> None:
     """Background task: poll until the acked alert is no longer active,
-    then delete its silence early and post a synthesized resolved
-    message. `pending` is the SAME dict stored in _pending so edits are
-    reflected there too (matters if anything else ever reads content).
+    then delete its silence early AND delete the Discord message itself
+    -- per explicit direction, #infra-alerts shows ONLY currently-firing
+    alerts; resolved/historical state belongs in Grafana, not piling up
+    in Discord. `pending` is the SAME dict stored in _pending so state
+    changes are reflected there too.
     """
     deadline = datetime.now(timezone.utc) + ACK_WATCH_MAX_DURATION
     async with aiohttp.ClientSession() as session:
@@ -417,14 +495,12 @@ async def _watch_for_resolution(
             if still_active:
                 continue
 
-            log.info("Alert %s (silence %s) resolved, tearing down ack silence early", alertname, silence_id)
+            log.info("Alert %s (silence %s) resolved, tearing down ack silence and deleting message %s", alertname, silence_id, message_id)
             await _delete_silence(session, silence_id)
-            resolved_line = f"\n✅ Resolved — {alertname} is no longer firing (ack silence lifted)"
-            new_content = pending["content"] + resolved_line
-            pending["content"] = new_content
-            pending["resolved"] = True
+            await _delete_via_webhook(session, message_id)
+            _pending.pop(message_id, None)
+            _ack_watchers.pop(message_id, None)
             _save_pending()
-            await _edit_via_webhook(session, message_id, new_content)
             return
 
         log.warning(
@@ -463,7 +539,9 @@ async def _create_ack_annotation(session: aiohttp.ClientSession, alertname: str,
         return result.get("id")
 
 
-async def _edit_via_webhook(session: aiohttp.ClientSession, message_id: int, new_content: str) -> None:
+async def _edit_via_webhook(
+    session: aiohttp.ClientSession, message_id: int, new_content: str, max_attempts: int = 4
+) -> None:
     # The alert message was posted via the raw Discord webhook, so it's
     # "authored by" that webhook identity, not the bot user -- Discord
     # only allows editing it through the webhook's own edit-message
@@ -472,13 +550,74 @@ async def _edit_via_webhook(session: aiohttp.ClientSession, message_id: int, new
     # message authored by another user" even though it's the same
     # underlying application). DISCORD_WEBHOOK_URL already has the
     # {id}/{token} pair baked in.
-    async with session.patch(
-        f"{DISCORD_WEBHOOK_URL}/messages/{message_id}",
-        json={"content": new_content},
-    ) as edit_resp:
-        if edit_resp.status >= 300:
-            body = await edit_resp.text()
-            log.warning("Failed to edit message via webhook API: %s %s", edit_resp.status, body)
+    #
+    # Retries on 429 the same way _add_reaction_with_retry does. Without
+    # this, a rate-limited edit is just logged and dropped -- observed in
+    # practice 2026-08-09: the resolution watcher's "torn down early"
+    # edit for tms-02 hit a 429 during a burst of 6 simultaneous
+    # teardowns and silently never landed, so the Discord message stayed
+    # showing "Acked" forever even though the alert had genuinely
+    # resolved and its silence was gone. No retry meant no second
+    # chance -- the resolved checkmark was just lost.
+    for attempt in range(1, max_attempts + 1):
+        async with session.patch(
+            f"{DISCORD_WEBHOOK_URL}/messages/{message_id}",
+            json={"content": new_content},
+        ) as edit_resp:
+            if edit_resp.status < 300:
+                return
+            if edit_resp.status == 429:
+                try:
+                    body = await edit_resp.json()
+                    retry_after = float(body.get("retry_after", 1.0))
+                except Exception:
+                    retry_after = 1.0
+                log.warning(
+                    "Edit rate-limited for message %s (attempt %d/%d), retrying in %.2fs",
+                    message_id, attempt, max_attempts, retry_after,
+                )
+                await asyncio.sleep(retry_after + 0.1)
+                continue
+            body_text = await edit_resp.text()
+            log.warning("Failed to edit message via webhook API: %s %s", edit_resp.status, body_text)
+            return
+    log.error("Giving up editing message %s after %d attempts", message_id, max_attempts)
+
+
+async def _delete_via_webhook(
+    session: aiohttp.ClientSession, message_id: int, max_attempts: int = 4
+) -> None:
+    """Delete an alert message via the webhook's own delete endpoint
+    (same authored-by-webhook constraint as _edit_via_webhook -- the bot
+    API can't touch it). Used once an alert resolves: per explicit
+    direction, #infra-alerts should show ONLY currently-firing alerts,
+    with resolved/historical state living in Grafana, not accumulating
+    in Discord. Retries on 429 like every other Discord call here.
+    """
+    for attempt in range(1, max_attempts + 1):
+        async with session.delete(
+            f"{DISCORD_WEBHOOK_URL}/messages/{message_id}",
+        ) as del_resp:
+            if del_resp.status < 300 or del_resp.status == 404:
+                # 404 = already gone (e.g. manually deleted) -- treat as
+                # success, nothing left to clean up.
+                return
+            if del_resp.status == 429:
+                try:
+                    body = await del_resp.json()
+                    retry_after = float(body.get("retry_after", 1.0))
+                except Exception:
+                    retry_after = 1.0
+                log.warning(
+                    "Delete rate-limited for message %s (attempt %d/%d), retrying in %.2fs",
+                    message_id, attempt, max_attempts, retry_after,
+                )
+                await asyncio.sleep(retry_after + 0.1)
+                continue
+            body_text = await del_resp.text()
+            log.warning("Failed to delete message via webhook API: %s %s", del_resp.status, body_text)
+            return
+    log.error("Giving up deleting message %s after %d attempts", message_id, max_attempts)
 
 
 def _resume_ack_watchers() -> None:
@@ -646,12 +785,70 @@ async def run_http_server() -> None:
     await asyncio.Event().wait()
 
 
+# How often the reconciliation sweep runs. This is a safety net, not the
+# primary resolve-detection path (that's the webhook resolved-batch
+# handler for unacked alerts, and _watch_for_resolution's poll for acked
+# ones) -- it exists to catch cases neither of those cover: a missed
+# Grafana webhook delivery (bot down during the resolved notification,
+# Discord outage, Alertmanager retry exhaustion), or a crash between an
+# unacked-resolve delete and its _save_pending() call leaving a stale
+# entry. Runs at a slower cadence than the ack watcher's 30s poll since
+# it's O(all pending alerts) against the same active-alerts endpoint
+# rather than one alert per task.
+RECONCILE_INTERVAL_SEC = 300
+
+
+async def _reconcile_pending() -> None:
+    """Background loop: periodically diff every _pending entry that ISN'T
+    already covered by an ack watcher against Grafana's active-alerts
+    list, and delete the Discord message for anything that's resolved
+    but was never cleaned up. See RECONCILE_INTERVAL_SEC for why this
+    exists alongside the webhook-driven and ack-watcher-driven paths.
+    """
+    async with aiohttp.ClientSession() as session:
+        while True:
+            await asyncio.sleep(RECONCILE_INTERVAL_SEC)
+            try:
+                async with session.get(
+                    f"{GRAFANA_URL}/api/alertmanager/grafana/api/v2/alerts",
+                    headers={"Authorization": f"Bearer {GRAFANA_SA_TOKEN}"},
+                ) as resp:
+                    if resp.status >= 300:
+                        log.warning("Reconcile: could not query active alerts (%s), skipping this pass", resp.status)
+                        continue
+                    active_alerts = await resp.json()
+            except Exception:
+                log.exception("Reconcile: error querying active alerts, will retry next interval")
+                continue
+
+            active_label_sets = [a.get("labels", {}) for a in active_alerts]
+            stale: list[int] = []
+            for message_id, pending in list(_pending.items()):
+                if pending.get("resolved") or pending.get("acked"):
+                    # acked entries are covered by their own watcher task
+                    continue
+                labels = pending.get("labels", {})
+                if labels not in active_label_sets:
+                    stale.append(message_id)
+
+            if not stale:
+                continue
+            log.info("Reconcile: found %d stale unacked message(s) not caught by the webhook path, cleaning up", len(stale))
+            for message_id in stale:
+                await _delete_via_webhook(session, message_id)
+                still_pending = _pending.get(message_id)
+                if still_pending is not None and not still_pending.get("acked"):
+                    _pending.pop(message_id, None)
+                    _save_pending()
+
+
 async def main() -> None:
     _load_pending()
     client = AckBotClient()
     await asyncio.gather(
         client.start(DISCORD_BOT_TOKEN),
         run_http_server(),
+        _reconcile_pending(),
     )
 
 
