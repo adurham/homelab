@@ -29,7 +29,7 @@ contactPoints:
           use_discord_username: true
           title: "{{ '{{' }} .CommonLabels.alertname {{ '}}' }}"
           message: >-
-            {{ '{{' }} range .Alerts {{ '}}' }}**{{ '{{' }} .Labels.severity | default "unknown" {{ '}}' }}** — {{ '{{' }} .Annotations.summary {{ '}}' }}
+            {{ '{{' }} range .Alerts {{ '}}' }}**{{ '{{' }} if .Labels.severity {{ '}}' }}{{ '{{' }} .Labels.severity {{ '}}' }}{{ '{{' }} else {{ '}}' }}unknown{{ '{{' }} end {{ '}}' }}** — {{ '{{' }} .Annotations.summary {{ '}}' }}
             {{ '{{' }} if .Annotations.description {{ '}}' }}{{ '{{' }} .Annotations.description {{ '}}' }}
             {{ '{{' }} end {{ '}}' }}{{ '{{' }} end {{ '}}' }}
             [View in Grafana]({{ '{{' }} .ExternalURL {{ '}}' }})
