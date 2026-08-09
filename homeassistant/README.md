@@ -70,8 +70,14 @@ Brief tour of what is actually running. See the matching files under
   `automations/circulation_safety.yaml`. Smoke / CO emergency response and
   HVAC circulation watchdog.
 - Infrastructure alerting — `automations/adguard_watchdog.yaml`,
-  `automations/grafana_alert_webhook.yaml`. AdGuard Home liveness monitor
-  and Grafana → iPhone push bridge.
+  `automations/frigate_watchdog.yaml`, `automations/disk_space_watchdog.yaml`,
+  `automations/smart_vent_watchdog.yaml`, `automations/grafana_alert_webhook.yaml`.
+  Liveness monitors (AdGuard, Frigate NVR, HA host disk space, Smart Vent
+  Controller's AppDaemon heartbeat) and the Grafana → iPhone push bridge.
+  `smart_vent_watchdog.yaml` self-heals via `hassio.addon_restart` on
+  heartbeat staleness >6min, rate-limited to 1 restart/15min, escalates
+  to a critical push if the restart doesn't clear it — see the 2026-08-08
+  incident notes in its header comment.
 - Lights — `cat_room_main_lights_{on,off}.yaml`,
   `front_porch_sconces_{on,off}.yaml`,
   `stairs_main_lights_{on,off}.yaml`,
@@ -87,7 +93,15 @@ Brief tour of what is actually running. See the matching files under
   from `sensor.ac_suction_line_temp`) so redirection never risks evaporator
   freeze. Deploys via the same `ansible/deploy_ha_automations.yml` playbook
   (AppDaemon hot-reloads the app on file change — no HA restart). Offline
-  unit tests in `appdaemon/tests/`.
+  unit tests in `appdaemon/tests/`. All HA service calls (vent tilt, fan
+  mode) are fire-and-forget (`callback=`), not blocking waits — this app
+  runs on a single pinned AppDaemon worker thread, and a blocking call that
+  never returns (2026-08-08 incident: a websocket response got orphaned)
+  freezes the WHOLE app, including the periodic control loop, for as long
+  as the wedge lasts. `automations/smart_vent_watchdog.yaml` +
+  `sensor.smart_vent_controller_heartbeat` + a Grafana alert rule
+  (`roles/grafana` → `smart_vent_controller_frozen`) all exist specifically
+  to detect and self-heal this failure mode.
 - Hot water — `hot_water_recovery.yaml`, `smart_circulation.yaml`. Recovery
   manager and (currently disabled) smart recirculation pump control.
 - Laundry — `laundry_monitor.yaml`. Notifies when the washer cycle ends.

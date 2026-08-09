@@ -88,14 +88,24 @@ Single-host metrics + logs stack on `vm-01` and `graf-01`:
   - **Log-backed events**: `log_oom_kill`, `log_service_restart_loop`,
     `log_ssh_brute_force`, `log_kernel_io_error`, `log_postgres_fatal`,
     `log_postfix_relay_failure`.
+  - **App-specific staleness**: `smart_vent_controller_frozen` (HVAC
+    vent-control AppDaemon heartbeat, see `roles/grafana_ack_bot` for
+    how these route through Discord), `tati_phone_tracking_stale`.
   - **Meta**: `dead_mans_switch` — always-firing rule routed exclusively
     to a healthchecks.io webhook so an outage of Grafana / mail-01 /
     the LAN doesn't leave you blind.
-- **Delivery** — Three contact points:
+- **Delivery** — Four contact points, all fanned out in parallel
+  (`continue: true`):
   1. Home Assistant webhook → iOS critical push (`severity=critical`
      overrides Do Not Disturb; warnings come in as normal pushes).
-  2. iCloud SMTP fallback via `mail-01` for resilience if HA is down.
-  3. healthchecks.io webhook for the dead-man's-switch only — pages
+  2. Discord (`#infra-alerts`, via `roles/grafana_ack_bot` — a
+     standalone bot on hermes-gw-01, NOT Grafana's native Discord
+     integration directly) — clickthrough link to the firing alert,
+     permanent scrollable history, and reaction-based ack (EM7-style:
+     suppresses new notifications until the alert actually resolves,
+     not a fixed timer) / timed silence (1h/4h/24h).
+  3. iCloud SMTP fallback via `mail-01` for resilience if HA is down.
+  4. healthchecks.io webhook for the dead-man's-switch only — pages
      out-of-band (gmail, not via mail-01) if the rest of the pipeline
      is broken.
 
@@ -153,6 +163,8 @@ Manages the lifecycle of LXC containers, VMs, and cluster configuration.
   - `manage_authentik.yml` — declarative Authentik config (providers, apps, groups).
   - `deploy_tanium_clients.yml` — Tanium client install across mixed OS targets.
   - `deploy_monitoring.yml` — VictoriaMetrics + Grafana.
+  - `deploy_grafana_ack_bot.yml` — Discord reaction ack/silence bot for
+    Grafana alerts (hermes-gw-01, see `roles/grafana_ack_bot/README.md`).
 
 ### `homeassistant/` — smart home automation
 
