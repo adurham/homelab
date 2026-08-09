@@ -19,7 +19,19 @@ groups:
                 type: prometheus
                 uid: victoriametrics
               editorMode: code
-              expr: up
+              # job!="exo" -- exo cluster nodes (the Mac Studios) don't run
+              # node_exporter at all, they expose their own /metrics on
+              # :52415 (see roles/victoriametrics job 'exo'). This rule's
+              # annotations hardcode "node_exporter on X hasn't responded",
+              # which was factually WRONG when it fired for job=exo -- the
+              # actual Mac Studio hardware was up the whole time, only the
+              # exo SERVER PROCESS was down (e.g. mid-restart, mid-mlx
+              # rebuild). Those are different failure modes needing
+              # different responses (restart the exo process vs. physically
+              # check the machine), so exo gets its own rule below
+              # (exo_server_down) with accurate wording instead of being
+              # silently folded into the generic host-down check.
+              expr: up{job!="exo"}
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -55,6 +67,60 @@ groups:
         annotations:
           summary: "{{ '{{' }} $labels.instance {{ '}}' }} is down"
           description: "node_exporter on {{ '{{' }} $labels.instance {{ '}}' }} hasn't responded for 5 minutes"
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: exo_server_down
+        title: exo server process down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: up{job="exo"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "exo server down on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "The exo inference server process on {{ '{{' }} $labels.instance {{ '}}' }} hasn't responded on :52415/metrics for 5 minutes. This does NOT mean the Mac Studio itself is down -- it means the exo process specifically has stopped (crashed, restarting, mid mlx rebuild, cluster not started). Check with `ssh {{ '{{' }} $labels.instance {{ '}}' }} 'ps aux | grep exo'` and the cluster start/log workflow before assuming hardware failure."
         labels:
           severity: critical
         isPaused: false
