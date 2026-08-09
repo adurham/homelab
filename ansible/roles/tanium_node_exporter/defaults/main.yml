@@ -1,9 +1,0 @@
----
-# Renovate tracks `prometheus/node_exporter` GitHub releases here.
-# This is the only consumer of node_exporter in the repo — every other
-# host runs Grafana Alloy's bundled `prometheus.exporter.unix` instead.
-tanium_node_exporter_version: "1.11.1"
-
-# vm-01's private-subnet IP — the only host that should be allowed to
-# scrape :9100 on the Tanium appliances. Sourced from group_vars/all/vars.yml.
-tanium_node_exporter_scrape_src: "{{ ip_vm }}"
