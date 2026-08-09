@@ -117,6 +117,13 @@ ACK_SILENCE_CEILING = timedelta(days=30)
 # acked alert. Short enough that "resolved" shows up promptly, long
 # enough not to hammer Grafana with N concurrent acked-alert pollers.
 ACK_WATCH_POLL_INTERVAL_SEC = 30
+# Number of consecutive polls where an acked alert's fingerprint must be
+# absent from the active-alerts list before it's treated as genuinely
+# resolved. A single miss is not trusted -- Grafana can return a 200
+# with a transiently incomplete list (mid-restart, brief backend hiccup)
+# that looks identical to real resolution. 2 misses = ~60s of confirmed
+# absence at the default 30s poll interval.
+RESOLUTION_MISS_THRESHOLD = 2
 # Give up watching (leave the silence in place until its 30-day ceiling)
 # after this long -- a safety valve so a permanently-stuck alert
 # (Grafana can't tell it's resolved, or the matchers stop matching for
@@ -411,12 +418,26 @@ async def _delete_silence(session: aiohttp.ClientSession, silence_id: str) -> bo
         return True
 
 
-async def _alert_still_active(session: aiohttp.ClientSession, labels: dict) -> bool:
-    """Check Grafana's Alertmanager active-alerts list for an entry whose
-    labels exactly match. Used by the ack watcher to detect resolution --
-    an acked alert instance disappearing from this list entirely means it
+async def _alert_still_active(session: aiohttp.ClientSession, fingerprint: str) -> bool:
+    """Check Grafana's Alertmanager active-alerts list for an entry with
+    this fingerprint. Used by the ack watcher to detect resolution -- an
+    acked alert instance disappearing from this list entirely means it
     resolved and the ack's silence can come down early instead of riding
     out its 30-day ceiling.
+
+    Matches on fingerprint, NOT labels. Grafana's OUTGOING webhook
+    payload (what _pending's labels were captured from at post time)
+    strips server-injected labels like __alert_rule_uid__ and
+    grafana_folder that the /api/v2/alerts REST API response DOES
+    include for the same instance -- confirmed empirically 2026-08-09
+    (webhook gave 6 labels, API gave 8 for the identical alert). Exact
+    label-dict equality between the two therefore NEVER matches, which
+    meant this check always returned False (alert not found -> treated
+    as resolved) on the very first poll after every ack, regardless of
+    whether the alert was still genuinely firing. fingerprint is
+    computed from the full internal label set on both the webhook
+    payload and the API response for the same alert instance, so it's
+    stable and comparable across both surfaces.
 
     IMPORTANT: this must NOT filter on status.state == "active". Once an
     alert is acked, the ack's OWN silence matches its labels, which flips
@@ -443,8 +464,7 @@ async def _alert_still_active(session: aiohttp.ClientSession, labels: dict) -> b
         alerts = await resp.json()
 
     for a in alerts:
-        a_labels = a.get("labels", {})
-        if a_labels == labels:
+        if a.get("fingerprint") == fingerprint:
             return True
     return False
 
@@ -461,11 +481,11 @@ async def _alert_still_active(session: aiohttp.ClientSession, labels: dict) -> b
 _ack_watchers: dict[int, asyncio.Task] = {}
 
 
-def _spawn_ack_watcher(message_id: int, silence_id: str, alertname: str, labels: dict, pending: dict) -> None:
+def _spawn_ack_watcher(message_id: int, silence_id: str, alertname: str, fingerprint: str, pending: dict) -> None:
     existing = _ack_watchers.get(message_id)
     if existing is not None and not existing.done():
         return
-    task = asyncio.create_task(_watch_for_resolution(message_id, silence_id, alertname, labels, pending))
+    task = asyncio.create_task(_watch_for_resolution(message_id, silence_id, alertname, fingerprint, pending))
     _ack_watchers[message_id] = task
 
 
@@ -473,7 +493,7 @@ async def _watch_for_resolution(
     message_id: int,
     silence_id: str,
     alertname: str,
-    labels: dict,
+    fingerprint: str,
     pending: dict,
 ) -> None:
     """Background task: poll until the acked alert is no longer active,
@@ -482,17 +502,38 @@ async def _watch_for_resolution(
     alerts; resolved/historical state belongs in Grafana, not piling up
     in Discord. `pending` is the SAME dict stored in _pending so state
     changes are reflected there too.
+
+    Requires MISS_THRESHOLD consecutive polls where the fingerprint is
+    absent from the active-alerts list before treating it as resolved,
+    not a single miss. Without this debounce, one transient/incomplete
+    API response (Grafana mid-restart, a slow query, momentary API
+    hiccup that still returns 200 with a partial list) looks identical
+    to genuine resolution and deletes a message for an alert that's
+    still actually firing -- this exact failure mode deleted 3 live
+    alerts' messages via the reconcile sweep on 2026-08-09 before this
+    debounce was added.
     """
     deadline = datetime.now(timezone.utc) + ACK_WATCH_MAX_DURATION
+    consecutive_misses = 0
     async with aiohttp.ClientSession() as session:
         while datetime.now(timezone.utc) < deadline:
             await asyncio.sleep(ACK_WATCH_POLL_INTERVAL_SEC)
             try:
-                still_active = await _alert_still_active(session, labels)
+                still_active = await _alert_still_active(session, fingerprint)
             except Exception:
                 log.exception("Error polling active-alerts for %s, will retry", alertname)
+                consecutive_misses = 0
                 continue
             if still_active:
+                consecutive_misses = 0
+                continue
+
+            consecutive_misses += 1
+            if consecutive_misses < RESOLUTION_MISS_THRESHOLD:
+                log.info(
+                    "Alert %s not seen in active-alerts poll %d/%d, waiting for confirmation before treating as resolved",
+                    alertname, consecutive_misses, RESOLUTION_MISS_THRESHOLD,
+                )
                 continue
 
             log.info("Alert %s (silence %s) resolved, tearing down ack silence and deleting message %s", alertname, silence_id, message_id)
@@ -633,20 +674,37 @@ def _resume_ack_watchers() -> None:
     calls are safe and cheap.
     """
     resumed = 0
+    skipped_no_fingerprint = 0
     for message_id, pending in _pending.items():
         silence_id = pending.get("ack_silence_id")
         if not silence_id or pending.get("resolved"):
             continue
         try:
             alertname = pending["alertname"]
-            labels = pending["labels"]
         except KeyError:
-            log.warning("Skipping malformed pending entry for message %s (missing alertname/labels)", message_id)
+            log.warning("Skipping malformed pending entry for message %s (missing alertname)", message_id)
             continue
-        _spawn_ack_watcher(message_id, silence_id, alertname, labels, pending)
+        fingerprint = pending.get("fingerprint")
+        if not fingerprint:
+            # Persisted by a pre-fingerprint version of this service.
+            # Nothing safe to poll on -- resume-watching would just
+            # never find a match (see _alert_still_active's docstring
+            # for why label-only matching is unreliable) and eventually
+            # time out without ever tearing down the silence early. Log
+            # it and leave the silence to ride out its 30-day ceiling
+            # rather than guessing.
+            skipped_no_fingerprint += 1
+            continue
+        _spawn_ack_watcher(message_id, silence_id, alertname, fingerprint, pending)
         resumed += 1
     if resumed:
         log.info("Resumed %d ack resolution watcher(s) after restart", resumed)
+    if skipped_no_fingerprint:
+        log.warning(
+            "Skipped resuming %d ack watcher(s) with no persisted fingerprint (pre-fingerprint state) "
+            "-- their silences will ride out the 30-day ceiling instead of tearing down early",
+            skipped_no_fingerprint,
+        )
 
 
 class AckBotClient(discord.Client):
@@ -716,7 +774,7 @@ class AckBotClient(discord.Client):
                 pending["ack_silence_id"] = silence_id
                 _save_pending()
                 _spawn_ack_watcher(
-                    payload.message_id, silence_id, pending["alertname"], pending["labels"], pending
+                    payload.message_id, silence_id, pending["alertname"], pending.get("fingerprint", ""), pending
                 )
             else:
                 ack_line = "\n⚠️ Ack failed — could not create Grafana silence, check service logs"
@@ -796,14 +854,37 @@ async def run_http_server() -> None:
 # it's O(all pending alerts) against the same active-alerts endpoint
 # rather than one alert per task.
 RECONCILE_INTERVAL_SEC = 300
+# Consecutive reconcile sweeps required before deleting anything. 2 =
+# 10 minutes of confirmed absence at the default 5-minute interval.
+RECONCILE_MISS_THRESHOLD = 2
+
+# Per-message_id count of consecutive reconcile sweeps where the alert
+# was absent from the active-alerts list. Not persisted -- a service
+# restart resets it, which is fine since a restart also means state.json
+# was just freshly reloaded and _pending only reflects genuinely
+# still-open alerts as of the last _save_pending() before the restart.
+_reconcile_miss_counts: dict[int, int] = {}
 
 
 async def _reconcile_pending() -> None:
     """Background loop: periodically diff every _pending entry that ISN'T
     already covered by an ack watcher against Grafana's active-alerts
-    list, and delete the Discord message for anything that's resolved
-    but was never cleaned up. See RECONCILE_INTERVAL_SEC for why this
-    exists alongside the webhook-driven and ack-watcher-driven paths.
+    list (matched by fingerprint -- see _alert_still_active's docstring
+    for why label matching across the webhook-payload/API boundary is
+    unreliable), and delete the Discord message for anything confirmed
+    resolved but never cleaned up. See RECONCILE_INTERVAL_SEC for why
+    this exists alongside the webhook-driven and ack-watcher-driven
+    paths.
+
+    Requires RECONCILE_MISS_THRESHOLD consecutive sweeps (not a single
+    one) with the alert absent before deleting anything. A single sweep
+    deleted 3 GENUINELY STILL-FIRING alerts' Discord messages on
+    2026-08-09 -- root cause was matching on labels instead of
+    fingerprint (see _alert_still_active), but the single-miss trigger
+    made that bug immediately destructive instead of self-correcting on
+    the next poll. Never repeat that mistake: always debounce a
+    delete-on-absence decision against a data source that can be
+    transiently wrong.
     """
     async with aiohttp.ClientSession() as session:
         while True:
@@ -821,21 +902,41 @@ async def _reconcile_pending() -> None:
                 log.exception("Reconcile: error querying active alerts, will retry next interval")
                 continue
 
-            active_label_sets = [a.get("labels", {}) for a in active_alerts]
-            stale: list[int] = []
+            active_fingerprints = {a.get("fingerprint") for a in active_alerts if a.get("fingerprint")}
+            candidates: list[int] = []
             for message_id, pending in list(_pending.items()):
                 if pending.get("resolved") or pending.get("acked"):
                     # acked entries are covered by their own watcher task
                     continue
-                labels = pending.get("labels", {})
-                if labels not in active_label_sets:
+                fingerprint = pending.get("fingerprint")
+                if not fingerprint:
+                    # Pre-fingerprint legacy entry -- nothing safe to
+                    # match on, leave it for someone to notice/clean up
+                    # manually rather than guessing with label matching.
+                    continue
+                if fingerprint not in active_fingerprints:
+                    candidates.append(message_id)
+                else:
+                    _reconcile_miss_counts.pop(message_id, None)
+
+            stale: list[int] = []
+            for message_id in candidates:
+                count = _reconcile_miss_counts.get(message_id, 0) + 1
+                _reconcile_miss_counts[message_id] = count
+                if count >= RECONCILE_MISS_THRESHOLD:
                     stale.append(message_id)
+                else:
+                    log.info(
+                        "Reconcile: message %s absent from active-alerts %d/%d sweeps, waiting for confirmation",
+                        message_id, count, RECONCILE_MISS_THRESHOLD,
+                    )
 
             if not stale:
                 continue
             log.info("Reconcile: found %d stale unacked message(s) not caught by the webhook path, cleaning up", len(stale))
             for message_id in stale:
                 await _delete_via_webhook(session, message_id)
+                _reconcile_miss_counts.pop(message_id, None)
                 still_pending = _pending.get(message_id)
                 if still_pending is not None and not still_pending.get("acked"):
                     _pending.pop(message_id, None)
