@@ -10,6 +10,30 @@ contactPoints:
           url: "{{ homeassistant_url }}/api/webhook/{{ grafana_alert_webhook_id }}"
           httpMethod: POST
 
+  # #infra-alerts channel on "Nativedude's server" via Grafana's native
+  # Discord webhook integration. Created 2026-08-08 specifically to fix
+  # two gaps in the HA-push + email path: the HA mobile push has no
+  # deep link back to the firing alert/panel, and neither push nor email
+  # gives a real scrollable history — Discord gives both for free (the
+  # channel IS the history, {{ '{{' }} .ExternalURL {{ '}}' }} gives the clickthrough).
+  # use_discord_username=true so messages show as "Grafana Alerts" (the
+  # webhook's configured name) rather than generic "Grafana".
+  - orgId: 1
+    name: discord_infra_alerts
+    receivers:
+      - uid: discord_infra_alerts
+        type: discord
+        disableResolveMessage: false
+        settings:
+          url: "{{ discord_infra_alerts_webhook_url }}"
+          use_discord_username: true
+          title: "{{ '{{' }} .CommonLabels.alertname {{ '}}' }}"
+          message: >-
+            {{ '{{' }} range .Alerts {{ '}}' }}**{{ '{{' }} .Labels.severity | default "unknown" {{ '}}' }}** — {{ '{{' }} .Annotations.summary {{ '}}' }}
+            {{ '{{' }} if .Annotations.description {{ '}}' }}{{ '{{' }} .Annotations.description {{ '}}' }}
+            {{ '{{' }} end {{ '}}' }}{{ '{{' }} end {{ '}}' }}
+            [View in Grafana]({{ '{{' }} .ExternalURL {{ '}}' }})
+
   # Fallback path: emails the operator via mail-01 -> iCloud SMTP relay.
   # If HA is down, the webhook above fails and notifications drop. Email
   # via mail-01 doesn't depend on HA. Doesn't help if mail-01 is also
