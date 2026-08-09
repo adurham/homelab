@@ -68,6 +68,34 @@ discord_infra_alerts_webhook_url: !vault |
           64616366353639373638653030366236346631316263356136326362643366306365306265333965
           6566326630323533623834633930626432383134376338366562
 
+# Numeric ID (not a secret, but kept alongside the webhook for the
+# grafana_ack_bot role to target the right channel for its reaction
+# listener) of the #infra-alerts channel above.
+discord_infra_alerts_channel_id: "1535865801947611178"
+
+# Grafana Discord Ack Bot (roles/grafana_ack_bot). Standalone service on
+# hermes-gw-01: reacting to an alert message in #infra-alerts (1h/4h/24h
+# emoji) creates a matching Grafana Alertmanager silence via this
+# service-account token (created 2026-08-08, Editor role, scoped only to
+# what the Silence API needs). Reuses the EXISTING Hermes Discord bot
+# token (vault_hermes_gw_discord_bot_token, see roles/hermes_gateway) --
+# deliberately not a new Discord application. See
+# roles/grafana_ack_bot/files/service.py for the full design rationale.
+grafana_ack_bot_sa_token: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          62383335353837383638636439373961376166666535333362386133666636316263643431636435
+          3861313937316438393639633661363732613265383664380a653262643061343866386631653338
+          36343361343831643434353663343265316235663161326230303766616632643063626238626135
+          3534396538313363610a323933386566393932316464333837323737353134316233326164303966
+          64613862366165356566353235393865656434376233613861616231303761326236663231383962
+          6230666566313039633733346363313734363766656230643232
+
+# Discord user ID allowed to trigger acks via reaction (grafana_ack_bot
+# ALLOWED_USER_IDS). This is the app-owner user ID confirmed via the
+# Discord API when this bot's OAuth was granted server permissions
+# 2026-08-08 (owner.id in /oauth2/applications/@me). Not a secret.
+discord_owner_user_id: "109655906366541824"
+
 # Home Assistant base URL (LAN; reachable from graf-01 via vmbr0/eth0)
 homeassistant_url: "http://{{ ip_homeassistant }}:8123"
 # Long-lived access token for the VictoriaMetrics → HA Prometheus scrape.

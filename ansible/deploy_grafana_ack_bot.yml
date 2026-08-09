@@ -1,0 +1,10 @@
+---
+# Deploys the standalone Grafana Discord Ack Bot to hermes-gw-01. See
+# roles/grafana_ack_bot/files/service.py for the full design rationale
+# (why this is a separate process from hermes-agent, not an extension of
+# its own Discord adapter).
+- name: Deploy Grafana Discord Ack Bot
+  hosts: hermes_gateway
+  gather_facts: true
+  roles:
+    - grafana_ack_bot

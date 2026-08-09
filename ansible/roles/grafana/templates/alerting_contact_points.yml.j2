@@ -10,29 +10,25 @@ contactPoints:
           url: "{{ homeassistant_url }}/api/webhook/{{ grafana_alert_webhook_id }}"
           httpMethod: POST
 
-  # #infra-alerts channel on "Nativedude's server" via Grafana's native
-  # Discord webhook integration. Created 2026-08-08 specifically to fix
-  # two gaps in the HA-push + email path: the HA mobile push has no
-  # deep link back to the firing alert/panel, and neither push nor email
-  # gives a real scrollable history — Discord gives both for free (the
-  # channel IS the history, {{ '{{' }} .ExternalURL {{ '}}' }} gives the clickthrough).
-  # use_discord_username=true so messages show as "Grafana Alerts" (the
-  # webhook's configured name) rather than generic "Grafana".
+  # #infra-alerts channel on "Nativedude's server", routed through the
+  # Grafana Discord Ack Bot (roles/grafana_ack_bot, hermes-gw-01:8990)
+  # rather than Grafana's native `discord` contact point directly. The
+  # ack bot itself posts the formatted message to Discord (reusing the
+  # same webhook) and adds 1h/4h/24h reaction options; reacting creates
+  # a real Grafana Alertmanager silence scoped to that specific alert
+  # instance. A plain `webhook` contact point (not `type: discord`) is
+  # used here deliberately -- Grafana's native Discord integration has
+  # no ack/silence capability of its own, so the raw payload is POSTed
+  # to the ack bot instead, which does the Discord posting itself.
   - orgId: 1
     name: discord_infra_alerts
     receivers:
       - uid: discord_infra_alerts
-        type: discord
-        disableResolveMessage: false
+        type: webhook
+        disableResolveMessage: true
         settings:
-          url: "{{ discord_infra_alerts_webhook_url }}"
-          use_discord_username: true
-          title: "{{ '{{' }} .CommonLabels.alertname {{ '}}' }}"
-          message: >-
-            {{ '{{' }} range .Alerts {{ '}}' }}**{{ '{{' }} if .Labels.severity {{ '}}' }}{{ '{{' }} .Labels.severity {{ '}}' }}{{ '{{' }} else {{ '}}' }}unknown{{ '{{' }} end {{ '}}' }}** — {{ '{{' }} .Annotations.summary {{ '}}' }}
-            {{ '{{' }} if .Annotations.description {{ '}}' }}{{ '{{' }} .Annotations.description {{ '}}' }}
-            {{ '{{' }} end {{ '}}' }}{{ '{{' }} end {{ '}}' }}
-            [View in Grafana]({{ '{{' }} .ExternalURL {{ '}}' }})
+          url: "http://172.16.0.50:8990/grafana-webhook"
+          httpMethod: POST
 
   # Fallback path: emails the operator via mail-01 -> iCloud SMTP relay.
   # If HA is down, the webhook above fails and notifications drop. Email

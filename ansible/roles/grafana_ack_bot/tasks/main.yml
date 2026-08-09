@@ -1,0 +1,111 @@
+---
+# Grafana Discord Ack Bot: standalone service on hermes-gw-01 that lets
+# reacting to a Grafana alert message in #infra-alerts (1h/4h/24h emoji)
+# create a matching Grafana Alertmanager silence. Deliberately NOT part
+# of hermes-agent -- see the module docstring in files/service.py for
+# why (Discord's global per-app Interactions Endpoint URL routing
+# conflict). Reuses the existing Hermes Discord bot token + webhook, no
+# new Discord application needed.
+
+- name: Create grafana-ack-bot venv directory
+  ansible.builtin.file:
+    path: /opt/grafana-ack-bot-venv
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: '0755'
+
+- name: Create grafana-ack-bot venv
+  ansible.builtin.command: python3 -m venv /opt/grafana-ack-bot-venv
+  args:
+    creates: /opt/grafana-ack-bot-venv/bin/python3
+  become: true
+  become_user: hermes
+
+- name: Install grafana-ack-bot Python dependencies
+  ansible.builtin.pip:
+    name:
+      - discord.py
+      - aiohttp
+    virtualenv: /opt/grafana-ack-bot-venv
+    state: present
+  become: true
+  become_user: hermes
+
+- name: Create /opt/grafana-ack-bot directory
+  ansible.builtin.file:
+    path: /opt/grafana-ack-bot
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: '0755'
+
+- name: Deploy grafana-ack-bot service.py
+  ansible.builtin.copy:
+    src: service.py
+    dest: /opt/grafana-ack-bot/service.py
+    owner: hermes
+    group: hermes
+    mode: '0644'
+  notify: Restart grafana-ack-bot
+
+- name: Deploy grafana-ack-bot env file
+  ansible.builtin.template:
+    src: grafana-ack-bot.env.j2
+    dest: /opt/grafana-ack-bot/grafana-ack-bot.env
+    owner: hermes
+    group: hermes
+    mode: '0600'
+  no_log: true
+  notify: Restart grafana-ack-bot
+
+- name: Deploy grafana-ack-bot systemd unit
+  ansible.builtin.template:
+    src: grafana-ack-bot.service.j2
+    dest: /etc/systemd/system/grafana-ack-bot.service
+    mode: '0644'
+  notify:
+    - Reload systemd daemon
+    - Restart grafana-ack-bot
+
+- name: Enable and start grafana-ack-bot
+  ansible.builtin.systemd:
+    name: grafana-ack-bot
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# Default-deny firewall for the webhook receiver port, mirroring the
+# pattern already established for hermes_gateway's api_server (tcp/8642):
+# only graf-01 (the sole caller of /grafana-webhook) and loopback are
+# allowed in; everything else is dropped. Uses the SAME netfilter-persistent
+# stack hermes_gateway already installed on this host — no new package.
+- name: "iptables: allow loopback to grafana-ack-bot (defense in depth)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    in_interface: lo
+    jump: ACCEPT
+    comment: "grafana_ack_bot: loopback"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow graf-01 (172.16.0.41) to grafana-ack-bot tcp/8990"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8990"
+    source: "172.16.0.41"
+    jump: ACCEPT
+    comment: "grafana_ack_bot: graf-01 -> webhook receiver"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: drop all other inbound to grafana-ack-bot tcp/8990"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8990"
+    jump: DROP
+    comment: "grafana_ack_bot: deny webhook receiver"
+    state: present
+  notify: Save iptables rules
