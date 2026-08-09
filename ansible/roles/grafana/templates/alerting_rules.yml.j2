@@ -764,35 +764,54 @@ groups:
               datasource:
                 type: loki
                 uid: loki
+              # Range query (NOT instant) is required here: with multiple
+              # hosts matching simultaneously, an instant Loki query's
+              # per-series host labels get lost in Grafana's frame
+              # conversion, and the classic-condition/threshold node
+              # downstream throws "frame cannot uniquely be identified by
+              # its labels: has duplicate results with labels {}" — a
+              # long-standing Grafana bug (see e.g. grafana/grafana#83448,
+              # #104076) that silently replaces the real per-host alert
+              # with a DatasourceError showing "[no value]" everywhere.
+              # Range queries route through a different conversion path
+              # that keeps labels intact (verified empirically against
+              # this Loki 3.7.1 + Grafana 11.x pairing 2026-08-09).
               expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "Out of memory|invoked oom-killer" [5m]))'
-              instant: true
+              instant: false
+              range: true
               intervalMs: 1000
               maxDataPoints: 43200
               refId: A
-          - refId: C
+          - refId: B
             datasourceUid: __expr__
             model:
-              conditions:
-                - evaluator:
-                    params: [0]
-                    type: gt
-                  operator:
-                    type: and
-                  query:
-                    params: [A]
-                  reducer:
-                    type: last
-                    params: []
-                  type: query
               datasource:
                 name: Expression
                 type: __expr__
                 uid: __expr__
               expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              # Math (not classic-condition Threshold) so each host's
+              # label set survives into the alert instance -- Threshold
+              # on a multi-series input collapses everything into one
+              # unlabeled instance, which is why the host label in the
+              # annotations below used to render as "[no value]".
+              expression: "$B > 0"
+              type: math
               intervalMs: 1000
               maxDataPoints: 43200
               refId: C
-              type: threshold
         noDataState: OK
         execErrState: Error
         for: 1m
@@ -816,35 +835,40 @@ groups:
               datasource:
                 type: loki
                 uid: loki
+              # See the "Range query (NOT instant)" comment on log_oom_kill
+              # above for why this can't be instant:true with multiple
+              # simultaneous (host, unit) series.
               expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
-              instant: true
+              instant: false
+              range: true
               intervalMs: 1000
               maxDataPoints: 43200
               refId: A
-          - refId: C
+          - refId: B
             datasourceUid: __expr__
             model:
-              conditions:
-                - evaluator:
-                    params: [5]
-                    type: gt
-                  operator:
-                    type: and
-                  query:
-                    params: [A]
-                  reducer:
-                    type: last
-                    params: []
-                  type: query
               datasource:
                 name: Expression
                 type: __expr__
                 uid: __expr__
               expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 5"
+              type: math
               intervalMs: 1000
               maxDataPoints: 43200
               refId: C
-              type: threshold
         noDataState: OK
         execErrState: Error
         for: 5m
@@ -868,35 +892,40 @@ groups:
               datasource:
                 type: loki
                 uid: loki
+              # See the "Range query (NOT instant)" comment on log_oom_kill
+              # for why this can't be instant:true with multiple
+              # simultaneous host series.
               expr: 'sum by (host) (count_over_time({job="systemd-journal", unit="ssh.service"} |~ "Failed password|Invalid user" [10m]))'
-              instant: true
+              instant: false
+              range: true
               intervalMs: 1000
               maxDataPoints: 43200
               refId: A
-          - refId: C
+          - refId: B
             datasourceUid: __expr__
             model:
-              conditions:
-                - evaluator:
-                    params: [10]
-                    type: gt
-                  operator:
-                    type: and
-                  query:
-                    params: [A]
-                  reducer:
-                    type: last
-                    params: []
-                  type: query
               datasource:
                 name: Expression
                 type: __expr__
                 uid: __expr__
               expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 10"
+              type: math
               intervalMs: 1000
               maxDataPoints: 43200
               refId: C
-              type: threshold
         noDataState: OK
         execErrState: Error
         for: 5m
@@ -920,35 +949,40 @@ groups:
               datasource:
                 type: loki
                 uid: loki
+              # See the "Range query (NOT instant)" comment on log_oom_kill
+              # for why this can't be instant:true with multiple
+              # simultaneous host series.
               expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "I/O error|EXT4-fs error|Buffer I/O error|Medium error|blk_update_request" [5m]))'
-              instant: true
+              instant: false
+              range: true
               intervalMs: 1000
               maxDataPoints: 43200
               refId: A
-          - refId: C
+          - refId: B
             datasourceUid: __expr__
             model:
-              conditions:
-                - evaluator:
-                    params: [0]
-                    type: gt
-                  operator:
-                    type: and
-                  query:
-                    params: [A]
-                  reducer:
-                    type: last
-                    params: []
-                  type: query
               datasource:
                 name: Expression
                 type: __expr__
                 uid: __expr__
               expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 0"
+              type: math
               intervalMs: 1000
               maxDataPoints: 43200
               refId: C
-              type: threshold
         noDataState: OK
         execErrState: Error
         for: 1m
@@ -1099,35 +1133,40 @@ groups:
               # the systemd journal of the pve host that's sending. Match
               # the noisy-but-precise patterns that indicate a real fail
               # (not a transient retry).
+              # See the "Range query (NOT instant)" comment on log_oom_kill
+              # for why this can't be instant:true with multiple
+              # simultaneous host series.
               expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+"} |~ "(?i)replication.*(failed|error)|send/receive failed|530 Permission denied|cannot send.*: Broken pipe" [15m]))'
-              instant: true
+              instant: false
+              range: true
               intervalMs: 1000
               maxDataPoints: 43200
               refId: A
-          - refId: C
+          - refId: B
             datasourceUid: __expr__
             model:
-              conditions:
-                - evaluator:
-                    params: [0]
-                    type: gt
-                  operator:
-                    type: and
-                  query:
-                    params: [A]
-                  reducer:
-                    type: last
-                    params: []
-                  type: query
               datasource:
                 name: Expression
                 type: __expr__
                 uid: __expr__
               expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 0"
+              type: math
               intervalMs: 1000
               maxDataPoints: 43200
               refId: C
-              type: threshold
         noDataState: OK
         execErrState: Error
         for: 5m
@@ -1156,35 +1195,40 @@ groups:
               # read-only now" signal; "host: X has no active links" means
               # a peer dropped — single-node-loss is benign, but stack two
               # of those and you've lost quorum.
+              # See the "Range query (NOT instant)" comment on log_oom_kill
+              # for why this can't be instant:true with multiple
+              # simultaneous host series.
               expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+", unit="corosync.service"} |~ "(?i)not quorate|cluster is not quorate|quorum lost|no active links" [5m]))'
-              instant: true
+              instant: false
+              range: true
               intervalMs: 1000
               maxDataPoints: 43200
               refId: A
-          - refId: C
+          - refId: B
             datasourceUid: __expr__
             model:
-              conditions:
-                - evaluator:
-                    params: [0]
-                    type: gt
-                  operator:
-                    type: and
-                  query:
-                    params: [A]
-                  reducer:
-                    type: last
-                    params: []
-                  type: query
               datasource:
                 name: Expression
                 type: __expr__
                 uid: __expr__
               expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 0"
+              type: math
               intervalMs: 1000
               maxDataPoints: 43200
               refId: C
-              type: threshold
         noDataState: OK
         execErrState: Error
         for: 1m
@@ -1208,35 +1252,40 @@ groups:
               datasource:
                 type: loki
                 uid: loki
+              # See the "Range query (NOT instant)" comment on log_oom_kill
+              # for why this can't be instant:true with multiple
+              # simultaneous host series.
               expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "FATAL:|PANIC:" |~ "postgres" [5m]))'
-              instant: true
+              instant: false
+              range: true
               intervalMs: 1000
               maxDataPoints: 43200
               refId: A
-          - refId: C
+          - refId: B
             datasourceUid: __expr__
             model:
-              conditions:
-                - evaluator:
-                    params: [0]
-                    type: gt
-                  operator:
-                    type: and
-                  query:
-                    params: [A]
-                  reducer:
-                    type: last
-                    params: []
-                  type: query
               datasource:
                 name: Expression
                 type: __expr__
                 uid: __expr__
               expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 0"
+              type: math
               intervalMs: 1000
               maxDataPoints: 43200
               refId: C
-              type: threshold
         noDataState: OK
         execErrState: Error
         for: 2m
