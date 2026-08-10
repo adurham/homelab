@@ -1683,7 +1683,21 @@ class SmartVentController(hass.Hass):
             self.log(f"heartbeat write failed (non-fatal): {e}")
 
     def _engage_fan_assist(self):
-        """Turn the air handler fan to 'on', tracking that WE did it."""
+        """Turn the air handler fan to 'on', tracking that WE did it.
+
+        Goes through the ecobee_enhanced integration's real cloud API
+        (setHold with a "fan" param, no heat/coolHoldTemp — a pure fan
+        hold) instead of climate/set_fan_mode against the HomeKit
+        Controller entity. HomeKit fan-mode writes are a documented HA
+        bug (home-assistant/core#92010): ANY fan_mode change through
+        HomeKit forces an indefinite TEMPERATURE hold too, silently
+        knocking the ecobee off its schedule until someone notices and
+        presses Resume Program. 2026-08-09 incident: this app's own
+        FAN-ASSIST cycles were doing exactly that, 2-4x/day, undetected
+        for hours at a time. The ecobee_enhanced fan hold sets fan-only
+        (isTemperatureAbsolute/Relative both false), so the schedule's
+        setpoints keep running underneath it.
+        """
         if getattr(self, "_fan_assist_active", False):
             return
         current = self.get_state(FAN_ENTITY, attribute="fan_mode")
@@ -1691,22 +1705,30 @@ class SmartVentController(hass.Hass):
             # Already on (user or schedule); don't claim ownership so we won't
             # turn it off later and stomp their setting.
             return
-        self.log("  FAN-ASSIST: setting ecobee fan_mode -> on")
+        self.log("  FAN-ASSIST: setting ecobee fan hold -> on (via ecobee_enhanced, not HomeKit)")
         # Fire-and-forget — see _set_vent for why (2026-08-08 thread-freeze
         # incident). This callback also blocks the same pinned worker
         # thread as the vent-position calls.
-        self.call_service("climate/set_fan_mode",
-                          entity_id=FAN_ENTITY, fan_mode="on", hass_timeout=8,
+        self.call_service("ecobee_enhanced/set_fan_hold",
+                          fan_mode="on", hold_type="indefinite", hass_timeout=8,
                           callback=self._service_call_done)
         self._fan_assist_active = True
 
     def _release_fan_assist(self):
-        """Return the fan to 'auto' only if WE turned it on."""
+        """Clear the fan-only hold we created, via resume_top_event.
+
+        resumeAll=false pops ONLY the fan hold we pushed, leaving any
+        real user hold (e.g. Hold Away) underneath untouched. Previously
+        this called climate/set_fan_mode -> "auto" against the HomeKit
+        entity, which does NOT clear the hold ecobee's firmware created
+        on engage — that "auto" write is itself just another HomeKit
+        command, so the hold silently persisted for hours past release.
+        """
         if not getattr(self, "_fan_assist_active", False):
             return
-        self.log("  FAN-ASSIST: releasing ecobee fan_mode -> auto")
-        self.call_service("climate/set_fan_mode",
-                          entity_id=FAN_ENTITY, fan_mode="auto", hass_timeout=8,
+        self.log("  FAN-ASSIST: releasing fan hold (resume_top_event, via ecobee_enhanced)")
+        self.call_service("ecobee_enhanced/resume_top_event",
+                          hass_timeout=8,
                           callback=self._service_call_done)
         self._fan_assist_active = False
 

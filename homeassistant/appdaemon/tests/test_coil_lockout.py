@@ -63,9 +63,12 @@ class FakeController(svc.SmartVentController):
         return None
 
     def call_service(self, service, **kwargs):
-        if service == "climate/set_fan_mode":
+        if service == "ecobee_enhanced/set_fan_hold":
             self._fan_mode = kwargs.get("fan_mode")
             self.fan_calls.append(kwargs.get("fan_mode"))
+        elif service == "ecobee_enhanced/resume_top_event":
+            self._fan_mode = "auto"
+            self.fan_calls.append("auto")
 
 
 def build(hot_room_temp, donor_temp, cooling_ended_min_ago):
