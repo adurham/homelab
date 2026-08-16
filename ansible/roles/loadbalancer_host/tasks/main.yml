@@ -66,11 +66,21 @@
 # It IS the internet ingress — Google Home forwards :80/:443 to its LAN IP, and
 # it runs the No-IP DDNS updater. The backends (gallery/vm/graf) are private-
 # only, but the load balancer itself must straddle LAN+SDN or external access
-# (auth.chi, tanium.chi, etc.) breaks. net1 uses a STATIC LAN IP — AdGuard (in
-# Home Assistant) does DHCP but systemd-networkd won't reliably hold a lease on
-# this CT, and a static ingress IP is the right call for infra anyway. The
-# in-CT eth1.network deliberately sets NO gateway so default egress stays via
-# the private SDN gateway (no asymmetric-routing 502s).
+# (auth.chi, tanium.chi, etc.) breaks. net1 uses a STATIC LAN IP set directly
+# at the Proxmox net1 config (ip=<lb_lan_ingress_ip>/24, no gw) — NOT
+# ip=dhcp. History: this used to be ip=dhcp with the static address applied
+# only inside the CT via loadbalancer_service's eth1.network — but the guest's
+# own systemd-networkd DHCP client would still race for/hold a lease
+# alongside the static address (observed live 2026-08-16: eth1 carried BOTH
+# a stale DHCP lease at .94 as primary and .86 as a secondary address after a
+# `pct set` NIC recreate changed the MAC and broke the AdGuard static-lease
+# binding — HA's http.trusted_proxies only trusts .86/32, so every proxied
+# request 400'd until the DHCP lease was manually cleared). Setting the
+# static IP at the Proxmox net1 level removes the DHCP client from the
+# picture entirely, so there's no lease to drift onto. in-CT eth1.network
+# (loadbalancer_service role) still sets the address too, redundantly, and
+# deliberately has NO gateway so default egress stays via the private SDN
+# gateway (no asymmetric-routing 502s).
 - name: Check if Net1 (LAN ingress) exists
   delegate_to: "{{ lb_node }}"
   ansible.builtin.shell: |
@@ -80,10 +90,34 @@
   failed_when: false
   changed_when: false
 
-- name: Ensure LAN ingress interface (net1 on vmbr0)
+- name: Ensure LAN ingress interface (net1 on vmbr0, static IP)
   delegate_to: "{{ lb_node }}"
-  ansible.builtin.command: "pct set {{ lxc_id }} --net1 name=eth1,bridge=vmbr0,ip=dhcp,firewall=1"
+  ansible.builtin.command: >
+    pct set {{ lxc_id }} --net1
+    name=eth1,bridge=vmbr0,ip={{ lb_lan_ingress_ip }}/24,firewall=1
   when: lb_exists and net1_check.rc != 0
+  changed_when: true
+
+# Idempotent re-assert: if net1 already exists but somehow drifted back to
+# dhcp (manual pct set, NIC recreate, etc.), correct it back to static on
+# every run rather than only on first creation.
+- name: Detect net1 drifted to DHCP
+  delegate_to: "{{ lb_node }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct config {{ lxc_id }} | grep '^net1' | grep -q 'ip=dhcp'
+  register: net1_dhcp_check
+  failed_when: false
+  changed_when: false
+  when: lb_exists and net1_check.rc == 0
+
+- name: Correct net1 back to static IP if drifted to DHCP
+  delegate_to: "{{ lb_node }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    MAC=$(pct config {{ lxc_id }} | grep '^net1' | grep -oE 'hwaddr=[0-9A-Fa-f:]+' | cut -d= -f2)
+    pct set {{ lxc_id }} --net1 name=eth1,bridge=vmbr0,hwaddr=${MAC},ip={{ lb_lan_ingress_ip }}/24,firewall=1
+  when: lb_exists and net1_check.rc == 0 and net1_dhcp_check.rc == 0
   changed_when: true
 
 - name: Ensure private gateway on net0
