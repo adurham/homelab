@@ -26,6 +26,32 @@
 # This is an interim fix: the real fix is a metering Shelly (1PM Mini Gen3)
 # reporting LOCAL real-time watts, at which point the trigger moves off the
 # laggy cloud sensor and the debounce can drop back down.
+#
+# FRESHNESS/CORROBORATION GATE (added 2026-08-19): the 8-min debounce only
+# protects against a LATE reading, not a STOPPED one. Observed 2026-08-19:
+# Emporia's whole cloud poll stalled outright - every circuit sensor
+# (including the whole-home aggregate) froze at an identical timestamp for
+# 30+ minutes, all reporting a stale cached ~0 W. A frozen 0 W satisfies the
+# "below 50 for 8 min" trigger just as well as a genuine fault, no matter how
+# long the debounce is, because wall-clock time keeps passing even though the
+# reading itself never updates. This force-killed a pump that was actually
+# running fine. Per warm memory fact 410 (corroboration, not just longer
+# debounce), both automations below now also require
+# sensor.edgewater_road_power_minute_average_12's last_reported to be within
+# 180s (Emporia's normal ~60s poll cadence, so 180s gives 2-3 missed polls of
+# slack before treating it as stale) - i.e. the reading must be LIVE, not
+# just low, before it's trusted to cut the pump. A separate non-destructive
+# automation below alerts when the sensor goes stale so a real cloud outage
+# is still visible without blinding the safety logic into a false trip.
+#
+# last_reported vs last_updated: deliberately using last_reported (HA
+# >=2024.4; this host runs 2026.8.2). Since HA 2024.4, last_updated only
+# advances when the STATE VALUE CHANGES - if Emporia's cloud poll is healthy
+# but happens to report the same value twice in a row (very plausible at a
+# steady ~924W run, or a genuinely idle 0W with the pump off), last_updated
+# freezes even though the integration is alive, which would falsely block a
+# real cutoff. last_reported advances on every poll regardless of whether the
+# value changed, so it's the correct "is the data pipe alive" signal here.
 
 - alias: "Pool Pump Safety - Dead (no power draw)"
   id: pool_pump_safety_dead
@@ -51,6 +77,12 @@
     - condition: numeric_state
       entity_id: sensor.edgewater_road_power_minute_average_12
       below: 50
+    # Corroboration gate: the reading must be LIVE, not a stale frozen cache
+    # from a stalled Emporia cloud poll (see 2026-08-19 note above).
+    - condition: template
+      value_template: >
+        {{ states.sensor.edgewater_road_power_minute_average_12 is not none and
+           (now() - states.sensor.edgewater_road_power_minute_average_12.last_reported).total_seconds() < 180 }}
 
   action:
     - service: switch.turn_off
@@ -99,6 +131,12 @@
       entity_id: sensor.edgewater_road_power_minute_average_12
       above: 50
       below: 700
+    # Corroboration gate: the reading must be LIVE, not a stale frozen cache
+    # from a stalled Emporia cloud poll (see 2026-08-19 note above).
+    - condition: template
+      value_template: >
+        {{ states.sensor.edgewater_road_power_minute_average_12 is not none and
+           (now() - states.sensor.edgewater_road_power_minute_average_12.last_reported).total_seconds() < 180 }}
 
   action:
     - service: switch.turn_off
@@ -123,3 +161,46 @@
           {{ states('sensor.edgewater_road_power_minute_average_12') }} W
           (normal ~924) - dead-head or lost prime, no flow. Pump forced OFF.
           Check valves / water level / baskets, then toggle Pool Season to re-run.
+
+# Non-destructive companion to the freshness gate above: the safety rules now
+# refuse to act on a stale reading, so a real multi-hour Emporia cloud outage
+# during a pump run would otherwise go silent (no cutoff, no alert). This
+# fires a one-time heads-up instead, without touching the relay, so a genuine
+# cloud outage is still visible for manual judgment.
+- alias: "Pool Pump Safety - Power sensor stale (informational)"
+  id: pool_pump_safety_sensor_stale
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: template
+      value_template: >
+        {{ states.sensor.edgewater_road_power_minute_average_12 is not none and
+           (now() - states.sensor.edgewater_road_power_minute_average_12.last_reported).total_seconds() > 600 }}
+      for: "00:05:00"
+
+  condition:
+    - condition: state
+      entity_id: switch.shelly1minig3_28372f21c5b8
+      state: "on"
+
+  action:
+    - service: persistent_notification.create
+      data:
+        notification_id: pool_pump_sensor_stale
+        title: "Pool pump power sensor stale"
+        message: >
+          sensor.edgewater_road_power_minute_average_12 (Emporia cloud) hasn't
+          updated in 10+ min while the pump is running - likely an Emporia
+          cloud poll outage. Safety cutoff logic is intentionally NOT trusting
+          this reading right now (freshness gate), so the pump won't be force-
+          killed off a stale value, but it also isn't being protected by the
+          power watchdog until the sensor recovers. No action needed unless
+          you suspect a real fault - check the pump visually if unsure.
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "Pool pump power sensor stale"
+        message: >
+          Emporia reading frozen 10+ min while pump running - cloud poll
+          outage suspected. Safety watchdog paused (not disabled) until the
+          sensor updates again. Check pump visually if unsure.
