@@ -176,6 +176,40 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+# Wire the watchdog above to a timer so it actually runs (was previously
+# deployed but never scheduled -- fully dead code). Alerts land in the
+# journal only (media-gallery-queue-watchdog.service shows "failed" in
+# `systemctl --failed` / journalctl when the trash or move queue is stuck) --
+# this host runs Alloy in metrics-only mode (no log shipping, see
+# roles/alloy/README.md "Metrics-only hosts"), so a stuck queue is NOT yet
+# visible in Grafana/alerting. Enabling node_systemd_unit_state collection in
+# roles/alloy/templates/config.alloy.j2 would surface it there; left as a
+# deliberate follow-up, not done here.
+- name: Render Queue Watchdog Service Unit
+  ansible.builtin.template:
+    src: queue-watchdog.service.j2
+    dest: /etc/systemd/system/media-gallery-queue-watchdog.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Queue Watchdog Timer Unit
+  ansible.builtin.template:
+    src: queue-watchdog.timer.j2
+    dest: /etc/systemd/system/media-gallery-queue-watchdog.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Queue Watchdog Timer
+  ansible.builtin.systemd:
+    name: media-gallery-queue-watchdog.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
 # ─── rclone config (crypt over gdrive) ─────────────────────────────────────
 # The OAuth token + crypt passwords come from vault (generated one-time via
 # the authorize flow on the Mac; see README). force:false so a token the

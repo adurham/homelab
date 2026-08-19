@@ -1,0 +1,12 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+[Unit]
+Description=media-gallery queue watchdog timer (every 15min)
+Requires=media-gallery-queue-watchdog.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
