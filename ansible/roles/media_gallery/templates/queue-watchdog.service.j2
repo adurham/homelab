@@ -1,0 +1,13 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+[Unit]
+Description=media-gallery stuck-reaper watchdog (trash/move queues)
+After=media-gallery-trash.service media-gallery-upload.service
+
+[Service]
+Type=oneshot
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+Environment=TG_DELETE_QUEUE={{ media_gallery_state }}/pending_delete.json
+Environment=TG_MOVE_QUEUE={{ media_gallery_state }}/pending_move.json
+ExecStart={{ media_gallery_dir }}/venv/bin/python {{ media_gallery_dir }}/queue_watchdog.py
+StandardOutput=journal
