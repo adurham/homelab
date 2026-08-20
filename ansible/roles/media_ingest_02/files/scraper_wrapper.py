@@ -679,7 +679,11 @@ def _run_like_pass():
     remaining = LIKE_DAILY_CAP - state.get("daily_likes_used", 0)
     if remaining <= 0:
         return
-    yesterday = (dt.datetime.now() - dt.timedelta(days=1)).strftime("%m/%d/%Y")
+    # ISO format (YYYY-MM-DD) so `arrow` parses it directly. MM/DD/YYYY used
+    # to fail arrow.get() and fall into ofscraper's humanize fallback parser,
+    # which has its own bug (missing \b before \minute in a regex) that threw
+    # "re.error: bad escape \m" on every single daily-mode like attempt.
+    yesterday = (dt.datetime.now() - dt.timedelta(days=1)).strftime("%Y-%m-%d")
     per_model = max(1, remaining // len(models))
     likes_used = 0
     for model in models:
