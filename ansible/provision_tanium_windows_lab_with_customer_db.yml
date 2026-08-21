@@ -135,6 +135,10 @@
         # =1 is the whole point of this playbook -- use the just-restored
         # customer DB, never drop/recreate it.
         tanium_use_existing_db: 1
+        # 127.0.0.1 because the Hub below is co-located on this same box
+        # -- see provision_tanium_windows_lab.yml's header for why a Hub
+        # is just a Zone Server with /HubFlag=1, no separate component.
+        tanium_allowed_hubs: "127.0.0.1"
 
 - name: Install Tanium Module Server
   hosts: win-tms-case1-01
@@ -144,6 +148,16 @@
       vars:
         tanium_moduleserver_ip: "{{ ansible_host }}"
         tanium_server_ip: "{{ hostvars['win-ts-case1-01'].ansible_host }}"
+
+- name: Install the Zone Server Hub (co-located directly on the Tanium Server box)
+  hosts: win-ts-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_zoneserver_install
+      vars:
+        tanium_zoneserver_ip: "{{ ansible_host }}"
+        tanium_server_ip: "{{ ansible_host }}"
+        tanium_zoneserver_hub_flag: 1
 
 - name: Install Tanium Zone Server
   hosts: win-tzs-case1-01

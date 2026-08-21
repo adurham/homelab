@@ -376,3 +376,49 @@
     ansible_port: 5985
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
+
+# Zone Server Hub support: the Server only accepts registrations from
+# addresses on its own AllowedHubs allowlist (server.nsi, confirmed via
+# source -- HKLM\Software\Tanium\Tanium Server\AllowedHubs +
+# EnforceAllowedHubs). tanium_allowed_hubs defaults to empty (no-op) --
+# set it (a comma-separated list is accepted by the same registry value
+# the installer itself writes) when a Zone Server Hub -- including one
+# co-located directly on this Server box, e.g. "127.0.0.1" -- needs to
+# register. Safe to re-run: idempotent registry writes, no service
+# restart required (the Server reads this at connection-acceptance
+# time, not at startup).
+- name: "Configure AllowedHubs on the Tanium Server (only if tanium_allowed_hubs is set)"
+  when: tanium_allowed_hubs | default('') != ''
+  delegate_to: localhost
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Tanium\Tanium Server
+    name: AllowedHubs
+    data: "{{ tanium_allowed_hubs }}"
+    type: string
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Enforce AllowedHubs on the Tanium Server (only if tanium_allowed_hubs is set)"
+  when: tanium_allowed_hubs | default('') != ''
+  delegate_to: localhost
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Tanium\Tanium Server
+    name: EnforceAllowedHubs
+    data: 1
+    type: dword
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"

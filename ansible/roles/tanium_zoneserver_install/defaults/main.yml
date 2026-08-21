@@ -13,5 +13,17 @@ tanium_installers_dir: "C:\\TaniumInstallers"
 # directory.
 tanium_install_dir: "C:\\Program Files\\Tanium\\Tanium Server"
 
+# 0 = plain leaf Zone Server (default). 1 = Hub mode -- see
+# tasks/main.yml header for what this actually changes (just a PKI
+# identity flag on the same binary/service, confirmed via source). The
+# user's chosen architecture for this lab is a Hub co-located directly
+# on the Tanium Server box -- when doing that, target this role at the
+# Server's own inventory host with tanium_zoneserver_ip == the Server's
+# IP and tanium_zoneserver_hub_flag: 1. tanium_server_ip still points at
+# the Tanium Server (itself, in the co-located case) either way -- it's
+# always "what does this Zone Server/Hub connect out to," never "am I
+# the server."
+tanium_zoneserver_hub_flag: 0
+
 # Required per-invocation: tanium_zoneserver_ip, tanium_server_ip,
 # tanium_setup_zoneserver_exe_local_path.

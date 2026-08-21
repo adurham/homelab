@@ -82,6 +82,15 @@
 # verifies the service is STILL running 15s after start, not just that
 # Start-Service returned success.
 #
+# Zone Server Hub, confirmed via source 2026-08-21: there is no
+# separate "Hub" installer or Server-side component -- it is a normal
+# Zone Server install (SetupZoneServer.exe /HubFlag=1) that this repo's
+# architecture choice runs co-located directly on the Tanium Server box
+# itself, not standalone. See tanium_zoneserver_install's task-file
+# header for the full source citation. The Server's own AllowedHubs
+# registry setting must include the Hub's address (127.0.0.1 here,
+# since it's co-located) for the Hub's registration to succeed.
+#
 # Every step here is idempotent — safe to re-run after a partial failure.
 
 - name: Clone Windows VMs for the lab
@@ -139,6 +148,8 @@
         tanium_db_username: "{{ tanium_db_service_account }}"
         tanium_db_domain: "{{ tanium_lab_domain_netbios }}"
         tanium_db_password: "{{ vault_tanium_lab_svc_password }}"
+        # 127.0.0.1 because the Hub below is co-located on this same box.
+        tanium_allowed_hubs: "127.0.0.1"
 
 - name: Install Tanium Module Server
   hosts: win-tms-case1-01
@@ -148,6 +159,18 @@
       vars:
         tanium_moduleserver_ip: "{{ ansible_host }}"
         tanium_server_ip: "{{ hostvars['win-ts-case1-01'].ansible_host }}"
+
+- name: Install the Zone Server Hub (co-located directly on the Tanium Server box)
+  hosts: win-ts-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_zoneserver_install
+      vars:
+        # Same box, same host -- see this role's task-file header for
+        # why a Hub is just a Zone Server with /HubFlag=1.
+        tanium_zoneserver_ip: "{{ ansible_host }}"
+        tanium_server_ip: "{{ ansible_host }}"
+        tanium_zoneserver_hub_flag: 1
 
 - name: Install Tanium Zone Server
   hosts: win-tzs-case1-01

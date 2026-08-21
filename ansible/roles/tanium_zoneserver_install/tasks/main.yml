@@ -19,6 +19,35 @@
 # "C:\Program Files\..." like Server/Module Server (see
 # tanium_zoneserver_install_dir in defaults/main.yml).
 #
+# HUB MODE, confirmed via source AND a real live install 2026-08-21:
+# there is NO separate "Zone Server Hub" installer or Server-side
+# component. A Hub is a normal Zone Server install with /HubFlag=1
+# (Components/ZoneServer/ProcessZoneServerCommandLine.cpp reads
+# AppConfig "ZoneHubFlag" written by this exact flag; it switches the
+# PKI identity from TaniumZoneServerPKI to TaniumHubPKI, nothing else
+# about the binary, service name ("Tanium ZoneServer"), or install
+# directory changes). The user's stated architecture choice for this
+# lab is a co-located Hub installed directly ON the Tanium Server box
+# itself (not standalone) — set tanium_zoneserver_hub_flag: 1 and target
+# this role at the Server's own host to do that; the wizard's Hub-mode
+# settings page just asks for the Tanium Server address/port to connect
+# out to, same /ServerAddress param as a leaf Zone Server.
+#
+# LIVE-VALIDATED 2026-08-21: for the co-located case specifically,
+# SetupZoneServer.exe's own install log shows it locally invoking
+# `TaniumReceiver.exe pki show-registration-fingerprint` then
+# `TaniumReceiver.exe server-registrations approve <request-id>` on the
+# SAME box right after starting the service — the Server auto-approves
+# a co-located Hub's registration itself, with NO AllowedHubs config
+# needed at all in that specific case (confirmed by a real end-to-end
+# install: "Tanium ZoneServer started" -> fingerprint discovered ->
+# "server-registrations approve command returned. Return code 0", no
+# manual intervention). tanium_server_install's tanium_allowed_hubs
+# setting is still wired up and harmless to set as defense-in-depth
+# (and IS load-bearing for a standalone, non-co-located Hub, which
+# cannot self-approve this way) — just don't assume it's required for
+# the co-located architecture this repo actually uses.
+#
 # Full parameter reference (zoneserver.nsi, grep 'GetOptions.*Params'):
 #   /ServerAddress /ServerPort /ZoneServerAddress /ZoneServerPort
 #   /LogVerbosityLevel /KeyPath /HubFlag /ServiceUserName
@@ -102,7 +131,8 @@
       {{ tanium_installers_dir }}\SetupZoneServer.exe /S
       /ServerAddress={{ tanium_server_ip }}
       /KeyPath={{ tanium_installers_dir }}\tanium-init.dat
-      /AllowedHubs={{ tanium_server_ip }}
+      /HubFlag={{ tanium_zoneserver_hub_flag }}
+      {{ ('/AllowedHubs=' + tanium_server_ip) if tanium_zoneserver_hub_flag | int == 0 else '' }}
   register: install_result
   changed_when: true
   vars:
