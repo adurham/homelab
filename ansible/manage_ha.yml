@@ -22,6 +22,8 @@
         name: "graf-01"
       - id: 113
         name: "hermes-gw-01"
+      - id: 118
+        name: "adblock-proxy-01"
 
     # Replication Config
     replication_targets:

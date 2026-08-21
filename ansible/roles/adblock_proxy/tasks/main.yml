@@ -1,9 +1,10 @@
 ---
 # Configures adblock-proxy-01 (CT 118) — personal-device MITM ad-stripping
-# proxy. Devices opt in individually via explicit HTTPS proxy settings
-# pointed at this host's Tailscale IP; NOT transparent/network-wide, NOT
-# reachable from the home LAN. The host LXC itself is created by
-# roles/adblock_proxy_host; this role handles the application layer.
+# proxy (Discord + Reddit). Devices opt in individually via explicit HTTPS
+# proxy settings pointed at this host's Tailscale IP, OR via the Tailscale
+# exit-node path (transparent mode, tailscale0-only). The host LXC itself
+# is created by roles/adblock_proxy_host; this role handles the
+# application layer.
 
 - name: Install Base OS Packages
   ansible.builtin.apt:
@@ -117,16 +118,25 @@
     group: mitmproxy
     recurse: true
 
-# ─── Discord ad/quest/promo stripping addon ────────────────────────────────
+# ─── Discord + Reddit ad/tracking-stripping addon ──────────────────────────
 # Filters known Discord Quest/Discovery/Promotion API response paths so the
 # client renders no ad content, while every other discord.com/discordapp.net
 # request (login, messages, CDN, voice gateway, etc.) passes through
-# untouched. Endpoint list is a living document — see the addon's own
+# untouched. Also blocks Reddit's known tracking/ad-serving domains
+# (ads.reddit.com etc.) and captures real Reddit feed JSON for future
+# inline-promoted-post stripping (see the addon's own module docstring —
+# REDDIT STATUS section — for what's live vs. pending live-traffic
+# verification). Endpoint list is a living document — see the addon's own
 # comment block for how to extend it after a mitmweb capture session.
-- name: Deploy Discord Ad-Stripping mitmproxy Addon
+- name: Remove Legacy discord_adblock.py (renamed to ad_block.py 2026-08-21)
+  ansible.builtin.file:
+    path: /opt/adblock-proxy/discord_adblock.py
+    state: absent
+
+- name: Deploy Discord + Reddit Ad-Stripping mitmproxy Addon
   ansible.builtin.template:
-    src: discord_adblock.py.j2
-    dest: /opt/adblock-proxy/discord_adblock.py
+    src: ad_block.py.j2
+    dest: /opt/adblock-proxy/ad_block.py
     owner: mitmproxy
     group: mitmproxy
     mode: '0644'
@@ -252,14 +262,19 @@
 
       OPTION A — exit node (covers WiFi + cellular, one toggle):
         1. Tailscale app -> Exit Node -> adblock-proxy-01
-        2. Discord ads are stripped transparently; DNS-level ad/tracker
-           blocking is enforced via the existing AdGuard Home instance
-           (192.168.86.2, 7 blocklists) for every other app; all other
-           apps' HTTPS traffic passes through as an opaque relay (no TLS
-           interception outside discord.com/discordapp.net/discord.gg/
-           discord.media).
+        2. Discord ads are stripped transparently; Reddit tracking/ad
+           domains (ads.reddit.com etc.) are blocked; DNS-level
+           ad/tracker blocking is enforced via the existing AdGuard Home
+           instance (192.168.86.2, 7 blocklists) for every other app;
+           all other apps' HTTPS traffic passes through as an opaque
+           relay (no TLS interception outside discord.com/
+           discordapp.net/discord.gg/discord.media/reddit.com/
+           redditmedia.com).
         NOTE: while active, ALL phone traffic egresses via the homelab's
-        public IP, not just Discord's.
+        public IP, not just Discord's/Reddit's. Reddit's inline
+        promoted-post stripping is NOT live yet (needs a verified-live
+        capture of the real ad-marker field — see ad_block.py's module
+        docstring); tracking-domain blocking is live now.
 
       OPTION B — per-network explicit proxy (WiFi only, no exit-node
       blast radius):

@@ -1,0 +1,261 @@
+"""
+Discord + Reddit ad/tracking-stripping addon for mitmproxy.
+
+Runs on adblock-proxy-01 in two modes simultaneously:
+  - EXPLICIT proxy (port 8080): devices opt in via Wi-Fi proxy settings.
+  - TRANSPARENT proxy (port 8443): fed by an iptables REDIRECT on inbound
+    exit-node traffic (tailscale0). Devices routing through this host as
+    a Tailscale exit node never configure anything — all their HTTPS
+    traffic arrives here automatically.
+
+SNI-based selective interception (transparent mode): the tls_clienthello
+hook below inspects the SNI on every TLS ClientHello and calls
+`data.ignore_connection = True` for anything that isn't a Discord or
+Reddit hostname. mitmproxy's own docs note hostname-based --ignore-hosts
+is unreliable in transparent mode ("recommended to use an IP address
+range, not the hostname") — but both Discord and Reddit share Cloudflare
+IP ranges with many other services, so IP-based matching would either
+miss their traffic or over-match onto unrelated Cloudflare-fronted apps.
+The tls_clienthello hook is mitmproxy's actual supported mechanism for
+per-connection SNI-based passthrough and doesn't have this limitation.
+Everything NOT ignored gets full TLS termination + inspection here;
+everything ignored is relayed as opaque encrypted TCP — no cert/pinning
+breakage for other apps (banking, iMessage, etc.) on a phone routing
+through the exit node.
+
+DISCORD STATUS: patterns below were corrected 2026-07-27 against REAL
+observed traffic (journalctl -u adblock-proxy-transparent, once the
+phone actually trusted the mitmproxy CA — earlier entries were all TLS
+handshake failures, not real requests). The original patterns were
+guesses from public docs and were WRONG on two counts: the actual path
+is /api/v*/quests/@me, not /api/v*/users/@me/quests; and
+/api/v*/promotions, not /api/v*/users/@me/promotions. Also found a path
+that wasn't anticipated at all: /api/v*/quests/get-decisions, which is
+Discord's actual ad-decision-serving endpoint (returns which ad to
+show) — this is the real "ad request," more so than the quest list
+itself. Keep re-checking DISCORD_BLOCK_PATH_PATTERNS against fresh
+"pass" log lines periodically — Discord's client evolves.
+
+Discord endpoint reference (Discord's undocumented API is versioned
+/api/v9, /api/v10, etc. — patterns below match any version):
+  - /api/v*/promotions                      - Nitro/promo carousel data
+  - /api/v*/quests/@me                      - active Quest list
+  - /api/v*/quests/get-decisions            - ad-decision-serving
+                                              endpoint (which ad to show)
+  - /api/v*/quests-completion-attempts     - quest progress writes (no ad
+                                              content, but tied to quest
+                                              UI — commented out below,
+                                              only enable if you want to
+                                              fully disable Quests, not
+                                              just hide promo content)
+  - /api/v*/experiments                    - A/B test bucketing, often
+                                              gates promo surfaces
+  - /api/v*/discoverable-guilds            - Server Discovery ads
+  - /api/v*/*/promoted-content             - in-server promoted posts
+  - ads.discord.com (any path)             - the one domain-level rule
+                                              AdGuard already had, dead
+                                              weight since the client
+                                              never queries it — kept
+                                              here too in case that
+                                              changes
+
+REDDIT STATUS (added 2026-08-21): unlike Discord, Reddit's promoted
+posts are NOT served from separate ad-decision endpoints — they're
+embedded inline in the same feed/listing JSON as organic posts
+(data.children[].data with some ad-marker field), because that's how
+native/inline ads on Reddit's `t3` (link/post) "Thing" type work. There
+is no verified-live capture of that field yet (Reddit's listing API
+requires an authenticated session; an unauthenticated curl through this
+proxy returned a login redirect, not feed JSON), so BLOCK_PATH_PATTERNS
+below intentionally does NOT attempt to strip inline promoted posts —
+guessing at an unverified field name risks either leaving real ads
+untouched or corrupting/breaking organic posts, which is worse than
+doing nothing. What IS shipped now, with the same confidence level as
+the verified `ads.discord.com` domain rule: Reddit's known
+tracking/ad-serving domains are blocked wholesale (any path), same
+mechanism as ads.discord.com. Additionally, `capture_reddit` below logs
+real reddit.com/oauth.reddit.com JSON listing responses to
+/var/log/mitmproxy/reddit_capture/ the next time an authenticated
+device browses Reddit through this proxy — inspect those captures for
+the actual promoted-post marker field, then add a request()/response()
+rewrite rule here following the same verified-live-traffic pattern used
+for Discord's 2026-07-27 fix. Capture is capped (see
+REDDIT_CAPTURE_MAX_FILES) so it can't fill the CT's disk.
+
+Reddit tracking domains (confirmed via EasyPrivacy's reddit-specific
+filter list, same domain-blocking pattern as ads.discord.com):
+  - ads.reddit.com          - ad-serving / Ads Manager API
+  - alb.reddit.com          - ad load balancer
+  - events.reddit.com       - event/analytics beacon
+  - events.redditmedia.com  - event/analytics beacon (media CDN variant)
+  - pixel.reddit.com        - tracking pixel
+  - gateway.reddit.com      - ad gateway
+"""
+import json
+import re
+import time
+from pathlib import Path
+
+from mitmproxy import ctx, http, tls
+
+DISCORD_HOSTS = {"discord.com", "discordapp.com"}
+DISCORD_HOST_SUFFIXES = (".discord.com", ".discordapp.com", ".discordapp.net", ".discord.gg", ".discord.media")
+
+DISCORD_BLOCK_PATH_PATTERNS = [
+    re.compile(r"^/api/v\d+/promotions"),
+    re.compile(r"^/api/v\d+/quests/@me"),
+    re.compile(r"^/api/v\d+/quests/get-decisions"),
+    re.compile(r"^/api/v\d+/users/@me/collectibles-marketing"),
+    re.compile(r"^/api/v\d+/discoverable-guilds"),
+    re.compile(r"^/api/v\d+/.*/promoted-content"),
+    re.compile(r"^/api/v\d+/experiments"),
+]
+
+REDDIT_TRACKING_HOSTS = {
+    "ads.reddit.com",
+    "alb.reddit.com",
+    "events.reddit.com",
+    "events.redditmedia.com",
+    "pixel.reddit.com",
+    "gateway.reddit.com",
+}
+# Content hosts we intercept (for the tracking-domain block above to even
+# see the traffic) but do NOT modify yet — see REDDIT STATUS above.
+REDDIT_CONTENT_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.com", "oauth.reddit.com"}
+REDDIT_CONTENT_SUFFIXES = (".reddit.com",)
+
+REDDIT_CAPTURE_DIR = Path("/var/log/mitmproxy/reddit_capture")
+REDDIT_CAPTURE_MAX_FILES = 200  # hard cap so this can never fill the CT's 8G rootfs
+
+LOG_TAG_DISCORD = "DISCORD_TRAFFIC"
+LOG_TAG_REDDIT = "REDDIT_TRAFFIC"
+
+
+def _is_discord_host(host: str) -> bool:
+    if not host:
+        return False
+    return host in DISCORD_HOSTS or any(host.endswith(suf) for suf in DISCORD_HOST_SUFFIXES) or host == "ads.discord.com"
+
+
+def _matches_discord_block_pattern(path: str) -> bool:
+    return any(p.search(path) for p in DISCORD_BLOCK_PATH_PATTERNS)
+
+
+def _is_reddit_tracking_host(host: str) -> bool:
+    return bool(host) and host in REDDIT_TRACKING_HOSTS
+
+
+def _is_reddit_content_host(host: str) -> bool:
+    if not host:
+        return False
+    return host in REDDIT_CONTENT_HOSTS or any(host.endswith(suf) for suf in REDDIT_CONTENT_SUFFIXES)
+
+
+def _is_reddit_host(host: str) -> bool:
+    return _is_reddit_tracking_host(host) or _is_reddit_content_host(host)
+
+
+def tls_clienthello(data: tls.ClientHelloData) -> None:
+    """Transparent-mode only: skip TLS interception entirely for any SNI
+    that isn't a Discord or Reddit hostname. Explicit-proxy mode (port
+    8080) never fires this hook the same way since the client already
+    told us the target host via CONNECT — this only matters for
+    exit-node traffic.
+
+    mitm.it is deliberately excluded from passthrough: it's mitmproxy's
+    own built-in onboarding hostname (serves the cert-install page /
+    /cert/pem download), and needs interception on HTTPS too, not just
+    plain HTTP — iOS Safari silently upgrades http:// link taps to
+    https:// in some contexts, and the real internet's mitm.it (a
+    GitHub Pages static site, not affiliated with this proxy) 404s on
+    /cert/pem. Confirmed live 2026-07-27: an iPhone tapping the cert
+    link got a 404 until this exclusion was added."""
+    sni = data.client_hello.sni
+    if sni and sni != "mitm.it" and not _is_discord_host(sni) and not _is_reddit_host(sni):
+        data.ignore_connection = True
+
+
+def _handle_discord(flow: http.HTTPFlow, host: str) -> bool:
+    """Returns True if this request was Discord and has been handled
+    (either blocked or logged as passed)."""
+    if not _is_discord_host(host):
+        return False
+
+    path = flow.request.path.split("?", 1)[0]
+
+    if host == "ads.discord.com" or _matches_discord_block_pattern(path):
+        # Respond with an empty-but-valid payload instead of letting the
+        # request through. Empty list/object keeps the client from
+        # erroring on a missing field; it just renders nothing.
+        empty_body = json.dumps([]).encode()
+        flow.response = http.Response.make(
+            200,
+            empty_body,
+            {"Content-Type": "application/json"},
+        )
+        ctx.log.info(f"[{LOG_TAG_DISCORD}] BLOCKED {host}{flow.request.path}")
+        return True
+
+    ctx.log.info(f"[{LOG_TAG_DISCORD}] pass {host}{flow.request.path}")
+    return True
+
+
+def _handle_reddit_request(flow: http.HTTPFlow, host: str) -> bool:
+    """Returns True if this request was a Reddit tracking domain and has
+    been blocked. Content hosts (reddit.com/oauth.reddit.com) are left
+    alone here — see capture_reddit() in the response hook, and the
+    REDDIT STATUS docstring above for why inline ad-stripping isn't
+    live yet."""
+    if not _is_reddit_tracking_host(host):
+        return False
+
+    empty_body = json.dumps({}).encode()
+    flow.response = http.Response.make(
+        200,
+        empty_body,
+        {"Content-Type": "application/json"},
+    )
+    ctx.log.info(f"[{LOG_TAG_REDDIT}] BLOCKED (tracking domain) {host}{flow.request.path}")
+    return True
+
+
+def request(flow: http.HTTPFlow) -> None:
+    host = flow.request.pretty_host
+
+    if _handle_discord(flow, host):
+        return
+
+    _handle_reddit_request(flow, host)
+
+
+def response(flow: http.HTTPFlow) -> None:
+    """Capture-only for Reddit content-host JSON responses, to build the
+    real-traffic sample needed to identify the actual promoted-post
+    marker field (see REDDIT STATUS in the module docstring). Does NOT
+    modify the response — passthrough is unaffected. Self-limiting via
+    REDDIT_CAPTURE_MAX_FILES so a heavy Reddit browsing session can't
+    fill the disk; once the cap is hit, capture silently stops (existing
+    ad-blocking behavior for Discord/Reddit tracking domains is
+    unaffected either way)."""
+    host = flow.request.pretty_host
+    if not _is_reddit_content_host(host):
+        return
+
+    content_type = flow.response.headers.get("content-type", "") if flow.response else ""
+    if "json" not in content_type.lower():
+        return
+
+    try:
+        REDDIT_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+        existing = list(REDDIT_CAPTURE_DIR.glob("*.json"))
+        if len(existing) >= REDDIT_CAPTURE_MAX_FILES:
+            return
+
+        safe_path = re.sub(r"[^A-Za-z0-9._-]", "_", flow.request.path)[:150]
+        fname = f"{int(time.time() * 1000)}_{host}_{safe_path}.json"
+        out_path = REDDIT_CAPTURE_DIR / fname
+        out_path.write_bytes(flow.response.content or b"")
+        ctx.log.info(f"[{LOG_TAG_REDDIT}] captured {host}{flow.request.path} -> {out_path.name} ({len(existing) + 1}/{REDDIT_CAPTURE_MAX_FILES})")
+    except Exception as exc:  # noqa: BLE001 - never let capture logic break real traffic
+        ctx.log.warn(f"[{LOG_TAG_REDDIT}] capture failed for {host}{flow.request.path}: {exc}")
+

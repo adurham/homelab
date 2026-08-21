@@ -15,7 +15,7 @@ Environment=HOME=/home/mitmproxy
 # adblock-transparent.rules.v4.j2 / the "Install Transparent-Redirect
 # iptables Rules" task).
 #
-# SNI-based passthrough is handled INSIDE discord_adblock.py via the
+# SNI-based passthrough is handled INSIDE ad_block.py via the
 # tls_clienthello hook, NOT --ignore-hosts here. mitmproxy's own --help
 # says hostname regex matching in --ignore-hosts is unreliable in
 # transparent mode ("recommended to use an IP address range, not the
@@ -33,18 +33,21 @@ Environment=HOME=/home/mitmproxy
 # silently black-holes — confirmed via iptables counters incrementing
 # with zero established connections on 8443 (2026-07-27 post-deploy
 # verification). 0.0.0.0 covers both the tailscale0 IP and loopback.
-# Loads discord_adblock.py as the sole -s addon on this mitmdump
-# instance. (2026-08-08: a second addon, midea_capture.py, was
-# temporarily loaded here for a one-off Midea cloud token/key capture
-# attempt -- removed after the approach was abandoned in favor of a
-# second-account cloud login instead. See homelab repo git history
-# around 2026-08-07/08 if that context is ever needed again.)
+# Loads ad_block.py as the sole -s addon on this mitmdump
+# instance (Discord ad/quest stripping + Reddit tracking-domain block +
+# Reddit inline-ad capture, added 2026-08-21 — see the module docstring
+# for the Reddit rollout status). (2026-08-08: a second addon,
+# midea_capture.py, was temporarily loaded here for a one-off Midea
+# cloud token/key capture attempt -- removed after the approach was
+# abandoned in favor of a second-account cloud login instead. See
+# homelab repo git history around 2026-08-07/08 if that context is ever
+# needed again.)
 ExecStart=/opt/adblock-proxy/venv/bin/mitmdump \
   --mode transparent \
   --listen-host 0.0.0.0 \
   --listen-port 8443 \
   --set confdir=/home/mitmproxy/.mitmproxy \
-  -s /opt/adblock-proxy/discord_adblock.py
+  -s /opt/adblock-proxy/ad_block.py
 
 Restart=on-failure
 RestartSec=5
