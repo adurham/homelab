@@ -28,7 +28,7 @@
     --hostname adblock-proxy-01
     --cores 2 --memory 2048 --swap 1024
     --rootfs nvme-data:8
-    --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_adblock_proxy }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
+    --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_adblock_proxy }}/24,mtu={{ net_private_mtu }}
     --net1 name=eth1,bridge=vmbr0,ip=dhcp
     --unprivileged 1
     --features nesting=1
@@ -67,6 +67,28 @@
   delegate_to: "{{ ct_node }}"
   changed_when: true
 
+# net0's `gw=` was REMOVED (2026-08-21, live-debugged): with BOTH eth0
+# (gw=172.16.0.1, static) and eth1 (DHCP-assigned gateway) present,
+# eth0's static route always won as the default (implicit metric 0 vs
+# eth1's DHCP metric 1024) — Tailscale's portmapper only probes the
+# CURRENT default-route gateway, so it kept checking tailscale-gw
+# (172.16.0.1, no UPnP/NAT-PMP server) instead of the real home router
+# (192.168.86.1, confirmed reachable + responsive), and PortMapping
+# stayed empty even after the eth1 NIC + firewall fix above landed.
+# Removing net0's gw= leaves the private-SDN subnet route intact (a
+# directly-connected route, NOT dependent on the gateway declaration —
+# dns-01/lb-01/other private-SDN hosts stay reachable) while letting
+# eth1's DHCP-provided route become the sole default, so the CT's own
+# internet egress (and Tailscale's portmapper) now goes straight out
+# the real router instead of double-NAT hairpinning through
+# tailscale-gw. Idempotent re-apply covers CTs created before this
+# fix landed (this CT specifically, migrated off dead pve03 same day).
+- name: Ensure Adblock Proxy net0 Has No Static Default Route (eth1 DHCP route wins)
+  ansible.builtin.command: >
+    pct set 118 --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_adblock_proxy }}/24,mtu={{ net_private_mtu }}
+  delegate_to: "{{ ct_node }}"
+  changed_when: true
+
 # Bumped from the original 1 core/512MB to 2 cores/2GB (2026-07-27) once
 # real usage showed multiple devices (phone + Mac) routing simultaneously
 # through the exit node. Actual load stayed low even at 1c/512M (~1% CPU,
@@ -88,6 +110,25 @@
   failed_when: adblock_proxy_start.rc != 0 and ("already running" not in adblock_proxy_start.stderr and "already running" not in adblock_proxy_start.stdout)
   changed_when: adblock_proxy_start.rc == 0
 
+# Re-scan network interfaces so systemd-networkd picks up eth1 (and
+# re-applies eth0's config after net0/net1 changes above regenerate the
+# veth with a new MAC/ifindex). Hot-added/changed LXC network devices
+# via `pct set` do NOT automatically get matched against existing
+# .network files — networkd only does that matching on enumeration/
+# reload, not on a bare link-up event. Without this, `networkctl status`
+# shows the new interface as "degraded (unmanaged)" and it never gets an
+# IP or (critically) a default route, which also means Tailscale's
+# portmapper can't reach the real router for direct-connect negotiation.
+# Confirmed live 2026-08-21: every `pct set --net0`/`--net1` change on
+# this CT regenerated the veth and required a manual `networkctl reload`
+# to recover — this task makes that automatic instead of a manual
+# recovery step, and IDEMPOTENT re-runs also need it (not just first
+# creation), since ANY net0/net1 pct set regenerates the interface.
+- name: Reload systemd-networkd (pick up regenerated net0/net1 interfaces)
+  ansible.builtin.command: pct exec 118 -- networkctl reload
+  delegate_to: "{{ ct_node }}"
+  changed_when: false
+
 - name: Wait for Adblock Proxy Container IP
   ansible.builtin.shell: |
     set -o pipefail
@@ -97,6 +138,51 @@
   until: ip_check.rc == 0
   retries: 20
   delay: 3
+  changed_when: false
+
+# eth1's default route (via DHCP) is what makes Tailscale's portmapper
+# reach the real home router instead of tailscale-gw's NAT hairpin — see
+# the "Ensure Adblock Proxy net0 Has No Static Default Route" task above
+# for the full root-cause writeup. Wait for it explicitly (separate from
+# eth0's IP check above) since eth1 comes up via DHCP, not a static
+# assignment, and can lag a few seconds behind eth0.
+#
+# ROBUSTNESS (2026-08-21, live-debugged): a single reload + a 60s retry
+# budget (20x3s) was NOT always enough — DHCP completion after a fresh
+# `networkctl reload` was observed taking anywhere from ~15s to over 60s
+# across repeated live runs, and on one run the interface regenerated a
+# SECOND time mid-wait (triggered by an unrelated `pct set` elsewhere in
+# this same play), which orphaned the first reload's in-flight DHCP
+# negotiation entirely. A bare ansible `until` retry loop can't recover
+# from that — it just keeps checking a route that will never appear
+# without a fresh reload. This task is a self-contained shell loop
+# instead: it re-issues `networkctl reload` every ~20s if the route
+# still hasn't appeared, so a second interface regeneration during the
+# wait gets its own fresh DHCP attempt rather than silently timing out.
+# 180s total budget (vs the previous 60s) — generous, but this task only
+# ever runs during a network-affecting deploy, where a slow-but-working
+# DHCP handshake is preferable to a false failure that leaves the CT
+# reachable via SSH but ansible reporting broken.
+- name: Wait for Adblock Proxy Container Default Route (via eth1 DHCP, self-healing reload)
+  ansible.builtin.shell: |
+    set -o pipefail
+    for i in $(seq 1 36); do
+      if pct exec 118 -- ip route show | grep -q "^default"; then
+        echo "default route present after $((i * 5))s"
+        exit 0
+      fi
+      # Re-nudge networkd every ~20s (every 4th 5s tick) in case the
+      # interface regenerated again since the last reload and needs a
+      # fresh DHCP attempt.
+      if [ $((i % 4)) -eq 0 ]; then
+        pct exec 118 -- networkctl reload || true
+      fi
+      sleep 5
+    done
+    echo "default route still absent after 180s"
+    exit 1
+  delegate_to: "{{ ct_node }}"
+  register: default_route_check
   changed_when: false
 
 - name: Update Apt Cache in Adblock Proxy Container
