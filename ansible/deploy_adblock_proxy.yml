@@ -1,15 +1,32 @@
 ---
 # Two-stage deploy of the personal-device MITM ad-stripping proxy:
-#   1. adblock_proxy_host runs on pve03 to create the LXC (vmid 118,
-#      ip_adblock_proxy, hostname adblock-proxy-01) and inject SSH keys.
-#   2. adblock_proxy runs against the new CT to install mitmproxy, deploy
-#      the Discord ad-stripping addon, join Tailscale, and bring up the
-#      systemd unit. Explicit-proxy only — devices opt in per-device via
-#      Wi-Fi proxy settings pointed at this host's Tailscale IP; never
-#      transparent, never network-wide.
+#   1. adblock_proxy_host runs from pve01 (any healthy cluster node works —
+#      pvesh's cluster resource list and node-local pct ops delegate to
+#      wherever CT 118 actually lives via roles/resolve_ct_node; this was
+#      hardcoded to pve03 originally since that's where the CT was first
+#      created, but hardcoding a specific node as the PLAY target is wrong
+#      the moment that node degrades — confirmed 2026-08-21 when pve03's
+#      root filesystem started failing with I/O errors and ansible could
+#      no longer even copy its own Python module code onto pve03 to run
+#      ANYTHING, including tasks that don't touch the CT at all. The CT
+#      itself was never down — its storage is on the shared nvme-data ZFS
+#      pool, unrelated to pve03's local root disk — only the play's fixed
+#      target node was.) Creates the LXC (vmid 118, ip_adblock_proxy,
+#      hostname adblock-proxy-01) and injects SSH keys.
+#   2. adblock_proxy runs against the CT to install mitmproxy, deploy the
+#      Discord + Reddit ad-stripping addon, join Tailscale, and bring up
+#      the systemd units (explicit proxy :8080 + transparent/exit-node
+#      :8443).
+#
+# NOTE: switching the play's target host does NOT change which node any
+# individual `pct`/`pvesh` task actually runs ON — those still delegate to
+# ct_node (roles/resolve_ct_node), which resolves to wherever Proxmox HA
+# currently says the CT lives. If that's still a degraded node, node-local
+# CT config changes (pct set/exec/start) will still fail until that node
+# is healthy again or HA migrates the CT off it.
 
 - name: Provision Adblock Proxy Container
-  hosts: pve03
+  hosts: pve01
   gather_facts: false
   roles:
     - adblock_proxy_host

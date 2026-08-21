@@ -29,6 +29,7 @@
     --cores 2 --memory 2048 --swap 1024
     --rootfs nvme-data:8
     --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_adblock_proxy }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
+    --net1 name=eth1,bridge=vmbr0,ip=dhcp
     --unprivileged 1
     --features nesting=1
     --password "{{ vault_adblock_proxy_root_pass }}"
@@ -36,6 +37,35 @@
     --onboot 1
   no_log: true
   when: not ct_exists
+
+# LAN-facing eth1 (added 2026-08-21) so Tailscale can hole-punch a DIRECT
+# peer connection instead of falling back to a DERP relay. Root cause:
+# with only the private-SDN leg, the CT sat behind a second NAT hop at
+# tailscale-gw (a static iptables MASQUERADE with no NAT-PMP/UPnP/PCP
+# server), so tailscaled could never open a port mapping and every
+# client (even ones on the SAME home network / same public IP) fell
+# back to DERP(ord), capping real-world throughput at ~17.5 Mbps
+# against a ~280-350 Mbps LAN/WAN baseline (confirmed via direct
+# throughput tests 2026-08-21). tailscale-gw itself and lb-01/frigate-01
+# all solve this the same way — a LAN NIC alongside the private-SDN
+# leg — so this mirrors an already-proven pattern rather than
+# attempting NAT-PMP relay-chaining through tailscale-gw (evaluated and
+# rejected: standard NAT-PMP/UPnP servers don't chain a mapping request
+# to a router further upstream, so it would need non-standard
+# double-NAT traversal untested anywhere else in this homelab).
+#
+# SECURITY: this newly exposes the CT to the LAN (previously reachable
+# ONLY via the private SDN / Tailscale). The "Restrict Adblock Proxy
+# LAN NIC to Tailscale Hole-Punch Only" firewall task below is NOT
+# optional — it must land before/alongside this NIC, locking eth1 down
+# to just UDP/41641 (tailscaled's hole-punch port) so the mitmproxy
+# listeners (8080/8443) stay unreachable from the LAN, exactly as they
+# were before this change.
+- name: Ensure Adblock Proxy Container Has LAN-Facing eth1 (Tailscale direct-connect)
+  ansible.builtin.command: >
+    pct set 118 --net1 name=eth1,bridge=vmbr0,ip=dhcp
+  delegate_to: "{{ ct_node }}"
+  changed_when: true
 
 # Bumped from the original 1 core/512MB to 2 cores/2GB (2026-07-27) once
 # real usage showed multiple devices (phone + Mac) routing simultaneously

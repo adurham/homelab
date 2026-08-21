@@ -32,7 +32,23 @@
 COMMIT
 
 *filter
+:INPUT ACCEPT [0:0]
 :OUTPUT ACCEPT [0:0]
+# LOCK DOWN the LAN-facing eth1 (added 2026-08-21 solely so Tailscale can
+# hole-punch a direct peer connection instead of relaying through DERP —
+# see roles/adblock_proxy_host's "Ensure Adblock Proxy Container Has
+# LAN-Facing eth1" task for the full root-cause writeup). Before eth1
+# existed, mitmproxy's listeners (8080/8443) were reachable ONLY via the
+# private SDN / Tailscale — adding a LAN NIC without this INPUT lockdown
+# would newly expose them to anyone on the home LAN. Only UDP/41641
+# (tailscaled's hole-punch port, confirmed live via `ss -ulnp` 2026-08-21)
+# is allowed in on eth1; everything else inbound on that interface is
+# dropped, so mitmproxy stays reachable ONLY via tailscale0 exactly as
+# before.
+-A INPUT -i lo -j ACCEPT
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A INPUT -i eth1 -p udp --dport 41641 -j ACCEPT
+-A INPUT -i eth1 -j DROP
 # Restrict the CT's OWN outbound traffic (i.e. traffic this box
 # originates itself — logging, health checks, package updates) to
 # exactly what it needs. This is DISTINCT from exit-node relay traffic,
