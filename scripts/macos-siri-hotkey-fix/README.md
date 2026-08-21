@@ -54,23 +54,34 @@ hardcoded in this build.
 4. **Poll `CGWindowListCopyWindowInfo` for Siri AI's window and hide it**
    — too slow. By the time a ~15ms poll noticed the window, 1Password had
    already lost focus and self-dismissed.
+5. **Listen-only event tap + fixed-step busy-poll race** (first working
+   version) — a listen-only `CGEventTap` detected the combo, then
+   busy-polled `isActive`/`hidden` every 0.5ms for up to 200ms, hiding
+   Siri AI and re-activating 1Password the moment it saw Siri AI active.
+   This worked in live testing but is a brute-force timing race, not a
+   real fix: it burns CPU during the poll window and has no guarantee of
+   winning if Siri AI's activation timing shifts on a different build or
+   under load. Superseded by the notification-driven version below.
 
-## Fix: listen-only event tap + focus-race win
+## Fix: listen-only event tap + NSWorkspace activation notification
 
 `siri_preempt.m` installs a **listen-only** `CGEventTap` (never blocks or
 consumes events — every app, including 1Password, still gets the real
-keystroke). The instant it detects Cmd+Shift+Space, it races for up to
-~200ms (0.5ms poll steps) to `hide` Siri AI (`com.apple.campo`) and
-re-`activate` 1Password (`com.1password.1password`), winning the focus
-race before 1Password's panel dismisses itself.
+keystroke). Detecting Cmd+Shift+Space "arms" a short 500ms window. A
+separate `NSWorkspaceDidActivateApplicationNotification` observer reacts
+the instant macOS actually activates Siri AI (`com.apple.campo`): if that
+happens while armed, it immediately `hide`s Siri AI and re-`activate`s
+1Password (`com.1password.1password`) — event-driven on both ends rather
+than guessing a timing window with a busy-poll loop.
 
 Result: 1Password's Quick Access panel opens and stays open; Siri AI
 never becomes visible. Siri itself remains fully enabled and usable
 everywhere else (this only intercepts one specific hotkey combo).
 
-Confirmed CPU-idle: event taps are interrupt-driven, not polling — 0.0%
-CPU / ~10MB RSS at rest, negligible battery impact, comparable to any
-lightweight global-hotkey utility (Rectangle, BetterTouchTool, etc.).
+Confirmed CPU-idle: event taps and NSWorkspace notifications are both
+interrupt-driven, not polling — 0.0% CPU / ~10MB RSS at rest, negligible
+battery impact, comparable to any lightweight global-hotkey utility
+(Rectangle, BetterTouchTool, etc.).
 
 ## Install
 
