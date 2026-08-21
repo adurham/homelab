@@ -1,0 +1,4 @@
+---
+# Required per-invocation: tanium_lab_host_role ("dc" or "member"),
+# tanium_win_ip. tanium_lab_domain_name/netbios come from
+# group_vars/all/vars.yml.

@@ -92,3 +92,42 @@ net_bwt_bridge: "bwt"
 net_bwt_vlan_tag: 200
 net_bwt_mtu: 1450  # VXLAN overhead, same as `private`
 lb_lan_ingress_ip: "192.168.86.86"  # lb-01 LAN ingress (AdGuard static lease "lb-01-ingress", Google Home forwards :80/:443 here)
+
+# Windows TS/TMS/TZS/SQL lab (Tanium platform Windows on-prem repro lab,
+# `private` SDN bridge, WORKGROUP-and-AD variants). See
+# roles/tanium_windows_lab_* and docs/tanium_windows_lab.md.
+#
+# Baseline (WORKGROUP-only, no domain, VMIDs 250-253) — clean-slate boxes,
+# never touched by day-to-day case work.
+ip_win_sql_baseline: "172.16.0.80"
+ip_win_ts_baseline: "172.16.0.81"
+ip_win_tms_baseline: "172.16.0.82"
+ip_win_tzs_baseline: "172.16.0.83"
+
+# tanium.lab AD domain — stood up specifically because Windows-auth SQL
+# logins cannot bridge two WORKGROUP machines (no domain trust for the
+# SID lookup a remote SQL Server needs), confirmed by hands-on repro
+# 2026-08-20. Any lab stack needing a *remote* SQL Server for the Tanium
+# Server install must join this domain; a fully local/POC SQL Express +
+# Local System combo can skip it. See docs/tanium_windows_lab.md.
+tanium_lab_domain_name: "tanium.lab"
+tanium_lab_domain_netbios: "TANIUM"
+ip_win_dc: "172.16.0.94"
+
+# Case-specific clone set (e.g. investigating a customer's restored SQL
+# backup against a matching Tanium Server version). VMIDs and IPs here are
+# for the currently-active case1 investigation; treat as a template to copy
+# per future case, not a fixed permanent allocation.
+ip_win_sql_case1: "172.16.0.90"
+ip_win_ts_case1: "172.16.0.91"
+ip_win_tms_case1: "172.16.0.92"
+ip_win_tzs_case1: "172.16.0.93"
+
+# Domain account used as the Tanium Server's DB connection identity
+# (created by tanium_lab_service_account, granted sysadmin on the SQL
+# Server instance by tanium_lab_sql_login). Windows-auth only — see
+# tanium_lab_ad_domain role notes for why this must be a domain account,
+# not a local one, when SQL is on a different host than the Tanium
+# Server. Default matches the manual setup this playbook replaces
+# (TANIUM\taniumsvc).
+tanium_db_service_account: "taniumsvc"

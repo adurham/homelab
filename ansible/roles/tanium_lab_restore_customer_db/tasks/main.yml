@@ -1,0 +1,406 @@
+---
+# Restore a customer's SQL Server .bak file into a target database
+# BEFORE Tanium Server install runs, so the install can safely use
+# /UseExistingDB=1 knowing the DB is the customer's real data, not an
+# accidental collision with something else that happened to have the
+# same name.
+#
+# THIS ROLE IS DESTRUCTIVE (WITH REPLACE). It is deliberately kept out
+# of provision_tanium_windows_lab.yml (the clean-lab playbook) entirely
+# -- only provision_tanium_windows_lab_with_customer_db.yml includes it,
+# and only because restoring a customer backup is the explicit, stated
+# purpose of that playbook. Never add this role to the clean-lab
+# playbook "just in case."
+#
+# IDEMPOTENCY, deliberately NOT based on row/table counts: an earlier
+# design considered skipping the restore if the target DB already had
+# more than 1 row in dbo.version_history, on the theory that "has real
+# data" == "already restored." A second-opinion review (2026-08-21)
+# correctly flagged this as unsafe in BOTH directions:
+#   - Case B's .bak pointed at a DB still holding Case A's leftover data
+#     -> row count is high -> role SKIPS -> Tanium installs against the
+#     WRONG CUSTOMER'S DATA. That's a cross-customer data-handling
+#     incident, not just a broken lab.
+#   - A near-empty leftover DB gets silently replaced without ever
+#     confirming what it actually was.
+# Row/table counts answer "is something real here," not "is THIS EXACT
+# backup already restored here." This role instead stamps and checks
+# BACKUP IDENTITY:
+#   1. RESTORE HEADERONLY on the .bak to read its real BackupSetGUID.
+#   2. If the target DB exists, read a marker THIS ROLE wrote on a prior
+#      successful restore (an extended property, not a heuristic).
+#   3. Marker present + GUID matches -> skip (true idempotency).
+#      Marker present + GUID differs -> FAIL LOUDLY, do not overwrite.
+#      DB exists with NO marker (unknown provenance) -> FAIL LOUDLY.
+#      DB absent -> restore.
+# Ambiguity always fails closed, matching the same discipline as
+# tanium_server_install's pre-flight guard for /UseExistingDB=0.
+
+- name: "Resolve tanium_sql_server_ip to a plain fact"
+  ansible.builtin.set_fact:
+    tanium_sql_server_ip_resolved: "{{ tanium_sql_server_ip }}"
+
+- name: "Copy the customer .bak to the SQL Server's backup staging path"
+  delegate_to: localhost
+  ansible.windows.win_copy:
+    src: "{{ tanium_customer_bak_local_path }}"
+    dest: "{{ tanium_restore_staging_path }}\\{{ tanium_customer_bak_local_path | basename }}"
+  register: bak_copy_result
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Read the .bak's real BackupSetGUID via RESTORE HEADERONLY"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+    -Q "SET NOCOUNT ON; RESTORE HEADERONLY FROM DISK = N'{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'"
+    -s "|" -W
+  register: backup_header
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# RESTORE HEADERONLY's pipe-delimited output has BackupSetGUID in a
+# fixed column position that varies by SQL Server version -- rather than
+# parse that fragile text output, pull the GUID from msdb's own history
+# table for the file we just staged (populated by the HEADERONLY call
+# above), which is a stable, documented column.
+- name: "Extract BackupSetGUID from msdb.dbo.backupset for this file"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+    -Q "SET NOCOUNT ON; SELECT TOP 1 CAST(backup_set_uuid AS NVARCHAR(36))
+    FROM msdb.dbo.backupset bs
+    JOIN msdb.dbo.backupmediafamily bmf ON bs.media_set_id = bmf.media_set_id
+    WHERE bmf.physical_device_name = N'{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'
+    ORDER BY bs.backup_start_date DESC"
+    -h -1
+  register: backup_guid_result
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Set fact: backup GUID for this .bak"
+  ansible.builtin.set_fact:
+    tanium_backup_set_guid: "{{ backup_guid_result.stdout | trim }}"
+
+- name: "Check if target DB already exists"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+    -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('{{ tanium_target_db_name }}') IS NULL THEN 'ABSENT' ELSE 'PRESENT' END"
+    -h -1
+  register: db_exists_check
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "If DB exists, read this role's own restore-identity marker"
+  when: "'PRESENT' in (db_exists_check.stdout | default(''))"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+    -Q "SET NOCOUNT ON; SELECT CAST(value AS NVARCHAR(36)) FROM sys.extended_properties
+    WHERE class = 0 AND name = 'tanium_lab_restore_backup_guid'"
+    -d "{{ tanium_target_db_name }}" -h -1
+  register: existing_marker
+  changed_when: false
+  failed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "SAFETY: refuse to touch an existing DB with no marker or a mismatched marker"
+  when: "'PRESENT' in (db_exists_check.stdout | default(''))"
+  ansible.builtin.assert:
+    that:
+      - existing_marker is defined
+      - (existing_marker.stdout | default('') | trim) == tanium_backup_set_guid
+    fail_msg: >-
+      Refusing to RESTORE WITH REPLACE over database
+      '{{ tanium_target_db_name }}' on {{ tanium_sql_server_ip }}:
+      it already exists but either has no tanium_lab_restore_backup_guid
+      marker (unknown provenance -- could be a different case's data) or
+      its marker ('{{ existing_marker.stdout | default('') | trim }}')
+      does not match this backup's real identity
+      ('{{ tanium_backup_set_guid }}'). This guard exists specifically to
+      prevent the class of incident that happened 2026-08-21 (a DB
+      collision leading to lost/overwritten customer data). If this
+      really is the same restore re-run, something is wrong with the
+      marker itself -- investigate before overriding. There is no
+      override flag for this check on purpose.
+
+# Explicit boolean fact for the rest of the role to branch on, rather
+# than inspecting the assert task's own registered result (which is
+# ambiguous when that task was skipped because the DB didn't exist at
+# all -- the "safe to proceed" case that never needed the assert).
+- name: "Set fact: does the target DB already hold this exact backup"
+  ansible.builtin.set_fact:
+    tanium_db_already_has_this_backup: >-
+      {{
+        ('PRESENT' in (db_exists_check.stdout | default(''))) and
+        ((existing_marker.stdout | default('') | trim) == tanium_backup_set_guid)
+      }}
+
+- name: "Skip restore: DB already has this exact backup (verified by GUID)"
+  when: tanium_db_already_has_this_backup
+  ansible.builtin.debug:
+    msg: >-
+      Database '{{ tanium_target_db_name }}' on {{ tanium_sql_server_ip }}
+      already contains this exact backup (BackupSetGUID
+      {{ tanium_backup_set_guid }}) -- restore skipped, role is a no-op.
+
+- name: "Restore the customer database (only reached if the guard above passed)"
+  when: not tanium_db_already_has_this_backup
+  block:
+    - name: "Query the SQL instance's default data/log paths"
+      delegate_to: localhost
+      ansible.windows.win_shell: >-
+        sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+        -Q "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS NVARCHAR(4000))
+        + '|' + CAST(SERVERPROPERTY('InstanceDefaultLogPath') AS NVARCHAR(4000))"
+        -h -1
+      register: default_paths_result
+      changed_when: false
+      vars:
+        ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_scheme: http
+        ansible_port: 5985
+        ansible_user: Administrator
+        ansible_password: "{{ vault_win_admin_password }}"
+
+    - name: "Set facts: default data/log paths"
+      ansible.builtin.set_fact:
+        tanium_sql_data_path: "{{ default_paths_result.stdout | trim | split('|') | first }}"
+        tanium_sql_log_path: "{{ default_paths_result.stdout | trim | split('|') | last }}"
+
+    - name: "Verify the backup file is readable and not corrupt (RESTORE VERIFYONLY)"
+      delegate_to: localhost
+      ansible.windows.win_shell: >-
+        sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+        -Q "RESTORE VERIFYONLY FROM DISK = N'{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'"
+      register: verify_result
+      changed_when: false
+      vars:
+        ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_scheme: http
+        ansible_port: 5985
+        ansible_user: Administrator
+        ansible_password: "{{ vault_win_admin_password }}"
+
+    - name: "Take a pre-restore safety backup of any existing DB with this name"
+      when: "'PRESENT' in (db_exists_check.stdout | default(''))"
+      delegate_to: localhost
+      ansible.windows.win_shell: >-
+        sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+        -Q "BACKUP DATABASE [{{ tanium_target_db_name }}] TO DISK = N'{{ tanium_restore_staging_path }}\pre_replace_safety_{{ tanium_target_db_name }}.bak'
+        WITH COPY_ONLY, CHECKSUM, INIT"
+      register: safety_backup_result
+      vars:
+        ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_scheme: http
+        ansible_port: 5985
+        ansible_user: Administrator
+        ansible_password: "{{ vault_win_admin_password }}"
+
+    - name: "Set the existing DB to SINGLE_USER (kill connections) before replace"
+      when: "'PRESENT' in (db_exists_check.stdout | default(''))"
+      delegate_to: localhost
+      ansible.windows.win_shell: >-
+        sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+        -Q "ALTER DATABASE [{{ tanium_target_db_name }}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE"
+        -t 60
+      register: single_user_result
+      vars:
+        ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_scheme: http
+        ansible_port: 5985
+        ansible_user: Administrator
+        ansible_password: "{{ vault_win_admin_password }}"
+
+    - name: "List logical files, build MOVE clauses, and restore WITH REPLACE (single script to avoid fragile multi-hop parsing)"
+      delegate_to: localhost
+      ansible.windows.win_shell: |
+        $bakPath = '{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'
+        $dbName = '{{ tanium_target_db_name }}'
+        $dataPath = '{{ tanium_sql_data_path }}'
+        $logPath = '{{ tanium_sql_log_path }}'
+        $sa = '{{ tanium_sql_sa_password }}'
+
+        # RESTORE FILELISTONLY as CSV: LogicalName,PhysicalName,Type,...
+        # (Type is 'D' for data files, 'L' for the log file -- this is
+        # the real per-file list from the backup, not an assumed
+        # single-mdf/single-ldf pair, so it handles multi-file DBs too.)
+        $csv = sqlcmd -S localhost -U sa -P $sa -Q "SET NOCOUNT ON; RESTORE FILELISTONLY FROM DISK = N'$bakPath'" -s "," -W -h -1
+        $moveClauses = @()
+        foreach ($line in $csv) {
+          if ($line.Trim() -eq '') { continue }
+          $fields = $line.Split(',')
+          if ($fields.Count -lt 3) { continue }
+          $logicalName = $fields[0].Trim()
+          $type = $fields[2].Trim()
+          if ($type -eq 'L') {
+            $ext = 'ldf'
+            $targetDir = $logPath
+          } else {
+            $ext = 'mdf'
+            $targetDir = $dataPath
+          }
+          $newPhysicalName = Join-Path $targetDir "${logicalName}_${dbName}.${ext}"
+          $moveClauses += "MOVE N'$logicalName' TO N'$newPhysicalName'"
+        }
+        if ($moveClauses.Count -eq 0) {
+          Write-Error "No logical files found in backup FILELISTONLY output -- refusing to restore blind."
+          exit 1
+        }
+        $moveClauseStr = $moveClauses -join ', '
+        $restoreSql = "RESTORE DATABASE [$dbName] FROM DISK = N'$bakPath' WITH REPLACE, $moveClauseStr, STATS=10"
+        Write-Output "Restore command: $restoreSql"
+        sqlcmd -S localhost -U sa -P $sa -Q $restoreSql -t 0
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "RESTORE DATABASE failed, exit code $LASTEXITCODE"
+          exit $LASTEXITCODE
+        }
+      register: restore_result
+      vars:
+        ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_scheme: http
+        ansible_port: 5985
+        ansible_user: Administrator
+        ansible_password: "{{ vault_win_admin_password }}"
+
+    - name: "Wait for the database to come back ONLINE"
+      delegate_to: localhost
+      ansible.windows.win_shell: >-
+        sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+        -Q "SET NOCOUNT ON; SELECT state_desc FROM sys.databases WHERE name = '{{ tanium_target_db_name }}'"
+        -h -1
+      register: online_check
+      until: "'ONLINE' in (online_check.stdout | default(''))"
+      retries: 30
+      delay: 10
+      changed_when: false
+      vars:
+        ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_scheme: http
+        ansible_port: 5985
+        ansible_user: Administrator
+        ansible_password: "{{ vault_win_admin_password }}"
+
+    - name: "Sanity-check the restored DB actually has a Tanium schema"
+      delegate_to: localhost
+      ansible.windows.win_shell: >-
+        sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+        -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM [{{ tanium_target_db_name }}].sys.tables WHERE name = 'version_history'"
+        -h -1
+      register: schema_sanity_check
+      changed_when: false
+      failed_when: (schema_sanity_check.stdout | default('0') | trim | int) < 1
+      vars:
+        ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_scheme: http
+        ansible_port: 5985
+        ansible_user: Administrator
+        ansible_password: "{{ vault_win_admin_password }}"
+
+    - name: "Stamp this restore's backup-identity marker for future idempotency checks"
+      delegate_to: localhost
+      ansible.windows.win_shell: >-
+        sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+        -d "{{ tanium_target_db_name }}"
+        -Q "IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 0 AND name = 'tanium_lab_restore_backup_guid')
+        EXEC sp_updateextendedproperty 'tanium_lab_restore_backup_guid', N'{{ tanium_backup_set_guid }}'
+        ELSE EXEC sp_addextendedproperty 'tanium_lab_restore_backup_guid', N'{{ tanium_backup_set_guid }}'"
+      vars:
+        ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_scheme: http
+        ansible_port: 5985
+        ansible_user: Administrator
+        ansible_password: "{{ vault_win_admin_password }}"
+
+  rescue:
+    - name: "Restore failed -- report and stop (DB may be in SINGLE_USER)"
+      ansible.builtin.fail:
+        msg: >-
+          The customer DB restore failed partway through. The target
+          database may be left in SINGLE_USER mode or mid-restore --
+          check {{ tanium_sql_server_ip }} manually before retrying.
+          Original error context is in the task output above.
+
+  always:
+    - name: "Always return the DB to MULTI_USER, even on failure"
+      delegate_to: localhost
+      ansible.windows.win_shell: >-
+        sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+        -Q "IF DB_ID('{{ tanium_target_db_name }}') IS NOT NULL AND
+        (SELECT user_access_desc FROM sys.databases WHERE name = '{{ tanium_target_db_name }}') = 'SINGLE_USER'
+        ALTER DATABASE [{{ tanium_target_db_name }}] SET MULTI_USER"
+      changed_when: false
+      failed_when: false
+      vars:
+        ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_scheme: http
+        ansible_port: 5985
+        ansible_user: Administrator
+        ansible_password: "{{ vault_win_admin_password }}"

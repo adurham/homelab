@@ -1,0 +1,159 @@
+---
+# Provision a CLEAN Windows TS/TMS/TZS/SQL lab: clone win-server-2022
+# VMs, stand up the tanium.lab AD domain (needed for a remote SQL Server
+# — see roles/tanium_lab_ad_domain for why), grant the Tanium service
+# account sysadmin on SQL, then silent-install Tanium Server + Module
+# Server + Zone Server against a FRESH database.
+#
+# THIS PLAYBOOK NEVER TOUCHES CUSTOMER DATA. It is the "clean lab" path
+# — every database it creates is brand new. If you need to restore a
+# customer's SQL backup into the lab (e.g. reproducing a
+# version-specific bug against their real data), use
+# provision_tanium_windows_lab_with_customer_db.yml instead, which wraps
+# this same install logic with an explicit, guarded restore step first.
+# Do NOT add a customer-DB-restore step to THIS playbook "just this
+# once" — that blurring of clean-lab vs. customer-data paths is exactly
+# what led to a real incident on 2026-08-21 (see below).
+#
+# Usage:
+#   cd ~/repos/homelab
+#   OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES ansible-playbook \
+#     -i ansible/inventory/proxmox.yml ansible/provision_tanium_windows_lab.yml \
+#     -e tanium_setup_server_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupServer.exe \
+#     -e tanium_setup_moduleserver_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupModuleServer.exe \
+#     -e tanium_setup_zoneserver_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupZoneServer.exe \
+#     -e tanium_license_local_path=~/Downloads/tanium_7.8.2.1136/tanium.license
+#
+# The OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES env var works around a
+# macOS-only crash in ansible-core's WinRM connection worker ("A worker
+# was found in a dead state", no traceback) — confirmed 2026-08-20, not a
+# WinRM or network problem (raw pywinrm works fine without it). See warm
+# memory / this playbook's README for detail.
+#
+# REAL INCIDENT, 2026-08-20 (read before running against any SQL Server
+# with existing data): the first live run of tanium_server_install was
+# missing /UseSQLServer=1 and had /UseExistingDB=0. Without
+# /UseSQLServer=1, the installer's driver-check silently takes the wrong
+# (Postgres) branch even for a SQL Server target; combined with
+# /UseExistingDB=0, it unconditionally DROPPED AND RECREATED an existing
+# database with the expected name — in this case a customer's
+# freshly-restored production database. Recovered via re-restore from
+# the original .bak; both parameters are now fixed with safe defaults in
+# tanium_server_install (see that role's task-file header for the full
+# source citation). Any manual override of tanium_use_existing_db to 0
+# should be done with the same caution as `DROP DATABASE`.
+#
+# Also confirmed 2026-08-20: any reboot of a VM cloned from
+# template-win-server-2022 can boot into WinRE instead of Windows,
+# because the template (and every prior clone) inherits
+# boot=order=ide2;virtio0 with the original install ISO still attached —
+# tanium_windows_vm_clone now unconditionally ejects the ISO and fixes
+# boot order every run, and the template itself + all existing CASE1 VMs
+# were fixed in place. If you ever see a VM stuck on "Choose your
+# keyboard layout" after a reboot: qm set <vmid> --ide2 none,media=cdrom
+# --boot order=virtio0;ide2, then from within WinRE choose
+# Troubleshoot -> Turn off your PC (a plain reset/restart re-enters WinRE
+# even with boot order already fixed — it must be a clean shutdown+start).
+#
+# Zone Server needs a "tanium-init.dat"-style key file, but confirmed
+# 2026-08-20 this requires NO manual Console step and NO separate local
+# file: a fresh Tanium Server install auto-generates its own
+# tanium-init.dat, and tanium_zoneserver_install fetches it directly from
+# the Server box via WinRM. Zone Server install can run in the same pass
+# as everything else as long as the Server install ran first (which the
+# play ordering below already guarantees).
+#
+# REAL INCIDENT, 2026-08-21 (confirmed via a live re-run after the
+# original incident above was thought fully resolved): SetupServer.exe's
+# DBUser* params only cover the main DB connection. The SEPARATE
+# `TaniumReceiver.exe database create-admin-user` step authenticates as
+# the Tanium Server HOST'S OWN COMPUTER ACCOUNT (DOMAIN\HOSTNAME$), not
+# the DBUser service account -- without a SQL login for that computer
+# account, the install aborts right before installing the Windows
+# service, leaving Tanium Server completely uninstalled (files present,
+# no service) even though every earlier step succeeded. A follow-on
+# effect of the SAME aborted run also deleted SOAPServer.key/.crt
+# without ever regenerating them, so even after fixing the SQL login and
+# manually re-running the install steps, the service crashed on startup
+# with "Error initializing private keys." tanium_lab_sql_login now grants
+# sysadmin to BOTH the domain service account AND the Tanium Server
+# host's computer account (see the play below); tanium_server_install
+# now detects and regenerates a missing SOAPServer.key/.crt, and
+# verifies the service is STILL running 15s after start, not just that
+# Start-Service returned success.
+#
+# Every step here is idempotent — safe to re-run after a partial failure.
+
+- name: Clone Windows VMs for the lab
+  hosts: tanium_windows_lab
+  gather_facts: false
+  roles:
+    - role: tanium_windows_vm_clone
+      vars:
+        tanium_win_vmid: "{{ vmid }}"
+        tanium_win_vm_name: "{{ inventory_hostname }}"
+        tanium_win_ip: "{{ ansible_host }}"
+        tanium_win_hostname: "{{ hostvars[inventory_hostname].tanium_win_hostname | default(inventory_hostname | upper) }}"
+
+- name: Stand up the tanium.lab AD domain and join member servers
+  hosts: tanium_windows_lab
+  gather_facts: false
+  # DC must be promoted (and its own DNS pointed at itself) before any
+  # member can join and resolve the domain — serial: 1 across BOTH
+  # groups keeps this play strictly ordered by inventory position
+  # (tanium_windows_lab_dc listed before tanium_windows_lab_case1).
+  serial: 1
+  roles:
+    - role: tanium_lab_ad_domain
+      vars:
+        tanium_win_ip: "{{ ansible_host }}"
+
+- name: Create the Tanium DB service account in the domain
+  hosts: win-dc-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_lab_service_account
+
+- name: Grant Tanium service account + Server computer account sysadmin on SQL Server
+  hosts: win-sql-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_lab_sql_login
+      vars:
+        tanium_sql_login_names:
+          - "{{ tanium_lab_domain_netbios }}\\{{ tanium_db_service_account }}"
+          # The Tanium Server's own computer account -- required by
+          # `database create-admin-user` (see incident note above), not
+          # just the service account.
+          - "{{ tanium_lab_domain_netbios }}\\{{ hostvars['win-ts-case1-01'].tanium_win_hostname }}$"
+        tanium_sql_server_ip: "{{ ansible_host }}"
+
+- name: Install Tanium Server
+  hosts: win-ts-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_server_install
+      vars:
+        tanium_server_ip: "{{ ansible_host }}"
+        tanium_sql_server_ip: "{{ hostvars['win-sql-case1-01'].ansible_host }}"
+        tanium_db_username: "{{ tanium_db_service_account }}"
+        tanium_db_domain: "{{ tanium_lab_domain_netbios }}"
+        tanium_db_password: "{{ vault_tanium_lab_svc_password }}"
+
+- name: Install Tanium Module Server
+  hosts: win-tms-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_moduleserver_install
+      vars:
+        tanium_moduleserver_ip: "{{ ansible_host }}"
+        tanium_server_ip: "{{ hostvars['win-ts-case1-01'].ansible_host }}"
+
+- name: Install Tanium Zone Server
+  hosts: win-tzs-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_zoneserver_install
+      vars:
+        tanium_zoneserver_ip: "{{ ansible_host }}"
+        tanium_server_ip: "{{ hostvars['win-ts-case1-01'].ansible_host }}"

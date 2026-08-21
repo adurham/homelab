@@ -1,0 +1,14 @@
+---
+tanium_win_template_vmid: 9000  # template-win-server-2022
+tanium_win_target_node: "{{ target_node }}"
+tanium_win_storage: "{{ vm_storage | default('nvme-data') }}"
+tanium_win_cores: 4
+tanium_win_memory: 8192
+tanium_win_dns_servers:
+  - "{{ ip_dns_primary }}"
+
+# Required per-invocation (no sane default): vmid, vm_name, ip, hostname.
+# tanium_win_vmid: 254
+# tanium_win_vm_name: win-sql-case1-01
+# tanium_win_ip: 172.16.0.90
+# tanium_win_hostname: WIN-SQL-CASE1

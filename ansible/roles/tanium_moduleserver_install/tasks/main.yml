@@ -1,0 +1,170 @@
+---
+# Silent-install the Tanium Module Server. Verified against
+# moduleserver.nsi source on platdev-jump (same tag as tanium_server_install)
+# 2026-08-20.
+#
+# Unlike Tanium Server, the Module Server always uses its own bundled
+# Postgres (InitSQLVariables hardcodes $UsePostgres="1" unconditionally,
+# with no /UseSQLServer equivalent) — it never touches the customer's SQL
+# Server at all, and its SQL-driver-download path (a separate Tanium
+# Postgres installer .exe, not a third-party MSI via nsExec::ExecToStack)
+# is structurally different from Tanium Server's confirmed-hanging
+# msiexec call. No equivalent of the tanium_server_install incident
+# applies here — verified via source, not assumed.
+#
+# Registration against the Tanium Server: RegisterModuleServer defaults
+# to "1" (register) on a fresh install automatically — no need to pass
+# /RegisterModuleServer=1 explicitly — but registration is silently
+# skipped unless a password is supplied via /RegisterAdminPassFile
+# (a FILE containing the password, not an inline /RegisterAdminPass=
+# parameter — there isn't one exposed on the command line). This role
+# writes that file to the module server box just before install and
+# removes it right after, so the admin password never lands in
+# Install.log or process-list-visible command-line args.
+#
+# Full parameter reference (moduleserver.nsi, grep 'GetOptions.*Params'):
+#   /ServerAddress /ServerPort /LogVerbosityLevel /TrustedCertPath
+#   /TrustedFingerprint /ServerHostName /SelfSign /CertPath /KeyPath
+#   /MainServerHostName /RegisterModuleServer /RegisterAdminUser
+#   /RegisterAdminPassFile /SkipDBCreate
+
+# Snapshot tanium_moduleserver_ip to a plain fact before any task-level
+# `vars:` block redefines `ansible_host` — see tanium_windows_vm_clone's
+# role header for why this avoids a real Jinja recursion error.
+- name: "Resolve tanium_moduleserver_ip to a plain fact"
+  ansible.builtin.set_fact:
+    tanium_moduleserver_ip_resolved: "{{ tanium_moduleserver_ip }}"
+
+- name: "Check if Tanium Module Server is already installed"
+  delegate_to: localhost
+  ansible.windows.win_stat:
+    path: "{{ tanium_moduleserver_install_dir }}\\TaniumModuleServer.exe"
+  register: ms_exe_check
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Copy installer to {{ tanium_moduleserver_ip }}"
+  when: not ms_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_copy:
+    src: "{{ tanium_setup_moduleserver_exe_local_path }}"
+    dest: "{{ tanium_installers_dir }}\\SetupModuleServer.exe"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Write registration password file (removed immediately after install)"
+  when: not ms_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_copy:
+    content: "{{ tanium_console_admin_password }}"
+    dest: "{{ tanium_installers_dir }}\\register-pass.txt"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+  no_log: true
+
+- name: "Run SetupModuleServer.exe /S (silent install + register)"
+  when: not ms_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_command:
+    cmd: >-
+      {{ tanium_installers_dir }}\SetupModuleServer.exe /S
+      /MainServerHostName={{ tanium_server_ip }}
+      /RegisterAdminUser={{ tanium_console_admin_user }}
+      /RegisterAdminPassFile={{ tanium_installers_dir }}\register-pass.txt
+      /SelfSign=1
+  register: install_result
+  changed_when: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Remove registration password file"
+  delegate_to: localhost
+  ansible.windows.win_file:
+    path: "{{ tanium_installers_dir }}\\register-pass.txt"
+    state: absent
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Wait for TaniumModuleServer.exe to exist (install completion signal)"
+  delegate_to: localhost
+  ansible.windows.win_stat:
+    path: "{{ tanium_moduleserver_install_dir }}\\TaniumModuleServer.exe"
+  register: install_done_check
+  until: install_done_check.stat.exists
+  retries: 30
+  delay: 20
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Verify Tanium Module Server service is running"
+  delegate_to: localhost
+  ansible.windows.win_service:
+    name: "Tanium Module Server"
+  register: service_check
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Start Tanium Module Server service if not running"
+  when: service_check.state != 'started'
+  delegate_to: localhost
+  ansible.windows.win_service:
+    name: "Tanium Module Server"
+    state: started
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"

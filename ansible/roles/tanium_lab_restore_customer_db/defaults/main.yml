@@ -1,0 +1,21 @@
+---
+# The database name to restore into (this is a real T-SQL RESTORE
+# DATABASE [name] target -- SQL Server itself doesn't care what you
+# name it, so per-case namespacing genuinely works AT THE RESTORE LEVEL,
+# unlike SetupServer.exe -- see provision_tanium_windows_lab_with_customer_db.yml's
+# header for why the Tanium installer itself can't be pointed at a
+# custom database name; it always targets one literally named "tanium").
+# Defaults to "tanium" for convenience/back-compat with the installer's
+# hardcoded expectation, but namespacing this restore step alone (e.g.
+# "tanium_<case-id>") is still useful if you want to keep a restored
+# customer DB around under its own name for inspection separately from
+# whatever DB the Tanium Server install actually ends up using.
+tanium_target_db_name: "tanium"
+
+# Where the .bak gets staged on the SQL Server box before RESTORE.
+tanium_restore_staging_path: "C:\\TaniumRestoreStaging"
+
+tanium_sql_sa_password: "{{ vault_tanium_lab_sql_sa_password }}"
+
+# Required per-invocation: tanium_customer_bak_local_path (local path to
+# the customer's .bak on this Mac), tanium_sql_server_ip.

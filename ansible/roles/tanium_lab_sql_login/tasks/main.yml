@@ -1,0 +1,108 @@
+---
+# Create (idempotently) Windows-authenticated SQL Server logins and
+# grant sysadmin — the role only makes sense once both the SQL Server
+# box and the account-owning box are members of the same AD domain (see
+# tanium_lab_ad_domain). CREATE LOGIN ... FROM WINDOWS against a
+# workgroup machine's local account fails with "Windows NT user or group
+# not found" — this is a hard SQL Server/AD limitation, not a config gap
+# (confirmed by hands-on repro 2026-08-20).
+#
+# Runs sqlcmd directly over WinRM rather than pulling in a dedicated SQL
+# Ansible collection (e.g. lowlydba.sqlserver) — sqlcmd ships with SQL
+# Server by default and this is a small, one-shot idempotent operation;
+# not worth a new collection dependency for the whole repo.
+#
+# vault_tanium_lab_sql_sa_password is a NEW secret for future fresh SQL
+# Server installs done as part of this playbook family — it does NOT
+# necessarily match an existing SQL Server's actual sa password (e.g. a
+# customer database restored from a backup with its own sa password
+# already set). Override with -e tanium_sql_sa_password=... at
+# invocation time when the SQL Server's real sa credential differs.
+#
+# REAL BUG, confirmed 2026-08-21: SetupServer.exe's DBUser* CLI params
+# only cover the main install/upgrade DB connection. The SEPARATE
+# `TaniumReceiver.exe database create-admin-user` step (run automatically
+# right after) authenticates to SQL as the Tanium Server HOST'S OWN
+# COMPUTER ACCOUNT (DOMAIN\HOSTNAME$, via Kerberos/integrated auth), NOT
+# the DBUser service account passed on the command line. Without a SQL
+# login for that computer account, create-admin-user fails with "Login
+# failed for user 'DOMAIN\HOSTNAME$'" and the whole install aborts right
+# before installing the Windows service — leaving Tanium Server
+# completely uninstalled (files present, no service) even though every
+# earlier step (including the DB upgrade itself) succeeded.
+#
+# tanium_sql_login_names: list of account names to grant sysadmin to
+# (defaults to [tanium_sql_login_name] for backward compat if only the
+# singular var is set — see defaults/main.yml). Always include the
+# Tanium Server host's own computer account (DOMAIN\HOSTNAME$) alongside
+# the domain service account.
+
+# Snapshot tanium_sql_server_ip to a plain fact before any task-level
+# `vars:` block redefines `ansible_host` — see tanium_windows_vm_clone's
+# role header for why this avoids a real Jinja recursion error.
+- name: "Resolve tanium_sql_server_ip to a plain fact"
+  ansible.builtin.set_fact:
+    tanium_sql_server_ip_resolved: "{{ tanium_sql_server_ip }}"
+
+- name: "Check which logins already exist"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+    -Q "SET NOCOUNT ON; SELECT name FROM sys.server_principals WHERE name = '{{ item }}'"
+    -h -1
+  loop: "{{ tanium_sql_login_names }}"
+  register: login_check
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Create login and grant sysadmin for each account"
+  when: item.item not in (item.stdout | default(''))
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+    -Q "CREATE LOGIN [{{ item.item }}] FROM WINDOWS;
+    ALTER SERVER ROLE sysadmin ADD MEMBER [{{ item.item }}];"
+  loop: "{{ login_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: create_login_result
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Verify every account is a sysadmin member"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
+    -Q "SET NOCOUNT ON; SELECT m.name FROM sys.server_role_members rm
+    JOIN sys.server_principals r ON rm.role_principal_id = r.principal_id
+    JOIN sys.server_principals m ON rm.member_principal_id = m.principal_id
+    WHERE r.name = 'sysadmin' AND m.name = '{{ item }}'"
+    -h -1
+  loop: "{{ tanium_sql_login_names }}"
+  register: sysadmin_check
+  changed_when: false
+  failed_when: item not in (sysadmin_check.stdout | default(''))
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"

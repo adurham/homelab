@@ -1,0 +1,155 @@
+---
+# Provision the Windows TS/TMS/TZS/SQL lab AND restore a customer's SQL
+# Server backup into it before Tanium Server installs -- for reproducing
+# version-specific bugs against a customer's real data (e.g. a
+# version-match investigation). This is the ONLY playbook in this repo
+# that should ever restore a customer .bak -- provision_tanium_windows_lab.yml
+# (the clean-lab playbook) deliberately never touches customer data.
+#
+# This playbook is everything in provision_tanium_windows_lab.yml PLUS
+# one inserted play: tanium_lab_restore_customer_db, which runs AFTER
+# the SQL login grants (the service account + Server computer account
+# need sysadmin before the restore, same as the clean path) and BEFORE
+# the Tanium Server install (so the install's /UseExistingDB=1 sees the
+# real, already-restored customer data instead of racing to create its
+# own empty DB first).
+#
+# Usage:
+#   cd ~/repos/homelab
+#   OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES ansible-playbook \
+#     -i ansible/inventory/proxmox.yml ansible/provision_tanium_windows_lab_with_customer_db.yml \
+#     -e tanium_setup_server_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupServer.exe \
+#     -e tanium_setup_moduleserver_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupModuleServer.exe \
+#     -e tanium_setup_zoneserver_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupZoneServer.exe \
+#     -e tanium_license_local_path=~/Downloads/tanium_7.8.2.1136/tanium.license \
+#     -e tanium_customer_bak_local_path=/path/to/customer/backup.bak \
+#     -e tanium_target_db_name=tanium_<case-id>
+#
+# NOTE ON DATABASE NAMING, confirmed 2026-08-21: SetupServer.exe's real
+# CLI parameters (/SQLServerName /SQLInstance /UseExistingDB etc. -- see
+# tanium_server_install's header for the full verified list) do NOT
+# include a database-name override. Every live install this session
+# targeted a database literally named "tanium" -- the installer appears
+# to hardcode this name, not read it from a parameter. This means the
+# "namespace per case" idea below is NOT currently achievable purely via
+# this playbook -- tanium_target_db_name only controls what
+# tanium_lab_restore_customer_db restores INTO and what
+# tanium_server_install's safety pre-flight check queries; it does NOT
+# get passed to SetupServer.exe, because there's nothing to pass it to.
+# If you actually need two different customer DBs coexisting on one SQL
+# Server, they need separate SQL Server INSTANCES (or separate SQL
+# Server boxes entirely), not just different database names under one
+# instance -- re-verify against source (server.nsi /SQLInstance) before
+# relying on this if it matters for your case; this playbook has not
+# been tested with a non-default instance.
+#
+# tanium_target_db_name still matters for the SAFETY checks even given
+# the above: it's what tanium_lab_restore_customer_db's identity-marker
+# guard keys off, so leave it at the default "tanium" unless you have a
+# specific reason and have confirmed the instance-targeting question
+# above.
+#
+# SAFETY: tanium_lab_restore_customer_db refuses to RESTORE WITH REPLACE
+# over any existing database that doesn't carry its own
+# tanium_lab_restore_backup_guid marker matching THIS backup's real
+# identity (read via RESTORE HEADERONLY, not inferred from row counts).
+# There is no override flag for that check -- if it fires, something
+# about your assumptions is wrong and needs investigating, not
+# bypassing.
+#
+# See provision_tanium_windows_lab.yml for the OBJC_DISABLE_INITIALIZE_FORK_SAFETY,
+# WinRE boot-loop, and Zone Server key-file notes -- all still apply
+# here unchanged.
+
+- name: Clone Windows VMs for the lab
+  hosts: tanium_windows_lab
+  gather_facts: false
+  roles:
+    - role: tanium_windows_vm_clone
+      vars:
+        tanium_win_vmid: "{{ vmid }}"
+        tanium_win_vm_name: "{{ inventory_hostname }}"
+        tanium_win_ip: "{{ ansible_host }}"
+        tanium_win_hostname: "{{ hostvars[inventory_hostname].tanium_win_hostname | default(inventory_hostname | upper) }}"
+
+- name: Stand up the tanium.lab AD domain and join member servers
+  hosts: tanium_windows_lab
+  gather_facts: false
+  serial: 1
+  roles:
+    - role: tanium_lab_ad_domain
+      vars:
+        tanium_win_ip: "{{ ansible_host }}"
+
+- name: Create the Tanium DB service account in the domain
+  hosts: win-dc-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_lab_service_account
+
+- name: Grant Tanium service account + Server computer account sysadmin on SQL Server
+  hosts: win-sql-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_lab_sql_login
+      vars:
+        tanium_sql_login_names:
+          - "{{ tanium_lab_domain_netbios }}\\{{ tanium_db_service_account }}"
+          - "{{ tanium_lab_domain_netbios }}\\{{ hostvars['win-ts-case1-01'].tanium_win_hostname }}$"
+        tanium_sql_server_ip: "{{ ansible_host }}"
+
+# THE ONE STEP THIS PLAYBOOK ADDS over the clean-lab path -- restores
+# the customer's .bak into tanium_target_db_name BEFORE the Server
+# install runs, with the identity-based safety checks described in the
+# role's task-file header (RESTORE HEADERONLY -> BackupSetGUID marker,
+# not row counts; refuses to touch an unmarked or mismatched existing
+# DB; pre-restore COPY_ONLY safety backup; SINGLE_USER/MULTI_USER
+# wrapped in block/rescue/always so a failure never leaves the DB
+# permanently locked).
+- name: Restore the customer's SQL backup before Tanium Server installs
+  hosts: win-sql-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_lab_restore_customer_db
+      vars:
+        tanium_sql_server_ip: "{{ ansible_host }}"
+
+- name: Install Tanium Server (against the restored customer DB)
+  hosts: win-ts-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_server_install
+      vars:
+        tanium_server_ip: "{{ ansible_host }}"
+        tanium_sql_server_ip: "{{ hostvars['win-sql-case1-01'].ansible_host }}"
+        tanium_db_username: "{{ tanium_db_service_account }}"
+        tanium_db_domain: "{{ tanium_lab_domain_netbios }}"
+        tanium_db_password: "{{ vault_tanium_lab_svc_password }}"
+        # NOT actually passed to SetupServer.exe (no such CLI param
+        # exists, confirmed 2026-08-21 -- see this playbook's header).
+        # Only affects the safety pre-flight check's query target; the
+        # installer itself always targets a DB literally named "tanium"
+        # regardless of this value. Kept here so the safety check and
+        # the restore role stay pointed at the same name.
+        tanium_target_db_name: "{{ tanium_target_db_name | default('tanium') }}"
+        # =1 is the whole point of this playbook -- use the just-restored
+        # customer DB, never drop/recreate it.
+        tanium_use_existing_db: 1
+
+- name: Install Tanium Module Server
+  hosts: win-tms-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_moduleserver_install
+      vars:
+        tanium_moduleserver_ip: "{{ ansible_host }}"
+        tanium_server_ip: "{{ hostvars['win-ts-case1-01'].ansible_host }}"
+
+- name: Install Tanium Zone Server
+  hosts: win-tzs-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_zoneserver_install
+      vars:
+        tanium_zoneserver_ip: "{{ ansible_host }}"
+        tanium_server_ip: "{{ hostvars['win-ts-case1-01'].ansible_host }}"

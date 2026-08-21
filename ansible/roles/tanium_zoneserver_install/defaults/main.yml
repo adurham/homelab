@@ -1,0 +1,17 @@
+---
+# Zone Server is a 32-bit installer — it installs to Program Files (x86),
+# NOT Program Files like Server/Module Server. Confirmed 2026-08-20 (a
+# real bug: this path was wrong as "C:\Program Files\Tanium\..." and the
+# install-completion win_stat check silently never found the exe,
+# looping until timeout even though the install itself succeeded fine).
+tanium_zoneserver_install_dir: "C:\\Program Files (x86)\\Tanium\\Tanium ZoneServer"
+tanium_installers_dir: "C:\\TaniumInstallers"
+
+# Where this role fetches tanium-init.dat from on the Tanium Server box
+# (see tasks/main.yml header — no Console interaction needed, confirmed
+# 2026-08-20). Override if the Server was installed to a non-default
+# directory.
+tanium_install_dir: "C:\\Program Files\\Tanium\\Tanium Server"
+
+# Required per-invocation: tanium_zoneserver_ip, tanium_server_ip,
+# tanium_setup_zoneserver_exe_local_path.

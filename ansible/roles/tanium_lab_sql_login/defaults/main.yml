@@ -1,0 +1,14 @@
+---
+tanium_sql_sa_password: "{{ vault_tanium_lab_sql_sa_password }}"
+
+# List of DOMAIN\account names to grant sysadmin. Defaults to just
+# tanium_sql_login_name for backward compat with callers that only set
+# the singular var — but the playbook should pass BOTH the domain
+# service account AND the Tanium Server host's own computer account
+# (DOMAIN\HOSTNAME$) here, since create-admin-user authenticates as the
+# latter (see tasks/main.yml header for the real incident this fixes).
+tanium_sql_login_names: "{{ [tanium_sql_login_name] if tanium_sql_login_name is defined else [] }}"
+
+# Required per-invocation: tanium_sql_login_names (list) or
+# tanium_sql_login_name (singular, back-compat), tanium_sql_server_ip
+# (the SQL Server box's IP, e.g. ip_win_sql_case).
