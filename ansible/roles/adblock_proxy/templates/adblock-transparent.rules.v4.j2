@@ -79,6 +79,24 @@ COMMIT
 # DNS resolution for this CT's own outbound lookups (apt, tailscale
 # control plane, blocklist-adjacent hostnames) — same AdGuard resolver
 # already configured in /etc/resolv.conf, covered by the rule above.
+# Tailscale port-mapping negotiation (UPnP/NAT-PMP/PCP) to the home
+# router (added 2026-08-21, same day as the eth1 LAN NIC): this is the
+# entire point of the LAN NIC — without reaching the router directly,
+# tailscaled can never open a port mapping and every peer connection
+# (even devices on the SAME home network) falls back to a DERP relay,
+# confirmed live capping throughput at ~17.5 Mbps vs a ~280-350 Mbps
+# LAN/WAN baseline. Router-only (net_lan_gateway), not the whole LAN
+# range — UPnP uses TCP for SOAP calls (root device description +
+# AddPortMapping etc, typically :5000 on this router per a live `curl`
+# test) and NAT-PMP/PCP use UDP/5351; SSDP discovery is UDP/1900
+# multicast, which this narrow ACCEPT also covers since -d matches the
+# unicast reply path tailscaled actually needs (the multicast discovery
+# packet itself goes out fine under the existing OUTPUT ACCEPT-by-
+# default for non-LAN/non-private-SDN destinations — 239.255.255.250
+# doesn't match {{ net_lan_range }}).
+-A OUTPUT -d {{ net_lan_gateway }} -p tcp --dport 5000 -j ACCEPT
+-A OUTPUT -d {{ net_lan_gateway }} -p udp --dport 1900 -j ACCEPT
+-A OUTPUT -d {{ net_lan_gateway }} -p udp --dport 5351 -j ACCEPT
 # Explicit DROP for the rest of the private SDN and LAN — this is the
 # actual lateral-movement lockout. Order matters: these DROPs come
 # AFTER the narrow ACCEPTs above, so dns-01/lb-01/proxmox/etc. are
