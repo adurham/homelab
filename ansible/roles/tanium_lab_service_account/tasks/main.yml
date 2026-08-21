@@ -1,0 +1,31 @@
+---
+# Create a dedicated domain service account for the Tanium Server's DB
+# connection identity (kept separate from Administrator — least
+# privilege, and matches the manual setup this playbook replaces:
+# TANIUM\taniumsvc, granted sysadmin only on the specific SQL instance
+# by tanium_lab_sql_login, not domain-wide privilege).
+
+- name: "Ensure domain service account {{ tanium_db_service_account }} exists"
+  delegate_to: localhost
+  microsoft.ad.user:
+    name: "{{ tanium_db_service_account }}"
+    firstname: Tanium
+    surname: Service Account
+    upn: "{{ tanium_db_service_account }}@{{ tanium_lab_domain_name }}"
+    password: "{{ vault_tanium_lab_svc_password }}"
+    password_never_expires: true
+    user_cannot_change_password: true
+    enabled: true
+    state: present
+    domain_server: "{{ ip_win_dc }}"
+    domain_username: "{{ tanium_lab_domain_netbios }}\\Administrator"
+    domain_password: "{{ vault_win_admin_password }}"
+  vars:
+    ansible_host: "{{ ip_win_dc }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"

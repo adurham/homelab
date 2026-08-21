@@ -1,0 +1,14 @@
+---
+tanium_moduleserver_install_dir: "C:\\Program Files\\Tanium\\Tanium Module Server"
+tanium_installers_dir: "C:\\TaniumInstallers"
+tanium_console_admin_user: "{{ tanium_lab_domain_netbios }}\\Administrator"
+# The console admin here is a domain account (DOMAIN\Administrator) —
+# Tanium Console authenticates it via the real Windows/AD password, not
+# a separate Tanium-only password. Same value as vault_win_admin_password
+# used everywhere else in this lab (kept as its own var so a future case
+# using a genuinely different console admin account can override just
+# this one).
+tanium_console_admin_password: "{{ vault_win_admin_password }}"
+
+# Required per-invocation: tanium_moduleserver_ip, tanium_server_ip,
+# tanium_setup_moduleserver_exe_local_path.

@@ -1,0 +1,193 @@
+---
+# Clone a Windows Server VM from the sysprepped golden-image template
+# (VMID 9000, template-win-server-2022), assign the target IP, rename the
+# computer, and wait for WinRM to answer.
+#
+# The template is built by ansible/build_windows_template.yml + the manual
+# steps in ansible/docs/windows_template_guide.md (sysprep /generalize
+# /oobe /shutdown, then "Convert to Template" in the Proxmox UI). See that
+# guide's "Known template gotcha" note: clones can boot stuck mid-OOBE if
+# the template wasn't re-sysprepped after certain changes — this role's
+# "unstick OOBE" step below is a defensive fix, not the primary path.
+#
+# WinRM is already enabled in the template (ansible/files/enable_winrm.ps1
+# baked in during template prep), so post-clone config below runs over
+# WinRM, not qm guest exec — much more reliable than the guest-agent exec
+# channel, which is known to be intermittently flaky against this Proxmox
+# cluster (empty/timeout responses even when otherwise healthy; retry-safe
+# guest exec is only used for the handful of steps that must run before
+# WinRM/network is configured).
+#
+# `qm guest exec <vmid> -- <argv...>` syntax confirmed against a live VM
+# (2026-08-20): no --pass-signal flag exists on this Proxmox version; pass
+# the command and each argument as separate argv elements after `--`, not
+# as one shell-quoted string, and read the JSON `out-data`/`exitcode`
+# fields from stdout rather than relying on the wrapper's own rc (`qm`
+# itself exits 0 even when the guest command fails — the real result is
+# inside the JSON).
+
+- name: "Check if VM {{ tanium_win_vmid }} already exists"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command: "qm status {{ tanium_win_vmid }}"
+  register: vm_exists_check
+  failed_when: false
+  changed_when: false
+
+# Snapshot tanium_win_ip to a plain fact BEFORE any task-level `vars:`
+# block below redefines `ansible_host` (for delegate_to: localhost WinRM
+# tasks) — without this, Ansible's flattened per-task variable scope
+# creates a real circular reference (tanium_win_ip resolves via
+# ansible_host, which those same tasks' vars: redefine via
+# tanium_win_ip), and every later `{{ tanium_win_ip }}` reference blows
+# the template recursion limit.
+- name: "Resolve tanium_win_ip to a plain fact"
+  ansible.builtin.set_fact:
+    tanium_win_ip_resolved: "{{ tanium_win_ip }}"
+
+- name: "Clone template {{ tanium_win_template_vmid }} -> {{ tanium_win_vmid }} ({{ tanium_win_vm_name }})"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command: >
+    qm clone {{ tanium_win_template_vmid }} {{ tanium_win_vmid }}
+    --name {{ tanium_win_vm_name }}
+    --full
+    --target {{ tanium_win_target_node }}
+    --storage {{ tanium_win_storage }}
+  when: vm_exists_check.rc != 0
+  register: clone_result
+
+- name: "Resize clone {{ tanium_win_vmid }} resources"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command: >
+    qm set {{ tanium_win_vmid }}
+    --cores {{ tanium_win_cores }}
+    --memory {{ tanium_win_memory }}
+  when: vm_exists_check.rc != 0
+
+# Real incident 2026-08-20: the win-server-2022 template (and every clone
+# made from it) inherits boot=order=ide2;virtio0 with the original Windows
+# Server install ISO still attached at ide2. Any reboot (not just first
+# boot) can boot off that ISO instead of the real disk, landing the VM in
+# WinRE ("Choose your keyboard layout") instead of normal Windows — this
+# hit TWO separate VMs mid-session on ordinary Restart-Computer calls, not
+# just first boot. Eject the ISO and put the disk first in boot order
+# unconditionally, every run — cheap and fully idempotent.
+- name: "Eject install ISO and fix boot order (prevents WinRE-on-reboot)"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command: >
+    qm set {{ tanium_win_vmid }}
+    --ide2 none,media=cdrom
+    --boot order=virtio0;ide2
+  register: bootfix_result
+  changed_when: "'ide2: none' not in (bootfix_result.stdout | default(''))"
+
+- name: "Start clone {{ tanium_win_vmid }}"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command: "qm start {{ tanium_win_vmid }}"
+  register: start_result
+  failed_when: start_result.rc != 0 and 'already running' not in (start_result.stderr | default(''))
+  changed_when: start_result.rc == 0 and 'already running' not in (start_result.stderr | default(''))
+
+- name: "Wait for QEMU guest agent to respond on {{ tanium_win_vmid }}"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command: "qm guest cmd {{ tanium_win_vmid }} ping"
+  register: agent_ping
+  until: agent_ping.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: false
+
+# Defensive fix for the known "clone boots stuck mid-OOBE" template gotcha
+# (see role header comment) — clears leftover Setup state from the
+# template's own first-boot history so this clone's OOBE isn't blocked.
+# No-ops harmlessly if the registry keys are already clean (rc reflects
+# whether Remove-ItemProperty found anything, which is fine either way).
+- name: "Unstick OOBE if template was booted before final sysprep"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - guest
+      - exec
+      - "{{ tanium_win_vmid }}"
+      - --
+      - powershell
+      - -NoProfile
+      - -Command
+      - "Remove-ItemProperty -Path 'HKLM:\\SYSTEM\\Setup' -Name OOBEInProgress,SetupType,CmdLine -ErrorAction SilentlyContinue"
+  register: unstick_oobe
+  changed_when: false
+  failed_when: false
+
+- name: "Assign static IP {{ tanium_win_ip_resolved }} via guest exec"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - guest
+      - exec
+      - "{{ tanium_win_vmid }}"
+      - --
+      - powershell
+      - -NoProfile
+      - -Command
+      - >-
+        Set-NetIPInterface -InterfaceAlias Ethernet -Dhcp Disabled -ErrorAction SilentlyContinue;
+        if (-not (Get-NetIPAddress -IPAddress {{ tanium_win_ip_resolved }} -ErrorAction SilentlyContinue)) {
+        New-NetIPAddress -InterfaceAlias Ethernet -IPAddress {{ tanium_win_ip_resolved }} -PrefixLength 24
+        -DefaultGateway {{ net_private_gw }} -ErrorAction SilentlyContinue }
+        Set-DnsClientServerAddress -InterfaceAlias Ethernet -ServerAddresses {{ tanium_win_dns_servers | join(',') }}
+  register: assign_ip
+  changed_when: "'New-NetIPAddress' in (assign_ip.stdout | default(''))"
+
+- name: "Wait for {{ tanium_win_ip_resolved }} to answer on WinRM port 5985"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.wait_for:
+    host: "{{ tanium_win_ip_resolved }}"
+    port: 5985
+    timeout: 180
+    delay: 5
+
+- name: "Rename computer to {{ tanium_win_hostname }} and reboot if needed"
+  delegate_to: localhost
+  ansible.windows.win_hostname:
+    name: "{{ tanium_win_hostname }}"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_win_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+  register: rename_result
+
+- name: "Reboot after hostname change"
+  when: rename_result.reboot_required | default(false)
+  delegate_to: localhost
+  ansible.windows.win_reboot:
+    reboot_timeout: 300
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_win_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# If this reboot lands the VM in WinRE despite the boot-order fix above
+# (confirmed happening on 2+ VMs in one session, from an ordinary
+# win_reboot / Restart-Computer, not just first boot) — win_reboot will
+# time out waiting for WinRM, since WinRE has no WinRM listener. Recovery
+# is NOT another reboot/reset: bootmgr's failure counter re-enters WinRE
+# even with boot order already fixed. It needs a genuine cold
+# shutdown+start (qm stop <vmid> && qm start <vmid> — NOT qm reset, and
+# NOT "Turn off your PC" if VNC access is unreliable, plain API stop
+# works identically). Also note: WinRE's winre.wim commonly lacks the
+# VirtIO storage driver even though the real installed OS has it —
+# `diskpart > list disk` inside WinRE showing "no fixed disks" is a
+# WinRE-environment limitation, not evidence of real disk corruption;
+# don't chase disk-repair options if you land here, just cold-cycle the
+# VM via the Proxmox API.

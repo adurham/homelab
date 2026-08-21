@@ -1,0 +1,131 @@
+---
+# Promote the DC (if it isn't one yet) then join a member server to the
+# domain — both idempotent, safe to run against a host repeatedly.
+#
+# Why this role exists at all: Tanium Server's silent installer
+# (SetupServer.exe /SQLServerName=... /DBUserName=... /DBUserDomain=...)
+# needs a Windows-authenticated SQL login for a *remote* SQL Server.
+# CREATE LOGIN ... FROM WINDOWS resolves the account's SID via a
+# cross-machine LSA/SAM lookup that has no trust path between two
+# WORKGROUP machines — confirmed by hands-on repro 2026-08-20 (matching
+# local accounts, anonymous SID/name lookup policy tweaks,
+# RestrictAnonymousSAM, null-session pipes, and even running SQL Server's
+# own service as the matching local account all failed with the same
+# "Windows NT user or group not found" error). A shared AD domain is the
+# only supported fix short of using a fully local SQL Server + Local
+# System (see tanium_server_install role notes on when that's enough).
+#
+# host_role: "dc" promotes this host as the (first) domain controller of
+# a new forest; "member" joins an existing domain. Re-running with
+# host_role=dc against an already-promoted DC, or host_role=member
+# against an already-joined member, is a no-op (both underlying modules
+# are idempotent).
+
+# Snapshot tanium_win_ip to a plain fact before any task-level `vars:`
+# block redefines `ansible_host` — see tanium_windows_vm_clone's role
+# header for why this avoids a real Jinja recursion error.
+- name: "Resolve tanium_win_ip to a plain fact"
+  ansible.builtin.set_fact:
+    tanium_win_ip_resolved: "{{ tanium_win_ip }}"
+
+- name: "Promote {{ inventory_hostname }} as domain controller (new forest {{ tanium_lab_domain_name }})"
+  when: tanium_lab_host_role == 'dc'
+  delegate_to: localhost
+  microsoft.ad.domain:
+    dns_domain_name: "{{ tanium_lab_domain_name }}"
+    domain_netbios_name: "{{ tanium_lab_domain_netbios }}"
+    safe_mode_password: "{{ vault_tanium_lab_dsrm_password }}"
+    install_dns: true
+    reboot: true
+    reboot_timeout: 600
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_win_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+  register: dc_promote_result
+
+# The DC's own DNS should point at itself once it's authoritative for the
+# zone — pointing it at an external/lab resolver first (done implicitly
+# by the vm_clone role's default net_private DNS) can leave it unable to
+# resolve its own domain after promotion.
+- name: "Point DC's own DNS at itself"
+  when: tanium_lab_host_role == 'dc'
+  delegate_to: localhost
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - "{{ tanium_win_ip_resolved }}"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_win_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# New-forest promotion keeps the pre-promotion local Administrator
+# password as the domain Administrator's password (they become the same
+# account) — no separate reset needed as long as vault_win_admin_password
+# is what was set on the VM before promotion.
+
+- name: "Point member server's DNS at the domain controller"
+  when: tanium_lab_host_role == 'member'
+  delegate_to: localhost
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - "{{ ip_win_dc }}"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_win_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Wait for domain {{ tanium_lab_domain_name }} to be resolvable from member"
+  when: tanium_lab_host_role == 'member'
+  delegate_to: localhost
+  ansible.windows.win_shell: "Resolve-DnsName {{ tanium_lab_domain_name }} -ErrorAction Stop"
+  register: resolve_check
+  retries: 10
+  delay: 10
+  until: resolve_check.rc == 0
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_win_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Join {{ inventory_hostname }} to domain {{ tanium_lab_domain_name }}"
+  when: tanium_lab_host_role == 'member'
+  delegate_to: localhost
+  microsoft.ad.membership:
+    dns_domain_name: "{{ tanium_lab_domain_name }}"
+    domain_admin_user: "{{ tanium_lab_domain_netbios }}\\Administrator"
+    domain_admin_password: "{{ vault_win_admin_password }}"
+    state: domain
+    reboot: true
+    reboot_timeout: 600
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_win_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"

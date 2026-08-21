@@ -1,0 +1,378 @@
+---
+# Silent-install the Tanium Server using the NSIS installer's documented
+# (but undocumented-in-public-help) CLI parameters — verified directly
+# against the server.nsi/sql_server.nsi source on platdev-jump
+# (release/7.8.2, tag version/7.8.2.1000) 2026-08-20, NOT guessed against
+# the compiled binary or inferred from help.tanium.com (which only
+# documents the interactive wizard for this installer).
+#
+# CRITICAL, hard-won parameters (real incident 2026-08-20 — see below):
+#   /UseSQLServer=1   REQUIRED for any SQL Server target. Without it,
+#     $UsePostgres never gets forced to "0" (its NSIS Var default is an
+#     empty string, not "0"), so CheckForDatabaseDrivers takes the
+#     Postgres branch instead of the SQL Server branch — the install
+#     still limps forward using $SQLServerName as if it were a Postgres
+#     host, downloads/installs SQL Native Client anyway (hardcoded
+#     download type), then falls through into whatever $UsePostgres's
+#     wrong branch does next. This produced a real, live incident: with
+#     /UseExistingDB=0 also set, it silently DROPPED AND RECREATED an
+#     existing customer database that happened to already be present and
+#     correct at the target SQL Server. Recovered via re-restore from the
+#     original .bak; no permanent data loss, but treat this parameter as
+#     load-bearing, not optional, for every SQL Server target.
+#   /UseExistingDB=1  Use this (not =0) whenever the target SQL Server
+#     might already have a Tanium database present that should be
+#     upgraded in place rather than dropped — including the case of a
+#     freshly-restored customer backup at the same/compatible Tanium
+#     version. =0 unconditionally drops+recreates if a DB with the
+#     expected name already exists (see DropDatabase/CreateDatabase in
+#     server.nsi ~line 2073) — only use =0 for a target you are certain
+#     has no data worth keeping.
+#
+# Once silent, the installer downloads/installs SQL Native Client +
+# Command Line Utilities itself if not already present via
+# nsExec::ExecToStack calling msiexec — this specific call has been
+# observed to hang indefinitely (near-zero CPU, no new Windows Installer
+# event-log entries) regardless of interactive vs Session-0 launch
+# context; a MANUAL msiexec /i ... /qn /norestart of the identical .msi
+# (once already downloaded to %TEMP%) completes in seconds. Root cause
+# undetermined (likely an IPC/pipe issue specific to nsExec::ExecToStack's
+# stdout capture) — the practical fix used successfully this session was
+# pre-installing SQL Native Client + Command Line Utilities via a direct
+# msiexec call BEFORE running SetupServer.exe, so CheckForSQLDrivers finds
+# them already present and doDownloadSQL never gets set. See the
+# "Pre-install SQL Native Client" tasks below — they are not optional
+# scaffolding, they are the actual fix for a confirmed-hanging code path.
+#
+# Requires /AdminUser=<DOMAIN\user or user@upn> unless /SkipDBCreate=1
+# is set (this becomes the initial Tanium Console admin — NOT the same
+# thing as the DB service account below). No password parameter exists
+# for this account in silent mode; it's created without interactive
+# validation.
+#
+# For a REMOTE SQL Server, /DBUserName + /DBUserDomain + /DBUserPassword
+# must be a real Windows account with sysadmin on that SQL instance (see
+# tanium_lab_sql_login role) — Local System only works when the Tanium
+# Server and SQL Server are on the same host (a POC/local-DB deployment,
+# not this role's target case).
+#
+# Full parameter reference (server.nsi, grep 'GetOptions.*Params'):
+#   /ServerAddress /ServerPort /SoapPort /ServerHostName /SelfSign
+#   /CertPath /KeyPath /SQLServerName /SQLInstance /UseExistingDB
+#   /OSCheck /SQLCheck /OpenFirewall /Install64Bit /SkipDBCreate
+#   /AdminUser /DBUserName /DBUserDomain /DBUserPassword /LicensePath
+#   /UsePostgres /UseSQLServer /PGRoot /PGServer /PGOptions
+#   /SkipLocalModuleServer
+
+# Snapshot tanium_server_ip to a plain fact before any task-level `vars:`
+# block redefines `ansible_host` — see tanium_windows_vm_clone's role
+# header for why this avoids a real Jinja recursion error.
+- name: "Resolve tanium_server_ip to a plain fact"
+  ansible.builtin.set_fact:
+    tanium_server_ip_resolved: "{{ tanium_server_ip }}"
+
+- name: "Check if Tanium Server is already installed"
+  delegate_to: localhost
+  ansible.windows.win_stat:
+    path: "{{ tanium_install_dir }}\\TaniumReceiver.exe"
+  register: server_exe_check
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Copy installer to {{ tanium_server_ip }}"
+  when: not server_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_copy:
+    src: "{{ tanium_setup_server_exe_local_path }}"
+    dest: "{{ tanium_installers_dir }}\\SetupServer.exe"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# License is genuinely optional per source (server.nsi LicensePage: "You
+# may choose to skip this for now and add it manually later") — don't
+# fail the whole install if tanium_license_local_path doesn't exist.
+- name: "Copy license to {{ tanium_server_ip }} (optional)"
+  when: not server_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_copy:
+    src: "{{ tanium_license_local_path }}"
+    dest: "{{ tanium_installers_dir }}\\tanium.license"
+  register: license_copy_result
+  failed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# Real fix for the confirmed-hanging nsExec::ExecToStack msiexec call
+# inside SetupServer.exe (see role header) — pre-download and install SQL
+# Native Client + Command Line Utilities directly via win_shell +
+# Start-Process -Wait, so CheckForSQLDrivers finds them already present
+# and SetupServer.exe never hits the hanging code path at all.
+- name: "Check for existing SQL Server Native Client"
+  when: not server_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server Native Client 11.0\CurrentVersion
+  register: sqlncli_check
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Install SQL Native Client + Command Line Utilities if missing"
+  when: not server_exe_check.stat.exists and not sqlncli_check.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    Invoke-WebRequest -Uri '{{ item.url }}' -OutFile 'C:\TaniumInstallers\{{ item.file }}';
+    Start-Process msiexec.exe -ArgumentList '/i C:\TaniumInstallers\{{ item.file }} /qn /norestart' -Wait
+  loop:
+    - { url: "https://download.microsoft.com/download/B/E/D/BED73AAC-3C8A-43F5-AF4F-EB4FEA6C8F3A/ENU/x64/sqlncli.msi", file: "sqlncli.msi" }
+    - { url: "https://download.microsoft.com/download/C/8/E/C8ECE442-C29C-4EE4-BD73-872C03D9EB84/ENG_1033/x64/SqlCmdLnUtils.msi", file: "SqlCmdLnUtils.msi" }
+  loop_control:
+    label: "{{ item.file }}"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# SAFETY GUARD, added 2026-08-21 after a real incident: /UseExistingDB=0
+# unconditionally drops+recreates any pre-existing DB with the expected
+# name (see role header). This guard queries the target SQL Server for
+# real user data in that DB BEFORE the drop can happen, and refuses to
+# proceed without an explicit override — closing the exact gap the
+# original incident went through (a parameter mistake that silently
+# dropped a customer's freshly-restored production database). This is a
+# fail-closed check: any query error is treated as "can't prove it's
+# safe," not as "must be empty."
+- name: "SAFETY: check target DB for existing data before a destructive install"
+  when: not server_exe_check.stat.exists and (tanium_use_existing_db | int) == 0
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    sqlcmd -S {{ tanium_sql_server_ip }} -U sa -P "{{ tanium_sql_sa_password }}"
+    -Q "SET NOCOUNT ON; IF DB_ID('{{ tanium_target_db_name | default('tanium') }}') IS NOT NULL
+    SELECT COUNT(*) FROM [{{ tanium_target_db_name | default('tanium') }}].sys.tables ELSE SELECT -1"
+    -h -1
+  register: preflight_db_check
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "SAFETY: refuse to proceed with a destructive install unless explicitly confirmed"
+  when: not server_exe_check.stat.exists and (tanium_use_existing_db | int) == 0
+  ansible.builtin.assert:
+    that:
+      # -1 means the DB doesn't exist yet (genuinely safe to create fresh).
+      # A tables count of 0 in an EXISTING db is still suspicious enough
+      # to require confirmation -- fail closed rather than guess.
+      - (preflight_db_check.stdout | trim == '-1') or
+        (tanium_confirm_drop_existing_db | default('') == (tanium_target_db_name | default('tanium')))
+    fail_msg: >-
+      Refusing to run SetupServer.exe /UseExistingDB=0 against
+      {{ tanium_sql_server_ip }}: a database named
+      '{{ tanium_target_db_name | default('tanium') }}' already exists there
+      (table count query returned '{{ preflight_db_check.stdout | trim }}',
+      not the "doesn't exist" sentinel -1). Dropping it may destroy real
+      data -- this is exactly the mistake that caused a real incident on
+      2026-08-21. If you are CERTAIN this database has nothing worth
+      keeping, re-run with
+      -e tanium_confirm_drop_existing_db={{ tanium_target_db_name | default('tanium') }}
+      to proceed.
+
+# /S alone is the silent flag; every other /Param below is a real NSIS
+# GetOptions() key read by server.nsi/sql_server.nsi (see role header for
+# the source citations, esp. /UseSQLServer and /UseExistingDB). Quote
+# nothing here — NSIS's own GetOptions parsing expects bare /Key=Value
+# tokens.
+- name: "Run SetupServer.exe /S (silent install)"
+  when: not server_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_command:
+    cmd: >-
+      {{ tanium_installers_dir }}\SetupServer.exe /S
+      /UseSQLServer=1
+      /AdminUser={{ tanium_console_admin_user }}
+      /SQLServerName={{ tanium_sql_server_ip }}
+      /UseExistingDB={{ tanium_use_existing_db }}
+      /DBUserName={{ tanium_db_username }}
+      /DBUserDomain={{ tanium_db_domain }}
+      /DBUserPassword={{ tanium_db_password }}
+      /LicensePath={{ tanium_installers_dir }}\tanium.license
+      /OpenFirewall=1
+      /SkipLocalModuleServer=1
+  register: install_result
+  # SetupServer.exe forks a background process and returns before the DB
+  # init work is fully done — the actual completion signal is
+  # TaniumReceiver.exe existing (checked below), not this command's own
+  # exit code.
+  changed_when: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Wait for Tanium Server Windows service to exist (install completion signal)"
+  delegate_to: localhost
+  ansible.windows.win_service_info:
+    name: "Tanium Server"
+  register: install_done_check
+  until: install_done_check.exists
+  retries: 30
+  delay: 20
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# REAL BUG, confirmed 2026-08-21: TaniumReceiver.exe as a file existing is
+# NOT a valid install-completion signal — the binary is extracted early
+# in the install, well before the Windows service is actually installed
+# (-i) and before create-admin-user runs. A run that fails at
+# create-admin-user (see tanium_lab_sql_login's header for why) aborts
+# BEFORE installing the service, leaving the exe present with no service
+# at all — the old win_stat-on-the-exe check above would have reported
+# success on a completely broken install. The win_service_info check
+# above is the real signal.
+#
+# Also confirmed 2026-08-21: an aborted/partial reinstall can delete
+# SOAPServer.key/.crt (removed as part of the upgrade's cleanup step)
+# without ever regenerating them, since that happens later in the run
+# than where it aborted. The service then installs and even reports
+# "Running" briefly before crashing on startup with "Error initializing
+# private keys ... SOAPServer.key ... file specified" — regenerate with
+# KeyUtility.exe selfsign if either file is missing, using the same
+# hostname.basename pattern the installer itself uses.
+- name: "Check for missing TLS cert/key (can happen after a partial reinstall)"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    (Test-Path '{{ tanium_install_dir }}\SOAPServer.key') -and (Test-Path '{{ tanium_install_dir }}\SOAPServer.crt')
+  register: soap_cert_check
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Regenerate SOAPServer.key/.crt if missing"
+  when: "'True' not in (soap_cert_check.stdout | default(''))"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    Set-Location '{{ tanium_install_dir }}';
+    .\KeyUtility.exe selfsign {{ tanium_server_hostname | default(inventory_hostname) }} SOAPServer
+  register: cert_regen_result
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Verify Tanium Server service is running"
+  delegate_to: localhost
+  ansible.windows.win_service:
+    name: "Tanium Server"
+  register: service_check
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Start Tanium Server service if not running"
+  when: service_check.state != 'started'
+  delegate_to: localhost
+  ansible.windows.win_service:
+    name: "Tanium Server"
+    state: started
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# REAL BUG, confirmed 2026-08-21: win_service reporting "started"
+# immediately after Start-Service is not proof the service STAYS up —
+# a bad cert/key or DB auth problem can crash it seconds later. Re-check
+# after a real pause, not just once.
+- name: "Wait, then re-verify the service is still running (not just started)"
+  ansible.builtin.pause:
+    seconds: 15
+  delegate_to: localhost
+
+- name: "Confirm Tanium Server is still running after the startup window"
+  delegate_to: localhost
+  ansible.windows.win_service:
+    name: "Tanium Server"
+  register: stability_check
+  failed_when: stability_check.state != 'started'
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"

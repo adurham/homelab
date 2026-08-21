@@ -525,6 +525,56 @@ all:
             vm_storage: nvme-data
             vm_gw: "{{ net_bwt_gw }}"
 
+    # ─────────────────────────────────────────────────────────────────
+    # Windows TS/TMS/TZS/SQL lab (Tanium platform on-prem Windows repro).
+    #
+    # win-server-2022 clones (template VMID 9000) on the `private` SDN
+    # bridge. Two variants coexist:
+    #   - *-01 (250-253): baseline WORKGROUP-only boxes, no domain, never
+    #     touched by case work — see docs/windows_template_guide.md.
+    #   - win-dc-case1-01 + *-case1-01 (254-258): joined to the tanium.lab
+    #     AD domain, built for the active case1 SQL-restore/version-match
+    #     investigation. VMIDs/names here reflect that specific case;
+    #     future cases should copy this pattern with new VMIDs/IPs rather
+    #     than reusing this group wholesale.
+    #
+    # See roles/tanium_windows_vm_clone, tanium_lab_ad_domain,
+    # tanium_lab_sql_login, tanium_server_install, tanium_moduleserver_install,
+    # tanium_zoneserver_install, and provision_tanium_windows_lab.yml.
+    tanium_windows_lab:
+      children:
+        tanium_windows_lab_dc:
+          hosts:
+            win-dc-case1-01:
+              vmid: 258
+              ansible_host: "{{ ip_win_dc }}"
+              tanium_lab_host_role: dc
+        tanium_windows_lab_case1:
+          hosts:
+            win-sql-case1-01:
+              vmid: 254
+              ansible_host: "{{ ip_win_sql_case1 }}"
+              tanium_lab_host_role: member
+              tanium_win_hostname: WIN-SQL-CASE1
+            win-ts-case1-01:
+              vmid: 255
+              ansible_host: "{{ ip_win_ts_case1 }}"
+              tanium_lab_host_role: member
+              tanium_win_hostname: WIN-TS-CASE1
+            win-tms-case1-01:
+              vmid: 256
+              ansible_host: "{{ ip_win_tms_case1 }}"
+              tanium_lab_host_role: member
+              tanium_win_hostname: WIN-TMS-CASE1
+            win-tzs-case1-01:
+              vmid: 257
+              ansible_host: "{{ ip_win_tzs_case1 }}"
+              tanium_lab_host_role: member
+              tanium_win_hostname: WIN-TZS-CASE1
+      vars:
+        target_node: pve01
+        vm_storage: nvme-data
+
     # Monitoring Infrastructure
     monitoring:
       children:

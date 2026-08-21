@@ -1,0 +1,32 @@
+---
+tanium_install_dir: "C:\\Program Files\\Tanium\\Tanium Server"
+tanium_installers_dir: "C:\\TaniumInstallers"
+tanium_console_admin_user: "{{ tanium_lab_domain_netbios }}\\Administrator"
+
+# /UseExistingDB value passed to SetupServer.exe. Default 1 (use/upgrade
+# an existing database if present) — see this role's tasks/main.yml
+# header for why =0 is dangerous (it unconditionally drops+recreates any
+# existing database with the expected name, which caused a real incident
+# 2026-08-20 against a restored customer database). Override to 0 only
+# when you are certain the target SQL Server has no data worth keeping.
+tanium_use_existing_db: 1
+
+# Used only by the safety pre-flight guard when tanium_use_existing_db=0
+# (see tasks/main.yml header) -- must match sa's real credential on the
+# target SQL Server, which may differ from the fresh-install default in
+# vault_tanium_lab_sql_sa_password if the target already has its own sa
+# password set (e.g. a restored customer backup). Override with
+# -e tanium_sql_sa_password=... when they differ.
+tanium_sql_sa_password: "{{ vault_tanium_lab_sql_sa_password }}"
+
+# The database name SetupServer.exe will create/use. Confirmed 2026-08-21
+# this should be namespaced per-case (e.g. "tanium_<case-id>") rather
+# than left at the Tanium-default "tanium" whenever there's any chance
+# of two different investigations sharing the same SQL Server -- a name
+# collision was the root enabler of the original drop/recreate incident.
+tanium_target_db_name: "tanium"
+
+# Required per-invocation (no sane default — each case/version is
+# different): tanium_server_ip, tanium_setup_server_exe_local_path,
+# tanium_license_local_path, tanium_sql_server_ip, tanium_db_username,
+# tanium_db_domain, tanium_db_password.
