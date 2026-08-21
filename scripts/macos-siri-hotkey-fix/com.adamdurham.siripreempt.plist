@@ -6,8 +6,10 @@
     <string>com.adamdurham.siripreempt</string>
     <key>ProgramArguments</key>
     <array>
-        <string>__HOME__/bin/siri_preempt</string>
+        <string>__HOME__/Applications/SiriPreempt.app/Contents/MacOS/SiriPreempt</string>
     </array>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
