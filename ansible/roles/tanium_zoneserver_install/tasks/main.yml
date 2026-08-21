@@ -92,6 +92,22 @@
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
 
+- name: "Ensure {{ tanium_installers_dir }} exists on {{ tanium_zoneserver_ip }}"
+  when: not zs_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_file:
+    path: "{{ tanium_installers_dir }}"
+    state: directory
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_zoneserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
 - name: "Copy installer to {{ tanium_zoneserver_ip }}"
   when: not zs_exe_check.stat.exists
   delegate_to: localhost
@@ -179,7 +195,7 @@
     ansible_password: "{{ vault_win_admin_password }}"
 
 - name: "Start Tanium ZoneServer service if not running"
-  when: service_check.state != 'started'
+  when: service_check.state != 'running'
   delegate_to: localhost
   ansible.windows.win_service:
     name: "Tanium ZoneServer"

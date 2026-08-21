@@ -1,0 +1,305 @@
+---
+# Real gap found live 2026-08-21: no role in this repo ever installed
+# SQL Server itself -- tanium_lab_sql_login only manages logins on an
+# ALREADY-PRESENT instance. This went unnoticed all session because
+# every SQL box used for testing was pre-built manually before any of
+# this automation existed. Closes that gap -- fully live-validated,
+# every step below was run and verified manually before being encoded
+# here, not written speculatively:
+#   1. Microsoft's small SSEI bootstrapper self-downloads the full
+#      Developer Edition media as a "Cab" media type (a folder of
+#      files, ~1.2GB) -- no pre-staged ISO required. A 1.1GB Developer
+#      Edition ISO already sitting on the Proxmox host was tried first
+#      and REJECTED: it would not mount cleanly over IDE CD-ROM
+#      emulation on this specific Proxmox/VM combo (Get-Volume showed
+#      Size=0/FileSystem empty even after ejecting, reattaching, and a
+#      full guest reboot) -- rather than fight that, this downloads
+#      fresh media directly inside the guest over its real internet
+#      connection, confirmed reachable.
+#   2. The downloaded .exe self-extracts into a real SQL Server setup
+#      tree (SETUP.EXE + support files) via /x:<dir>.
+#   3. setup.exe /q /ACTION=Install /IACCEPTSQLSERVERLICENSETERMS
+#      /FEATURES=SQLENGINE ... completed with "Final result: Passed"
+#      (Summary.txt), service came up Running, confirmed queryable via
+#      sqlcmd immediately after.
+#   4. sqlcmd itself is a SEPARATE install -- SQLENGINE alone does not
+#      include client tools. The old ODBC-based Microsoft Command Line
+#      Utilities MSI link that's commonly cited online (go/fwlink
+#      2230791) installs "Microsoft ODBC Driver 17 for SQL Server" but
+#      NOT a usable sqlcmd.exe (confirmed: installed cleanly per
+#      Get-Package, but no sqlcmd binary existed anywhere on disk
+#      afterward). The correct tool for a fresh install today is the
+#      modern Go-based sqlcmd (github.com/microsoft/go-sqlcmd),
+#      installed via its real GitHub Releases MSI (queried via the
+#      GitHub API for the current release tag/asset URL rather than
+#      guessing a filename -- a guessed "latest/download/..." URL 404'd).
+
+- name: "Resolve tanium_sql_ip to a plain fact"
+  ansible.builtin.set_fact:
+    tanium_sql_ip_resolved: "{{ tanium_sql_ip }}"
+
+- name: "Check if SQL Server engine is already installed"
+  delegate_to: localhost
+  ansible.windows.win_service_info:
+    name: "{{ tanium_sql_instance_name }}"
+  register: sql_service_check
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Download the SQL Server 2022 Developer SSEI bootstrapper"
+  when: not sql_service_check.exists
+  delegate_to: localhost
+  ansible.windows.win_get_url:
+    url: "{{ tanium_sql_bootstrapper_url }}"
+    dest: "C:\\SQL2022-SSEI-Dev.exe"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Download the full SQL Server media (Cab type) via the bootstrapper"
+  when: not sql_service_check.exists
+  delegate_to: localhost
+  ansible.windows.win_command:
+    cmd: >-
+      C:\SQL2022-SSEI-Dev.exe /ACTION=Download
+      MEDIAPATH={{ tanium_sql_staging_dir }}
+      /MEDIATYPE=Cab /QUIET
+  register: sql_media_download
+  changed_when: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Wait for the media .box/.exe pair to actually land on disk"
+  delegate_to: localhost
+  ansible.windows.win_find:
+    paths: "{{ tanium_sql_staging_dir }}"
+    patterns: "SQLServer2022-DEV-x64-ENU.exe"
+  register: sql_media_check
+  until: sql_media_check.files | length > 0
+  retries: 30
+  delay: 10
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Extract the SQL Server setup tree"
+  when: not sql_service_check.exists
+  delegate_to: localhost
+  ansible.windows.win_command:
+    cmd: >-
+      {{ tanium_sql_staging_dir }}\SQLServer2022-DEV-x64-ENU.exe
+      /q /x:{{ tanium_sql_staging_dir }}\Extracted
+  register: sql_extract_result
+  changed_when: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# Always Mixed Mode auth (SECURITYMODE=SQL) -- the rest of this repo's
+# roles (tanium_lab_restore_customer_db, tanium_server_install's
+# preflight guard) assume a working sa login, and Tanium Server itself
+# needs a Windows-auth login too (handled separately by
+# tanium_lab_sql_login, granted AFTER this role runs).
+- name: "Run SQL Server setup.exe /q /ACTION=Install"
+  when: not sql_service_check.exists
+  delegate_to: localhost
+  ansible.windows.win_command:
+    cmd: >-
+      {{ tanium_sql_staging_dir }}\Extracted\SETUP.EXE
+      /q /ACTION=Install /IACCEPTSQLSERVERLICENSETERMS
+      /FEATURES=SQLENGINE
+      /INSTANCENAME={{ tanium_sql_instance_name }}
+      /SQLSYSADMINACCOUNTS="{{ tanium_console_admin_user | default('TANIUM\\Administrator') }}"
+      /SECURITYMODE=SQL
+      /SAPWD="{{ tanium_sql_sa_password }}"
+      /TCPENABLED=1
+  register: sql_install_result
+  changed_when: true
+  no_log: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Verify SQL Server service is running"
+  delegate_to: localhost
+  ansible.windows.win_service:
+    name: "{{ tanium_sql_instance_name }}"
+  register: sql_service_final_check
+  # REAL BUG, confirmed 2026-08-21: win_service's returned "state" field
+  # uses 'running'/'stopped' (the actual reported status), NOT the
+  # 'started'/'stopped' vocabulary its own `state:` INPUT parameter
+  # accepts -- checking != 'started' here always failed_when'd even on
+  # a genuinely healthy, confirmed-Running service.
+  failed_when: sql_service_final_check.state != 'running'
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# REAL BUG, confirmed 2026-08-21 via a live end-to-end run:
+# /TCPENABLED=1 at setup time only enables the TCP protocol inside SQL
+# Server's own SQL Server Configuration Manager settings -- it does
+# NOT open the Windows Firewall. tanium_server_install's remote
+# connection attempt from the Server box failed with "A network-related
+# or instance-specific error... Server is not found or not accessible"
+# (SQL Native Client 08001/HYT00) even though SQL Server itself was up
+# and TCP-enabled -- confirmed via Test-NetConnection: port 1433 was
+# reachable FROM the SQL box itself but not from a different VM on the
+# same subnet, and even ICMP ping failed cross-VM, pointing at Windows
+# Firewall specifically, not a SQL config issue. This role now opens
+# 1433/TCP inbound explicitly.
+- name: "Open Windows Firewall for SQL Server (1433/TCP inbound)"
+  delegate_to: localhost
+  community.windows.win_firewall_rule:
+    name: "SQL Server (TCP-In)"
+    localport: 1433
+    action: allow
+    direction: in
+    protocol: tcp
+    state: present
+    enabled: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Check if the modern sqlcmd (Go) client is already installed"
+  delegate_to: localhost
+  ansible.windows.win_stat:
+    path: "C:\\Program Files\\sqlcmd\\sqlcmd.exe"
+  register: sqlcmd_check
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# Queries GitHub's release API for the real current asset URL rather
+# than guessing a "latest/download/<filename>" path -- confirmed live
+# that guessing 404s (release filenames aren't predictable without
+# checking), while the API-driven approach works every time.
+- name: "Look up the current go-sqlcmd MSI download URL"
+  when: not sqlcmd_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    (Invoke-RestMethod -Uri 'https://api.github.com/repos/microsoft/go-sqlcmd/releases/latest').assets
+    | Where-Object { $_.name -eq 'sqlcmd-amd64.msi' }
+    | Select-Object -ExpandProperty browser_download_url
+  register: sqlcmd_url_lookup
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Download the go-sqlcmd MSI"
+  when: not sqlcmd_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_get_url:
+    url: "{{ sqlcmd_url_lookup.stdout | trim }}"
+    dest: "C:\\sqlcmd-amd64.msi"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Install the go-sqlcmd MSI"
+  when: not sqlcmd_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_package:
+    path: "C:\\sqlcmd-amd64.msi"
+    state: present
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# win_package/msiexec updates the machine PATH env var, but the CURRENT
+# guest-exec/WinRM process's own environment doesn't refresh -- always
+# call the tool by its full install path in later roles/tasks rather
+# than assuming a bare "sqlcmd" on PATH works without a fresh session.
+- name: "Verify sqlcmd can connect and query the new instance"
+  delegate_to: localhost
+  ansible.windows.win_command:
+    cmd: >-
+      "C:\Program Files\sqlcmd\sqlcmd.exe" -S localhost
+      -U sa -P "{{ tanium_sql_sa_password }}" -Q "SELECT @@VERSION"
+  register: sqlcmd_verify
+  changed_when: false
+  no_log: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"

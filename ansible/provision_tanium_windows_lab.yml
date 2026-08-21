@@ -91,6 +91,18 @@
 # registry setting must include the Hub's address (127.0.0.1 here,
 # since it's co-located) for the Hub's registration to succeed.
 #
+# SQL Server itself, confirmed via a real live install 2026-08-21: no
+# role in this repo previously installed the SQL Server ENGINE (only
+# managed logins on an already-present instance) -- this was invisible
+# all session because the SQL box was always manually pre-built before
+# any of this automation existed. tanium_lab_sql_install closes that
+# gap: downloads SQL Server 2022 Developer Edition media directly (a
+# pre-staged ISO on the Proxmox host failed to mount over IDE CD-ROM
+# emulation -- not worth fighting, the guest's own internet access
+# works fine) and the separate modern go-sqlcmd client tool the rest of
+# this repo's roles need. See that role's task-file header for the
+# full live-validated command sequence.
+#
 # Every step here is idempotent — safe to re-run after a partial failure.
 
 - name: Clone Windows VMs for the lab
@@ -122,6 +134,15 @@
   gather_facts: false
   roles:
     - role: tanium_lab_service_account
+
+- name: Install SQL Server on the SQL box
+  hosts: win-sql-case1-01
+  gather_facts: false
+  roles:
+    - role: tanium_lab_sql_install
+      vars:
+        tanium_sql_ip: "{{ ansible_host }}"
+        tanium_console_admin_user: "{{ tanium_lab_domain_netbios }}\\Administrator"
 
 - name: Grant Tanium service account + Server computer account sysadmin on SQL Server
   hosts: win-sql-case1-01

@@ -86,6 +86,22 @@
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
 
+- name: "Ensure {{ tanium_installers_dir }} exists on {{ tanium_server_ip }}"
+  when: not server_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_file:
+    path: "{{ tanium_installers_dir }}"
+    state: directory
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
 - name: "Copy installer to {{ tanium_server_ip }}"
   when: not server_exe_check.stat.exists
   delegate_to: localhost
@@ -128,6 +144,28 @@
 # Native Client + Command Line Utilities directly via win_shell +
 # Start-Process -Wait, so CheckForSQLDrivers finds them already present
 # and SetupServer.exe never hits the hanging code path at all.
+#
+# REAL BUG, confirmed 2026-08-21 via a live end-to-end run: this
+# pre-install was silently FAILING (msiexec exit 1603) on a genuinely
+# fresh VM that had never had these MSIs on it before -- the original
+# `win_shell` never checked $LASTEXITCODE/Start-Process's ExitCode, so
+# Ansible reported changed=true/rc=0 (the win_shell task itself
+# succeeded; the msiexec it launched did not) and the role proceeded as
+# if the drivers were present. SetupServer.exe's own log then showed
+# "Microsoft SQL Server Native Client 2008R2/2012 not found" and hung
+# for 15+ minutes re-attempting the exact confirmed-broken
+# nsExec::ExecToStack path this whole pre-install exists to avoid.
+# Root cause (sqlncli_install.log, "Action ended: SNAC_IAcceptSQLNCLILicenseTerms.
+# Return value 3"): sqlncli.msi and SqlCmdLnUtils.msi both require an
+# explicit MSI property to accept their EULA in silent mode --
+# IACCEPTSQLNCLILICENSETERMS=YES / IACCEPTSQLCMDLNUTILSLICENSETERMS=YES
+# respectively -- without it, the license-acceptance custom action
+# aborts the whole install with no on-screen error (silent means
+# silent, including the failure). This task now passes those
+# properties AND explicitly checks $p.ExitCode, throwing (failing the
+# task for real) on anything non-zero instead of trusting win_shell's
+# own success/failure signal, which only reflects the PowerShell
+# wrapper script, not the msiexec it launched.
 - name: "Check for existing SQL Server Native Client"
   when: not server_exe_check.stat.exists
   delegate_to: localhost
@@ -149,10 +187,12 @@
   delegate_to: localhost
   ansible.windows.win_shell: >-
     Invoke-WebRequest -Uri '{{ item.url }}' -OutFile 'C:\TaniumInstallers\{{ item.file }}';
-    Start-Process msiexec.exe -ArgumentList '/i C:\TaniumInstallers\{{ item.file }} /qn /norestart' -Wait
+    $p = Start-Process msiexec.exe -ArgumentList '/i C:\TaniumInstallers\{{ item.file }} /qn /norestart {{ item.license_prop }}=YES' -Wait -PassThru;
+    if ($p.ExitCode -ne 0) { throw "msiexec exited $($p.ExitCode) installing {{ item.file }}" }
+  register: sqlncli_install_result
   loop:
-    - { url: "https://download.microsoft.com/download/B/E/D/BED73AAC-3C8A-43F5-AF4F-EB4FEA6C8F3A/ENU/x64/sqlncli.msi", file: "sqlncli.msi" }
-    - { url: "https://download.microsoft.com/download/C/8/E/C8ECE442-C29C-4EE4-BD73-872C03D9EB84/ENG_1033/x64/SqlCmdLnUtils.msi", file: "SqlCmdLnUtils.msi" }
+    - { url: "https://download.microsoft.com/download/B/E/D/BED73AAC-3C8A-43F5-AF4F-EB4FEA6C8F3A/ENU/x64/sqlncli.msi", file: "sqlncli.msi", license_prop: "IACCEPTSQLNCLILICENSETERMS" }
+    - { url: "https://download.microsoft.com/download/C/8/E/C8ECE442-C29C-4EE4-BD73-872C03D9EB84/ENG_1033/x64/SqlCmdLnUtils.msi", file: "SqlCmdLnUtils.msi", license_prop: "IACCEPTSQLCMDLNUTILSLICENSETERMS" }
   loop_control:
     label: "{{ item.file }}"
   vars:
@@ -215,32 +255,110 @@
       -e tanium_confirm_drop_existing_db={{ tanium_target_db_name | default('tanium') }}
       to proceed.
 
+# REAL BUG, confirmed 2026-08-21 via 3 separate live test contexts:
+#   1. WinRM win_command session (elevated, unfiltered Administrator
+#      token -- SQL grants, file ACLs, UAC/LocalAccountTokenFilterPolicy
+#      all independently confirmed correct): fails partway through with
+#      "Access is denied. Error code 0x00000005" launching its own child
+#      process "TaniumReceiver.exe database create".
+#   2. A scheduled task (schtasks /RL HIGHEST /RU ... /RP <password>,
+#      i.e. LOGON32_LOGON_BATCH) with NO real interactive login present:
+#      progresses further (past the DB-create Access Denied) but the
+#      child process then crashes with exit code 3221225794 =
+#      0xC0000142 (STATUS_DLL_INIT_FAILED) on "database upgrade".
+#   3. The SAME scheduled task, run WHILE a genuine interactive console
+#      session is logged in (confirmed via `query session` showing
+#      "console <user> ... Active"): succeeded immediately, service
+#      came up and stayed running.
+# Consulted analysis: TaniumReceiver.exe's child process needs a real
+# window station + interactive desktop (WinSta0\Default) that only a
+# genuine console/RDP logon grants -- a batch logon token lacks the
+# INTERACTIVE (S-1-5-4) SID and gets a non-interactive window station,
+# which a component loading user32.dll/GDI at DllMain time can't use,
+# producing exactly this NTSTATUS. This is a real Tanium Server
+# requirement (matches what Tanium's own install docs assume -- a
+# console/RDP session, not remote WinRM), not a bug this role can work
+# around purely via WinRM or guest-exec.
+#
+# This role now: (a) checks for a genuine interactive session via `qm
+# guest exec ... -- query session` (no VNC/vision needed for the CHECK
+# itself, only the login has to happen via VNC/RDP if missing) and
+# FAILS with clear instructions if none is present, rather than
+# silently hitting the DLL-init crash; (b) launches SetupServer.exe as
+# a scheduled task (proven pattern) once a real session is confirmed.
+- name: "Check for a genuine interactive login session on {{ tanium_server_ip }} (required for SetupServer.exe's DB-create step)"
+  when: not server_exe_check.stat.exists
+  delegate_to: "{{ target_node | default('pve01') }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - guest
+      - exec
+      - "{{ vmid }}"
+      - --
+      - query
+      - session
+  register: interactive_session_check
+  changed_when: false
+
+- name: "FAIL with instructions if no interactive session is logged in"
+  when: not server_exe_check.stat.exists
+  ansible.builtin.assert:
+    that:
+      - "'Active' in (interactive_session_check.stdout | default(''))"
+    fail_msg: >-
+      Tanium Server's install requires a REAL interactive Windows login
+      on {{ tanium_server_ip }} (VMID {{ vmid }}) before this
+      role can proceed -- confirmed via 3 live test contexts that
+      WinRM and a scheduled task with no login both fail differently
+      (Access Denied / DLL init crash 0xC0000142) launching
+      TaniumReceiver.exe's child process, while the identical command
+      succeeds under a genuine console session. Log in via VNC or RDP
+      as Administrator on VMID {{ vmid }} now, then re-run
+      this playbook -- it will pick up right where it left off.
+
 # /S alone is the silent flag; every other /Param below is a real NSIS
 # GetOptions() key read by server.nsi/sql_server.nsi (see role header for
 # the source citations, esp. /UseSQLServer and /UseExistingDB). Quote
 # nothing here — NSIS's own GetOptions parsing expects bare /Key=Value
 # tokens.
-- name: "Run SetupServer.exe /S (silent install)"
+- name: "Build the SetupServer.exe launcher .bat locally"
   when: not server_exe_check.stat.exists
   delegate_to: localhost
-  ansible.windows.win_command:
-    cmd: >-
-      {{ tanium_installers_dir }}\SetupServer.exe /S
-      /UseSQLServer=1
-      /AdminUser={{ tanium_console_admin_user }}
-      /SQLServerName={{ tanium_sql_server_ip }}
-      /UseExistingDB={{ tanium_use_existing_db }}
-      /DBUserName={{ tanium_db_username }}
-      /DBUserDomain={{ tanium_db_domain }}
-      /DBUserPassword={{ tanium_db_password }}
-      /LicensePath={{ tanium_installers_dir }}\tanium.license
-      /OpenFirewall=1
-      /SkipLocalModuleServer=1
+  ansible.builtin.copy:
+    dest: "{{ tanium_local_scratch_dir | default('/tmp') }}/setup_server_{{ tanium_server_ip | replace('.', '_') }}.bat"
+    mode: "0600"
+    content: |
+      @echo off
+      {{ tanium_installers_dir }}\SetupServer.exe /S /UseSQLServer=1 /AdminUser={{ tanium_console_admin_user }} /SQLServerName={{ tanium_sql_server_ip }} /UseExistingDB={{ tanium_use_existing_db }} /DBUserName={{ tanium_db_username }} /DBUserDomain={{ tanium_db_domain }} /DBUserPassword={{ tanium_db_password }} /LicensePath={{ tanium_installers_dir }}\tanium.license /OpenFirewall=1 /SkipLocalModuleServer=1 > {{ tanium_installers_dir }}\setup_server_run.log 2>&1
+  register: setup_bat_local
+  no_log: true
+
+- name: "Push the launcher .bat to {{ tanium_server_ip }}"
+  when: not server_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_copy:
+    src: "{{ setup_bat_local.dest }}"
+    dest: "{{ tanium_installers_dir }}\\setup_server_run.bat"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Create and run SetupServer.exe as a scheduled task (avoids the WinRM Access Denied issue)"
+  when: not server_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    schtasks /Create /TN TaniumServerInstall
+    /TR "{{ tanium_installers_dir }}\setup_server_run.bat"
+    /SC ONCE /ST 00:00 /RL HIGHEST /RU .\Administrator /F;
+    schtasks /Run /TN TaniumServerInstall
   register: install_result
-  # SetupServer.exe forks a background process and returns before the DB
-  # init work is fully done — the actual completion signal is
-  # TaniumReceiver.exe existing (checked below), not this command's own
-  # exit code.
   changed_when: true
   vars:
     ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
@@ -337,7 +455,7 @@
     ansible_password: "{{ vault_win_admin_password }}"
 
 - name: "Start Tanium Server service if not running"
-  when: service_check.state != 'started'
+  when: service_check.state != 'running'
   delegate_to: localhost
   ansible.windows.win_service:
     name: "Tanium Server"
@@ -356,6 +474,16 @@
 # immediately after Start-Service is not proof the service STAYS up —
 # a bad cert/key or DB auth problem can crash it seconds later. Re-check
 # after a real pause, not just once.
+#
+# SEPARATE REAL BUG, also confirmed 2026-08-21 (via a live run of
+# tanium_lab_sql_install hitting the identical mistake): win_service's
+# RETURNED "state" field uses 'running'/'stopped' vocabulary, not the
+# 'started'/'stopped' vocabulary its own `state:` INPUT parameter takes
+# -- confirmed directly from a real task result
+# ({"state": "running", ...}) failing a `!= 'started'` check even
+# though the service was genuinely, confirmedly up. Every win_service
+# state comparison in this repo now checks against 'running', not
+# 'started'.
 - name: "Wait, then re-verify the service is still running (not just started)"
   ansible.builtin.pause:
     seconds: 15
@@ -366,7 +494,7 @@
   ansible.windows.win_service:
     name: "Tanium Server"
   register: stability_check
-  failed_when: stability_check.state != 'started'
+  failed_when: stability_check.state != 'running'
   vars:
     ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
     ansible_connection: winrm
