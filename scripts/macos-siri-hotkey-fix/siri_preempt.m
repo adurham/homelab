@@ -202,7 +202,7 @@ static void installActivationObserver(void) {
             NSLog(@"siri_preempt: got activation notification for Siri AI (unexpected but handled)");
             bool expected = false;
             if (atomic_compare_exchange_strong(&gPollInFlight, &expected, true)) {
-                preemptSiriAI(-1);
+                preemptSiriAI(-1); // -1 = fired from the notification observer, not the poll loop
                 atomic_store(&gPollInFlight, false);
             }
         }
@@ -287,7 +287,7 @@ CGEventRef keyTapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
     return event;
 }
 
-int main() {
+int main(int argc, char **argv) {
     @autoreleasepool {
         // Listen-only: never blocks/consumes the keystroke. Every app,
         // including 1Password, still receives the real event normally.
@@ -306,6 +306,11 @@ int main() {
 
         CFRunLoopSourceRef src = CFMachPortCreateRunLoopSource(NULL, gTap, 0);
         CFRunLoopAddSource(CFRunLoopGetCurrent(), src, kCFRunLoopCommonModes);
+        // CFRunLoopAddSource retains src itself; release our own +1
+        // reference now that the run loop holds it. Process-lifetime
+        // daemon, so this was harmless either way, but keeping ownership
+        // balanced is good practice.
+        CFRelease(src);
         CGEventTapEnable(gTap, true);
 
         installActivationObserver();
