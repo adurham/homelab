@@ -50,7 +50,21 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/home/mitmproxy /opt/adblock-proxy /var/log/mitmproxy
+ReadWritePaths=/home/mitmproxy /opt/adblock-proxy
+# LogsDirectory (not ReadWritePaths) is the systemd-managed way to grant
+# /var/log/mitmproxy: systemd creates it (owned by User=/Group= above)
+# before every start and it survives Type=simple's mount-namespace setup
+# even on a clean host with no pre-existing directory. A prior version of
+# this unit put /var/log/mitmproxy in ReadWritePaths without anything ever
+# creating the directory — ProtectSystem=strict's namespace setup then
+# failed at boot with "Failed to set up mount namespacing: ... No such
+# file or directory" (226/NAMESPACE), since ReadWritePaths only grants
+# write access to a path, it does not create one. Found crash-looping
+# (RestartSec=5, thousands of restarts) 2026-08-21 after going stale
+# since 2026-08-20 05:17 — nothing on this unit actually logs to that
+# path today, but LogsDirectory= makes it exist unconditionally so any
+# future logging config (or manual debugging) doesn't hit this again.
+LogsDirectory=mitmproxy
 AmbientCapabilities=CAP_NET_ADMIN
 
 [Install]
