@@ -96,12 +96,69 @@
   delay: 10
   changed_when: false
 
-# Defensive fix for the known "clone boots stuck mid-OOBE" template gotcha
-# (see role header comment) — clears leftover Setup state from the
-# template's own first-boot history so this clone's OOBE isn't blocked.
-# No-ops harmlessly if the registry keys are already clean (rc reflects
-# whether Remove-ItemProperty found anything, which is fine either way).
-- name: "Unstick OOBE if template was booted before final sysprep"
+# REAL INCIDENT, 2026-08-21: this task used to UNCONDITIONALLY clear
+# HKLM:\SYSTEM\Setup OOBEInProgress/SetupType/CmdLine right after the
+# QEMU guest agent first responded, on every single clone -- not just
+# ones actually stuck. Guest-agent-ping succeeds very early in boot,
+# well before Windows Server 2022's specialize/OOBE unattend passes
+# finish (these can take several minutes). Two independent expert
+# reviews (consulted after 5/5 fresh clones became unbootable --
+# WinRE, Startup Repair fails, no "Continue" option -- on the very
+# first Rename-Computer+reboot) converged on the same explanation:
+# Windows uses SetupType/CmdLine to re-launch the pending setup phase
+# across reboots IT schedules itself; blanking them while setup.exe is
+# mid-pass orphans that continuation, and rebooting into it produces
+# exactly this "unbootable, nothing for Startup Repair to fix" state.
+# Confirmed live on a genuinely-still-specializing fresh clone (2026-08-21):
+# HKLM:\SYSTEM\Setup had OOBEInProgress=1, CmdLine=oobe\windeploy.exe,
+# SetupType=2 minutes after guest-agent first responded -- exactly the
+# in-progress state the old task would have wiped mid-flight.
+#
+# This is now a READ-ONLY gate: it polls for genuine completion via
+# HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State's
+# ImageState value (== IMAGE_STATE_COMPLETE; NOTE the real path is
+# "...\Windows\CurrentVersion\Setup\State", not
+# "...\Windows NT\CurrentVersion\State" -- an earlier draft of this
+# check had the wrong path, silently returned null, and would have
+# looped forever), plus HKLM:\SYSTEM\Setup's SystemSetupInProgress/
+# OOBEInProgress/CmdLine all settled, and FAILS THE PLAY on timeout
+# rather than barreling forward or writing to HKLM:\SYSTEM\Setup. If a
+# clone genuinely never settles within the timeout, that's a
+# template/unattend bug to fix at the source (see
+# docs/windows_template_guide.md), not something to paper over here.
+- name: "Wait for OOBE/specialize to genuinely complete before touching the OS"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command: >-
+    qm guest exec {{ tanium_win_vmid }} -- powershell -NoProfile -NonInteractive
+    -EncodedCommand {{ tanium_win_oobe_check_b64 }}
+  register: oobe_check
+  # qm guest exec prints the raw JSON result (including the "out-data"
+  # field) straight to stdout as one blob -- our READY=True/False marker
+  # is plain ASCII inside that field, so a substring match on the raw
+  # JSON text works without needing a JSON parser on the delegated node.
+  until: "'READY=True' in (oobe_check.stdout | default(''))"
+  retries: 90
+  delay: 10
+  changed_when: false
+  vars:
+    # Base64(UTF-16LE) of a read-only PowerShell readiness check -- see
+    # this task's comment above for exactly what it reads and why.
+    # Decode with: echo <b64> | base64 -d | iconv -f utf-16le
+    tanium_win_oobe_check_b64: "JABpAG0AYQBnAGUAUwB0AGEAdABlACAAPQAgACgARwBlAHQALQBJAHQAZQBtAFAAcgBvAHAAZQByAHQAeQAgACcASABLAEwATQA6AFwAUwBPAEYAVABXAEEAUgBFAFwATQBpAGMAcgBvAHMAbwBmAHQAXABXAGkAbgBkAG8AdwBzAFwAQwB1AHIAcgBlAG4AdABWAGUAcgBzAGkAbwBuAFwAUwBlAHQAdQBwAFwAUwB0AGEAdABlACcAIAAtAEUAcgByAG8AcgBBAGMAdABpAG8AbgAgAFMAaQBsAGUAbgB0AGwAeQBDAG8AbgB0AGkAbgB1AGUAKQAuAEkAbQBhAGcAZQBTAHQAYQB0AGUACgAkAHMAZQB0AHUAcAAgAD0AIABHAGUAdAAtAEkAdABlAG0AIAAnAEgASwBMAE0AOgBcAFMAWQBTAFQARQBNAFwAUwBlAHQAdQBwACcACgAkAHMAZQB0AHUAcABJAG4AUAByAG8AZwByAGUAcwBzACAAPQAgACQAcwBlAHQAdQBwAC4ARwBlAHQAVgBhAGwAdQBlACgAJwBTAHkAcwB0AGUAbQBTAGUAdAB1AHAASQBuAFAAcgBvAGcAcgBlAHMAcwAnACkACgAkAG8AbwBiAGUASQBuAFAAcgBvAGcAcgBlAHMAcwAgAD0AIAAkAHMAZQB0AHUAcAAuAEcAZQB0AFYAYQBsAHUAZQAoACcATwBPAEIARQBJAG4AUAByAG8AZwByAGUAcwBzACcAKQAKACQAYwBtAGQATABpAG4AZQAgAD0AIAAkAHMAZQB0AHUAcAAuAEcAZQB0AFYAYQBsAHUAZQAoACcAQwBtAGQATABpAG4AZQAnACkACgAkAHIAZQBhAGQAeQAgAD0AIAAoACQAaQBtAGEAZwBlAFMAdABhAHQAZQAgAC0AZQBxACAAJwBJAE0AQQBHAEUAXwBTAFQAQQBUAEUAXwBDAE8ATQBQAEwARQBUAEUAJwApACAALQBhAG4AZAAgACgAKAAkAHMAZQB0AHUAcABJAG4AUAByAG8AZwByAGUAcwBzACAALQBlAHEAIAAkAG4AdQBsAGwAKQAgAC0AbwByACAAKAAkAHMAZQB0AHUAcABJAG4AUAByAG8AZwByAGUAcwBzACAALQBlAHEAIAAwACkAKQAgAC0AYQBuAGQAIAAoACgAJABvAG8AYgBlAEkAbgBQAHIAbwBnAHIAZQBzAHMAIAAtAGUAcQAgACQAbgB1AGwAbAApACAALQBvAHIAIAAoACQAbwBvAGIAZQBJAG4AUAByAG8AZwByAGUAcwBzACAALQBlAHEAIAAwACkAKQAgAC0AYQBuAGQAIAAoAFsAcwB0AHIAaQBuAGcAXQA6ADoASQBzAE4AdQBsAGwATwByAEUAbQBwAHQAeQAoACQAYwBtAGQATABpAG4AZQApACkACgBXAHIAaQB0AGUALQBPAHUAdABwAHUAdAAgACIAUgBFAEEARABZAD0AJAByAGUAYQBkAHkAIABJAE0AQQBHAEUAUwBUAEEAVABFAD0AJABpAG0AYQBnAGUAUwB0AGEAdABlACAAUwBFAFQAVQBQAEkATgBQAFIATwBHAFIARQBTAFMAPQAkAHMAZQB0AHUAcABJAG4AUAByAG8AZwByAGUAcwBzACAATwBPAEIARQBJAE4AUABSAE8ARwBSAEUAUwBTAD0AJABvAG8AYgBlAEkAbgBQAHIAbwBnAHIAZQBzAHMAIABDAE0ARABMAEkATgBFAD0AJABjAG0AZABMAGkAbgBlACIACgA="
+
+# REAL BUG, confirmed 2026-08-21 via a live end-to-end run: sysprep
+# /generalize wipes the template-build-time Administrator password (see
+# docs/windows_template_guide.md step "Set the Administrator password"
+# -- that was a ONE-TIME manual step before sysprep, not something that
+# survives generalization). Every fresh clone regenerates its OWN
+# random local Administrator password during OOBE, which does NOT
+# match vault_win_admin_password -- every WinRM-based task below
+# (win_hostname, win_copy, etc.) would fail with "the specified
+# credentials were rejected by the server" without this reset. qm guest
+# exec (used here) needs no password at all -- it's the Proxmox host's
+# own privileged channel into the guest, independent of Windows auth --
+# so this is the right layer to fix it at, before any WinRM step runs.
+- name: "Reset local Administrator password to match vault_win_admin_password"
   delegate_to: "{{ tanium_win_target_node }}"
   ansible.builtin.command:
     argv:
@@ -110,13 +167,13 @@
       - exec
       - "{{ tanium_win_vmid }}"
       - --
-      - powershell
-      - -NoProfile
-      - -Command
-      - "Remove-ItemProperty -Path 'HKLM:\\SYSTEM\\Setup' -Name OOBEInProgress,SetupType,CmdLine -ErrorAction SilentlyContinue"
-  register: unstick_oobe
-  changed_when: false
-  failed_when: false
+      - net
+      - user
+      - Administrator
+      - "{{ vault_win_admin_password }}"
+  register: reset_admin_password
+  changed_when: "'completed successfully' in (reset_admin_password.stdout | default(''))"
+  no_log: true
 
 - name: "Assign static IP {{ tanium_win_ip_resolved }} via guest exec"
   delegate_to: "{{ tanium_win_target_node }}"

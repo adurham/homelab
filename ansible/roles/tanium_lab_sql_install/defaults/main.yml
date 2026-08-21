@@ -1,0 +1,28 @@
+---
+# Real gap found live 2026-08-21: no role in this repo ever installed
+# SQL Server itself -- tanium_lab_sql_login only manages logins on an
+# ALREADY-PRESENT instance. This went unnoticed all session because
+# every SQL box used for testing was pre-built manually before any of
+# this automation existed. This role closes that gap using Microsoft's
+# small SSEI bootstrapper (self-downloads full media, no pre-staged ISO
+# needed -- confirmed working: a 1.1GB SQL Server 2022 Developer ISO
+# already on the Proxmox host failed to mount cleanly over IDE CD-ROM
+# emulation (Get-Volume showed Size=0/FileSystem empty even after a
+# guest reboot) -- rather than fight that, this downloads fresh media
+# directly inside the guest, which the guest already has real internet
+# access for).
+
+tanium_sql_install_dir: "C:\\Program Files\\Microsoft SQL Server"
+tanium_sql_staging_dir: "C:\\SQL2022_Setup"
+tanium_sql_bootstrapper_url: "https://download.microsoft.com/download/c/c/9/cc9c6797-383c-4b24-8920-dc057c1de9d3/SQL2022-SSEI-Dev.exe"
+tanium_sql_instance_name: "MSSQLSERVER"
+
+# Passed to setup.exe as SAPWD -- must satisfy SQL Server's password
+# complexity policy (8+ chars, 3 of: upper/lower/digit/symbol) since
+# this role always installs with Mixed Mode auth (needed for the sa
+# login the rest of this repo's roles/docs already assume, e.g.
+# tanium_lab_restore_customer_db's sa-based RESTORE commands).
+tanium_sql_sa_password: "{{ vault_tanium_lab_sql_sa_password }}"
+
+# Required per-invocation: tanium_sql_ip. This role is otherwise
+# self-contained (downloads its own installer media).
