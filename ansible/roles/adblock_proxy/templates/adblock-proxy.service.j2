@@ -17,12 +17,22 @@ ExecStart=/opt/adblock-proxy/venv/bin/mitmdump \
   --listen-host {{ adblock_proxy_listen_host }} \
   --listen-port 8080 \
   --set confdir=/home/mitmproxy/.mitmproxy \
-  -s /opt/adblock-proxy/discord_adblock.py
+  -s /opt/adblock-proxy/ad_block.py
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/home/mitmproxy /opt/adblock-proxy
+# LogsDirectory (not ReadWritePaths) is systemd's native way to create
+# and grant /var/log/mitmproxy — see the transparent unit's comment for
+# the full ReadWritePaths-vs-LogsDirectory rationale. Needed here too:
+# ad_block.py's response() hook (Reddit inline-ad capture, added
+# 2026-08-21) runs on BOTH proxies since they share the same addon, and
+# without this the explicit proxy hits "Read-only file system" trying
+# to write capture files (confirmed live 2026-08-21 immediately after
+# first deploy — capture silently failed via the addon's own try/except
+# but the failure showed up in the journal).
+LogsDirectory=mitmproxy
 
 [Install]
 WantedBy=multi-user.target

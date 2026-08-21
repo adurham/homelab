@@ -2,10 +2,10 @@
 :PREROUTING ACCEPT [0:0]
 # Redirect HTTPS from exit-node clients (arriving on tailscale0) to the
 # local mitmproxy transparent listener. mitmproxy inspects the TLS SNI
-# via a tls_clienthello hook in discord_adblock.py and passes anything
-# non-Discord straight through as a raw TCP relay — only Discord's own
-# hostnames get decrypted/filtered. Traffic NOT arriving via tailscale0
-# (i.e. the CT's own outbound traffic) is untouched.
+# via a tls_clienthello hook in ad_block.py and passes anything
+# non-Discord/non-Reddit straight through as a raw TCP relay — only
+# those hostnames get decrypted/filtered. Traffic NOT arriving via
+# tailscale0 (i.e. the CT's own outbound traffic) is untouched.
 #
 # NOTE: DNS is NOT handled here. Exit-node clients' DNS queries never
 # transit tailscale0 as real UDP/TCP:53 packets (Tailscale tunnels them
@@ -25,8 +25,8 @@
 # 2026-07-27: phone got the real mitm.it site, which literally says
 # "If you can see this, traffic is not going through mitmproxy").
 # Plain HTTP needs no cert trust to intercept (nothing is encrypted),
-# and discord_adblock.py's request() hook already no-ops on any
-# non-Discord host, so this is safe for the same reason the HTTPS
+# and ad_block.py's request() hook already no-ops on any non-Discord/
+# non-Reddit host, so this is safe for the same reason the HTTPS
 # SNI-passthrough is safe.
 -A PREROUTING -i tailscale0 -p tcp --dport 80 -j REDIRECT --to-port 8443
 COMMIT
