@@ -12,15 +12,34 @@
 # msiexec call. No equivalent of the tanium_server_install incident
 # applies here — verified via source, not assumed.
 #
+# CRITICAL, confirmed via source 2026-08-21: /RegisterAdminPassFile is
+# NOT a plaintext password file. moduleserver.nsi's own install-time
+# registration (line ~1480: "$INSTDIR\TaniumModuleServer.exe register
+# ... --pass-file $RegisterAdminPassFile") passes it straight through to
+# TaniumModuleServer.exe register, whose --pass-file handling
+# (Components/PluginServer/ProcessModuleServerCommandLine.cpp) calls
+# DataProtectionSerialization::LoadSerializedBlobAsString on the file
+# contents — a Tanium-specific serialized+base64 blob, NOT raw
+# plaintext, NOT bare base64, NOT PowerShell's ConvertTo-SecureString
+# DPAPI format (all three were tried and failed with "class
+# InvalidBase64" / "Failed to parse protected data from string" before
+# this was traced to source). The correct generator is
+# `KeyUtility.exe protect --input <plaintext-file> --output <blob-file>`
+# (Components/KeyUtility/KeyUtility.cpp, uses the exact same
+# DataProtectionSerialization::MakeSerializedBlob under the hood) — this
+# role now generates the pass-file that way instead of writing plaintext.
+#
+# IMPORTANT: the protection key is per-user, per-machine
+# (Components/DataProtection/CurrentUserKeyEncryptionKey.cpp reads/writes
+# "%USERPROFILE%\.tanium-user-key-encryption.key"). The protect step and
+# the install/register step MUST run as the same Windows user on the
+# same box — both do here (Administrator, over WinRM, same task run) —
+# a file protected on a different machine or under a different account
+# will not decrypt.
+#
 # Registration against the Tanium Server: RegisterModuleServer defaults
 # to "1" (register) on a fresh install automatically — no need to pass
-# /RegisterModuleServer=1 explicitly — but registration is silently
-# skipped unless a password is supplied via /RegisterAdminPassFile
-# (a FILE containing the password, not an inline /RegisterAdminPass=
-# parameter — there isn't one exposed on the command line). This role
-# writes that file to the module server box just before install and
-# removes it right after, so the admin password never lands in
-# Install.log or process-list-visible command-line args.
+# /RegisterModuleServer=1 explicitly.
 #
 # Full parameter reference (moduleserver.nsi, grep 'GetOptions.*Params'):
 #   /ServerAddress /ServerPort /LogVerbosityLevel /TrustedCertPath
@@ -66,12 +85,12 @@
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
 
-- name: "Write registration password file (removed immediately after install)"
+- name: "Write plaintext registration password to a temp file"
   when: not ms_exe_check.stat.exists
   delegate_to: localhost
   ansible.windows.win_copy:
     content: "{{ tanium_console_admin_password }}"
-    dest: "{{ tanium_installers_dir }}\\register-pass.txt"
+    dest: "{{ tanium_installers_dir }}\\register-pass-plain.txt"
   vars:
     ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
     ansible_connection: winrm
@@ -83,6 +102,133 @@
     ansible_password: "{{ vault_win_admin_password }}"
   no_log: true
 
+# Requires a Tanium Server (or Module Server -- either binary ships
+# KeyUtility.exe) install present on THIS box already for KeyUtility.exe
+# to exist; the Module Server's own installer directory doesn't have it
+# before install, so this borrows Tanium Server's copy over WinRM if
+# present, otherwise fails clearly instead of silently writing garbage.
+- name: "Locate a KeyUtility.exe to use for protecting the pass-file"
+  when: not ms_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    if (Test-Path 'C:\Program Files\Tanium\Tanium Server\KeyUtility.exe') {
+      'C:\Program Files\Tanium\Tanium Server\KeyUtility.exe'
+    } elseif (Test-Path "{{ tanium_installers_dir }}\KeyUtility.exe") {
+      "{{ tanium_installers_dir }}\KeyUtility.exe"
+    } else {
+      ''
+    }
+  register: keyutility_path_check
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "SAFETY: fail clearly if no KeyUtility.exe is available to protect the pass-file"
+  when: not ms_exe_check.stat.exists
+  ansible.builtin.assert:
+    that:
+      - (keyutility_path_check.stdout | trim) != ''
+    fail_msg: >-
+      No KeyUtility.exe found on {{ tanium_moduleserver_ip }} (checked
+      the local Tanium Server install dir and tanium_installers_dir).
+      This is required to generate a valid --pass-file for
+      SetupModuleServer.exe's registration step -- see this role's
+      task-file header for why a plaintext password file fails with
+      "class InvalidBase64". Copy KeyUtility.exe from a Tanium
+      Server/Module Server install onto this box, or install this role
+      on a box that already has one.
+
+- name: "Generate the properly-protected registration pass-file via KeyUtility.exe protect"
+  when: not ms_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    & "{{ keyutility_path_check.stdout | trim }}" protect
+    --input "{{ tanium_installers_dir }}\register-pass-plain.txt"
+    --output "{{ tanium_installers_dir }}\register-pass.txt"
+  register: protect_result
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Remove the plaintext password file (protected blob is what SetupModuleServer.exe reads)"
+  delegate_to: localhost
+  ansible.windows.win_file:
+    path: "{{ tanium_installers_dir }}\\register-pass-plain.txt"
+    state: absent
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# Since SetupServer.exe runs with /SelfSign=1 (see tanium_server_install),
+# TaniumModuleServer.exe register's TLS handshake to it fails with
+# "certificate verify failed" unless the exact server cert fingerprint
+# is pre-trusted via /TrustedFingerprint=. Confirmed via source
+# (moduleserver.nsi line ~1489-1509): the installer itself only
+# discovers this fingerprint interactively (a Yes/No MessageBox) on a
+# failed first attempt -- there is no silent-mode auto-trust path. Fetch
+# the Server's real "Server TLS" leaf cert fingerprint programmatically
+# instead (TaniumReceiver.exe pki show --json --full-fingerprints) and
+# pass it explicitly, so registration succeeds on the first silent
+# attempt with no interactive prompt at all.
+- name: "Fetch the Tanium Server's TLS certificate fingerprint"
+  when: not ms_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    $json = & '{{ tanium_install_dir | default('C:\Program Files\Tanium\Tanium Server') }}\TaniumReceiver.exe' pki show --json --full-fingerprints | ConvertFrom-Json;
+    function Find-ServerTLS($node) {
+      if ($node.name -like '* Server TLS *') { return $node.fingerprint }
+      foreach ($child in $node.children) {
+        $result = Find-ServerTLS $child.key
+        if ($result) { return $result }
+      }
+      return $null
+    }
+    $fp = $null
+    foreach ($root in $json.roots) { $fp = Find-ServerTLS $root.key; if ($fp) { break } }
+    Write-Output $fp
+  register: server_fingerprint_result
+  changed_when: false
+  vars:
+    ansible_host: "{{ tanium_server_ip }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "SAFETY: fail clearly if the Server's TLS fingerprint could not be determined"
+  when: not ms_exe_check.stat.exists
+  ansible.builtin.assert:
+    that:
+      - (server_fingerprint_result.stdout | trim) != ''
+    fail_msg: >-
+      Could not determine {{ tanium_server_ip }}'s Server TLS
+      certificate fingerprint via 'TaniumReceiver.exe pki show --json
+      --full-fingerprints'. Registration would otherwise fail on the
+      TLS handshake with "certificate verify failed" and no way to
+      trust it non-interactively -- see this role's task-file header.
+
 - name: "Run SetupModuleServer.exe /S (silent install + register)"
   when: not ms_exe_check.stat.exists
   delegate_to: localhost
@@ -92,6 +238,7 @@
       /MainServerHostName={{ tanium_server_ip }}
       /RegisterAdminUser={{ tanium_console_admin_user }}
       /RegisterAdminPassFile={{ tanium_installers_dir }}\register-pass.txt
+      /TrustedFingerprint={{ server_fingerprint_result.stdout | trim }}
       /SelfSign=1
   register: install_result
   changed_when: true
@@ -105,7 +252,7 @@
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
 
-- name: "Remove registration password file"
+- name: "Remove registration password file (protected blob)"
   delegate_to: localhost
   ansible.windows.win_file:
     path: "{{ tanium_installers_dir }}\\register-pass.txt"

@@ -26,6 +26,13 @@ tanium_sql_sa_password: "{{ vault_tanium_lab_sql_sa_password }}"
 # collision was the root enabler of the original drop/recreate incident.
 tanium_target_db_name: "tanium"
 
+# Comma-separated list of IPs/hostnames the Server will accept Zone
+# Server Hub registrations from -- empty (default) is a no-op, this
+# role won't touch AllowedHubs/EnforceAllowedHubs at all. Set to
+# "127.0.0.1" for a Hub co-located directly on this Server box, or a
+# real Hub's address for a standalone Hub. See tasks/main.yml header.
+tanium_allowed_hubs: ""
+
 # Required per-invocation (no sane default — each case/version is
 # different): tanium_server_ip, tanium_setup_server_exe_local_path,
 # tanium_license_local_path, tanium_sql_server_ip, tanium_db_username,
