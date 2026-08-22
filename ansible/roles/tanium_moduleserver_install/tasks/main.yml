@@ -331,6 +331,15 @@
 # line with no separator, which PowerShell then fails to parse
 # ("Unexpected token 'foreach'"). Switched to a literal block scalar
 # (|) so real newlines survive, exactly as written below.
+# REAL BUG, confirmed 2026-08-22 via a live from-scratch run: this
+# call to `pki show` intermittently fails with "Failed to connect to
+# database after 1 attempts" even though the Server is confirmed
+# genuinely healthy seconds before AND immediately after (manually
+# re-run the identical command right after this failure and it
+# succeeded cleanly) -- this matches the same class of transient
+# SQL/network blip documented at length elsewhere in this repo
+# (tanium_lab_sql_install, the DC secure-channel incident). Add a
+# retry instead of failing the whole play on one bad attempt.
 - name: "Fetch the Tanium Server's TLS certificate fingerprint"
   when: not ms_exe_check.stat.exists
   delegate_to: localhost
@@ -348,6 +357,9 @@
     foreach ($root in $json.roots) { $fp = Find-ServerTLS $root.key; if ($fp) { break } }
     Write-Output $fp
   register: server_fingerprint_result
+  until: (server_fingerprint_result.stdout | default('') | trim) != ''
+  retries: 5
+  delay: 15
   changed_when: false
   vars:
     ansible_host: "{{ tanium_server_ip }}"
