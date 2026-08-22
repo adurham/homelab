@@ -187,6 +187,13 @@
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
 
+# REAL BUG, confirmed 2026-08-22: ".\Administrator" (the standard
+# local-account schtasks syntax) fails on this domain-joined box with
+# "No mapping between account names and security IDs was done" --
+# using the box's own real hostname explicitly
+# (tanium_win_hostname\Administrator) works. Presumably the domain
+# membership makes "." resolve ambiguously here in a way it doesn't
+# on a workgroup-only box.
 - name: "Run SQL Server setup.exe via a scheduled task (LogonType=Password, avoids the DPAPI Access Denied)"
   when: not sql_service_check.exists
   delegate_to: localhost
@@ -194,7 +201,7 @@
     schtasks /Create /TN SQLServerInstall
     /TR "{{ tanium_sql_staging_dir }}\setup_sql_run.bat"
     /SC ONCE /ST 00:00 /RL HIGHEST
-    /RU .\Administrator /RP "{{ vault_win_admin_password }}" /F;
+    /RU {{ tanium_win_hostname }}\Administrator /RP "{{ vault_win_admin_password }}" /F;
     schtasks /Run /TN SQLServerInstall
   register: sql_install_result
   changed_when: true
