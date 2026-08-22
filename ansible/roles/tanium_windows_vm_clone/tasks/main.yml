@@ -141,6 +141,28 @@
 # clone genuinely never settles within the timeout, that's a
 # template/unattend bug to fix at the source (see
 # docs/windows_template_guide.md), not something to paper over here.
+# REAL BUG, confirmed 2026-08-22 via a full from-scratch reproducibility
+# test (all 5 VMs destroyed and recloned with zero manual intervention):
+# the win-server-2022 template's sysprep was run with NO unattend.xml
+# (see docs/windows_template_guide.md), so it carries no embedded
+# ProductKey -- every fresh clone genuinely stops on OOBE's "It's time
+# to enter the product key" screen and sits there until "Do this
+# later" is clicked, no timeout ever resolves it on its own. The
+# correct long-term fix is baking a KMS client setup key into the
+# template's answer file so this screen never appears at all -- until
+# that's done, click through it automatically via the same VNC-bridge
+# technique proven working elsewhere this session, so the playbook
+# doesn't need a human at a VNC console for every fresh clone. This is
+# harmless to run against a VM that's already past this screen --
+# clicking an arbitrary desktop/lock-screen coordinate does nothing
+# observable there.
+- name: "Click through the OOBE product-key screen if present (interim workaround, see comment above)"
+  ansible.builtin.include_tasks: oobe_click_attempt.yml
+  loop: "{{ range(0, 12) | list }}"
+  loop_control:
+    loop_var: oobe_click_attempt
+    label: "attempt {{ oobe_click_attempt }}"
+
 - name: "Wait for OOBE/specialize to genuinely complete before touching the OS"
   delegate_to: "{{ tanium_win_target_node }}"
   ansible.builtin.command: >-
