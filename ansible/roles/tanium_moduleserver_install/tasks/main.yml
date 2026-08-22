@@ -324,52 +324,70 @@
 # instead (TaniumReceiver.exe pki show --json --full-fingerprints) and
 # pass it explicitly, so registration succeeds on the first silent
 # attempt with no interactive prompt at all.
-# REAL BUG, confirmed 2026-08-22: this script used a YAML folded
-# scalar (>-), which joins every line with a single space -- fine for
-# simple one-liners, but it silently turns the function definition's
-# closing "}" and the next statement "$fp = $null" into one run-on
-# line with no separator, which PowerShell then fails to parse
-# ("Unexpected token 'foreach'"). Switched to a literal block scalar
-# (|) so real newlines survive, exactly as written below.
 # REAL BUG, confirmed 2026-08-22 via a live from-scratch run: this
-# call to `pki show` intermittently fails with "Failed to connect to
-# database after 1 attempts" even though the Server is confirmed
-# genuinely healthy seconds before AND immediately after (manually
-# re-run the identical command right after this failure and it
-# succeeded cleanly) -- this matches the same class of transient
-# SQL/network blip documented at length elsewhere in this repo
-# (tanium_lab_sql_install, the DC secure-channel incident). Add a
-# retry instead of failing the whole play on one bad attempt.
+# script used a YAML folded scalar (>-), which joins every line with a
+# single space -- fine for simple one-liners, but it silently turns
+# the function definition's closing "}" and the next statement
+# "$fp = $null" into one run-on line with no separator, which
+# PowerShell then fails to parse ("Unexpected token 'foreach'").
+# Fixed with a literal block scalar (|) so real newlines survive.
+#
+# REAL BUG (separate issue, also confirmed 2026-08-22 via a live
+# from-scratch run): this call to `pki show` consistently fails over
+# WinRM with "Failed to connect to database after 1 attempts"
+# (confirmed NOT transient -- failed all 5 retries with 15s delays
+# across two separate live runs), while the exact identical command
+# run via `qm guest exec` (SYSTEM identity, no WinRM) succeeds
+# immediately, every time. This is the same DPAPI/network-logon class
+# of problem root-caused at length elsewhere in this repo (SQL Server
+# setup.exe, tanium_server_install's own scheduled-task launcher) --
+# pki show apparently also needs a real loaded profile to read its own
+# DB credentials, which a WinRM network logon doesn't have. Switched
+# to qm guest exec (matching the working pattern already used by
+# tanium_windows_vm_clone's OOBE readiness gate), confirmed live:
+# returns the correct Server TLS fingerprint immediately.
 - name: "Fetch the Tanium Server's TLS certificate fingerprint"
   when: not ms_exe_check.stat.exists
-  delegate_to: localhost
-  ansible.windows.win_shell: |
-    $json = & '{{ tanium_install_dir | default('C:\Program Files\Tanium\Tanium Server') }}\TaniumReceiver.exe' pki show --json --full-fingerprints | ConvertFrom-Json
-    function Find-ServerTLS($node) {
-      if ($node.name -like '* Server TLS *') { return $node.fingerprint }
-      foreach ($child in $node.children) {
-        $result = Find-ServerTLS $child.key
-        if ($result) { return $result }
-      }
-      return $null
-    }
-    $fp = $null
-    foreach ($root in $json.roots) { $fp = Find-ServerTLS $root.key; if ($fp) { break } }
-    Write-Output $fp
-  register: server_fingerprint_result
-  until: (server_fingerprint_result.stdout | default('') | trim) != ''
+  delegate_to: "{{ hostvars['win-ts-case1-01'].tanium_win_target_node | default(hostvars['win-ts-case1-01'].target_node) }}"
+  ansible.builtin.command: >-
+    qm guest exec {{ hostvars['win-ts-case1-01'].vmid }} --
+    powershell -NoProfile -NonInteractive -EncodedCommand {{ tanium_fingerprint_lookup_b64 }}
+  register: server_fingerprint_raw
+  until: "'\"exited\" : 1' in (server_fingerprint_raw.stdout | default(''))"
   retries: 5
   delay: 15
   changed_when: false
   vars:
-    ansible_host: "{{ tanium_server_ip }}"
-    ansible_connection: winrm
-    ansible_winrm_transport: ntlm
-    ansible_winrm_server_cert_validation: ignore
-    ansible_winrm_scheme: http
-    ansible_port: 5985
-    ansible_user: Administrator
-    ansible_password: "{{ vault_win_admin_password }}"
+    # Base64(UTF-16LE) of the fingerprint-lookup PowerShell script,
+    # for use with qm guest exec -EncodedCommand (avoids all
+    # quoting/escaping concerns of a multi-line script passed as a
+    # plain command-line argument). Pre-computed once since it never
+    # changes. The script itself (decode with:
+    # echo <b64> | base64 -d | iconv -f utf-16le):
+    #   $json = & "C:\Program Files\Tanium\Tanium Server\TaniumReceiver.exe" pki show --json --full-fingerprints | ConvertFrom-Json
+    #   function Find-ServerTLS($node) {
+    #     if ($node.name -like "* Server TLS *") { return $node.fingerprint }
+    #     foreach ($child in $node.children) {
+    #       $result = Find-ServerTLS $child.key
+    #       if ($result) { return $result }
+    #     }
+    #     return $null
+    #   }
+    #   $fp = $null
+    #   foreach ($root in $json.roots) { $fp = Find-ServerTLS $root.key; if ($fp) { break } }
+    #   Write-Output $fp
+    tanium_fingerprint_lookup_b64: "JABqAHMAbwBuACAAPQAgACYAIAAiAEMAOgBcAFAAcgBvAGcAcgBhAG0AIABGAGkAbABlAHMAXABUAGEAbgBpAHUAbQBcAFQAYQBuAGkAdQBtACAAUwBlAHIAdgBlAHIAXABUAGEAbgBpAHUAbQBSAGUAYwBlAGkAdgBlAHIALgBlAHgAZQAiACAAcABrAGkAIABzAGgAbwB3ACAALQAtAGoAcwBvAG4AIAAtAC0AZgB1AGwAbAAtAGYAaQBuAGcAZQByAHAAcgBpAG4AdABzACAAfAAgAEMAbwBuAHYAZQByAHQARgByAG8AbQAtAEoAcwBvAG4ACgBmAHUAbgBjAHQAaQBvAG4AIABGAGkAbgBkAC0AUwBlAHIAdgBlAHIAVABMAFMAKAAkAG4AbwBkAGUAKQAgAHsACgAgACAAaQBmACAAKAAkAG4AbwBkAGUALgBuAGEAbQBlACAALQBsAGkAawBlACAAIgAqACAAUwBlAHIAdgBlAHIAIABUAEwAUwAgACoAIgApACAAewAgAHIAZQB0AHUAcgBuACAAJABuAG8AZABlAC4AZgBpAG4AZwBlAHIAcAByAGkAbgB0ACAAfQAKACAAIABmAG8AcgBlAGEAYwBoACAAKAAkAGMAaABpAGwAZAAgAGkAbgAgACQAbgBvAGQAZQAuAGMAaABpAGwAZAByAGUAbgApACAAewAKACAAIAAgACAAJAByAGUAcwB1AGwAdAAgAD0AIABGAGkAbgBkAC0AUwBlAHIAdgBlAHIAVABMAFMAIAAkAGMAaABpAGwAZAAuAGsAZQB5AAoAIAAgACAAIABpAGYAIAAoACQAcgBlAHMAdQBsAHQAKQAgAHsAIAByAGUAdAB1AHIAbgAgACQAcgBlAHMAdQBsAHQAIAB9AAoAIAAgAH0ACgAgACAAcgBlAHQAdQByAG4AIAAkAG4AdQBsAGwACgB9AAoAJABmAHAAIAA9ACAAJABuAHUAbABsAAoAZgBvAHIAZQBhAGMAaAAgACgAJAByAG8AbwB0ACAAaQBuACAAJABqAHMAbwBuAC4AcgBvAG8AdABzACkAIAB7ACAAJABmAHAAIAA9ACAARgBpAG4AZAAtAFMAZQByAHYAZQByAFQATABTACAAJAByAG8AbwB0AC4AawBlAHkAOwAgAGkAZgAgACgAJABmAHAAKQAgAHsAIABiAHIAZQBhAGsAIAB9ACAAfQAKAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAJABmAHAACgA="
+
+# REAL BUG (continued): qm guest exec's stdout is the raw JSON result
+# blob ({"out-data": "<fingerprint>\r\n", "exitcode": 0, ...}), not the
+# bare fingerprint string -- extract the actual value from "out-data"
+# for use by the assert/registration tasks below (which expect a
+# plain trimmed fingerprint string).
+- name: "Extract the fingerprint from the qm guest exec JSON result"
+  when: not ms_exe_check.stat.exists
+  ansible.builtin.set_fact:
+    server_fingerprint_result:
+      stdout: "{{ (server_fingerprint_raw.stdout | regex_search('\"out-data\" : \"([0-9a-f]+)') | default('') | regex_replace('.*\"', '')) }}"
 
 - name: "SAFETY: fail clearly if the Server's TLS fingerprint could not be determined"
   when: not ms_exe_check.stat.exists
