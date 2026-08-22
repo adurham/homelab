@@ -40,12 +40,116 @@
   ansible.builtin.set_fact:
     tanium_sql_server_ip_resolved: "{{ tanium_sql_server_ip }}"
 
-- name: "Copy the customer .bak to the SQL Server's backup staging path"
+# REAL BUG, confirmed 2026-08-22 via a live first real run of this
+# role: ansible.windows.win_copy transfers files over WinRM by
+# base64-encoding them into chunked SOAP envelopes -- fine for the
+# small binaries this repo transfers elsewhere (installer .exe files,
+# KeyUtility.exe + DLLs, tens/hundreds of MB), but genuinely
+# unworkable for a real customer .bak in the tens-of-GB range: the
+# transfer failed immediately with "Read timed out (read timeout=30)"
+# then "Bad HTTP response... Code 400" before any real data moved at
+# all. Raising ansible_winrm_read_timeout_sec wouldn't fix this either
+# (confirmed via a second opinion before attempting the fix below) --
+# WinRM's base64 encoding alone adds ~33% overhead and realistically
+# caps out at a few MB/s, which is many hours for a 35GB file, with no
+# resume on a dropped chunk.
+#
+# Investigated and ruled out: (a) SMB directly from the Ansible
+# controller to the SQL box's C$ share -- unreachable, port 445
+# timed out from outside the lab's 172.16.0.0/24 network entirely
+# (confirmed via `nc -zv`); (b) BITS pull FROM the guest, driven by a
+# scheduled task hitting an ad-hoc python3 http.server on the
+# controller -- TCP-level connectivity succeeded (Test-NetConnection),
+# but the actual HTTP request never completed even after 5+ minutes,
+# root cause not fully isolated (suspected macOS-side connection
+# handling for a long-lived single-threaded http.server, not
+# confirmed).
+#
+# What DOES work, confirmed live: the Proxmox NODE itself
+# (192.168.86.11, target_node in inventory) has full network access to
+# BOTH the Ansible controller (via SSH, already required for VM
+# clone/lifecycle operations elsewhere in this repo) AND the guest's
+# SMB share (172.16.0.0/24 is directly routable from the Proxmox host,
+# unlike from the controller). So: scp the .bak to the Proxmox node
+# first (fast, proven, already-working SSH path), then have the
+# Proxmox node itself mount the guest's C$ share over SMB and copy the
+# file in -- both hops stay off WinRM/base64 entirely. Confirmed live:
+# a 35GB file transferred this way in a few minutes total, vs. WinRM's
+# immediate failure.
+- name: "Copy the customer .bak to the Proxmox node (scp, fast/proven path already used for VM lifecycle ops)"
   delegate_to: localhost
-  ansible.windows.win_copy:
-    src: "{{ tanium_customer_bak_local_path }}"
-    dest: "{{ tanium_restore_staging_path }}\\{{ tanium_customer_bak_local_path | basename }}"
+  ansible.builtin.command:
+    argv:
+      - scp
+      - -o
+      - StrictHostKeyChecking=accept-new
+      - "{{ tanium_customer_bak_local_path }}"
+      - "root@{{ tanium_restore_proxmox_node_ssh_host }}:{{ tanium_restore_proxmox_scratch_path }}/{{ tanium_customer_bak_local_path | basename }}"
+  register: bak_scp_result
+  changed_when: true
+
+# Ansible can decrypt vault_win_admin_password in its own process and
+# write it to a credentials file for smbclient/mount.cifs's
+# `credentials=` option -- the plaintext password is never passed as
+# a bare CLI argument (which would appear in process listings on the
+# Proxmox node) and never printed to any log (no_log: true).
+- name: "Write a scoped SMB credentials file for the Proxmox node to use"
+  delegate_to: localhost
+  ansible.builtin.copy:
+    dest: "{{ tanium_local_scratch_dir | default('/tmp') }}/smb_creds_{{ tanium_sql_server_ip | replace('.', '_') }}.txt"
+    content: "username=Administrator\npassword={{ vault_win_admin_password }}\n"
+    mode: "0600"
+  register: smb_creds_local
+  no_log: true
+
+- name: "Push the SMB credentials file to the Proxmox node"
+  delegate_to: localhost
+  ansible.builtin.command:
+    argv:
+      - scp
+      - -o
+      - StrictHostKeyChecking=accept-new
+      - "{{ smb_creds_local.dest }}"
+      - "root@{{ tanium_restore_proxmox_node_ssh_host }}:{{ tanium_restore_proxmox_scratch_path }}/smb_creds.txt"
+  changed_when: true
+  no_log: true
+
+- name: "Delete the local copy of the SMB credentials file (no longer needed once pushed)"
+  delegate_to: localhost
+  ansible.builtin.file:
+    path: "{{ smb_creds_local.dest }}"
+    state: absent
+
+- name: "Mount the SQL Server's C$ share from the Proxmox node and copy the .bak in"
+  delegate_to: localhost
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - StrictHostKeyChecking=accept-new
+      - "root@{{ tanium_restore_proxmox_node_ssh_host }}"
+      - >-
+        mkdir -p /mnt/tanium_restore_smb &&
+        chmod 600 {{ tanium_restore_proxmox_scratch_path }}/smb_creds.txt &&
+        mount -t cifs //{{ tanium_sql_server_ip }}/C$ /mnt/tanium_restore_smb -o credentials={{ tanium_restore_proxmox_scratch_path }}/smb_creds.txt,vers=3.0 &&
+        mkdir -p /mnt/tanium_restore_smb/TaniumRestoreStaging &&
+        cp {{ tanium_restore_proxmox_scratch_path }}/{{ tanium_customer_bak_local_path | basename }} /mnt/tanium_restore_smb/TaniumRestoreStaging/{{ tanium_customer_bak_local_path | basename }} &&
+        umount /mnt/tanium_restore_smb &&
+        rm -f {{ tanium_restore_proxmox_scratch_path }}/{{ tanium_customer_bak_local_path | basename }} {{ tanium_restore_proxmox_scratch_path }}/smb_creds.txt
   register: bak_copy_result
+  changed_when: true
+
+- name: "Get the local .bak's real size for comparison"
+  delegate_to: localhost
+  ansible.builtin.stat:
+    path: "{{ tanium_customer_bak_local_path }}"
+  register: bak_local_stat
+
+- name: "Verify the .bak landed on the SQL Server with the correct byte-for-byte size"
+  delegate_to: localhost
+  ansible.windows.win_stat:
+    path: "{{ tanium_restore_staging_path }}\\{{ tanium_customer_bak_local_path | basename }}"
+  register: bak_remote_stat
   vars:
     ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
     ansible_connection: winrm
@@ -55,6 +159,19 @@
     ansible_port: 5985
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "SAFETY: fail clearly if the transferred .bak size doesn't match the local source file"
+  ansible.builtin.assert:
+    that:
+      - bak_remote_stat.stat.exists
+      - bak_remote_stat.stat.size == bak_local_stat.stat.size
+    fail_msg: >-
+      The .bak transferred to {{ tanium_sql_server_ip }}
+      ({{ bak_remote_stat.stat.size | default('MISSING') }} bytes) does not
+      match the local source file's real size
+      ({{ bak_local_stat.stat.size }} bytes) -- do not proceed with a
+      restore against a possibly-truncated backup file. Re-run this role
+      to retry the transfer.
 
 - name: "Read the .bak's real BackupSetGUID via RESTORE HEADERONLY"
   delegate_to: localhost

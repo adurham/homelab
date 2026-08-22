@@ -17,5 +17,21 @@ tanium_restore_staging_path: "C:\\TaniumRestoreStaging"
 
 tanium_sql_sa_password: "{{ vault_tanium_lab_sql_sa_password }}"
 
+# Where the customer .bak transfers through on the Proxmox node itself
+# as an intermediate hop -- see the "Copy the customer .bak" task's
+# header comment in tasks/main.yml for why this two-hop (scp to the
+# Proxmox node, then SMB from the Proxmox node to the guest) path
+# exists instead of a direct win_copy over WinRM. Cleaned up
+# automatically at the end of the transfer task; only needs to exist
+# transiently.
+tanium_restore_proxmox_scratch_path: "/tmp"
+
+# The Proxmox node's own SSH-reachable address -- resolved from the
+# SAME inventory data every VM-lifecycle task in tanium_windows_vm_clone
+# already uses (hostvars[<node-name>].ansible_host), not hardcoded, so
+# this keeps working correctly if the SQL box ever moves to a
+# different Proxmox node in inventory.
+tanium_restore_proxmox_node_ssh_host: "{{ hostvars[target_node].ansible_host }}"
+
 # Required per-invocation: tanium_customer_bak_local_path (local path to
 # the customer's .bak on this Mac), tanium_sql_server_ip.
