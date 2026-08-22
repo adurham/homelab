@@ -3,10 +3,22 @@
 # looped from main.yml via include_tasks (a plain `block:` can't take
 # a `loop:` directly). See main.yml's comment above the include_tasks
 # call for full context on why this exists.
+# REAL BUG, confirmed 2026-08-22 via a live from-scratch run:
+# ansible.builtin.script COPIES the named script to a temp location on
+# the target (even for delegate_to: localhost) before running it --
+# see its own docs: "The local script at the path will be transferred
+# to the remote node." That silently breaks vnc_click.sh's own
+# $SCRIPT_DIR-relative lookup of pve_vnc_bridge.py, since only
+# vnc_click.sh itself gets copied, not the whole files/ directory next
+# to it -- the bridge never starts, and every click attempt fails with
+# "Connection refused" (confirmed: nothing ever listens on the target
+# port). Fixed by invoking the real, already-in-place file path via
+# ansible.builtin.command instead, which runs the script exactly where
+# it lives in this repo, alongside pve_vnc_bridge.py.
 - name: "Attempt {{ oobe_click_attempt }}: click the product-key 'Do this later' coordinate"
   delegate_to: localhost
-  ansible.builtin.script: >-
-    files/vnc_click.sh {{ tanium_win_vmid }} {{ tanium_win_target_node }}
+  ansible.builtin.command: >-
+    {{ role_path }}/files/vnc_click.sh {{ tanium_win_vmid }} {{ tanium_win_target_node }}
     {{ 15900 + (tanium_win_vmid | int % 100) }} 223 652
   changed_when: false
   failed_when: false
