@@ -73,12 +73,13 @@ Local System combo on a single host doesn't need a domain at all — see
 
 | Role | Purpose |
 |---|---|
-| `tanium_windows_vm_clone` | Clone the win-server-2022 template, assign static IP, rename, wait for WinRM. |
+| `tanium_windows_vm_clone` | Clone the win-server-2022 template, assign static IP, rename, wait for WinRM. Also auto-dismisses the OOBE product-key screen (see "Known gaps"). |
 | `tanium_lab_ad_domain` | Promote the first DC of `tanium.lab`, or join a member server to it. |
 | `tanium_lab_service_account` | Create the domain service account used as the Tanium Server's DB identity. |
+| `tanium_lab_sql_install` | Install the SQL Server 2022 engine itself + the modern `sqlcmd` client (no role did this before 2026-08-22 — every SQL box had been manually pre-built). |
 | `tanium_lab_sql_login` | `CREATE LOGIN ... FROM WINDOWS` + grant sysadmin, for one or more accounts. |
 | `tanium_lab_restore_customer_db` | **Customer-DB playbook only.** Identity-checked, guarded restore of a customer `.bak`. |
-| `tanium_server_install` | Silent-install Tanium Server (NSIS `/S` + real params, verified against source). |
+| `tanium_server_install` | Silent-install Tanium Server (NSIS `/S` + real params, verified against source). Runs its DB-create/upgrade and admin-user steps under two different confirmed-correct Windows identities — see "Validated" below. |
 | `tanium_moduleserver_install` | Silent-install Tanium Module Server, register against the Server. |
 | `tanium_zoneserver_install` | Silent-install Tanium Zone Server (fetches its own key file automatically). |
 
@@ -267,52 +268,171 @@ To build a fresh set of VMs for a different case, copy the
 VMIDs, new `ip_win_*_case` vars in `group_vars/all/vars.yml`) rather than
 overwriting the case1 entries in place.
 
-## Validated (2026-08-20)
+## Validated (2026-08-22 — clean-lab playbook confirmed fully working end-to-end)
 
-End-to-end tested against a disposable VM (259, torn down after): clone,
-resize, start, guest-agent wait, OOBE-unstick, static-IP assignment, and
-WinRM-reachability all confirmed working from a cold template clone.
+**`provision_tanium_windows_lab.yml` completed a genuinely clean, fully
+unattended run from absolute scratch** — all 5 VMs destroyed and
+recloned, zero manual intervention of any kind (no VNC clicking, no
+manual registry edits, no hand-run commands) — with every host reporting
+`failed=0`. Directly verified afterward: all 5 services genuinely
+Running (AD `NTDS`/`Netlogon`, `MSSQLSERVER`, `Tanium Server`,
+`Tanium Module Server`, `Tanium ZoneServer`). This is the first time
+this playbook has been proven end-to-end, not just per-component.
 
-All three Tanium components were manually installed successfully against
-the live case1 investigation VMs using the exact parameter sets now baked
-into their respective roles:
+Getting to that clean run required finding and fixing a real chain of
+bugs — each confirmed via live testing before moving to the next (see
+git log `d8479f2..HEAD` on `ansible/` for every commit referenced
+below):
 
-- **Tanium Server** (win-ts-case1-01): `Get-Service 'Tanium Server'`
-  Running, `TaniumReceiver.exe` alive, port 443 listening, target
-  database's `version_history` table correctly gained a new row
-  (upgrade, not drop/recreate) — confirmed via the actual Tanium Console
-  UI (login succeeded, real customer historical data visible, branding
-  intact).
-- **Tanium Module Server** (win-tms-case1-01, fresh clone after the
-  original VM hit an unrecoverable WinRE loop — see incident below):
-  `Get-Service 'Tanium Module Server'` Running, `TaniumModuleServer.exe`
-  alive. Registration against the Server via `TaniumModuleServer.exe
-  register ... --pass-file` failed with `class InvalidBase64` /
-  `Failed to parse protected data from string` regardless of whether the
-  password file was plaintext, base64, or PowerShell DPAPI-protected —
-  the exact expected format is still unknown. Complete registration via
-  the Console UI (Administration -> Solutions -> Module Server) instead;
-  this role does not yet automate registration reliably.
-- **Tanium Zone Server** (win-tzs-case1-01): `Get-Service 'Tanium
-  ZoneServer'` Running, `TaniumZoneServer.exe` alive, using a
-  `tanium-init.dat` fetched directly from the Server's own install
-  directory with zero Console interaction.
+1. **OOBE "enter product key" screen blocks every fresh clone
+   indefinitely** (`6e51a6a`, `73bf333`, `e303f3a`) — the
+   `template-win-server-2022` template's sysprep was run with no
+   `unattend.xml`, so it carries no embedded product key; every fresh
+   clone stops on this screen with no timeout ever resolving it. Interim
+   fix: `tanium_windows_vm_clone` now auto-dismisses it via the same
+   VNC-bridge technique used for manual template work
+   (`files/pve_vnc_bridge.py` + `files/vnc_click.sh`), bounded to 12
+   attempts 30s apart, checking the existing OOBE readiness gate between
+   clicks. **The correct long-term fix — baking a KMS client setup key
+   into the template's answer file so this screen never appears at all —
+   is not yet done; see "Known gaps" below.**
+2. **Proxmox clone storage-lock contention** (`f11c2d3`) — cloning all 5
+   VMs in the same play (Ansible's default parallel execution) fires all
+   5 `qm clone` invocations at the same storage backend simultaneously;
+   Proxmox's own locking rejects the losers with `got timeout`. Genuine
+   transient contention, not a permanent failure — fixed with a bounded
+   retry instead of serializing the whole play.
+3. **SQL Server's own update-search step fails via WinRM** (`2bf382d`) —
+   without `/UpdateEnabled=False`, `setup.exe` defaults to checking
+   Windows Update before installing, which throws Access Denied over
+   this WinRM session. Disabled explicitly (also just faster/more
+   deterministic for a disposable lab install).
+4. **SQL Server setup.exe needs a real logon, not bare WinRM**
+   (`6acc301`, `3f8544c`) — `setup.exe` DPAPI-encrypts saved
+   passwords under `CurrentUser` scope while writing its config XML.
+   WinRM/Negotiate is a network logon (type 3) with no loaded user
+   profile and no DPAPI master key, so the encrypt call throws
+   `CryptographicException: Access is denied`. Fixed by launching via a
+   scheduled task with `LogonType=Password` (`/RU` + `/RP`, not a
+   passwordless/S4U task, which still lacks the credential material
+   DPAPI needs) — and separately, `.\Administrator` (the usual
+   local-account `schtasks` syntax) fails on a domain-joined box with
+   "No mapping between account names and security IDs was done"; the
+   box's real hostname (`WIN-SQL-CASE1\Administrator`) works.
+5. **`win_shell` mishandles a piped `Out-Null` over WinRM** (`bbe3cac`) —
+   a raw multi-statement `-Command` string containing `| Out-Null` fails
+   with `'Out-Null' is not recognized as an internal or external
+   command`, even though the identical command succeeds via `qm guest
+   exec` and via `-EncodedCommand`. Looks like an argument-marshalling
+   quirk specific to this WinRM session, not a real PowerShell/pipe
+   problem. Sidestepped with `$null = ...` instead of `| Out-Null`.
+6. **`pki show` needs a real loaded profile too** (`0d83906`, `7d1ad42`)
+   — same DPAPI/network-logon class of problem as SQL Server's own
+   installer: `TaniumReceiver.exe pki show` consistently (not
+   intermittently — confirmed by failing 5 retries with 15s delays,
+   twice) fails over WinRM with "Failed to connect to database," while
+   the identical command via `qm guest exec` (SYSTEM identity, no WinRM)
+   succeeds immediately every time. `tanium_moduleserver_install`'s TLS
+   fingerprint lookup now uses `qm guest exec` instead of WinRM.
+7. **`vncdo` can hang forever** (`cb93781`) — caught live as a genuinely
+   stuck process (11+ minutes, never returned) that stalled an entire
+   playbook run across all 5 VMs (parallel host execution meant one hung
+   click attempt blocked the whole play). `vnc_click.sh` now wraps the
+   `vncdo` invocation in a hard `timeout 20`.
+8. **Circular `ansible_host`/`tanium_server_ip` reference for the
+   co-located Zone Server Hub** (`52c0fd2`, ported to the customer-DB
+   playbook in `c33933f` after a manual review caught it there too) —
+   the "Install the Zone Server Hub" play runs on the same host as the
+   Tanium Server and set `tanium_server_ip: "{{ ansible_host }}"` as a
+   play-level var, but the role's own tasks also set
+   `ansible_host: "{{ tanium_server_ip }}"` as a task-level var for
+   their WinRM override. Jinja can't resolve the resulting cycle within
+   the same host context and fails with "Recursive loop detected in
+   template: maximum recursion depth exceeded." Fixed by referencing
+   the raw `ip_win_ts_case1` inventory variable directly instead of the
+   `ansible_host` alias that's also being overridden downstream.
+9. **Native-vs-WOW64 registry hive split for Tanium Server's DB config**
+   (`ab7683f`, hardened in `0b9d097`) — `SetupServer.exe` only ever
+   writes the DB connection config (`SQLConnectionString`, `DBUserName`,
+   `DBUserDomain`) to the WOW64-redirected registry view
+   (`HKLM:\SOFTWARE\Wow6432Node\Tanium\Tanium Server`), but the
+   genuinely 64-bit `TaniumReceiver.exe` service reads the NATIVE view
+   (`HKLM:\SOFTWARE\Tanium\Tanium Server`) at startup. Invisible
+   immediately after a fresh install (the installer's own in-process run
+   happens to work), but any later reboot spins up the real service
+   fresh, it reads the empty native hive, and the server loops forever
+   on "Failed to connect to database" even though SQL/network/firewall
+   are all fine. Fixed by syncing the DB connection keys into the native
+   hive too, gated on a check of **all three** keys (not just one) so a
+   hypothetical partial prior sync can't silently look "done" forever.
+10. **`TaniumReceiver.exe`'s DB-create/upgrade + `database
+    create-admin-user` steps need specific, DIFFERENT identities**
+    (`561a106`, the core of the fully-remote install) — confirmed via 3
+    independent live data points: WinRM = Access Denied;
+    scheduled-task-with-password-but-no-real-login = DLL init crash
+    (`0xC0000142`); the DB-upgrade step specifically needs to run as the
+    domain service account (`TANIUM\taniumsvc`, needs `SeBatchLogonRight`
+    granted via `secedit` + local Administrators membership, both now
+    done automatically), while `create-admin-user` specifically needs
+    `NT AUTHORITY\SYSTEM` (fails as `taniumsvc` with "login is from an
+    untrusted domain"). `tanium_server_install` now runs each sub-step
+    under its confirmed-correct identity and finishes the remaining
+    steps (cert regen, service install, service-account-set, start)
+    manually when `SetupServer.exe` itself aborts partway through at the
+    `create-admin-user` boundary — this is a fully remote fix, no
+    interactive/console/VNC/RDP session used anywhere in this sequence.
+11. **KeyUtility.exe needs its sibling DLLs, and its own DB-connectivity
+    dependents needed real fixes too** (`6c285b5`, `d8479f2`,
+    `cc8ce4f`) — a Module Server install never ships `KeyUtility.exe`
+    (only Tanium Server/Zone Server do); fetching just the one binary
+    from the Server box crashes with `STATUS_DLL_NOT_FOUND` since it
+    dynamically loads `libcrypto-3.dll`/`libssl-3.dll` from its own
+    directory. Fixed by fetching the whole sibling-DLL set, transferred
+    via a local temp file + `win_copy` rather than a base64 command-line
+    argument (which fails past ~8191 characters — fine for the small
+    `tanium-init.dat`, not for a real compiled binary).
+12. **The SQL Server engine itself was never installed by any role**
+    (`d8479f2`, `cc8ce4f`) — every prior session's testing had reused a
+    manually pre-built SQL box; `tanium_lab_sql_login` only ever managed
+    logins on an *already-present* instance. `tanium_lab_sql_install` now
+    closes that gap: downloads SQL Server 2022 Developer Edition media
+    directly via Microsoft's small self-downloading SSEI bootstrapper (a
+    pre-staged ISO failed to mount cleanly over this Proxmox/VM's IDE
+    CD-ROM emulation — not worth fighting, guest internet access works
+    fine), then installs the modern Go-based `sqlcmd`
+    (`github.com/microsoft/go-sqlcmd`, queried via the GitHub API for the
+    current release rather than guessing a URL).
 
-The roles themselves (as opposed to the manual command lines) have not
-yet been re-run end-to-end in one playbook pass against a fresh clone
-with every fix in place — re-validate before trusting the full playbook
-unattended for a new case, but every individual installer's real
-behavior is now confirmed correct.
+**Not yet re-validated end-to-end: `provision_tanium_windows_lab_with_customer_db.yml`.**
+Every individual step it wraps (SQL install, Tanium Server install
+against an existing DB, Module Server, Zone Server) is now proven via
+the clean-lab playbook's successful run, and the customer-restore role's
+own identity-guarded logic was reviewed and had one real bug fixed
+(the same Hub circular-reference crash as the clean-lab playbook, ported
+in `c33933f`) — but the playbook has never actually been run start-to-
+finish this session, because no customer `.bak` has been re-sourced yet
+(see "Known gaps"). Treat it as "believed correct, lint/syntax-clean,
+each component proven individually" rather than "proven end-to-end"
+until that real run happens.
 
-**2026-08-21 follow-up fixes are NOT yet re-validated end-to-end**
-(the `create-admin-user` SQL-login fix, the SOAPServer.key/.crt
-regeneration, the `win_service_info`-based completion check, and the
-whole `tanium_lab_restore_customer_db` role + customer-DB playbook are
-all new since the validation above). They were built from real,
-hands-on-diagnosed incidents this session, but only the underlying
-manual fixes (granting the computer account, running
-`KeyUtility.exe selfsign`, manually installing/starting the service)
-were exercised for real — the Ansible role code wrapping them has only
-been lint- and syntax-checked, not run against a live VM. Treat this
-playbook family as "believed correct, not yet proven" until a real run
-happens.
+## Known gaps / follow-up work
+
+- **Template lacks a baked-in Windows product key** — every fresh clone
+  currently needs the interim auto-click workaround (see fix #1 above)
+  to get past OOBE. The permanent fix: bake a KMS client setup key
+  (`vault_windows_server_2022_mak` is already in the vault per
+  `windows_template_guide.md`) into the template's `unattend.xml`
+  `Microsoft-Windows-Shell-Setup > ProductKey` field and reseal template
+  9000. Not yet done — tracked as the last piece needed to make the
+  clean-lab playbook need genuinely zero VNC/GUI machinery of any kind,
+  interim workaround included.
+- **Customer-DB playbook not yet run end-to-end** — needs a customer
+  `.bak` re-sourced first (the original was lost to an earlier VM-254
+  destroy incident; the user confirmed another copy exists elsewhere but
+  it has not yet been supplied to this environment).
+- Intermittent Proxmox-host-level guest-agent flakiness (VMs 254/255/258
+  observed going briefly unresponsive to `qm guest exec` mid-session,
+  independent of any Ansible role logic) was seen repeatedly this
+  session but never blocked a full run once the above fixes landed —
+  worth keeping an eye on if a future run stalls at a guest-agent-wait
+  task with no obvious cause; it has self-resolved every time so far.
