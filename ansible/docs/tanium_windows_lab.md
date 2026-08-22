@@ -417,15 +417,22 @@ until that real run happens.
 
 ## Known gaps / follow-up work
 
-- **Template lacks a baked-in Windows product key** — every fresh clone
-  currently needs the interim auto-click workaround (see fix #1 above)
-  to get past OOBE. The permanent fix: bake a KMS client setup key
-  (`vault_windows_server_2022_mak` is already in the vault per
-  `windows_template_guide.md`) into the template's `unattend.xml`
-  `Microsoft-Windows-Shell-Setup > ProductKey` field and reseal template
-  9000. Not yet done — tracked as the last piece needed to make the
-  clean-lab playbook need genuinely zero VNC/GUI machinery of any kind,
-  interim workaround included.
+- ~~**Template lacks a baked-in Windows product key**~~ — **FIXED,
+  2026-08-22.** Template VMID 9000 was rebuilt with
+  `vault_windows_server_2022_mak` baked into its `unattend.xml`
+  `ProductKey` field (specialize pass) and re-sysprepped — see
+  `windows_template_guide.md`'s "Sysprep and Template Conversion"
+  section for the exact procedure and the new
+  `bake_product_key_into_template.yml` one-shot playbook. Confirmed via
+  TWO independent from-scratch clone tests (one from the intermediate
+  rebuild VM, one from the final swapped-in VMID 9000 itself) that OOBE
+  now reaches `IMAGE_STATE_COMPLETE` with genuinely zero manual
+  intervention — no VNC, no clicks, the product-key screen never
+  appears at all. `tanium_windows_vm_clone`'s auto-click workaround
+  (fix #1 above) is kept in place as a defense-in-depth safety net
+  (gated behind a pre-check that skips it entirely when OOBE already
+  reports ready, which is expected on every clone from here on) in
+  case a future template rebuild ever regresses this fix.
 - **Customer-DB playbook not yet run end-to-end** — needs a customer
   `.bak` re-sourced first (the original was lost to an earlier VM-254
   destroy incident; the user confirmed another copy exists elsewhere but

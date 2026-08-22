@@ -1,0 +1,58 @@
+---
+# One-shot playbook: bake vault_windows_server_2022_mak into a rebuild
+# VM's unattend.xml (ProductKey field for the specialize/oobe passes),
+# then re-sysprep with that answer file so future clones from THIS
+# template never hit OOBE's "It's time to enter the product key"
+# screen at all.
+#
+# Deliberately generates the unattend.xml content via Jinja templating
+# INSIDE this Ansible task -- Ansible decrypts vault_windows_server_2022_mak
+# in its own process and writes the rendered file straight to the
+# remote host via win_copy; the plaintext key is never printed to any
+# terminal/log by this playbook (no_log: true on the write task, and no
+# debug/msg task ever references the raw vault var).
+#
+# Usage:
+#   cd ~/repos/homelab/ansible
+#   OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES ansible-playbook \
+#     -i inventory/proxmox.yml bake_product_key_into_template.yml \
+#     -e target_ip=172.16.0.253 -e target_admin_password='<local Administrator password>'
+
+- name: Bake the Windows Server 2022 MAK product key into an unattend.xml
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_host: "{{ target_ip }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ target_admin_password }}"
+  tasks:
+    - name: "Write unattend.xml with the real product key (no_log: true -- never print the key)"
+      ansible.windows.win_copy:
+        dest: "C:\\Windows\\Panther\\unattend.xml"
+        content: |
+          <?xml version="1.0" encoding="utf-8"?>
+          <unattend xmlns="urn:schemas-microsoft-com:unattend">
+            <settings pass="specialize">
+              <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+                <ProductKey>{{ vault_windows_server_2022_mak }}</ProductKey>
+              </component>
+            </settings>
+          </unattend>
+      no_log: true
+      register: unattend_write
+
+    - name: "Confirm unattend.xml was written (safe to log -- no secret here)"
+      ansible.windows.win_stat:
+        path: "C:\\Windows\\Panther\\unattend.xml"
+      register: unattend_check
+
+    - name: "Fail clearly if the write didn't actually happen"
+      ansible.builtin.assert:
+        that:
+          - unattend_check.stat.exists
+        fail_msg: "unattend.xml write failed -- do not proceed to sysprep."
