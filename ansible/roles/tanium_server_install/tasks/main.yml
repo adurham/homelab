@@ -507,6 +507,74 @@
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
 
+# REAL BUG, confirmed 2026-08-22 via a live reboot: SetupServer.exe
+# only ever writes the DB connection config (SQLConnectionString,
+# DBUserName, DBUserDomain) to the WOW64-redirected registry view
+# (HKLM:\SOFTWARE\Wow6432Node\Tanium\Tanium Server), but the genuinely
+# 64-bit TaniumReceiver.exe service process reads the NATIVE view
+# (HKLM:\SOFTWARE\Tanium\Tanium Server) at startup -- confirmed by
+# directly comparing both hives after a clean install: the WOW64 copy
+# had the full config, the native copy had only AllowedHubs/
+# EnforceAllowedHubs. This is invisible immediately after a fresh
+# install (the installer's OWN in-process run happens to work, likely
+# via a code path that doesn't go through the redirected read), but
+# any later reboot spins up the real service fresh, it reads the empty
+# native hive, and the server loops forever on "Failed to connect to
+# database" even though SQL/network/firewall are all genuinely fine.
+# Fix: copy the DB connection keys into the native hive too, so the
+# service finds them regardless of which view it actually reads from.
+- name: "Check whether the native registry hive already has the DB connection config"
+  delegate_to: localhost
+  ansible.windows.win_reg_stat:
+    path: "HKLM:\\SOFTWARE\\Tanium\\Tanium Server"
+    name: SQLConnectionString
+  register: native_hive_check
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Sync DB connection config into the native (non-WOW64) registry hive"
+  when: not native_hive_check.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    New-ItemProperty -Path 'HKLM:\SOFTWARE\Tanium\Tanium Server' -Name SQLConnectionString -Value '{{ tanium_sql_server_ip }}@{{ tanium_target_db_name | default('tanium') }}' -PropertyType String -Force | Out-Null;
+    New-ItemProperty -Path 'HKLM:\SOFTWARE\Tanium\Tanium Server' -Name DBUserName -Value '{{ tanium_db_username }}' -PropertyType String -Force | Out-Null;
+    New-ItemProperty -Path 'HKLM:\SOFTWARE\Tanium\Tanium Server' -Name DBUserDomain -Value '{{ tanium_db_domain }}' -PropertyType String -Force | Out-Null;
+    Write-Output DONE
+  register: registry_sync_result
+  no_log: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Restart Tanium Server to pick up the native-hive config (only when the sync above actually ran)"
+  when: not native_hive_check.exists
+  delegate_to: localhost
+  ansible.windows.win_service:
+    name: "Tanium Server"
+    state: restarted
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
 - name: "Wait for Tanium Server Windows service to exist (install completion signal)"
   delegate_to: localhost
   ansible.windows.win_service_info:
