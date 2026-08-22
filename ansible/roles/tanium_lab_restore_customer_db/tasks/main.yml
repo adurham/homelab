@@ -40,6 +40,48 @@
   ansible.builtin.set_fact:
     tanium_sql_server_ip_resolved: "{{ tanium_sql_server_ip }}"
 
+# REAL BUG, confirmed 2026-08-22 via a live re-run: the whole transfer
+# chain below (scp to Proxmox node, build+attach a 35GB ISO, copy off
+# the virtual CD-ROM) had no upfront idempotency check at all -- a
+# re-run against a destination that already has the correct file from
+# a prior successful run re-did the entire expensive transfer, then
+# failed at the final Copy-Item step with "Access... is denied"
+# because Copy-Item refuses to overwrite an existing file without
+# -Force. Check the destination's size FIRST and skip the whole chain
+# (scp/genisoimage/qm attach/copy/detach/cleanup) when it already
+# matches the local source -- both cheaper AND avoids the Copy-Item
+# collision entirely.
+- name: "Get the local .bak's real size upfront (used both for the skip-check below and the final verification)"
+  delegate_to: localhost
+  ansible.builtin.stat:
+    path: "{{ tanium_customer_bak_local_path }}"
+    get_checksum: false
+  register: bak_local_stat
+
+- name: "Check whether the destination already has a correctly-sized .bak (skip the whole transfer if so)"
+  delegate_to: localhost
+  ansible.windows.win_stat:
+    path: "{{ tanium_restore_staging_path }}\\{{ tanium_customer_bak_local_path | basename }}"
+    get_checksum: false
+  register: bak_existing_remote_stat
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Set fact: does the .bak already need transferring"
+  ansible.builtin.set_fact:
+    tanium_bak_transfer_needed: >-
+      {{
+        not bak_existing_remote_stat.stat.exists or
+        bak_existing_remote_stat.stat.size != bak_local_stat.stat.size
+      }}
+
 # REAL BUG, confirmed 2026-08-22 via a live first real run of this
 # role: ansible.windows.win_copy transfers files over WinRM by
 # base64-encoding them into chunked SOAP envelopes -- fine for the
@@ -90,6 +132,7 @@
 # guest over the hypervisor's own virtual IDE bus, same mechanism
 # already used for the VirtIO drivers ISO baked into every VM.
 - name: "Copy the customer .bak to the Proxmox node (scp, fast/proven path already used for VM lifecycle ops)"
+  when: tanium_bak_transfer_needed
   delegate_to: localhost
   ansible.builtin.command:
     argv:
@@ -102,6 +145,7 @@
   changed_when: true
 
 - name: "Build a UDF ISO on the Proxmox node containing the .bak (UDF, not plain ISO9660 -- files are far past the 4GiB-1 ISO9660 limit)"
+  when: tanium_bak_transfer_needed
   delegate_to: localhost
   ansible.builtin.command:
     argv:
@@ -120,6 +164,7 @@
   changed_when: true
 
 - name: "Attach the transfer ISO to the SQL Server VM's free IDE CD-ROM slot"
+  when: tanium_bak_transfer_needed
   delegate_to: "{{ target_node }}"
   ansible.builtin.command:
     argv:
@@ -132,6 +177,7 @@
   changed_when: true
 
 - name: "Wait for the ISO's CD-ROM drive to appear in Windows and locate its drive letter"
+  when: tanium_bak_transfer_needed
   delegate_to: localhost
   ansible.windows.win_shell: >-
     (Get-Volume | Where-Object { $_.DriveType -eq 'CD-ROM' -and $_.Size -gt 30000000000 } | Select-Object -First 1 -ExpandProperty DriveLetter)
@@ -151,9 +197,10 @@
     ansible_password: "{{ vault_win_admin_password }}"
 
 - name: "Copy the .bak off the virtual CD-ROM into the SQL Server's restore staging path"
+  when: tanium_bak_transfer_needed
   delegate_to: localhost
   ansible.windows.win_shell: >-
-    Copy-Item -Path '{{ iso_drive_letter.stdout | trim }}:\{{ tanium_customer_bak_local_path | basename }}'
+    Copy-Item -Force -Path '{{ iso_drive_letter.stdout | trim }}:\{{ tanium_customer_bak_local_path | basename }}'
     -Destination '{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'
   register: bak_copy_result
   changed_when: true
@@ -168,6 +215,7 @@
     ansible_password: "{{ vault_win_admin_password }}"
 
 - name: "Detach and delete the transfer ISO (no longer needed once the .bak is on real disk)"
+  when: tanium_bak_transfer_needed
   delegate_to: "{{ target_node }}"
   ansible.builtin.command:
     argv:
@@ -179,6 +227,7 @@
   changed_when: true
 
 - name: "Delete the ISO file from the Proxmox node's storage"
+  when: tanium_bak_transfer_needed
   delegate_to: localhost
   ansible.builtin.command:
     argv:
@@ -189,21 +238,7 @@
       - "rm -f {{ tanium_restore_proxmox_iso_storage_path }}/tanium_bak_transfer_{{ vmid }}.iso"
   changed_when: true
 
-# REAL BUG, confirmed 2026-08-22 via a live run: both ansible.builtin.stat
-# and ansible.windows.win_stat compute a checksum by default, which for
-# a real 35GB file took 25+ minutes each (SHA1 over the whole file) --
-# genuinely correct, not a hang, but needlessly slow for a check that
-# only needs the file's SIZE. get_checksum: false skips that entirely;
-# still a fully valid size comparison, just without the (here,
-# pointless) hash computation.
-- name: "Get the local .bak's real size for comparison"
-  delegate_to: localhost
-  ansible.builtin.stat:
-    path: "{{ tanium_customer_bak_local_path }}"
-    get_checksum: false
-  register: bak_local_stat
-
-- name: "Verify the .bak landed on the SQL Server with the correct byte-for-byte size"
+- name: "Verify the .bak is on the SQL Server with the correct byte-for-byte size (cheap now: get_checksum: false)"
   delegate_to: localhost
   ansible.windows.win_stat:
     path: "{{ tanium_restore_staging_path }}\\{{ tanium_customer_bak_local_path | basename }}"
@@ -225,7 +260,7 @@
       - bak_remote_stat.stat.exists
       - bak_remote_stat.stat.size == bak_local_stat.stat.size
     fail_msg: >-
-      The .bak transferred to {{ tanium_sql_server_ip }}
+      The .bak on {{ tanium_sql_server_ip }}
       ({{ bak_remote_stat.stat.size | default('MISSING') }} bytes) does not
       match the local source file's real size
       ({{ bak_local_stat.stat.size }} bytes) -- do not proceed with a
