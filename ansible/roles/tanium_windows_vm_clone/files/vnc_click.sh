@@ -62,7 +62,14 @@ for cycle in 1 2 3; do
   done
 
   PW=$(cat "$PWFILE" 2>/dev/null || echo "")
-  OUT=$("$VNCDO" -s "127.0.0.1::${PORT}" -p "$PW" "$CMDFILE" 2>&1)
+  # REAL BUG, confirmed 2026-08-22 via a live from-scratch run: vncdo
+  # itself can hang indefinitely on a bad/half-open TCP connection to
+  # the local bridge port -- caught live as a genuinely stuck process
+  # (11+ minutes, never returned) that stalled an entire Ansible
+  # playbook run across all 5 VMs. Wrap it in a hard `timeout` so a
+  # single bad connection attempt can never block longer than this
+  # script's own retry loop expects.
+  OUT=$(timeout 20 "$VNCDO" -s "127.0.0.1::${PORT}" -p "$PW" "$CMDFILE" 2>&1)
   RC=$?
   echo "$OUT"
 
