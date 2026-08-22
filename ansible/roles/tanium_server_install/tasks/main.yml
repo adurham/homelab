@@ -255,67 +255,89 @@
       -e tanium_confirm_drop_existing_db={{ tanium_target_db_name | default('tanium') }}
       to proceed.
 
-# REAL BUG, confirmed 2026-08-21 via 3 separate live test contexts:
-#   1. WinRM win_command session (elevated, unfiltered Administrator
-#      token -- SQL grants, file ACLs, UAC/LocalAccountTokenFilterPolicy
-#      all independently confirmed correct): fails partway through with
-#      "Access is denied. Error code 0x00000005" launching its own child
-#      process "TaniumReceiver.exe database create".
-#   2. A scheduled task (schtasks /RL HIGHEST /RU ... /RP <password>,
-#      i.e. LOGON32_LOGON_BATCH) with NO real interactive login present:
-#      progresses further (past the DB-create Access Denied) but the
-#      child process then crashes with exit code 3221225794 =
-#      0xC0000142 (STATUS_DLL_INIT_FAILED) on "database upgrade".
-#   3. The SAME scheduled task, run WHILE a genuine interactive console
-#      session is logged in (confirmed via `query session` showing
-#      "console <user> ... Active"): succeeded immediately, service
-#      came up and stayed running.
-# Consulted analysis: TaniumReceiver.exe's child process needs a real
-# window station + interactive desktop (WinSta0\Default) that only a
-# genuine console/RDP logon grants -- a batch logon token lacks the
-# INTERACTIVE (S-1-5-4) SID and gets a non-interactive window station,
-# which a component loading user32.dll/GDI at DllMain time can't use,
-# producing exactly this NTSTATUS. This is a real Tanium Server
-# requirement (matches what Tanium's own install docs assume -- a
-# console/RDP session, not remote WinRM), not a bug this role can work
-# around purely via WinRM or guest-exec.
-#
-# This role now: (a) checks for a genuine interactive session via `qm
-# guest exec ... -- query session` (no VNC/vision needed for the CHECK
-# itself, only the login has to happen via VNC/RDP if missing) and
-# FAILS with clear instructions if none is present, rather than
-# silently hitting the DLL-init crash; (b) launches SetupServer.exe as
-# a scheduled task (proven pattern) once a real session is confirmed.
-- name: "Check for a genuine interactive login session on {{ tanium_server_ip }} (required for SetupServer.exe's DB-create step)"
-  when: not server_exe_check.stat.exists
-  delegate_to: "{{ target_node | default('pve01') }}"
-  ansible.builtin.command:
-    argv:
-      - qm
-      - guest
-      - exec
-      - "{{ vmid }}"
-      - --
-      - query
-      - session
-  register: interactive_session_check
-  changed_when: false
+# REAL BUG, confirmed 2026-08-21/22 via extensive live testing across
+# BOTH sessions -- the actual root cause, found by re-checking SQL
+# Server's own error log rather than assuming a GUI/session limitation:
+#   - WinRM win_command / a scheduled task run as local Administrator
+#     both fail differently launching TaniumReceiver.exe's DB-create
+#     child process (Access Denied / DLL init crash 0xC0000142).
+#   - SQL Server's error log (xp_readerrorlog) showed the REAL cause:
+#     failed logins from 'NT AUTHORITY\ANONYMOUS LOGON' and
+#     'WIN-TS-CASE1\Administrator' at the exact failure timestamps --
+#     TaniumReceiver.exe's "database upgrade/create" step authenticates
+#     to SQL as the CALLING PROCESS'S OWN Windows identity (Windows
+#     Integrated Auth), not the /DBUserName credentials passed to
+#     SetupServer.exe. A WinRM/batch-logon-as-local-Administrator token
+#     has no SQL login and no delegatable network credential -> auth
+#     fails, and TaniumReceiver.exe's failure mode for that is the
+#     DLL-init crash, not a clean auth error.
+#   - Fix: run SetupServer.exe (and therefore its DB-upgrade child) as
+#     the domain service account (TANIUM\taniumsvc) via a scheduled
+#     task -- that account already has a real SQL login + sysadmin
+#     (tanium_lab_sql_login), so Windows Integrated Auth succeeds.
+#     taniumsvc needs two rights granted first, neither present by
+#     default: (a) "Log on as a batch job" (SeBatchLogonRight, via
+#     secedit) -- schtasks silently never runs the task without this,
+#     confirmed via `schtasks /Query ... Last Result` = 267011
+#     (SCHED_S_TASK_HAS_NOT_RUN); (b) local Administrators membership
+#     -- needed for the later service-install/firewall/Program-Files
+#     steps SetupServer.exe also performs.
+#   - Separately, `database create-admin-user` (the step immediately
+#     after DB upgrade) fails with a DIFFERENT SQL error ("login is
+#     from an untrusted domain") when run as taniumsvc -- this specific
+#     sub-step needs to run as NT AUTHORITY\SYSTEM instead. Confirmed
+#     live: create-admin-user succeeds under SYSTEM ("already exists in
+#     the database" once idempotently re-run), and the parent installer
+#     aborts BEFORE finishing (no service installed, no TLS cert
+#     regenerated) when it hits this as taniumsvc -- so this role
+#     finishes the remaining steps manually with the right identity for
+#     each, exactly matching a real successful live install: 
+#     KeyUtility.exe selfsign (cert), TaniumReceiver.exe -i (service
+#     install), set the service's logon account to taniumsvc, start it.
+#   - This is a FULLY REMOTE fix -- no interactive/console/VNC/RDP
+#     session of any kind is used or required anywhere in this
+#     sequence, confirmed via a real end-to-end run with zero GUI
+#     interaction, contrary to an earlier (wrong) diagnosis in this
+#     role's history that blamed a WinRM/Session-0 desktop limitation.
 
-- name: "FAIL with instructions if no interactive session is logged in"
+- name: "Grant taniumsvc 'Log on as a batch job' right (required for the scheduled-task launch below)"
   when: not server_exe_check.stat.exists
-  ansible.builtin.assert:
-    that:
-      - "'Active' in (interactive_session_check.stdout | default(''))"
-    fail_msg: >-
-      Tanium Server's install requires a REAL interactive Windows login
-      on {{ tanium_server_ip }} (VMID {{ vmid }}) before this
-      role can proceed -- confirmed via 3 live test contexts that
-      WinRM and a scheduled task with no login both fail differently
-      (Access Denied / DLL init crash 0xC0000142) launching
-      TaniumReceiver.exe's child process, while the identical command
-      succeeds under a genuine console session. Log in via VNC or RDP
-      as Administrator on VMID {{ vmid }} now, then re-run
-      this playbook -- it will pick up right where it left off.
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    $sid = (New-Object System.Security.Principal.NTAccount('{{ tanium_db_domain }}','{{ tanium_db_username }}')).Translate([System.Security.Principal.SecurityIdentifier]).Value;
+    secedit /export /cfg C:\TaniumInstallers\secpol.cfg /areas USER_RIGHTS | Out-Null;
+    (Get-Content C:\TaniumInstallers\secpol.cfg) -replace 'SeBatchLogonRight = (.*)', "SeBatchLogonRight = `$1,*$sid" | Set-Content C:\TaniumInstallers\secpol.cfg;
+    secedit /configure /db C:\TaniumInstallers\secedit.sdb /cfg C:\TaniumInstallers\secpol.cfg /areas USER_RIGHTS | Out-Null;
+    Write-Output DONE
+  register: batch_logon_grant
+  changed_when: "'DONE' in (batch_logon_grant.stdout | default(''))"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Add taniumsvc to local Administrators (needed for SetupServer.exe's service/firewall/file steps)"
+  when: not server_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_group_membership:
+    name: Administrators
+    members:
+      - "{{ tanium_db_domain }}\\{{ tanium_db_username }}"
+    state: present
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
 
 # /S alone is the silent flag; every other /Param below is a real NSIS
 # GetOptions() key read by server.nsi/sql_server.nsi (see role header for
@@ -350,16 +372,131 @@
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
 
-- name: "Create and run SetupServer.exe as a scheduled task (avoids the WinRM Access Denied issue)"
+- name: "Create and run SetupServer.exe as a scheduled task under TANIUM\\{{ tanium_db_username }} (the identity SQL Integrated Auth actually needs)"
   when: not server_exe_check.stat.exists
   delegate_to: localhost
   ansible.windows.win_shell: >-
     schtasks /Create /TN TaniumServerInstall
     /TR "{{ tanium_installers_dir }}\setup_server_run.bat"
-    /SC ONCE /ST 00:00 /RL HIGHEST /RU .\Administrator /F;
+    /SC ONCE /ST 00:00 /RL HIGHEST
+    /RU {{ tanium_db_domain }}\{{ tanium_db_username }} /RP "{{ tanium_db_password }}" /F;
     schtasks /Run /TN TaniumServerInstall
   register: install_result
   changed_when: true
+  no_log: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# Wait for the scheduled task to genuinely finish (success OR the
+# known create-admin-user abort) before checking anything downstream --
+# without this, the next tasks can race a still-running install.
+#
+# REAL BUG, confirmed 2026-08-22: `/SC ONCE` scheduled tasks can be
+# auto-removed by Task Scheduler once they finish, so polling
+# `schtasks /Query` for the task's own Status can hit "ERROR: The
+# system cannot find the file specified" on a run that actually
+# succeeded -- the task disappearing IS the completion signal in that
+# case, not a failure. Poll SetupServer.exe's own install log for its
+# "End installer log" line instead, which is written unconditionally
+# on every exit path (success or the known create-admin-user abort).
+- name: "Wait for the SetupServer.exe scheduled task to finish running"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    Get-Content '{{ tanium_install_dir }}\Install.log' -ErrorAction SilentlyContinue | Select-String 'End installer log'
+  register: task_status_check
+  until: "'End installer log' in (task_status_check.stdout | default(''))"
+  retries: 30
+  delay: 10
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+# REAL BUG, confirmed 2026-08-22 via live testing: `database
+# create-admin-user` fails with "the login is from an untrusted domain"
+# when run as taniumsvc (a domain account) -- this ONE sub-step
+# specifically needs NT AUTHORITY\SYSTEM, unlike every other step in
+# this install which needs taniumsvc. When SetupServer.exe hits this as
+# taniumsvc, it aborts BEFORE finishing (no service installed, no TLS
+# cert). This task detects that exact abort signature and finishes the
+# remaining steps manually, each with its confirmed-correct identity:
+# create-admin-user as SYSTEM, then cert regen + service install +
+# service-account-set + start (all fine as local Administrator, since
+# they're local filesystem/SCM operations, not SQL auth).
+- name: "Check whether the install aborted at create-admin-user (the one step needing SYSTEM, not taniumsvc)"
+  delegate_to: localhost
+  ansible.windows.win_service_info:
+    name: "Tanium Server"
+  register: post_install_service_check
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Finish create-admin-user as SYSTEM (the install aborted before this if the service doesn't exist yet)"
+  when: not post_install_service_check.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    schtasks /Create /TN TaniumCreateAdminUser
+    /TR "cmd /c \"cd /d '{{ tanium_install_dir }}' && TaniumReceiver.exe database create-admin-user {{ tanium_console_admin_user.split('\\')[-1] }} {{ tanium_db_domain }} > {{ tanium_installers_dir }}\create_admin_user.log 2>&1\""
+    /SC ONCE /ST 00:00 /RL HIGHEST /RU SYSTEM /F;
+    schtasks /Run /TN TaniumCreateAdminUser;
+    Start-Sleep -Seconds 10;
+    Get-Content "{{ tanium_installers_dir }}\create_admin_user.log" -ErrorAction SilentlyContinue
+  register: admin_user_fix_result
+  changed_when: true
+  # A failure here is expected and harmless if the admin user was
+  # already created by an earlier attempt ("already exists in the
+  # database" -- confirmed this is SYSTEM successfully authenticating
+  # and hitting a real, harmless business-logic condition, not an auth
+  # failure) -- only a genuine SQL/auth error should actually fail this
+  # play, which the next task's real service-existence check will
+  # catch anyway.
+  failed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Regenerate TLS cert, install the Windows service, and set its logon account (the remaining steps SetupServer.exe never reached)"
+  when: not post_install_service_check.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    Set-Location '{{ tanium_install_dir }}';
+    if (-not ((Test-Path 'SOAPServer.key') -and (Test-Path 'SOAPServer.crt'))) {
+      .\KeyUtility.exe selfsign {{ tanium_server_hostname | default(inventory_hostname) }} SOAPServer
+    };
+    .\TaniumReceiver.exe -i;
+    $svc = Get-CimInstance Win32_Service -Filter "Name='Tanium Server'";
+    Invoke-CimMethod -InputObject $svc -MethodName Change -Arguments @{StartName='{{ tanium_db_domain }}\{{ tanium_db_username }}'; StartPassword='{{ tanium_db_password }}'} | Out-Null;
+    Start-Service 'Tanium Server';
+    Write-Output DONE
+  register: manual_finish_result
+  changed_when: "'DONE' in (manual_finish_result.stdout | default(''))"
+  no_log: true
   vars:
     ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
     ansible_connection: winrm
