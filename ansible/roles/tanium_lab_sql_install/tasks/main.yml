@@ -132,6 +132,17 @@
 # preflight guard) assume a working sa login, and Tanium Server itself
 # needs a Windows-auth login too (handled separately by
 # tanium_lab_sql_login, granted AFTER this role runs).
+# REAL BUG, confirmed 2026-08-22 via a live from-scratch run: without
+# an explicit /UpdateEnabled=False, SQL Server 2022's setup.exe
+# defaults to running its "SearchUpdatesAction" step (checking for
+# product updates before installing), which fails with a genuine
+# Access Denied (0x80070005 E_ACCESSDENIED) when launched over a
+# WinRM session -- likely the same class of restricted-token/network-
+# resource issue documented at length in tanium_server_install's
+# header for a similar SetupServer.exe update-check step. Disable it
+# explicitly; this is a disposable lab install, not a
+# patch-to-latest-CU deployment, so skipping the update check is the
+# correct behavior here regardless of the WinRM angle.
 - name: "Run SQL Server setup.exe /q /ACTION=Install"
   when: not sql_service_check.exists
   delegate_to: localhost
@@ -139,6 +150,7 @@
     cmd: >-
       {{ tanium_sql_staging_dir }}\Extracted\SETUP.EXE
       /q /ACTION=Install /IACCEPTSQLSERVERLICENSETERMS
+      /UpdateEnabled=False
       /FEATURES=SQLENGINE
       /INSTANCENAME={{ tanium_sql_instance_name }}
       /SQLSYSADMINACCOUNTS="{{ tanium_console_admin_user | default('TANIUM\\Administrator') }}"
