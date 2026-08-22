@@ -131,6 +131,14 @@
 # delegation problem already root-caused elsewhere in this session
 # (see tanium_server_install's header), so route the read+write through
 # two separate WinRM hops instead of one cross-machine one.
+#
+# SEPARATE REAL BUG, confirmed 2026-08-22: copying ONLY KeyUtility.exe
+# (with a byte-identical, verified-uncorrupted transfer) still fails to
+# RUN with exit code -1073741515 = 0xC0000135 (STATUS_DLL_NOT_FOUND) --
+# it dynamically loads libcrypto-3.dll/libssl-3.dll (and friends) from
+# its own directory, which a bare copy of the .exe alone doesn't bring
+# along. Fixed by fetching the whole sibling-DLL set from the same
+# Tanium Server directory, not just the one binary.
 - name: "Check for KeyUtility.exe on the Tanium Server box (to fetch, since Module Server installs don't ship one)"
   when: not ms_exe_check.stat.exists
   delegate_to: localhost
@@ -147,11 +155,17 @@
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
 
-- name: "Read KeyUtility.exe bytes from the Tanium Server"
+- name: "Read KeyUtility.exe + its required sibling DLLs from the Tanium Server"
   when: not ms_exe_check.stat.exists and ts_keyutility_check.stat.exists
   delegate_to: localhost
-  ansible.windows.win_shell: "[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\\Program Files\\Tanium\\Tanium Server\\KeyUtility.exe'))"
-  register: keyutility_b64
+  ansible.windows.win_shell: "[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\\Program Files\\Tanium\\Tanium Server\\{{ item }}'))"
+  register: keyutility_deps_b64
+  loop:
+    - KeyUtility.exe
+    - libcrypto-3.dll
+    - libssl-3.dll
+  loop_control:
+    label: "{{ item }}"
   vars:
     ansible_host: "{{ tanium_server_ip }}"
     ansible_connection: winrm
@@ -171,22 +185,28 @@
 # temp file on the Ansible controller and use win_copy's real file
 # transfer instead of a command-line argument, exactly like every
 # other binary transfer in this repo (SetupServer.exe etc.).
-- name: "Save KeyUtility.exe bytes to a local temp file"
+- name: "Save KeyUtility.exe + DLLs to local temp files"
   when: not ms_exe_check.stat.exists and ts_keyutility_check.stat.exists
   delegate_to: localhost
   ansible.builtin.copy:
-    content: "{{ keyutility_b64.stdout | trim | b64decode }}"
-    dest: "{{ tanium_local_scratch_dir | default('/tmp') }}/KeyUtility_{{ tanium_moduleserver_ip | replace('.', '_') }}.exe"
+    content: "{{ item.stdout | trim | b64decode }}"
+    dest: "{{ tanium_local_scratch_dir | default('/tmp') }}/{{ item.item }}_{{ tanium_moduleserver_ip | replace('.', '_') }}"
     mode: "0600"
-  register: keyutility_local_file
+  loop: "{{ keyutility_deps_b64.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: keyutility_local_files
   no_log: true
 
-- name: "Copy KeyUtility.exe onto this Module Server"
+- name: "Copy KeyUtility.exe + DLLs onto this Module Server"
   when: not ms_exe_check.stat.exists and ts_keyutility_check.stat.exists
   delegate_to: localhost
   ansible.windows.win_copy:
-    src: "{{ keyutility_local_file.dest }}"
-    dest: "{{ tanium_installers_dir }}\\KeyUtility.exe"
+    src: "{{ item.dest }}"
+    dest: "{{ tanium_installers_dir }}\\{{ item.item.item }}"
+  loop: "{{ keyutility_local_files.results }}"
+  loop_control:
+    label: "{{ item.item.item }}"
   vars:
     ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
     ansible_connection: winrm
