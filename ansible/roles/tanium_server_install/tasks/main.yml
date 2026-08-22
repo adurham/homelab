@@ -539,13 +539,23 @@
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
 
+# REAL BUG, confirmed 2026-08-22 via live WinRM testing: a raw
+# win_shell -Command string with a piped cmdlet (`| Out-Null`) fails
+# over this WinRM session with "'Out-Null' is not recognized as an
+# internal or external command" -- the exact same command succeeds
+# fine via `qm guest exec` and via -EncodedCommand, so this looks like
+# an argument-marshalling quirk specific to raw multi-statement
+# -Command strings over WinRM, not a real PowerShell/pipe problem.
+# Sidestepped entirely by using `$null = ...` instead of `| Out-Null`
+# -- functionally identical output suppression with zero pipe
+# characters in the command string.
 - name: "Sync DB connection config into the native (non-WOW64) registry hive"
   when: not native_hive_check.exists
   delegate_to: localhost
   ansible.windows.win_shell: >-
-    New-ItemProperty -Path 'HKLM:\SOFTWARE\Tanium\Tanium Server' -Name SQLConnectionString -Value '{{ tanium_sql_server_ip }}@{{ tanium_target_db_name | default('tanium') }}' -PropertyType String -Force | Out-Null;
-    New-ItemProperty -Path 'HKLM:\SOFTWARE\Tanium\Tanium Server' -Name DBUserName -Value '{{ tanium_db_username }}' -PropertyType String -Force | Out-Null;
-    New-ItemProperty -Path 'HKLM:\SOFTWARE\Tanium\Tanium Server' -Name DBUserDomain -Value '{{ tanium_db_domain }}' -PropertyType String -Force | Out-Null;
+    $null = New-ItemProperty -Path 'HKLM:\SOFTWARE\Tanium\Tanium Server' -Name SQLConnectionString -Value '{{ tanium_sql_server_ip }}@{{ tanium_target_db_name | default('tanium') }}' -PropertyType String -Force;
+    $null = New-ItemProperty -Path 'HKLM:\SOFTWARE\Tanium\Tanium Server' -Name DBUserName -Value '{{ tanium_db_username }}' -PropertyType String -Force;
+    $null = New-ItemProperty -Path 'HKLM:\SOFTWARE\Tanium\Tanium Server' -Name DBUserDomain -Value '{{ tanium_db_domain }}' -PropertyType String -Force;
     Write-Output DONE
   register: registry_sync_result
   no_log: true
