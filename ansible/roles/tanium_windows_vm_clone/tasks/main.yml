@@ -44,6 +44,17 @@
   ansible.builtin.set_fact:
     tanium_win_ip_resolved: "{{ tanium_win_ip }}"
 
+# REAL BUG, confirmed 2026-08-21 via a live full-fresh-reclone run:
+# cloning all 5 VMs in the same play with Ansible's default parallel
+# (linear/fork) execution means all 5 `qm clone` invocations fire
+# against the SAME underlying storage backend at once -- Proxmox's own
+# storage-level locking then rejects whichever clone(s) lose the race
+# with "can't lock file '/var/lock/pve-manager/pve-storage-<name>' -
+# got timeout". This is genuine storage lock CONTENTION, not a
+# permanent failure -- the lock clears as soon as the storage backend
+# finishes the clone(s) already in flight. Retry with backoff instead
+# of serializing the whole play (which would needlessly slow down
+# every other task in this role too).
 - name: "Clone template {{ tanium_win_template_vmid }} -> {{ tanium_win_vmid }} ({{ tanium_win_vm_name }})"
   delegate_to: "{{ tanium_win_target_node }}"
   ansible.builtin.command: >
@@ -54,6 +65,10 @@
     --storage {{ tanium_win_storage }}
   when: vm_exists_check.rc != 0
   register: clone_result
+  retries: 6
+  delay: 20
+  until: clone_result.rc == 0 or "got timeout" not in (clone_result.stderr | default(''))
+  failed_when: clone_result.rc != 0
 
 - name: "Resize clone {{ tanium_win_vmid }} resources"
   delegate_to: "{{ tanium_win_target_node }}"
