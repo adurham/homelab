@@ -171,8 +171,22 @@
   roles:
     - role: tanium_zoneserver_install
       vars:
-        tanium_zoneserver_ip: "{{ ansible_host }}"
-        tanium_server_ip: "{{ ansible_host }}"
+        # REAL BUG, confirmed 2026-08-22 in provision_tanium_windows_lab.yml
+        # (commit 52c0fd2) via a live from-scratch run, but this sibling
+        # playbook never got the same fix: tanium_server_ip: "{{ ansible_host }}"
+        # here (a play-level var on the SAME host this play targets) creates
+        # a genuine circular reference once the role's own tasks set
+        # ansible_host: "{{ tanium_server_ip }}" as a task-level var for
+        # their own WinRM connection override -- Jinja can't resolve
+        # "ansible_host depends on tanium_server_ip depends on ansible_host"
+        # within the same host context, and fails with "Recursive loop
+        # detected in template: maximum recursion depth exceeded".
+        # Referencing the raw underlying inventory variable
+        # (ip_win_ts_case1) directly, instead of the ansible_host alias
+        # that's also being overridden downstream, breaks the cycle
+        # entirely -- no chain through "ansible_host" at all.
+        tanium_zoneserver_ip: "{{ ip_win_ts_case1 }}"
+        tanium_server_ip: "{{ ip_win_ts_case1 }}"
         tanium_zoneserver_hub_flag: 1
 
 - name: Install Tanium Zone Server
