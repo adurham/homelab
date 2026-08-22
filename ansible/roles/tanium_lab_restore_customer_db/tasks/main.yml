@@ -189,16 +189,25 @@
       - "rm -f {{ tanium_restore_proxmox_iso_storage_path }}/tanium_bak_transfer_{{ vmid }}.iso"
   changed_when: true
 
+# REAL BUG, confirmed 2026-08-22 via a live run: both ansible.builtin.stat
+# and ansible.windows.win_stat compute a checksum by default, which for
+# a real 35GB file took 25+ minutes each (SHA1 over the whole file) --
+# genuinely correct, not a hang, but needlessly slow for a check that
+# only needs the file's SIZE. get_checksum: false skips that entirely;
+# still a fully valid size comparison, just without the (here,
+# pointless) hash computation.
 - name: "Get the local .bak's real size for comparison"
   delegate_to: localhost
   ansible.builtin.stat:
     path: "{{ tanium_customer_bak_local_path }}"
+    get_checksum: false
   register: bak_local_stat
 
 - name: "Verify the .bak landed on the SQL Server with the correct byte-for-byte size"
   delegate_to: localhost
   ansible.windows.win_stat:
     path: "{{ tanium_restore_staging_path }}\\{{ tanium_customer_bak_local_path | basename }}"
+    get_checksum: false
   register: bak_remote_stat
   vars:
     ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
