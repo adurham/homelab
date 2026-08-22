@@ -260,6 +260,26 @@
       Server/Module Server install onto this box, or install this role
       on a box that already has one.
 
+# REAL BUG, confirmed 2026-08-22: KeyUtility.exe protect refuses to
+# overwrite an existing output file (FileExistsException) -- a
+# leftover register-pass.txt from any earlier partial/failed run makes
+# this role non-idempotent. Remove it first, unconditionally.
+- name: "Remove any stale register-pass.txt before generating a fresh one"
+  when: not ms_exe_check.stat.exists
+  delegate_to: localhost
+  ansible.windows.win_file:
+    path: "{{ tanium_installers_dir }}\\register-pass.txt"
+    state: absent
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_moduleserver_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
 - name: "Generate the properly-protected registration pass-file via KeyUtility.exe protect"
   when: not ms_exe_check.stat.exists
   delegate_to: localhost
@@ -304,11 +324,18 @@
 # instead (TaniumReceiver.exe pki show --json --full-fingerprints) and
 # pass it explicitly, so registration succeeds on the first silent
 # attempt with no interactive prompt at all.
+# REAL BUG, confirmed 2026-08-22: this script used a YAML folded
+# scalar (>-), which joins every line with a single space -- fine for
+# simple one-liners, but it silently turns the function definition's
+# closing "}" and the next statement "$fp = $null" into one run-on
+# line with no separator, which PowerShell then fails to parse
+# ("Unexpected token 'foreach'"). Switched to a literal block scalar
+# (|) so real newlines survive, exactly as written below.
 - name: "Fetch the Tanium Server's TLS certificate fingerprint"
   when: not ms_exe_check.stat.exists
   delegate_to: localhost
-  ansible.windows.win_shell: >-
-    $json = & '{{ tanium_install_dir | default('C:\Program Files\Tanium\Tanium Server') }}\TaniumReceiver.exe' pki show --json --full-fingerprints | ConvertFrom-Json;
+  ansible.windows.win_shell: |
+    $json = & '{{ tanium_install_dir | default('C:\Program Files\Tanium\Tanium Server') }}\TaniumReceiver.exe' pki show --json --full-fingerprints | ConvertFrom-Json
     function Find-ServerTLS($node) {
       if ($node.name -like '* Server TLS *') { return $node.fingerprint }
       foreach ($child in $node.children) {
