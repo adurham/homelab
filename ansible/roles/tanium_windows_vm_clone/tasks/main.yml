@@ -141,6 +141,7 @@
 # clone genuinely never settles within the timeout, that's a
 # template/unattend bug to fix at the source (see
 # docs/windows_template_guide.md), not something to paper over here.
+#
 # REAL BUG, confirmed 2026-08-22 via a full from-scratch reproducibility
 # test (all 5 VMs destroyed and recloned with zero manual intervention):
 # the win-server-2022 template's sysprep was run with NO unattend.xml
@@ -148,7 +149,7 @@
 # ProductKey -- every fresh clone genuinely stops on OOBE's "It's time
 # to enter the product key" screen and sits there until "Do this
 # later" is clicked, no timeout ever resolves it on its own. The
-# correct long-term fix is baking a KMS client setup key into the
+# correct long-term fix is baking a KMS/MAK client setup key into the
 # template's answer file so this screen never appears at all -- until
 # that's done, click through it automatically via the same VNC-bridge
 # technique proven working elsewhere this session, so the playbook
@@ -156,7 +157,32 @@
 # harmless to run against a VM that's already past this screen --
 # clicking an arbitrary desktop/lock-screen coordinate does nothing
 # observable there.
-- name: "Click through the OOBE product-key screen if present (interim workaround, see comment above)"
+#
+# FIXED AT THE SOURCE, 2026-08-22: template VMID 9000 was rebuilt with
+# vault_windows_server_2022_mak baked into its unattend.xml ProductKey
+# field (specialize pass) and re-sysprepped -- confirmed via TWO
+# independent from-scratch clone tests (one from the intermediate
+# rebuild VM, one from the final swapped-in VMID 9000 itself) that
+# OOBE now reaches IMAGE_STATE_COMPLETE with ZERO manual intervention,
+# no VNC, no clicks at all; the product-key screen never appears. This
+# click-loop below is kept ONLY as a defense-in-depth safety net for a
+# future template rebuild that regresses this fix (e.g. someone
+# re-syspreps template 9000 without an unattend.xml again) -- the
+# pre-check immediately below skips the whole loop entirely (zero VNC
+# bridge attempts, zero vncdo dependency exercised) on every clone from
+# a correctly-built template, which is expected to be every clone from
+# here on.
+- name: "Pre-check: has OOBE already completed without any clicking needed (expected on a correctly-built template)"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command: >-
+    qm guest exec {{ tanium_win_vmid }} -- powershell -NoProfile -NonInteractive
+    -EncodedCommand {{ tanium_win_oobe_check_b64 }}
+  register: oobe_preclick_check
+  changed_when: false
+  failed_when: false
+
+- name: "Click through the OOBE product-key screen if present (defense-in-depth only, see comment above)"
+  when: "'READY=True' not in (oobe_preclick_check.stdout | default(''))"
   ansible.builtin.include_tasks: oobe_click_attempt.yml
   loop: "{{ range(0, 12) | list }}"
   loop_control:

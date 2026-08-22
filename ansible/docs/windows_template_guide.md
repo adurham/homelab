@@ -105,16 +105,43 @@ victoriametrics` to pick it up in VictoriaMetrics.
 
 To ensure unique SIDs when cloning, we must Sysprep the machine.
 
+**Bake in the product key first (2026-08-22 fix — do this before every
+sysprep, not just once).** A bare `sysprep /generalize /oobe` with no
+answer file leaves every future clone stuck on OOBE's "It's time to
+enter the product key" screen forever (no timeout resolves it). Run
+this from the Ansible control host against the VM's current IP BEFORE
+running sysprep:
+
+```bash
+cd ~/repos/homelab/ansible
+OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES ansible-playbook \
+  -i inventory/proxmox.yml bake_product_key_into_template.yml \
+  -e target_ip=<vm-ip> -e target_admin_password='<current local Administrator password>'
+```
+
+This writes `C:\Windows\Panther\unattend.xml` with
+`vault_windows_server_2022_mak` in the `ProductKey` field for the
+`specialize` pass. The playbook decrypts the vault value in Ansible's
+own process and writes it straight to the remote host — the plaintext
+key is never printed to any terminal or log (`no_log: true` on the
+write task). Confirmed via two independent from-scratch clone tests
+(2026-08-22) that this results in OOBE reaching
+`IMAGE_STATE_COMPLETE` with zero manual intervention and no
+product-key screen at all.
+
 1. **Open PowerShell** as Administrator.
-2. **Run Sysprep**:
+2. **Run Sysprep, referencing the answer file above**:
 
     ```powershell
-    C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown
+    C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown /unattend:C:\Windows\Panther\unattend.xml
     ```
 
     - `/generalize`: Removes system-specific data (SID, logs).
     - `/oobe`: Forces "Out of Box Experience" on next boot.
     - `/shutdown`: Shuts down the VM automatically.
+    - `/unattend:...`: Supplies the product key (and any other
+      specialize/oobeSystem settings) so fresh clones don't need any
+      manual OOBE interaction.
 
 3. **Convert to Template**:
     - Once the VM is shutdown (Status: Stopped), right-click the VM in Proxmox.
