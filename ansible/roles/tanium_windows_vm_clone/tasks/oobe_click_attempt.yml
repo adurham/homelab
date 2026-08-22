@@ -1,0 +1,26 @@
+---
+# Single iteration of the OOBE product-key-screen click workaround --
+# looped from main.yml via include_tasks (a plain `block:` can't take
+# a `loop:` directly). See main.yml's comment above the include_tasks
+# call for full context on why this exists.
+- name: "Attempt {{ oobe_click_attempt }}: click the product-key 'Do this later' coordinate"
+  delegate_to: localhost
+  ansible.builtin.script: >-
+    files/vnc_click.sh {{ tanium_win_vmid }} {{ tanium_win_target_node }}
+    {{ 15900 + (tanium_win_vmid | int % 100) }} 223 652
+  changed_when: false
+  failed_when: false
+
+- name: "Check whether OOBE has already completed (stop clicking once it has)"
+  delegate_to: "{{ tanium_win_target_node }}"
+  ansible.builtin.command: >-
+    qm guest exec {{ tanium_win_vmid }} -- powershell -NoProfile -NonInteractive
+    -EncodedCommand {{ tanium_win_oobe_check_b64 }}
+  register: oobe_click_progress_check
+  changed_when: false
+  failed_when: false
+
+- name: "Pause before the next click attempt (product-key screen appears several minutes into boot, not immediately)"
+  when: "'READY=True' not in (oobe_click_progress_check.stdout | default(''))"
+  ansible.builtin.pause:
+    seconds: 30
