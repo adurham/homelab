@@ -527,8 +527,14 @@
   delegate_to: localhost
   ansible.windows.win_reg_stat:
     path: "HKLM:\\SOFTWARE\\Tanium\\Tanium Server"
-    name: SQLConnectionString
-  register: native_hive_check
+    name: "{{ item }}"
+  register: native_hive_check_raw
+  loop:
+    - SQLConnectionString
+    - DBUserName
+    - DBUserDomain
+  loop_control:
+    label: "{{ item }}"
   vars:
     ansible_host: "{{ hostvars[inventory_hostname].tanium_server_ip_resolved }}"
     ansible_connection: winrm
@@ -538,6 +544,21 @@
     ansible_port: 5985
     ansible_user: Administrator
     ansible_password: "{{ vault_win_admin_password }}"
+
+# REAL RISK spotted on manual review, 2026-08-22: the sync task below
+# only ran when SQLConnectionString alone was missing. All 3 keys are
+# written by ONE PowerShell invocation so a partial write is unlikely
+# in the common case, but this check is cheap and closes the gap
+# entirely: if a prior run's sync somehow left any ONE of the 3 keys
+# missing (a genuinely mid-script WinRM disconnect, a manual partial
+# edit, etc.), a bare SQLConnectionString-only check would report
+# "already configured" and skip re-syncing forever, silently
+# reproducing the exact "Failed to connect to database" bug this task
+# exists to fix -- but now unrecoverable by re-running the playbook.
+- name: "Set fact: does the native hive have ALL THREE required keys"
+  ansible.builtin.set_fact:
+    native_hive_check:
+      exists: "{{ native_hive_check_raw.results | map(attribute='exists') | list is all }}"
 
 # REAL BUG, confirmed 2026-08-22 via live WinRM testing: a raw
 # win_shell -Command string with a piped cmdlet (`| Out-Null`) fails
