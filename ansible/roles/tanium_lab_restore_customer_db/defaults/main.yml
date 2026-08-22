@@ -18,13 +18,20 @@ tanium_restore_staging_path: "C:\\TaniumRestoreStaging"
 tanium_sql_sa_password: "{{ vault_tanium_lab_sql_sa_password }}"
 
 # Where the customer .bak transfers through on the Proxmox node itself
-# as an intermediate hop -- see the "Copy the customer .bak" task's
-# header comment in tasks/main.yml for why this two-hop (scp to the
-# Proxmox node, then SMB from the Proxmox node to the guest) path
-# exists instead of a direct win_copy over WinRM. Cleaned up
-# automatically at the end of the transfer task; only needs to exist
-# transiently.
+# as an intermediate hop, and where the transfer ISO gets built --
+# see the "Copy the customer .bak" task's header comment in
+# tasks/main.yml for why this hop-through-the-hypervisor path exists
+# instead of a direct win_copy over WinRM (or SMB, which also failed).
+# Cleaned up automatically at the end of the transfer tasks; only
+# needs to exist transiently.
 tanium_restore_proxmox_scratch_path: "/tmp"
+
+# Where the Proxmox node's own ISO storage actually lives -- must be a
+# path `qm set --ideN local:iso/<name>.iso` can reference by relative
+# filename (i.e. under the "local" storage's configured ISO
+# directory). Confirmed live: /var/lib/vz/template/iso is this node's
+# real path for the "local" storage's iso content type.
+tanium_restore_proxmox_iso_storage_path: "/var/lib/vz/template/iso"
 
 # The Proxmox node's own SSH-reachable address -- resolved from the
 # SAME inventory data every VM-lifecycle task in tanium_windows_vm_clone
@@ -32,6 +39,13 @@ tanium_restore_proxmox_scratch_path: "/tmp"
 # this keeps working correctly if the SQL box ever moves to a
 # different Proxmox node in inventory.
 tanium_restore_proxmox_node_ssh_host: "{{ hostvars[target_node].ansible_host }}"
+
+# Which free IDE CD-ROM slot to attach the transfer ISO to. ide0 is
+# already used by the VirtIO drivers ISO baked into every clone (see
+# tanium_windows_vm_clone); ide2 is confirmed free (the boot-order fix
+# in that same role explicitly ejects it -- "none,media=cdrom" -- on
+# every run, so it's always available to reuse here).
+tanium_restore_iso_ide_slot: "ide2"
 
 # Required per-invocation: tanium_customer_bak_local_path (local path to
 # the customer's .bak on this Mac), tanium_sql_server_ip.

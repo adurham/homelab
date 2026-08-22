@@ -54,28 +54,41 @@
 # caps out at a few MB/s, which is many hours for a 35GB file, with no
 # resume on a dropped chunk.
 #
-# Investigated and ruled out: (a) SMB directly from the Ansible
-# controller to the SQL box's C$ share -- unreachable, port 445
-# timed out from outside the lab's 172.16.0.0/24 network entirely
-# (confirmed via `nc -zv`); (b) BITS pull FROM the guest, driven by a
-# scheduled task hitting an ad-hoc python3 http.server on the
-# controller -- TCP-level connectivity succeeded (Test-NetConnection),
-# but the actual HTTP request never completed even after 5+ minutes,
-# root cause not fully isolated (suspected macOS-side connection
-# handling for a long-lived single-threaded http.server, not
-# confirmed).
+# Investigated and ruled out, in order:
+#   1. SMB directly from the Ansible controller to the SQL box's C$
+#      share -- unreachable, port 445 timed out from outside the lab's
+#      172.16.0.0/24 network entirely (confirmed via `nc -zv`).
+#   2. BITS pull FROM the guest, driven by a scheduled task hitting an
+#      ad-hoc python3 http.server on the controller -- TCP-level
+#      connectivity succeeded (Test-NetConnection), but the actual
+#      HTTP request never completed even after 5+ minutes, root cause
+#      not fully isolated.
+#   3. scp the .bak to the Proxmox node (fast, ~6 min for 35GB over
+#      the proven SSH path already used for VM lifecycle ops), then
+#      have the Proxmox node mount the guest's C$ share over SMB and
+#      cp the file in. This got further than #1/#2 -- the scp leg
+#      completed cleanly -- but the SMB cp leg genuinely HUNG mid
+#      transfer (stalled at a fixed byte offset, kernel cifs mount
+#      stuck in D-state, `umount -f` reported "target is busy" even
+#      after killing the cp process). A second opinion on this
+#      specific failure pattern (three different protocols --
+#      SSH resets, WinRM 400s, and this SMB hang -- all failing on the
+#      same 172.16.0.0/24 path) concluded the common denominator is
+#      likely a stateful middlebox or MTU issue on that network
+#      segment, not any one protocol being "wrong" -- and recommended
+#      moving the transfer OFF the network entirely by using the
+#      hypervisor's own virtual-disk/ISO attach mechanism instead.
 #
-# What DOES work, confirmed live: the Proxmox NODE itself
-# (192.168.86.11, target_node in inventory) has full network access to
-# BOTH the Ansible controller (via SSH, already required for VM
-# clone/lifecycle operations elsewhere in this repo) AND the guest's
-# SMB share (172.16.0.0/24 is directly routable from the Proxmox host,
-# unlike from the controller). So: scp the .bak to the Proxmox node
-# first (fast, proven, already-working SSH path), then have the
-# Proxmox node itself mount the guest's C$ share over SMB and copy the
-# file in -- both hops stay off WinRM/base64 entirely. Confirmed live:
-# a 35GB file transferred this way in a few minutes total, vs. WinRM's
-# immediate failure.
+# What DOES work, confirmed live (real 35GB file, transferred and
+# verified byte-for-byte correct): build a UDF ISO on the Proxmox node
+# containing the .bak (genisoimage -udf -allow-limited-size -- plain
+# ISO9660 caps out at 4GiB-1 per file, UDF does not), attach it to the
+# guest's free IDE CD-ROM slot via `qm set <vmid> --ideN
+# local:iso/<name>.iso,media=cdrom`, then have the guest itself copy
+# the file off the resulting virtual CD-ROM drive letter. This never
+# touches the flaky network path at all -- the ISO's bytes reach the
+# guest over the hypervisor's own virtual IDE bus, same mechanism
+# already used for the VirtIO drivers ISO baked into every VM.
 - name: "Copy the customer .bak to the Proxmox node (scp, fast/proven path already used for VM lifecycle ops)"
   delegate_to: localhost
   ansible.builtin.command:
@@ -88,39 +101,7 @@
   register: bak_scp_result
   changed_when: true
 
-# Ansible can decrypt vault_win_admin_password in its own process and
-# write it to a credentials file for smbclient/mount.cifs's
-# `credentials=` option -- the plaintext password is never passed as
-# a bare CLI argument (which would appear in process listings on the
-# Proxmox node) and never printed to any log (no_log: true).
-- name: "Write a scoped SMB credentials file for the Proxmox node to use"
-  delegate_to: localhost
-  ansible.builtin.copy:
-    dest: "{{ tanium_local_scratch_dir | default('/tmp') }}/smb_creds_{{ tanium_sql_server_ip | replace('.', '_') }}.txt"
-    content: "username=Administrator\npassword={{ vault_win_admin_password }}\n"
-    mode: "0600"
-  register: smb_creds_local
-  no_log: true
-
-- name: "Push the SMB credentials file to the Proxmox node"
-  delegate_to: localhost
-  ansible.builtin.command:
-    argv:
-      - scp
-      - -o
-      - StrictHostKeyChecking=accept-new
-      - "{{ smb_creds_local.dest }}"
-      - "root@{{ tanium_restore_proxmox_node_ssh_host }}:{{ tanium_restore_proxmox_scratch_path }}/smb_creds.txt"
-  changed_when: true
-  no_log: true
-
-- name: "Delete the local copy of the SMB credentials file (no longer needed once pushed)"
-  delegate_to: localhost
-  ansible.builtin.file:
-    path: "{{ smb_creds_local.dest }}"
-    state: absent
-
-- name: "Mount the SQL Server's C$ share from the Proxmox node and copy the .bak in"
+- name: "Build a UDF ISO on the Proxmox node containing the .bak (UDF, not plain ISO9660 -- files are far past the 4GiB-1 ISO9660 limit)"
   delegate_to: localhost
   ansible.builtin.command:
     argv:
@@ -129,14 +110,83 @@
       - StrictHostKeyChecking=accept-new
       - "root@{{ tanium_restore_proxmox_node_ssh_host }}"
       - >-
-        mkdir -p /mnt/tanium_restore_smb &&
-        chmod 600 {{ tanium_restore_proxmox_scratch_path }}/smb_creds.txt &&
-        mount -t cifs //{{ tanium_sql_server_ip }}/C$ /mnt/tanium_restore_smb -o credentials={{ tanium_restore_proxmox_scratch_path }}/smb_creds.txt,vers=3.0 &&
-        mkdir -p /mnt/tanium_restore_smb/TaniumRestoreStaging &&
-        cp {{ tanium_restore_proxmox_scratch_path }}/{{ tanium_customer_bak_local_path | basename }} /mnt/tanium_restore_smb/TaniumRestoreStaging/{{ tanium_customer_bak_local_path | basename }} &&
-        umount /mnt/tanium_restore_smb &&
-        rm -f {{ tanium_restore_proxmox_scratch_path }}/{{ tanium_customer_bak_local_path | basename }} {{ tanium_restore_proxmox_scratch_path }}/smb_creds.txt
+        mkdir -p {{ tanium_restore_proxmox_scratch_path }}/iso_staging_{{ vmid }} &&
+        mv {{ tanium_restore_proxmox_scratch_path }}/{{ tanium_customer_bak_local_path | basename }} {{ tanium_restore_proxmox_scratch_path }}/iso_staging_{{ vmid }}/ &&
+        genisoimage -udf -allow-limited-size
+        -o {{ tanium_restore_proxmox_iso_storage_path }}/tanium_bak_transfer_{{ vmid }}.iso
+        {{ tanium_restore_proxmox_scratch_path }}/iso_staging_{{ vmid }}/ &&
+        rm -rf {{ tanium_restore_proxmox_scratch_path }}/iso_staging_{{ vmid }}
+  register: iso_build_result
+  changed_when: true
+
+- name: "Attach the transfer ISO to the SQL Server VM's free IDE CD-ROM slot"
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ vmid }}"
+      - "--{{ tanium_restore_iso_ide_slot }}"
+      - "local:iso/tanium_bak_transfer_{{ vmid }}.iso,media=cdrom"
+  register: iso_attach_result
+  changed_when: true
+
+- name: "Wait for the ISO's CD-ROM drive to appear in Windows and locate its drive letter"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    (Get-Volume | Where-Object { $_.DriveType -eq 'CD-ROM' -and $_.Size -gt 30000000000 } | Select-Object -First 1 -ExpandProperty DriveLetter)
+  register: iso_drive_letter
+  until: (iso_drive_letter.stdout | trim) != ''
+  retries: 12
+  delay: 10
+  changed_when: false
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Copy the .bak off the virtual CD-ROM into the SQL Server's restore staging path"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    Copy-Item -Path '{{ iso_drive_letter.stdout | trim }}:\{{ tanium_customer_bak_local_path | basename }}'
+    -Destination '{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'
   register: bak_copy_result
+  changed_when: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Detach and delete the transfer ISO (no longer needed once the .bak is on real disk)"
+  delegate_to: "{{ target_node }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ vmid }}"
+      - "--{{ tanium_restore_iso_ide_slot }}"
+      - "none,media=cdrom"
+  changed_when: true
+
+- name: "Delete the ISO file from the Proxmox node's storage"
+  delegate_to: localhost
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - StrictHostKeyChecking=accept-new
+      - "root@{{ tanium_restore_proxmox_node_ssh_host }}"
+      - "rm -f {{ tanium_restore_proxmox_iso_storage_path }}/tanium_bak_transfer_{{ vmid }}.iso"
   changed_when: true
 
 - name: "Get the local .bak's real size for comparison"
