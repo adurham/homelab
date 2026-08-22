@@ -143,23 +143,82 @@
 # explicitly; this is a disposable lab install, not a
 # patch-to-latest-CU deployment, so skipping the update check is the
 # correct behavior here regardless of the WinRM angle.
-- name: "Run SQL Server setup.exe /q /ACTION=Install"
+# REAL BUG, confirmed 2026-08-22 via a live from-scratch run, AFTER the
+# /UpdateEnabled=False fix above: setup.exe still fails, now with
+# "There was an error generating the XML document" ->
+# System.Security.Cryptography.CryptographicException: Access is
+# denied, in FinalCalculateSettingsAction. This is a genuine, widely-
+# documented DPAPI/user-profile issue: setup.exe DPAPI-encrypts saved
+# passwords under CurrentUser scope while writing its config XML, and
+# a WinRM/Negotiate session is a NETWORK logon (type 3) -- no loaded
+# user profile, no DPAPI master key, so the encrypt call itself throws
+# Access Denied. This is the exact same class of problem already
+# root-caused for Tanium Server's own install (see
+# tanium_server_install's header) -- the fix is the same proven
+# pattern: launch via a scheduled task with LogonType=Password (via
+# /RU + /RP, NOT a passwordless/S4U task, which still lacks the
+# credential material DPAPI needs), so LSA has what it needs to
+# derive the master key.
+- name: "Build the SQL Server setup.exe launcher .bat locally"
   when: not sql_service_check.exists
   delegate_to: localhost
-  ansible.windows.win_command:
-    cmd: >-
-      {{ tanium_sql_staging_dir }}\Extracted\SETUP.EXE
-      /q /ACTION=Install /IACCEPTSQLSERVERLICENSETERMS
-      /UpdateEnabled=False
-      /FEATURES=SQLENGINE
-      /INSTANCENAME={{ tanium_sql_instance_name }}
-      /SQLSYSADMINACCOUNTS="{{ tanium_console_admin_user | default('TANIUM\\Administrator') }}"
-      /SECURITYMODE=SQL
-      /SAPWD="{{ tanium_sql_sa_password }}"
-      /TCPENABLED=1
+  ansible.builtin.copy:
+    dest: "{{ tanium_local_scratch_dir | default('/tmp') }}/setup_sql_{{ tanium_sql_ip | replace('.', '_') }}.bat"
+    mode: "0600"
+    content: |
+      @echo off
+      {{ tanium_sql_staging_dir }}\Extracted\SETUP.EXE /q /ACTION=Install /IACCEPTSQLSERVERLICENSETERMS /UpdateEnabled=False /FEATURES=SQLENGINE /INSTANCENAME={{ tanium_sql_instance_name }} /SQLSYSADMINACCOUNTS="{{ tanium_console_admin_user | default('TANIUM\\Administrator') }}" /SECURITYMODE=SQL /SAPWD="{{ tanium_sql_sa_password }}" /TCPENABLED=1 > {{ tanium_sql_staging_dir }}\setup_sql_run.log 2>&1
+  register: sql_setup_bat_local
+  no_log: true
+
+- name: "Push the SQL Server setup.exe launcher .bat"
+  when: not sql_service_check.exists
+  delegate_to: localhost
+  ansible.windows.win_copy:
+    src: "{{ sql_setup_bat_local.dest }}"
+    dest: "{{ tanium_sql_staging_dir }}\\setup_sql_run.bat"
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Run SQL Server setup.exe via a scheduled task (LogonType=Password, avoids the DPAPI Access Denied)"
+  when: not sql_service_check.exists
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    schtasks /Create /TN SQLServerInstall
+    /TR "{{ tanium_sql_staging_dir }}\setup_sql_run.bat"
+    /SC ONCE /ST 00:00 /RL HIGHEST
+    /RU .\Administrator /RP "{{ vault_win_admin_password }}" /F;
+    schtasks /Run /TN SQLServerInstall
   register: sql_install_result
   changed_when: true
   no_log: true
+  vars:
+    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_scheme: http
+    ansible_port: 5985
+    ansible_user: Administrator
+    ansible_password: "{{ vault_win_admin_password }}"
+
+- name: "Wait for the SQL Server setup.exe scheduled task to finish"
+  delegate_to: localhost
+  ansible.windows.win_shell: >-
+    Get-Content '{{ tanium_sql_staging_dir }}\setup_sql_run.log' -ErrorAction SilentlyContinue;
+    Get-Service {{ tanium_sql_instance_name }} -ErrorAction SilentlyContinue
+  register: sql_install_wait
+  until: (sql_install_wait.stdout | default('')) != ''
+  retries: 60
+  delay: 10
+  changed_when: false
   vars:
     ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_ip_resolved }}"
     ansible_connection: winrm
