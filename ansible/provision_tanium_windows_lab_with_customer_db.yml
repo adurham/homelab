@@ -147,7 +147,22 @@
         # installer itself always targets a DB literally named "tanium"
         # regardless of this value. Kept here so the safety check and
         # the restore role stay pointed at the same name.
-        tanium_target_db_name: "{{ tanium_target_db_name | default('tanium') }}"
+        #
+        # REAL BUG, confirmed 2026-08-22 via a live run: this used to
+        # self-reference ("tanium_target_db_name | default('tanium')"
+        # as tanium_target_db_name's OWN value) -- intended to let a
+        # CLI -e tanium_target_db_name=... override take precedence,
+        # but Ansible can't distinguish "the extra-var of this same
+        # name" from "this play var of the same name" here, so it's a
+        # genuine circular reference: "Recursive loop detected in
+        # template: maximum recursion depth exceeded" the moment
+        # anything downstream actually evaluates it. There is nothing
+        # to fix TOWARD here -- a play var can't conditionally defer to
+        # a same-named CLI extra-var this way at all; extra-vars
+        # already win over play vars automatically in Ansible's
+        # precedence order, so this whole default-to-self dance was
+        # unnecessary. Just set the actual default plainly.
+        tanium_target_db_name: "tanium"
         # =1 is the whole point of this playbook -- use the just-restored
         # customer DB, never drop/recreate it.
         tanium_use_existing_db: 1
