@@ -290,31 +290,35 @@
 # parse that fragile text output, pull the GUID from msdb's own history
 # table for the file we just staged (populated by the HEADERONLY call
 # above), which is a stable, documented column.
-- name: "Extract BackupSetGUID from msdb.dbo.backupset for this file"
-  delegate_to: localhost
-  ansible.windows.win_shell: >-
-    sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
-    -Q "SET NOCOUNT ON; SELECT TOP 1 CAST(backup_set_uuid AS NVARCHAR(36))
-    FROM msdb.dbo.backupset bs
-    JOIN msdb.dbo.backupmediafamily bmf ON bs.media_set_id = bmf.media_set_id
-    WHERE bmf.physical_device_name = N'{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'
-    ORDER BY bs.backup_start_date DESC"
-    -h -1
-  register: backup_guid_result
-  changed_when: false
-  vars:
-    ansible_host: "{{ hostvars[inventory_hostname].tanium_sql_server_ip_resolved }}"
-    ansible_connection: winrm
-    ansible_winrm_transport: ntlm
-    ansible_winrm_server_cert_validation: ignore
-    ansible_winrm_scheme: http
-    ansible_port: 5985
-    ansible_user: Administrator
-    ansible_password: "{{ vault_win_admin_password }}"
-
-- name: "Set fact: backup GUID for this .bak"
+# REAL BUG, confirmed 2026-08-22 via a live run: msdb.dbo.backupset
+# only has rows for backups this SQL INSTANCE has itself taken or
+# actually restored -- RESTORE HEADERONLY is a read-only inspection of
+# an arbitrary file and does NOT register anything into msdb. Querying
+# msdb for a customer .bak that was never backed up FROM this specific
+# instance (which is every real case -- it's a customer's backup from
+# a DIFFERENT SQL Server, confirmed via this exact backup's own header
+# showing ServerName 'ZHTX-DB-TSQL01p\ARAD_N_SQL', not this lab's
+# instance at all) always returns genuinely empty here, silently. The
+# resulting empty tanium_backup_set_guid then got stamped as the
+# marker's value verbatim (a real, valid GUID-shaped column happily
+# accepts an empty string) -- so the marker existed but held no real
+# identity, and a re-run's SAFETY check correctly refused to proceed
+# (empty != empty is actually true in Jinja/Python, so the compare
+# fails) rather than silently corrupting anything. Fixed by parsing
+# the GUID directly out of RESTORE HEADERONLY's own output instead --
+# it's a real, always-populated column on every actual backup file,
+# with a stable, greppable position in the pipe-delimited header row
+# (the LAST field before a stable literal, "BackupTypeDescription",
+# safer than counting a large, version-varying number of fixed
+# pipe-delimited positions by index).
+- name: "Extract the real BackupSetGUID directly from RESTORE HEADERONLY's own output"
   ansible.builtin.set_fact:
-    tanium_backup_set_guid: "{{ backup_guid_result.stdout | trim }}"
+    tanium_backup_set_guid: >-
+      {{
+        (backup_header.stdout_lines[2].split('|'))[
+          backup_header.stdout_lines[0].split('|').index('BackupSetGUID')
+        ]
+      }}
 
 - name: "Check if target DB already exists"
   delegate_to: localhost
