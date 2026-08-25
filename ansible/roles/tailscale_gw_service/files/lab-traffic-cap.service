@@ -1,0 +1,12 @@
+[Unit]
+Description=100Mbps shared internet cap for media-ingest-02 + tg-harvester-01 (tc htb)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/lab-traffic-cap.sh
+
+[Install]
+WantedBy=multi-user.target
