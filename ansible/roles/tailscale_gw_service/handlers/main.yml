@@ -4,3 +4,11 @@
 - name: Save IPTables
   ansible.builtin.command: netfilter-persistent save
   changed_when: false
+
+# Re-apply the tc-based lab traffic cap after its script/unit changes.
+# The script is idempotent (deletes existing qdiscs then re-adds).
+- name: Restart lab traffic cap
+  ansible.builtin.systemd:
+    name: lab-traffic-cap.service
+    state: restarted
+    daemon_reload: true

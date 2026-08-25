@@ -77,6 +77,36 @@
   ansible.builtin.command: tailscale set --snat-subnet-routes=false
   when: tailscale_snat_check.stdout.strip() != "True"
 
+# Shared 100Mbps internet cap for the two noisy media CTs (2026-08-25).
+# Scoped by IP inside the gateway with tc/htb: ONLY media-ingest-02
+# (172.16.0.48) and tg-harvester-01 (172.16.0.46) share the 100Mbit
+# class; all other SDN CTs (lb-01, authentik, dns-01, graf-01,
+# hermes-gw, ...) route through this gateway UNCAPPED. Chosen over
+# per-CT Proxmox `rate=` caps (user wants 100 TOTAL, not per-box) and
+# over giving infra CTs LAN legs (user explicitly does NOT want more
+# CTs directly on the LAN). eth0 egress = lab upload, eth1 egress =
+# lab download.
+- name: Install lab traffic cap script
+  ansible.builtin.copy:
+    src: lab-traffic-cap.sh
+    dest: /usr/local/sbin/lab-traffic-cap.sh
+    mode: '0755'
+  notify: Restart lab traffic cap
+
+- name: Install lab traffic cap systemd unit
+  ansible.builtin.copy:
+    src: lab-traffic-cap.service
+    dest: /etc/systemd/system/lab-traffic-cap.service
+    mode: '0644'
+  notify: Restart lab traffic cap
+
+- name: Enable lab traffic cap service
+  ansible.builtin.systemd:
+    name: lab-traffic-cap.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
 # Tailscale subnet advertisement. `tailscale set` is idempotent and does
 # NOT require re-authentication (unlike `tailscale up`), so we drive it
 # from a single source of truth in group_vars/all/vars.yml. New routes
