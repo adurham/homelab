@@ -191,6 +191,10 @@ ENABLED_SWITCH = "input_boolean.vent_control_enabled"
 HEARTBEAT_ENTITY = "sensor.smart_vent_controller_heartbeat"
 # Summary sensor for the delivery/capacity handicap (achieved-cooling-rate axis).
 DELIVERY_PENALTY_ENTITY = "sensor.smart_vent_delivery_handicap"
+# Observability for the zone-presence contention axis: publishes each zone's
+# occupied/vacant state + last-occupied age + the computed contention for the
+# current cycle, so the deploy dispatch / Grafana can see the fix in action.
+ZONE_PRESENCE_ENTITY = "sensor.smart_vent_zone_presence"
 
 # Backpressure: never close more than this fraction of total vents.
 MAX_CLOSED_RATIO = 0.60
@@ -478,6 +482,65 @@ DELIVERY_MAX_DT_MIN = 10.0      # ignore long gaps (restart / sensor dropout) �
 DELIVERY_MARGIN_GAIN = 0.30     # °F margin reduction per °F of delivery penalty
 DELIVERY_ESCALATE_PENALTY = 1.5  # delivery penalty above this forces donor escalation
 
+# ── Zone-presence contention (measured axis) ─────────────────────────────────
+# The production bug (2026-08-31): with everyone upstairs and the Game Room at
+# 77°F while the ecobee read a whole-house 73-74°F average, the owner dropped the
+# cool setpoint 73->70°F to force the compressor on. The low setpoint pushed
+# several completely UNOCCUPIED downstairs rooms past the absolute
+# OCCUPANCY_OVERRIDE_OVER=3.0 threshold, which overrode the occupancy gate
+# entirely: they became protected beneficiaries pinned to 100% and — critically —
+# could NEVER be selected as a DONOR for the genuinely occupied, badly overheated
+# Game Room. Those empty rooms locked in at 100% and competed with Game Room for
+# limited compressor CFM, producing "Priority Game Room struggling but no donor
+# rooms" every cycle.
+#
+# The fix is a NEW measured axis derived purely from real sensors every cycle,
+# following the established pattern of _update_supply_penalties /
+# _update_delivery_penalties / _room_margin: "zone presence contention".
+#
+#   * _update_zone_presence() stamps each zone's last occupied time from its
+#     rooms' PIR occupancy sensors. A zone counts OCCUPIED if ANY of its rooms
+#     read "on" within ZONE_PRESENCE_HOLD_MIN minutes (debounce so a transient
+#     PIR false-negative doesn't instantly demote a zone).
+#   * _zone_contention(zone, heating) = a [0,1] factor for how badly some OTHER,
+#     OCCUPIED zone's occupants need air right now (the max room excess-over-
+#     margin among occupied zones that aren't `zone`, saturated at 1.0 once that
+#     excess reaches ZONE_CONTENTION_SPAN_F).
+#   * Lever A (_effective_occupancy_override): when a room's OWN zone is vacant,
+#     its protected-beneficiary threshold is raised above the bare
+#     OCCUPANCY_OVERRIDE_OVER by ZONE_VACANCY_OVERRIDE_BONUS_F * contention, so
+#     an empty room must be genuinely hot before it can re-lock into 100% (and
+#     out of donor eligibility) while another floor's occupants are suffering.
+#     Capped at ZONE_VACANCY_OVERRIDE_CEILING_F so a truly baking room is NEVER
+#     starved. Hysteresis: a demoted room must exceed
+#     raised + ZONE_VACANCY_OVERRIDE_HYST_F to re-promote, and a protected room
+#     must fall below raised to demote, so a vacant room that donates air -> heats
+#     up -> crosses the threshold -> cools -> donates again doesn't flap its
+#     damper every cycle. _zone_vacancy_demoted (a set of (zone, room) keys)
+#     tracks the per-room demotion state; entries clear when the zone stops being
+#     vacant.
+#   * Lever B (_donor_cooler_by): donor eligibility relaxes for rooms in VACANT
+#     zones, proportional to contention — the "must be cooler by" requirement is
+#     waived fractionally (ZONE_VACANCY_DONOR_RELAX) but floored at
+#     ZONE_VACANCY_DONOR_MIN_COOLER_F so we NEVER pull air from a room that isn't
+#     genuinely more comfortable than the beneficiary (thermodynamic guard).
+#
+# Both levers are applied in BOTH the priority pass (_apply_priority_rooms) and
+# the fan-assist pass (_apply_fan_assist) via two shared helpers, so they can't
+# drift out of sync (the recurring two-pass bug class in this file).
+#
+# Design guarantee: when NO other zone has an occupied room past its margin,
+# _zone_contention returns EXACTLY 0.0, both levers collapse to identity, and
+# behavior is byte-identical to today. A solar-baked empty room in a fully empty
+# house still gets airflow exactly as it does now.
+ZONE_PRESENCE_HOLD_MIN          = 25.0   # a zone counts OCCUPIED if any of its rooms read occupancy "on" within this many minutes
+ZONE_CONTENTION_SPAN_F          = 3.0    # occupied-zone excess-over-margin (F) that saturates the contention factor at 1.0
+ZONE_VACANCY_OVERRIDE_BONUS_F   = 3.0    # how much a VACANT zone's self-protect threshold rises at full contention
+ZONE_VACANCY_OVERRIDE_CEILING_F = 6.5    # hard bake-protection ceiling: past this a vacant room is helped regardless of contention
+ZONE_VACANCY_OVERRIDE_HYST_F    = 0.5    # hysteresis band so a demoted room doesn't chatter around the raised threshold
+ZONE_VACANCY_DONOR_RELAX        = 0.75   # fraction of the donor "must be cooler by" requirement waived at full contention
+ZONE_VACANCY_DONOR_MIN_COOLER_F = 0.25   # floor: never pull air from a room that isn't at least this much more comfortable than the beneficiary
+
 # ── Fan-assist redistribution (the thermostat blind-spot workaround) ───────────
 # A single hallway thermostat goes idle when the HOUSE AVERAGE is satisfied, even
 # while an individual room is still hot — that's the core reason a disadvantaged
@@ -549,6 +612,18 @@ class SmartVentController(hass.Hass):
         # sample per room so we can compute the rate between control cycles.
         self._delivery_penalty = {}
         self._delivery_last = {}
+
+        # Zone-presence contention state. _zone_last_occupied[zone] = datetime
+        # when any room in that zone last read occupancy "on" (None = never
+        # seen occupied since app start). _zone_occupied[zone] = bool for the
+        # CURRENT cycle, recomputed every control loop by _update_zone_presence
+        # (debounced by ZONE_PRESENCE_HOLD_MIN). _zone_vacancy_demoted is a set
+        # of (zone, room) keys whose self-protect threshold is currently raised
+        # because their zone is vacant under contention (hysteresis — see the
+        # constants block); entries clear once the zone stops being vacant.
+        self._zone_last_occupied = {}
+        self._zone_occupied = {}
+        self._zone_vacancy_demoted = set()
 
         # Dry-coil lockout tracking. _cooling_ended_at is the timestamp the
         # compressor last transitioned out of "cooling"; None while actively
@@ -759,6 +834,14 @@ class SmartVentController(hass.Hass):
         # when the room recovers or HVAC goes idle.
         self._update_delivery_penalties(hvac_action, target_cool, target_heat)
 
+        # Zone-presence contention (measured axis). Stamps each zone's last
+        # occupied time and recomputes the per-zone occupied/vacant booleans for
+        # this cycle. Must run BEFORE _auto_calculate / _apply_priority_rooms /
+        # _apply_fan_assist, which read the contention-adjusted thresholds and
+        # donor relaxation. Runs every cycle so the demotion state (and the
+        # published sensor) stays current.
+        self._update_zone_presence()
+
         # Calculate desired positions.
         # room_positions: {(zone_name, room_name): position}
         room_positions = {}
@@ -936,10 +1019,23 @@ class SmartVentController(hass.Hass):
                     unocc_hot_override = OCCUPANCY_OVERRIDE_OVER
                     occ_deadband = DEADBAND
 
-                if need > OCCUPANCY_OVERRIDE_OVER:
+                # Zone-presence contention (lever A): a vacant zone's rooms stop
+                # grabbing an unconditional 100% via either the absolute
+                # OCCUPANCY_OVERRIDE_OVER or the per-floor hot-override while
+                # someone elsewhere is off-target. The absolute gate uses the
+                # SAME stateful hysteresis helper as the priority/fan-assist
+                # passes (single source of truth); the per-floor override uses
+                # the stateless elevation (raised, ceiling-capped).
+                occ_override = self._effective_occupancy_override(
+                    zone_name, key, is_heating) if (occ_entity and not is_occupied) \
+                    else OCCUPANCY_OVERRIDE_OVER
+                raised_hot_override = self._elevated_threshold(
+                    zone_name, unocc_hot_override, is_heating)
+
+                if need > occ_override:
                     pos = 100
                     reason = f"hot override ({need:+.1f}) — 100% regardless of occupancy"
-                elif need > unocc_hot_override and not is_occupied:
+                elif need > raised_hot_override and not is_occupied:
                     # Unoccupied and past the per-floor hot-override (but under
                     # the absolute OCCUPANCY_OVERRIDE_OVER) — give full airflow;
                     # the room is hot enough that cooling it matters even empty.
@@ -1289,6 +1385,327 @@ class SmartVentController(hass.Hass):
                   - DELIVERY_MARGIN_GAIN * delivery)
         return max(PRIORITY_MARGIN_MIN, min(base_margin, margin))
 
+    # ── Zone-presence contention (measured axis) ───────────────────────────────
+    # These helpers make the beneficiary/self-protect threshold RELATIVE and the
+    # donor threshold RELAXED for rooms in zones that are currently vacant while
+    # someone elsewhere is off-target. They are the measured-axis counterparts to
+    # _update_supply_penalties / _update_delivery_penalties / _room_margin: all
+    # four are recomputed fresh every cycle from real sensors and decay back to
+    # neutral (contention == 0.0 == today's behavior) when the trigger clears.
+    # Both _apply_priority_rooms and _apply_fan_assist call the SAME two shared
+    # helpers (_effective_occupancy_override / _donor_cooler_by), so the two
+    # gated passes can't drift out of sync — the recurring bug class in this file.
+
+    def _ensure_zone_presence_state(self):
+        """Lazily (re)initialize the zone-presence state attributes if missing.
+
+        Defensive lazy-init so the helpers work even when the app was created
+        without initialize() running (the offline test fakes subclass the
+        controller directly, and must keep working unmodified). No-op once the
+        attrs exist.
+        """
+        if not hasattr(self, "_zone_last_occupied"):
+            self._zone_last_occupied = {}
+        if not hasattr(self, "_zone_occupied"):
+            self._zone_occupied = {}
+        if not hasattr(self, "_zone_vacancy_demoted"):
+            self._zone_vacancy_demoted = set()
+
+    def _update_zone_presence(self):
+        """Refresh each zone's presence state from its rooms' occupancy sensors.
+
+        Public helpers all rely on the per-zone vacancy booleans that this
+        stamps for the current cycle into self._zone_occupied[zone]:
+          - For each zone, if ANY of its rooms currently reads occupancy "on",
+            stamp self._zone_last_occupied[zone] = now (and _zone_occupied=True).
+          - A zone whose rooms are all "off" keeps its prior last_occupied stamp
+            (it stays "occupied" for the debounce window — see _zone_is_vacant).
+          - Rooms with a missing/unavailable occupancy entity are ignored
+            (never treated as occupied).
+        Also publishes the observability sensor and logs the per-zone picture.
+
+        The state attrs are lazily initialized so the helpers are safe to call
+        even when the app was instantiated outside initialize() (e.g. the
+        offline test fakes, which subclass without running it).
+        """
+        self._ensure_zone_presence_state()
+        now = self.datetime()
+        for zone_name, zone in ZONES.items():
+            occupied = False
+            for room_name, sensors in zone["rooms"].items():
+                occ = sensors.get("occupancy")
+                if not occ:
+                    continue
+                state = self.get_state(occ)
+                if state == "on":
+                    occupied = True
+                    break
+            if occupied:
+                self._zone_last_occupied[zone_name] = now
+            self._zone_occupied[zone_name] = occupied
+        self._publish_zone_presence()
+        # Log the per-zone picture (and contention for vacant zones) so the
+        # live AppDaemon log makes the measured axis visible. Greppable line the
+        # deploy dispatch verifies the fix on the live house with.
+        try:
+            _hmode, _hact, tc, th = self._get_thermostat_state()
+            # Pick heating direction iff the active action is heating.
+            _heating = (_hact == "heating")
+            parts = []
+            for zn2 in ZONES:
+                last2 = self._zone_last_occupied.get(zn2)
+                if last2 is None:
+                    age_s = ">24h"
+                else:
+                    mins2 = (now - last2).total_seconds() / 60.0
+                    age_s = ">24h" if mins2 > 24 * 60 else f"{round(mins2, 1):.1f}m"
+                parts.append(f"{zn2} {'OCCUPIED' if not self._zone_is_vacant(zn2) else 'VACANT'} ({age_s} ago)")
+            cents = []
+            for zn2 in ZONES:
+                if self._zone_is_vacant(zn2):
+                    cents.append(f"contention({zn2})={self._zone_contention(zn2, _heating):.2f}")
+            self.log("zone presence: " + ", ".join(parts)
+                     + (" | " + ", ".join(cents) if cents else ""))
+        except Exception as e:
+            self.log(f"zone-presence log failed (non-fatal): {e}")
+
+    def _zone_is_vacant(self, zone):
+        """True iff `zone` counts as vacant for this cycle.
+
+        Vacant means no room in the zone has read occupancy "on" within the last
+        ZONE_PRESENCE_HOLD_MIN minutes. A zone never seen occupied since app
+        start counts as vacant.
+        """
+        self._ensure_zone_presence_state()
+        last = self._zone_last_occupied.get(zone)
+        if last is None:
+            return True
+        age = (self.datetime() - last).total_seconds() / 60.0
+        return age > ZONE_PRESENCE_HOLD_MIN
+
+    def _zone_contention(self, zone, heating):
+        """How badly some OTHER zone's occupants need air right now, in [0, 1].
+
+        Scans every zone z != `zone` that is NOT vacant. For each such zone,
+        zone_demand[z] = the maximum "excess" over any of its (occupancy-
+        eligible) rooms' measured _room_margin, else 0.0, where
+            excess = off_target(room) - _room_margin(room, heating),
+            clamped at >= 0.
+        off_target is sign-aware: (room_temp - cool_setpoint) when cooling,
+        (heat_setpoint - room_temp) when heating.
+
+        contention = clamp(max(zone_demand.values()) / ZONE_CONTENTION_SPAN_F, 0, 1).
+        If no other zone is occupied, or no occupied room is past its margin,
+        this returns EXACTLY 0.0 (both levers then collapse to identity).
+        """
+        if len(ZONES) < 2:
+            return 0.0
+        zone_demand = {}
+        for zname, z in ZONES.items():
+            if zname == zone:
+                continue
+            if self._zone_is_vacant(zname):
+                continue
+            demand = 0.0
+            for room_name, sensors in z["rooms"].items():
+                occ_entity = sensors.get("occupancy")
+                if occ_entity and self.get_state(occ_entity) != "on":
+                    # A room whose PIR currently reads "off" isn't an occupant
+                    # needing air right now — skip it (the zone's actual
+                    # occupant still registers via their own "on" room). A room
+                    # with no occupancy sensor is treated as eligible, matching
+                    # the rest of the file (no sensor => assumed occupied).
+                    continue
+                temp = self._read_temp(sensors["temp"])
+                if temp is None:
+                    continue
+                off = self._off_target(room_name, temp, heating)
+                margin = self._room_margin((zname, room_name), heating)
+                excess = off - margin
+                if excess > 0:
+                    demand = max(demand, excess)
+            zone_demand[zname] = demand
+        if not zone_demand:
+            return 0.0
+        worst = max(zone_demand.values())
+        if worst <= 0.0:
+            return 0.0
+        return max(0.0, min(1.0, worst / ZONE_CONTENTION_SPAN_F))
+
+    def _off_target(self, room_name, temp, heating):
+        """Sign-aware off-target magnitude for a room in the current mode.
+
+        Cooling (heating=False): (room_temp - cool_setpoint), i.e. how hot.
+        Heating (heating=True):  (heat_setpoint - room_temp), i.e. how cold.
+        Both are positive when the room needs help.
+        """
+        setpoint = self._current_setpoint(heating)
+        if setpoint is None:
+            return 0.0
+        return (setpoint - temp) if heating else (temp - setpoint)
+
+    def _current_setpoint(self, heating):
+        """Return the active setpoint (cool or heat) from the thermostat state."""
+        _mode, _action, target_cool, target_heat = self._get_thermostat_state()
+        if heating:
+            return target_heat
+        return target_cool
+
+    def _elevated_threshold(self, zone, base, heating):
+        """Contention-adjusted ceiling for a VACANT zone, without hysteresis.
+
+        Stateless (no demotion-set side effects) — used by _auto_calculate to
+        raise a per-floor hot-override / self-protect threshold in a vacant zone:
+
+            raised = base + ZONE_VACANCY_OVERRIDE_BONUS_F * contention
+            raised = min(raised, ZONE_VACANCY_OVERRIDE_CEILING_F)   # bake protection
+
+        When the zone is occupied (or contention 0) this returns `base`
+        unchanged (identity). The ceiling cap guarantees a genuinely baking room
+        is never starved even at full contention.
+        """
+        if not self._zone_is_vacant(zone):
+            return base
+        c = self._zone_contention(zone, heating)
+        if c <= 0.0:
+            return base
+        raised = base + ZONE_VACANCY_OVERRIDE_BONUS_F * c
+        return min(raised, ZONE_VACANCY_OVERRIDE_CEILING_F)
+
+    def _effective_occupancy_override(self, zone, key, heating):
+        """Contention-adjusted replacement for the bare OCCUPANCY_OVERRIDE_OVER.
+
+        The single chokepoint for lever A, called by BOTH the priority pass and
+        the fan-assist pass (recurring-bug-class guard), so the demotion state
+        and hysteresis behavior can never drift out of sync.
+
+        If `zone` is NOT vacant -> return OCCUPANCY_OVERRIDE_OVER unchanged (and
+        clear the room's demotion entry so a returning occupant isn't held back).
+        Else:
+            raised = OCCUPANCY_OVERRIDE_OVER + ZONE_VACANCY_OVERRIDE_BONUS_F * c
+            raised = min(raised, ZONE_VACANCY_OVERRIDE_CEILING_F)
+        Then apply per-room hysteresis around `raised` using the current demotion
+        state (self._zone_vacancy_demoted, a set of (zone, room) keys):
+          - PROTECTED (not demoted): beneficiary while off >= raised; once off
+            falls BELOW raised the room is demoted (suppressed to a donor).
+          - DEMOTED (held as a donor): stays a donor while off < raised + HYST;
+            once off EXCEEDS raised + HYST it re-promotes to protected.
+        The returned value is the effective threshold the caller compares `off`
+        against: a room whose off is below it is NOT a beneficiary (it stays
+        eligible as a donor); at/above it the room re-locks into 100%.
+        """
+        # _off_target needs the room's temp; derive it here.
+        room_temp = self._read_temp(ZONES[key[0]]["rooms"][key[1]]["temp"])
+        if not self._zone_is_vacant(zone):
+            # Zone occupied — identity. Clear any stale demotion entry so a
+            # returning occupant isn't held back by hysteresis.
+            self._zone_vacancy_demoted.discard(key)
+            return OCCUPANCY_OVERRIDE_OVER
+
+        c = self._zone_contention(zone, heating)
+        raised = OCCUPANCY_OVERRIDE_OVER + ZONE_VACANCY_OVERRIDE_BONUS_F * c
+        raised = min(raised, ZONE_VACANCY_OVERRIDE_CEILING_F)
+
+        off = self._off_target(key[1], room_temp, heating)
+        if key in self._zone_vacancy_demoted:
+            # Demoted: held as a donor. Re-promote (return raised, so off >=
+            # raised makes it a beneficiary again) only once off EXCEEDS
+            # raised + HYST — the required hysteresis band.
+            if off >= raised + ZONE_VACANCY_OVERRIDE_HYST_F:
+                self._zone_vacancy_demoted.discard(key)
+                return raised
+            return raised + ZONE_VACANCY_OVERRIDE_HYST_F
+        else:
+            # Protected: a beneficiary while off >= raised. Demote (suppress to
+            # a donor) once it falls below raised.
+            if off < raised:
+                self._zone_vacancy_demoted.add(key)
+                return raised + ZONE_VACANCY_OVERRIDE_HYST_F
+            return raised
+
+    def _forget_demoted_rooms(self):
+        """Clear demotion state for any room whose zone is no longer vacant.
+
+        Keeps the hysteresis set from growing stale: once a zone reads occupied
+        again, its rooms are immediately eligible for the standard (identity)
+        threshold on the next cycle.
+        """
+        stale = {key for key in self._zone_vacancy_demoted
+                 if not self._zone_is_vacant(key[0])}
+        if stale:
+            self._zone_vacancy_demoted.difference_update(stale)
+
+    def _donor_cooler_by(self, donor_zone, base_cooler_by, heating):
+        """Relaxed "must be cooler by" requirement for a DONOR candidate's zone.
+
+        When the candidate donor's OWN zone is VACANT, its protected self-interest
+        is weaker, so we waive ZONE_VACANCY_DONOR_RELAX * contention of the
+        requirement:
+            required = base_cooler_by * (1.0 - ZONE_VACANCY_DONOR_RELAX * c)
+            required = max(required, ZONE_VACANCY_DONOR_MIN_COOLER_F)
+        The max(...) floor is the hard thermodynamic guard: we never pull air
+        from a room that isn't at least ZONE_VACANCY_DONOR_MIN_COOLER_F more
+        comfortable than the beneficiary (cooler when cooling, warmer when
+        heating). When the donor's zone is occupied (or contention is 0), this
+        returns base_cooler_by unchanged. `heating` is passed for the contention
+        computation only.
+        """
+        c = self._zone_contention(donor_zone, heating)
+        if c <= 0.0:
+            return base_cooler_by
+        required = base_cooler_by * (1.0 - ZONE_VACANCY_DONOR_RELAX * c)
+        return max(required, ZONE_VACANCY_DONOR_MIN_COOLER_F)
+
+    def _publish_zone_presence(self):
+        """Expose the zone-presence axis as one summary sensor (best-effort).
+
+        State is a short human/alert summary string. Attributes carry each
+        zone's occupied/vacant bool, its last-occupied age in minutes, and the
+        computed contention (as a float attribute — HA attributes accept floats
+        fine; only a bare float STATE would hit the silent-write drop, so we
+        always keep the state itself a string, per the delivery-penalty fix).
+        """
+        try:
+            now = self.datetime()
+            zone_attrs = {}
+            for zname in ZONES:
+                last = self._zone_last_occupied.get(zname)
+                if last is None:
+                    age_display = ">24h"
+                else:
+                    mins = (now - last).total_seconds() / 60.0
+                    if mins > 24 * 60:
+                        age_display = ">24h"
+                    else:
+                        age_display = round(mins, 1)
+                vacant = self._zone_is_vacant(zname)
+                zone_attrs[f"{zname}"] = (
+                    "VACANT" if vacant else "OCCUPIED",
+                    age_display,
+                )
+            # Pick a representative contention (used for the state + logs): the
+            # largest contention across all zones is the most informative gauge.
+            # We log per-zone so the deploy dispatch can grep; the sensor is one
+            # entity to keep the prod entity surface small (matches DELIVERY
+            # _PENALTY_ENTITY pattern).
+            worst_c = 0.0
+            for zname in ZONES:
+                c = self._zone_contention(zname, False)
+                worst_c = max(worst_c, c)
+            self.set_state(
+                ZONE_PRESENCE_ENTITY,
+                state="occupied-contention" if worst_c > 0 else "no-contention",
+                attributes={
+                    "friendly_name": "Smart Vent Zone Presence/Contention",
+                    "icon": "mdi:home-account",
+                    "zones": {z: {"vacant": v, "last_occupied_min": a}
+                              for z, (v, a) in zone_attrs.items()},
+                    "max_contention": round(worst_c, 3),
+                },
+            )
+        except Exception as e:
+            self.log(f"zone-presence publish failed (non-fatal): {e}")
+
     def _apply_priority_rooms(self, room_positions, hvac_action,
                               target_cool, target_heat=None, mode=None):
         """Redirect CFM toward ANY struggling room by throttling rooms that are
@@ -1347,8 +1764,18 @@ class SmartVentController(hass.Hass):
                 # PIR sensors read unoccupied when nobody is moving, even if
                 # the room is hot — don't starve a hot room of airflow just
                 # because it's empty.
+                #
+                # Zone-presence contention: this threshold is now RELATIVE for
+                # rooms in a VACANT zone — an empty room in a zone whose
+                # occupants are nowhere near must be considerably hotter before
+                # it can lock itself into protected-beneficiary status (and out
+                # of donor eligibility) while another floor's occupants are
+                # suffering. _occ_override is the single shared decision both
+                # this pass and fan-assist use (recurring-bug-class guard).
+                _occ_override = self._effective_occupancy_override(
+                    zone_name, key, heating)
                 if occ_entity and not is_occupied:
-                    if off < OCCUPANCY_OVERRIDE_OVER:
+                    if off < _occ_override:
                         continue  # unoccupied and not hot enough to override
                     # Hot enough to override the PIR false-negative. Treat as
                     # occupied for sort purposes too — a room this hot is a
@@ -1417,6 +1844,13 @@ class SmartVentController(hass.Hass):
                 if (not heating and zone_name == "upstairs"
                         and zn == "downstairs"):
                     cooler_by = PRIORITY_DONOR_COOLER_BY_CROSS_FLOOR
+                # Zone-presence contention (lever B): when this donor's OWN zone
+                # is vacant, its protected self-interest is weaker, so we waive
+                # up to ZONE_VACANCY_DONOR_RELAX * contention of the
+                # "must be cooler by" requirement (composed multiplicatively on
+                # top of whichever base applies) — but never below the
+                # ZONE_VACANCY_DONOR_MIN_COOLER_F thermodynamic floor.
+                cooler_by = self._donor_cooler_by(zn, cooler_by, heating)
                 if heating:
                     if dtemp < temp + cooler_by:
                         continue  # not enough warmer than the cold beneficiary
@@ -1438,9 +1872,21 @@ class SmartVentController(hass.Hass):
                     break
                 room_positions[dkey] = donor_pos
                 throttled += 1
+                # Include zone-presence context so the live log makes the
+                # measured axis visible: contention for the donor's (vacant)
+                # zone and whether its room was demoted (eligible as a donor
+                # that otherwise wouldn't have been).
+                dz = dkey[0]
+                d_vacant = self._zone_is_vacant(dz)
+                d_c = self._zone_contention(dz, heating)
+                zctx = ""
+                if d_vacant and d_c > 0.0:
+                    zctx = (f" (zone vacant, contention {d_c:.2f}"
+                            + (", demoted" if dkey in self._zone_vacancy_demoted else "")
+                            + ")")
                 self.log(f"  Priority {room_name} ({temp:.1f}F): throttling "
-                         f"{dkey[0]}/{dkey[1]} ({dtemp:.1f}F, "
-                         f"{'occ' if docc else 'empty'}) -> {donor_pos}%")
+                         f"{dz}/{dkey[1]} ({dtemp:.1f}F, "
+                         f"{'occ' if docc else 'empty'}) -> {donor_pos}%{zctx}")
 
             mode_tag = "heat" if heating else "cool"
             tag = [mode_tag]
@@ -1543,8 +1989,13 @@ class SmartVentController(hass.Hass):
                 off = off_by(temp)
                 # Same occupancy override as the priority pass: a hot room
                 # gets fan-assist even if unoccupied (see OCCUPANCY_OVERRIDE_OVER).
+                # Zone-presence contention (lever A): the threshold is RELATIVE
+                # for rooms in a vacant zone, via the SAME single shared helper
+                # the priority pass uses (recurring-bug-class guard).
+                _occ_override = self._effective_occupancy_override(
+                    zone_name, key, heating)
                 if occ_entity and self.get_state(occ_entity) != "on":
-                    if off < OCCUPANCY_OVERRIDE_OVER:
+                    if off < _occ_override:
                         continue
                 margin = self._room_margin(key, heating, base_margin=FAN_ASSIST_OVER)
                 if off < margin:
@@ -1571,10 +2022,17 @@ class SmartVentController(hass.Hass):
                     dtemp = self._read_temp(droom["temp"])
                     if dtemp is None:
                         continue
+                    # Zone-presence contention (lever B): a donor in a VACANT
+                    # zone can be trusted with less proven margin, waiving up to
+                    # ZONE_VACANCY_DONOR_RELAX * contention of the flat
+                    # FAN_ASSIST_DONOR_COOLER_BY (but never below the
+                    # ZONE_VACANCY_DONOR_MIN_COOLER_F thermodynamic floor).
+                    d_cooler_by = self._donor_cooler_by(
+                        zn, FAN_ASSIST_DONOR_COOLER_BY, heating)
                     if heating:
-                        useful = dtemp >= temp + FAN_ASSIST_DONOR_COOLER_BY
+                        useful = dtemp >= temp + d_cooler_by
                     else:
-                        useful = dtemp <= temp - FAN_ASSIST_DONOR_COOLER_BY
+                        useful = dtemp <= temp - d_cooler_by
                     if useful:
                         docc = droom.get("occupancy")
                         doccupied = (self.get_state(docc) == "on"
