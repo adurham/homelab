@@ -1,0 +1,43 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/dashboard_profile_config.yaml.j2
+#
+# Config for the `dashboard` Hermes PROFILE (separate HERMES_HOME under
+# /home/hermes/.hermes/profiles/dashboard/), used ONLY by hermes-serve.service
+# (the web dashboard / phone chat surface at hermes.chi.lab.amd-e.com).
+#
+# WHY A SEPARATE PROFILE (2026-09-01): the Discord bot (hermes-gateway.service)
+# and the web dashboard used to share ONE config.yaml/model, both tracking
+# hermes_gateway_main_provider. The user wants the dashboard permanently on
+# Anthropic Claude Sonnet 5 regardless of what the Discord bot's main
+# provider is set to (exo by default) — there's no per-platform model
+# override in hermes-agent, so a separate profile (separate HERMES_HOME,
+# separate config.yaml/.env) is the supported isolation mechanism instead.
+# The Discord bot keeps using the machine-root config.yaml
+# (templates/config.yaml.j2) untouched.
+model:
+  default: claude-sonnet-5
+  provider: anthropic
+
+# Same Authentik OIDC gate as the machine-root config (roles/authentik_provider
+# /tasks/hermes.yml provisions the client). hermes-serve.service runs this
+# profile with --isolated, so THIS profile's dashboard: block is what the
+# isolated server actually reads for its OAuth gate — the machine-root one
+# is irrelevant to it.
+dashboard:
+  oauth:
+    provider: self-hosted
+    self_hosted:
+      issuer: "{{ authentik_url }}/application/o/hermes-dashboard/"
+      client_id: "{{ vault_hermes_gw_dashboard_oidc_client_id }}"
+      scopes: "openid profile email"
+  public_url: "https://hermes.chi.lab.amd-e.com"
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 4500
+  user_char_limit: 5200
+  auto_extract: true
+
+skills:
+  lazy_listing: true

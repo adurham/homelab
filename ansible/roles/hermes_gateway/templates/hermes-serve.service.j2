@@ -10,24 +10,36 @@
 # ("Connecting Hermes Desktop to a remote backend") for the upstream
 # doc this mirrors.
 #
-# NOTE (2026-09-01): runs `hermes dashboard`, NOT `hermes serve`,
-# despite the unit's name. Upstream commit f0f8c84d1b ("make hermes
-# serve a real headless backend", 2026-06-30) split the two: `serve`
-# now mounts ZERO browser UI (pure JSON-RPC/WS for the Desktop
-# Electron app only) — hitting :9119/ returns
-# `{"error":"Headless backend (hermes serve): web UI disabled..."}`
-# instead of a page. `dashboard` boots the IDENTICAL backend
-# (`cmd_dashboard` -> `start_server`, same JSON-RPC/WS routes) and
-# additionally mounts the browser SPA, so switching the ExecStart
-# below does not break Desktop app connectivity — it only adds the
-# browser UI back. This surfaced when the fork's `main` (previously
-# ~10,422 commits behind upstream) was resynced and this box
-# redeployed; before that sync `serve` and `dashboard` behaved
-# identically on this fork, so the split was invisible until now.
+# NOTE (2026-09-01, updated): runs `hermes -p dashboard dashboard --isolated`,
+# NOT `hermes serve`, despite the unit's name. Two separate fixes landed
+# in this unit on the same day:
+#
+# 1. Upstream commit f0f8c84d1b ("make hermes serve a real headless
+#    backend", 2026-06-30) split `serve` and `dashboard`: `serve` now
+#    mounts ZERO browser UI (pure JSON-RPC/WS for the Desktop Electron
+#    app only) — hitting :9119/ returned
+#    `{"error":"Headless backend (hermes serve): web UI disabled..."}`
+#    instead of a page. `dashboard` boots the IDENTICAL backend
+#    (`cmd_dashboard` -> `start_server`, same JSON-RPC/WS routes) and
+#    additionally mounts the SPA.
+#
+# 2. `-p dashboard --isolated`: the web dashboard runs as its OWN Hermes
+#    PROFILE (separate HERMES_HOME under
+#    /home/hermes/.hermes/profiles/dashboard/), so it can be pinned to
+#    Anthropic Claude Sonnet 5 independent of the Discord bot's main
+#    provider (hermes_gateway_main_provider, exo by default) — there's
+#    no per-platform model override in hermes-agent, so a separate
+#    profile is the supported isolation mechanism. `--isolated` is
+#    required: without it, `cmd_dashboard`'s unified-profile-launch
+#    routing detects the non-default profile and RE-EXECS itself as the
+#    *machine* dashboard (profile preselected in the URL switcher only,
+#    still reading the machine-root config/model) instead of actually
+#    running as the isolated dashboard profile.
+#
 # Unit/service name kept as `hermes-serve` for backward compat with
 # existing ansible references (main.yml, handlers, README) rather
 # than a repo-wide rename.
-Description=Hermes Agent — persistent remote backend (hermes dashboard, headless-launch)
+Description=Hermes Agent — persistent remote backend (isolated dashboard profile)
 After=network-online.target
 Wants=network-online.target
 
@@ -37,7 +49,7 @@ User=hermes
 Group=hermes
 WorkingDirectory=/home/hermes
 EnvironmentFile=/home/hermes/.hermes/.env
-ExecStart=/opt/hermes-agent/venv/bin/hermes dashboard --no-open --host 0.0.0.0 --port 9119 --skip-build
+ExecStart=/opt/hermes-agent/venv/bin/hermes -p dashboard dashboard --isolated --no-open --host 0.0.0.0 --port 9119 --skip-build
 # Bound on ALL interfaces (0.0.0.0), not the LXC's specific IP. Hermes's
 # DNS-rebinding Host-header guard (web_server.py _is_accepted_host)
 # requires an EXACT match between the Host header and --host when bound

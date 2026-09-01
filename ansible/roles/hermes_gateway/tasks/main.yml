@@ -406,6 +406,47 @@
   changed_when: true
   notify: Restart Hermes Serve
 
+# The dashboard runs as its own Hermes PROFILE (separate HERMES_HOME),
+# isolated from the Discord bot's machine-root config/model — see
+# templates/dashboard_profile_config.yaml.j2 for the full rationale.
+# `hermes profile create` is idempotent-by-existence-check (no --force
+# flag exists; it errors if the profile dir already exists), so probe
+# first and only create when missing.
+- name: Probe Dashboard Hermes Profile
+  ansible.builtin.stat:
+    path: /home/hermes/.hermes/profiles/dashboard
+  register: hermes_dashboard_profile_stat
+
+- name: Create Dashboard Hermes Profile
+  ansible.builtin.command:
+    cmd: >
+      /opt/hermes-agent/venv/bin/hermes profile create dashboard
+      --description "Web dashboard / phone chat surface — Anthropic Sonnet 5, separate from the Discord bot which stays on hermes_gateway_main_provider"
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  when: not hermes_dashboard_profile_stat.stat.exists
+
+- name: Render Dashboard Profile config.yaml
+  ansible.builtin.template:
+    src: dashboard_profile_config.yaml.j2
+    dest: /home/hermes/.hermes/profiles/dashboard/config.yaml
+    owner: hermes
+    group: hermes
+    mode: '0600'
+  notify: Restart Hermes Serve
+
+- name: Render Dashboard Profile .env
+  ansible.builtin.template:
+    src: dashboard_profile_env.j2
+    dest: /home/hermes/.hermes/profiles/dashboard/.env
+    owner: hermes
+    group: hermes
+    mode: '0600'
+  no_log: true
+  notify: Restart Hermes Serve
+
 - name: Render Hermes Serve Systemd Unit
   ansible.builtin.template:
     src: hermes-serve.service.j2
