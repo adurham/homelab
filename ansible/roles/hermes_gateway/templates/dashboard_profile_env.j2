@@ -1,0 +1,24 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/dashboard_profile_env.j2
+#
+# Per-profile secrets for the `dashboard` Hermes profile (see
+# dashboard_profile_config.yaml.j2 for why this profile exists — it's
+# the web dashboard / phone chat surface, pinned to Anthropic Claude
+# Sonnet 5, isolated from the Discord bot's main-provider config).
+#
+# Hermes profiles are separate HERMES_HOME directories with their OWN
+# .env — they do NOT inherit the machine-root .env. Without this file
+# repeating CLAUDE_CODE_OAUTH_TOKEN, the dashboard profile's `hermes
+# serve` process 400s with "No Anthropic credentials found" on every
+# chat message even though the model/provider resolve correctly (the
+# gap: config.yaml.model.provider=anthropic resolves fine, but the
+# actual OAuth token lookup falls through env vars -> this profile's
+# own empty .env -> nothing).
+CLAUDE_CODE_OAUTH_TOKEN={{ vault_hermes_gw_claude_code_oauth_token }}
+ANTHROPIC_API_KEY=
+ANTHROPIC_TOKEN=
+
+# Same 1M-context-beta guard as the machine-root .env — without this,
+# a tiny "hi" from the dashboard 400s with "out of extra usage" on the
+# Claude Max personal subscription.
+HERMES_CONTEXT_1M_THRESHOLD_TOKENS=180000
