@@ -9,8 +9,11 @@ Controls:
   input_select.vent_control_mode      - Auto / Manual / Cool Upstairs / Cool Downstairs
 """
 
+import json
 import math
+import os
 import re
+import tempfile
 
 import appdaemon.plugins.hass.hassapi as hass
 from datetime import datetime, timedelta
@@ -580,6 +583,34 @@ SETPOINT_NUDGE_CONFIRM_SEC= 420   # readback mismatch must persist this long bef
 SETPOINT_NUDGE_TOLERANCE_F= 0.2   # readback match tolerance
 SETPOINT_HEATCOOL_MIN_DELTA_F = 6.0  # ecobee heatCoolMinDelta, see TRAP 1 below
 
+# ── Setpoint-nudge ownership persistence (restart-amnesia / baseline-ratchet fix,
+#    added 2026-09-01) ─────────────────────────────────────────────────────────
+# The ratchet: the restarted app has no memory of its OWN leftover nudge, so the
+# ownership rule's value-match ("readback differs from what we commanded ->
+# user changed it -> adopt as the new baseline") faithfully adopts the app's own
+# residue as user intent and then nudges one STEP further. Every restart during
+# an active nudge ratchets: 72 -> 66 -> 63 -> ...
+#
+# The fix is to survive restarts with the ownership record. We deliberately use
+# a plain ATOMIC JSON FILE, not an HA input_text entity:
+#   - an input_text entity can be unavailable/racy exactly when initialize()
+#     runs during an AppDaemon/Core restart (the critical moment),
+#   - input_text caps content at 255 chars,
+#   - it is user-editable in the HA UI (and thus a source of state corruption).
+# The file is written via a temp file + os.replace(), so a reader never sees a
+# half-written record (atomic on POSIX, which includes the addon container).
+# Path: derived from the app's own module path (__file__), which is deployed into
+# the AppDaemon addon's writable /addon_configs/a0d7b954_appdaemon/apps/ dir (see
+# the SCP target in the smart-vent-controller skill) — so the file travels with
+# the app and always lands somewhere valid WITHOUT a hardcoded host path.
+# All I/O here is defensive (any read/write exception is caught and logged);
+# a lost write is a degraded-but-safe condition -> one-cycle replay of the
+# dead-man's-switch hold, never a crash of initialize()/control_loop.
+NUDGE_STATE_FILENAME = "smart_vent_controller_nudge_state.json"
+# Timestamp the command (as ISO-8601 in UTC) when we persist, so a restore can
+# still evaluate whether the persisted CONFIRM window from the command time is open.
+NUDGE_STATE_VERSION = 1
+
 # ── Fan-assist redistribution (the thermostat blind-spot workaround) ───────────
 # A single hallway thermostat goes idle when the HOUSE AVERAGE is satisfied, even
 # while an individual room is still hot — that's the core reason a disadvantaged
@@ -687,6 +718,29 @@ class SmartVentController(hass.Hass):
         self._sp_last_write_ts = None
         self._sp_mismatch_since = None
         self._sp_heating = None
+
+        # Persistence of the nudge-ownership record. _nudge_state_file is the
+        # single source of truth for the state-file path; _nudge_persist_disable
+        # lets offline tests point it at a temp file (and force-persist for the
+        # write-ahead ordering assertion). _nudge_restore_pending is True after a
+        # persisted record was loaded but not yet validated against the live
+        # readback on the first control_loop cycle (see the comment on
+        # _restore_nudge_ownership and control_loop — validation CANNOT safely
+        # run inside initialize()). Derived from the app's own module path so it
+        # lives in the addon's writable apps/ dir (see NUDGE_STATE_FILENAME).
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self._nudge_state_file = os.path.join(base_dir, NUDGE_STATE_FILENAME)
+        self._nudge_persist_disable = False
+        self._nudge_restore_pending = False
+
+        # Re-adopt any persisted nudge-ownership record across an app restart.
+        # Runs as early as possible so the ratchet cannot recur between
+        # processes. The record's live-readback VALIDATION is deferred to the
+        # first control_loop cycle (_nudge_restore_pending) — get_state() can be
+        # unavailable/racy this early during an AppDaemon/Core restart, so a read
+        # taken synchronously here could wrongly DISCARD a valid persisted nudge.
+        # Defensive inside: any read/allocation exception is caught and logged.
+        self._restore_nudge_ownership()
 
         # Dry-coil lockout tracking. _cooling_ended_at is the timestamp the
         # compressor last transitioned out of "cooling"; None while actively
@@ -856,6 +910,26 @@ class SmartVentController(hass.Hass):
         hvac_mode, hvac_action, target_cool, target_heat = self._get_thermostat_state()
         self.log(f"Thermostat: mode={hvac_mode}, action={hvac_action}, "
                  f"cool={target_cool}, heat={target_heat}")
+
+        # Restart-amnesia guard: the FIRST cycle after initialize() may carry a
+        # persisted setpoint-nudge ownership record loaded from disk. Re-adopt
+        # it now, against the CURRENT live readback, BEFORE any pass below
+        # (baseline-aware vent scoring, _apply_setpoint_nudge) can use _sp_owned.
+        # Validation runs HERE, not in initialize(), because get_state() for the
+        # thermostat can be unavailable/racy the instant the app starts during an
+        # AppDaemon/Core restart — if it returned no setpoints initialize() would
+        # see a None readback and wrongly discard a valid persisted nudge (the
+        # exact amnesia the fix exists to prevent). By the time the first loop
+        # runs (run_every schedules control_loop at now+10; initialize returns
+        # long before that), the HA state is settled, so the readback here is
+        # trustworthy. One code path, documented; see _restore_nudge_ownership.
+        if self._nudge_restore_pending:
+            self._nudge_restore_pending = False
+            if getattr(self, "_sp_owned", False):
+                # initialize() re-adopted ownership. Still corroborate against
+                # the live readback (the persisted record may have gone stale
+                # during the restart window) — discard on ANY mismatch/expiry.
+                self._validate_restored_nudge(target_cool, target_heat)
 
         # Baseline-aware vent scoring (single source of truth). While a setpoint
         # nudge is actively held AND its readback matches what we commanded, vent
@@ -2375,6 +2449,10 @@ class SmartVentController(hass.Hass):
         """
         self.log(f"  SETPOINT-NUDGE: releasing (resume_top_event) — our hold "
                  f"is still the top event, safe to pop")
+        # WRITE-AHEAD: persist the relinquishment BEFORE issuing the release, so
+        # a crash between these two lines cannot leave a live hold behind with
+        # no persisted record (the amnesia the reset would then ratchet on).
+        self._persist_nudge_state(owned=False)
         # Fire-and-forget — see _set_vent for why (pinned-thread freeze
         # incident). Same callback discipline as fan-assist.
         self.call_service("ecobee_enhanced/resume_top_event",
@@ -2420,6 +2498,278 @@ class SmartVentController(hass.Hass):
             hass_timeout=8,
             callback=self._service_call_done,
         )
+
+    # ── Setpoint-nudge ownership persistence ──────────────────────────────────
+    # Restart-amnesia/ratchet fix (2026-09-01). Ownership must survive an app
+    # restart with VALIDATED restore: a persisted record is only re-adopted when
+    # the live readback corroborates it, otherwise it is discarded and today's
+    # existing behavior (adopt the live value as the user's baseline) runs.
+
+    def _nudge_state_path(self):
+        """Return the absolute path of the nudge-ownership state file.
+
+        Computed once in initialize() (_nudge_state_file) and cached. We do NOT
+        fall back to deriving it from the module here on purpose: production
+        initialize() always sets the path (so production persistence always
+        works), and any code that never ran initialize() (e.g. an offline test
+        harness that only exercises _apply_setpoint_nudge) must not silently
+        write a state file into the app directory — returning None makes both
+        persist and restore safe no-ops there.
+        """
+        return getattr(self, "_nudge_state_file", None)
+
+    def _persist_nudge_state(self, owned, commanded_cool=None, commanded_heat=None,
+                             baseline_cool=None, baseline_heat=None, heating=None):
+        """Atomically persist the full nudge-ownership record to disk.
+
+        WRITE-AHEAD: callers invoke this BEFORE issuing any setHold/resume
+        service call. State is serialized as ONE record, so a crash can never
+        leave a half-restored pair (the ecobee heatCoolMinDelta is 6F and this
+        house sits exactly at that minimum gap, so a half-restored pair would be
+        silently rejected by a later write).
+
+        `owned` is True for engage/keep/deepen, False for relinquish/release.
+        When relinquishing we persist owned=False WITHOUT the commanded values,
+        so a restore can never re-adopt after a clean (non-ratchet) exit — the
+        absence of a corroborating commanded record forces discard. The record's
+        commanded fields are written as None when owned=False so a reader cannot
+        mistake a stale value for ours.
+
+        All I/O is defensive: any exception is caught and logged, and NEVER
+        crashes the control loop or initialize(). A failed persist is a
+        degraded-but-safe condition (the dead-man's switch bounds it), not fatal.
+        """
+        try:
+            path = self._nudge_state_path()
+            if path is None:
+                return
+            if getattr(self, "_nudge_persist_disable", False):
+                self.log("  SETPOINT-NUDGE: persistence disabled (test); "
+                         "skipping state write")
+                return
+            commanded_cool = (None if commanded_cool is None
+                              else float(commanded_cool))
+            commanded_heat = (None if commanded_heat is None
+                              else float(commanded_heat))
+            baseline_cool = (None if baseline_cool is None
+                             else float(baseline_cool))
+            baseline_heat = (None if baseline_heat is None
+                             else float(baseline_heat))
+            record = {
+                "version": NUDGE_STATE_VERSION,
+                "owned": bool(owned),
+                # ISO-8601 UTC timestamp of THIS command, so a restore can
+                # still judge whether the confirm window is open.
+                "commanded_at": self.datetime().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "commanded_cool": commanded_cool,
+                "commanded_heat": commanded_heat,
+                "baseline_cool": baseline_cool,
+                "baseline_heat": baseline_heat,
+                "heating": (None if heating is None else bool(heating)),
+            }
+            payload = json.dumps(record)
+            # Atomic write: temp file in the same dir + os.replace(). A reader
+            # sees either the old or the new file, never a partial record.
+            fd, tmp = tempfile.mkstemp(prefix="nudge_state_",
+                                       dir=os.path.dirname(path))
+            try:
+                with os.fdopen(fd, "w") as f:
+                    f.write(payload)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+            except BaseException:
+                # Best-effort cleanup of the temp file on failure.
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except (OSError, IOError):
+                    pass
+                raise
+        except Exception as e:  # noqa: BLE001 - defensive: never crash the loop
+            self.log(f"  SETPOINT-NUDGE: failed to persist ownership state — "
+                     f"degraded but safe, one-cycle dead-man's-switch may "
+                     f"replay: {e}")
+
+    def _restore_nudge_ownership(self):
+        """Load the persisted record in initialize() and conditionally re-adopt.
+
+        Set on the app the ownership attributes the record describes, then
+        defer the readback MATCH decision to the first control_loop cycle (see
+        control_loop + _validate_restored_nudge): get_state() can be
+        unavailable/racy the instant the app starts during a restart, so we
+        cannot trust a read taken synchronously here. The re-adoption here is
+        therefore a provisional "_sp_owned=True pending readback validation",
+        flagged by _nudge_restore_pending.
+
+        If the record is missing, corrupt, unparseable, missing fields, an
+        unknown version, or a clean 'owned=False' relinquishment (release /
+        user-override / hold-expired), we clear ownership state and return —
+        today's existing behavior (adopt the live value as the user's baseline)
+        then runs, which is the desired fall-through for 'the user changed it
+        while the app was down' and 'the hold expired via nextTransition during
+        downtime'.
+
+        NO release/resume call is ever issued here.
+        """
+        self._nudge_restore_pending = False
+        try:
+            path = self._nudge_state_path()
+            if path is None:
+                return
+            if not os.path.exists(path):
+                return  # no record -> normal first start / file lost (accepted)
+            with open(path, "r") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("state record not a JSON object")
+            if data.get("version") != NUDGE_STATE_VERSION:
+                raise ValueError("unknown state version")
+            if not data.get("owned"):
+                # A clean relinquish/release wrote owned=False, or the previous
+                # run correctly discarded on a mismatch: not re-adopting is
+                # correct either way.
+                return
+            commanded_at = data.get("commanded_at")
+            cmd_ts = None
+            if isinstance(commanded_at, str):
+                try:
+                    cmd_ts = datetime.strptime(commanded_at,
+                                               "%Y-%m-%dT%H:%M:%SZ")
+                except (ValueError, TypeError):
+                    cmd_ts = None
+            if cmd_ts is None:
+                raise ValueError("missing/unparseable commanded_at timestamp")
+
+            bas_cool = data.get("baseline_cool")
+            bas_heat = data.get("baseline_heat")
+            cmd_cool = data.get("commanded_cool")
+            cmd_heat = data.get("commanded_heat")
+            heating = data.get("heating")
+            # Baseline AND commanded values must be present and numeric on BOTH
+            # axes for a re-adoption (heatCoolMinDelta pair integrity: restore
+            # both together or not at all — a half-restored pair is silently
+            # rejected by ecobee writes). heating must be a bool to pick the
+            # moved axis for the readback match.
+            if bas_cool is None or bas_heat is None:
+                raise ValueError("missing baseline axis")
+            if cmd_cool is None or cmd_heat is None:
+                raise ValueError("missing commanded axis")
+            if heating is None:
+                raise ValueError("missing heating direction")
+            bas_cool, bas_heat = float(bas_cool), float(bas_heat)
+            cmd_cool, cmd_heat = float(cmd_cool), float(cmd_heat)
+            heating = bool(heating)
+            self.log(f"  SETPOINT-NUDGE: found persisted ownership "
+                     f"(commanded cool {cmd_cool:.1f} heat {cmd_heat:.1f}, "
+                     f"baseline cool {bas_cool:.1f} heat {bas_heat:.1f}, "
+                     f"commanded_at {commanded_at}) — pending live-readback "
+                     f"validation on the first control loop")
+
+            # Provisional re-adopt. Set ALL ownership state from the record; the
+            # first control_loop cycle will corroborate (or discard) it against
+            # the live readback before any pass below uses _sp_owned.
+            self._sp_owned = True
+            self._sp_commanded_cool = cmd_cool
+            self._sp_commanded_heat = cmd_heat
+            self._sp_baseline_cool = bas_cool
+            self._sp_baseline_heat = bas_heat
+            self._sp_last_write_ts = cmd_ts
+            self._sp_mismatch_since = None
+            self._sp_heating = heating
+            self._sp_restore_commanded_at = cmd_ts
+            self._nudge_restore_pending = True
+        except Exception as e:  # noqa: BLE001 - defensive discard, never crash
+            self.log(f"  SETPOINT-NUDGE: persisted ownership state corrupt or "
+                     f"invalid, DISCARDING — adopting live setpoints as the "
+                     f"user's baseline: {e}")
+            self._sp_owned = False
+            self._sp_commanded_cool = None
+            self._sp_commanded_heat = None
+            self._sp_baseline_cool = None
+            self._sp_baseline_heat = None
+            self._sp_last_write_ts = None
+            self._sp_mismatch_since = None
+            self._sp_heating = None
+
+    def _validate_restored_nudge(self, live_cool, live_heat):
+        """Corroborate a re-adopted persisted record against the LIVE readback.
+
+        Called once, on the first control_loop cycle after initialize() loaded a
+        record. Re-adopts full ownership ONLY IF the live readback corroborates
+        the persisted record:
+          - readback matches the persisted commanded value on the moved axis
+            (within SETPOINT_NUDGE_TOLERANCE_F) -> keep full ownership. This is
+            the ratchet fix: the app now KNOWS the 66 is ITS OWN hold and that
+            its true baseline is 72.
+          - OR the confirm window (SETPOINT_NUDGE_CONFIRM_SEC from the persisted
+            command time) is still open AND readback still matches the PRIOR
+            (pre-nudge) value -> keep ownership, still in-flight (the nudge
+            hasn't echoed back yet / the user's schedule value is still live).
+          - ANYTHING ELSE -> DISCARD silently and fall through: the live value
+            is adopted as the user's baseline by today's existing behavior.
+            This covers 'the user changed it while the app was down' and 'the
+            hold expired via nextTransition during downtime'.
+        NO release/resume service call is issued here (releasing on an
+        unexplained mismatch would clobber a genuine user hold — the REJECTED
+        option).
+        """
+        # Reuse the EXISTING _nudge_readback_matches so restore and steady-state
+        # ownership can never disagree (recurring-bug-class guard). It compares
+        # self._sp_commanded_* on the moved axis; a persisted record set those,
+        # so the predicate works unchanged.
+        if self._sp_owned and self._sp_heating is not None \
+                and self._nudge_readback_matches(self._sp_heating,
+                                                 live_cool, live_heat):
+            self.log("  SETPOINT-NUDGE: restored ownership VALIDATED — live "
+                     "readback matches persisted commanded value; re-adopting "
+                     f"baseline cool {self._sp_baseline_cool:.1f} heat "
+                     f"{self._sp_baseline_heat:.1f}")
+            if hasattr(self, "_sp_restore_commanded_at"):
+                del self._sp_restore_commanded_at
+            return
+
+        # Readback did NOT match the persisted commanded value. Check whether the
+        # confirm window from the persisted command time is still open.
+        cmd_ts = getattr(self, "_sp_restore_commanded_at", None)
+        in_flight = False
+        if cmd_ts is not None and self._sp_heating is not None:
+            now = self.datetime()
+            if (now - cmd_ts).total_seconds() < SETPOINT_NUDGE_CONFIRM_SEC:
+                # Window open. Re-adopt as in-flight ONLY if the live readback
+                # still matches the PRIOR value (the user's pre-nudge baseline),
+                # i.e. the nudge simply hasn't echoed/applied yet.
+                if not self._sp_heating:
+                    matches_prior = (live_cool is not None
+                                     and abs(live_cool - self._sp_baseline_cool)
+                                     <= SETPOINT_NUDGE_TOLERANCE_F)
+                else:
+                    matches_prior = (live_heat is not None
+                                     and abs(live_heat - self._sp_baseline_heat)
+                                     <= SETPOINT_NUDGE_TOLERANCE_F)
+                if matches_prior:
+                    in_flight = True
+                    self.log("  SETPOINT-NUDGE: restored ownership re-adopted "
+                             "as IN-FLIGHT — confirm window open and readback "
+                             "still matches the pre-nudge value")
+
+        if not in_flight:
+            # Corrupt/stale/unexplained mismatch: DISCARD silently. Do NOT issue
+            # any release/resume. Existing behavior adopts the live value as the
+            # user's baseline on the next pass.
+            self.log("  SETPOINT-NUDGE: restored ownership DISCARDED — live "
+                     "readback does not corroborate the persisted record, so "
+                     "adopting live as the user's baseline")
+            self._sp_owned = False
+            self._sp_commanded_cool = None
+            self._sp_commanded_heat = None
+            self._sp_baseline_cool = None
+            self._sp_baseline_heat = None
+            self._sp_last_write_ts = None
+            self._sp_mismatch_since = None
+            self._sp_heating = None
+            if hasattr(self, "_sp_restore_commanded_at"):
+                del self._sp_restore_commanded_at
 
     def _nudge_readback_matches(self, heating, live_cool, live_heat):
         """True iff live readback matches what we last commanded on the moved axis.
@@ -2617,6 +2967,18 @@ class SmartVentController(hass.Hass):
             baseline_heat = target_heat
             commanded_cool, commanded_heat = self._commanded_setpoints(
                 baseline_cool, baseline_heat, heating, worst_excess, dual)
+            # WRITE-AHEAD: persist the INTENDED ownership state BEFORE issuing
+            # the hold. A persisted intent whose readback never matches is safely
+            # DISCARDED on restore; the reverse (a live hold with no persisted
+            # record) is exactly the restart-amnesia ratchet bug this guards
+            # against. So the file records state BEFORE the service call.
+            self._persist_nudge_state(
+                owned=True,
+                commanded_cool=commanded_cool,
+                commanded_heat=commanded_heat,
+                baseline_cool=baseline_cool,
+                baseline_heat=baseline_heat,
+                heating=heating)
             self._write_setpoint_nudge(commanded_heat, commanded_cool)
             self._sp_owned = True
             self._sp_baseline_cool = baseline_cool
@@ -2661,6 +3023,11 @@ class SmartVentController(hass.Hass):
                 self.log(f"  SETPOINT-NUDGE: user changed setpoint (cool "
                          f"{self._sp_commanded_cool:.1f} -> {live_cool} live), "
                          f"relinquishing ownership without resuming")
+                # Persist the relinquishment BEFORE clearing in-memory state, so
+                # a crash mid-transition cannot leave a stale "we own it" record.
+                # The user's live value becomes the baseline for any future
+                # engagement once they release it back to schedule.
+                self._persist_nudge_state(owned=False)
                 self._sp_owned = False
                 self._sp_commanded_cool = None
                 self._sp_commanded_heat = None
@@ -2712,6 +3079,13 @@ class SmartVentController(hass.Hass):
                 < SETPOINT_NUDGE_DWELL_SEC:
             return
         # Write the larger nudge, still off the ORIGINAL baseline.
+        self._persist_nudge_state(
+            owned=True,
+            commanded_cool=new_cool,
+            commanded_heat=new_heat,
+            baseline_cool=self._sp_baseline_cool,
+            baseline_heat=self._sp_baseline_heat,
+            heating=heating)
         self._write_setpoint_nudge(new_heat, new_cool)
         self._sp_commanded_cool = new_cool
         self._sp_commanded_heat = new_heat
