@@ -857,6 +857,24 @@ class SmartVentController(hass.Hass):
         self.log(f"Thermostat: mode={hvac_mode}, action={hvac_action}, "
                  f"cool={target_cool}, heat={target_heat}")
 
+        # Baseline-aware vent scoring (single source of truth). While a setpoint
+        # nudge is actively held AND its readback matches what we commanded, vent
+        # scoring references the USER's effective (pre-nudge) baseline setpoints
+        # instead of the artificially nudged LIVE ones — the vents aim at how the
+        # house should FEEL, while the compressor is separately hammered harder by
+        # the nudge. Computed HERE once per cycle, on the nudge state from the
+        # previous cycle (exactly the state the current cycle's vent decisions
+        # should use), and passed to all three vent-scoring passes so they can
+        # never drift apart (recurring-bug-class guard). When no nudge is trusted
+        # live, _active_nudge_baseline returns None and these equal the LIVE
+        # setpoints byte-for-byte. The nudge's own pass and delivery penalties
+        # deliberately keep using the LIVE setpoints (see their call sites).
+        _bl = self._active_nudge_baseline(target_cool, target_heat)
+        if _bl:
+            eff_cool, eff_heat = _bl
+        else:
+            eff_cool, eff_heat = target_cool, target_heat
+
         # Track the compressor cooling->idle transition for the dry-coil
         # lockout. Stamp the moment cooling stops; clear it while cooling so a
         # fresh cycle resets the drain timer. Read by _apply_fan_assist.
@@ -927,7 +945,7 @@ class SmartVentController(hass.Hass):
 
         elif mode == "Auto":
             room_positions = self._auto_calculate(
-                hvac_mode, hvac_action, target_cool, target_heat
+                hvac_mode, hvac_action, eff_cool, eff_heat
             )
 
         # Concentrate airflow toward any struggling room by throttling already-
@@ -935,7 +953,7 @@ class SmartVentController(hass.Hass):
         # when heating. Must run BEFORE backpressure so backpressure remains the
         # final safety net.
         room_positions = self._apply_priority_rooms(
-            room_positions, hvac_action, target_cool, target_heat, mode
+            room_positions, hvac_action, eff_cool, eff_heat, mode
         )
 
         # Fan-assist redistribution: when the system is idle but a room is still
@@ -944,7 +962,7 @@ class SmartVentController(hass.Hass):
         # room when cooling; warm air to a cold room when heating). Manages the
         # fan mode and may rewrite room_positions. Runs before backpressure.
         room_positions = self._apply_fan_assist(
-            room_positions, mode, hvac_action, target_cool, target_heat
+            room_positions, mode, hvac_action, eff_cool, eff_heat
         )
 
         # Setpoint nudge (the TRIGGER axis): independently of the vent-position
@@ -2403,6 +2421,70 @@ class SmartVentController(hass.Hass):
             callback=self._service_call_done,
         )
 
+    def _nudge_readback_matches(self, heating, live_cool, live_heat):
+        """True iff live readback matches what we last commanded on the moved axis.
+
+        Single source of truth for the readback-match condition shared by
+        _apply_setpoint_nudge (ownership keep/release) and _active_nudge_baseline
+        (whether to reference the pre-nudge baseline for vent scoring). The moved
+        axis is the one the nudge actually changed ('heating' True -> heat axis,
+        False -> cool axis); the other axis may be coupled (TRAP 1 heatCoolMinDelta)
+        but ownership pivots only on the moved axis.
+
+        Pure refactor target: _apply_setpoint_nudge's owned branch computes this
+        inline; routing it through here (identical expression) keeps the two
+        consumers from ever drifting apart, which is the exact recurring bug class
+        this file guards against.
+        """
+        if not heating:
+            return (live_cool is not None
+                    and abs(live_cool - self._sp_commanded_cool)
+                    <= SETPOINT_NUDGE_TOLERANCE_F)
+        else:
+            return (live_heat is not None
+                    and abs(live_heat - self._sp_commanded_heat)
+                    <= SETPOINT_NUDGE_TOLERANCE_F)
+
+    def _active_nudge_baseline(self, target_cool, target_heat):
+        """Return (baseline_cool, baseline_heat) iff a setpoint nudge is active
+        AND its live readback matches what we commanded.
+
+        Vent scoring must reference the USER's effective (pre-nudge BASELINE)
+        setpoints while a nudge is actively holding the thermostat below/above
+        them. The vents aim at how the house should FEEL, while the compressor is
+        separately being hammered harder by the nudge (so the nudge's own
+        worst_excess and _update_delivery_penalties deliberately stay on LIVE
+        setpoints — see callers). Without this substitution every room reads as
+        far over the artificially-nudged setpoint during an active nudge and pins
+        at 100%, defeating all redistribution.
+
+        Returns None — so callers fall back to the LIVE setpoints, giving
+        byte-identical behavior whenever no nudge is trusted live — unless we own
+        a nudge in the exact 'owned AND readback matches' keep-ownership state
+        _apply_setpoint_nudge uses:
+          - not owned                            -> None
+          - owned but _sp_heating missing        -> None (no axis to compare)
+          - owned but baseline missing           -> None (defensive)
+          - owned + FRESH readback mismatch      -> None. This is the in-flight
+            echo/confirm window. Matching the existing confirm-window semantics
+            (SETPOINT_NUDGE_CONFIRM_SEC), we deliberately do NOT act on an
+            unconfirmed reading — the nudge may be about to relinquish.
+          - owned + readback matches             -> (baseline_cool, baseline_heat)
+        The readback-match condition is EXACTLY the one _apply_setpoint_nudge
+        uses to KEEP ownership (shared _nudge_readback_matches predicate), so the
+        two can never disagree about whether the nudge is trusted.
+        """
+        if not getattr(self, "_sp_owned", False):
+            return None
+        heating = self._sp_heating
+        if heating is None:
+            return None
+        if self._sp_baseline_cool is None or self._sp_baseline_heat is None:
+            return None
+        if not self._nudge_readback_matches(heating, target_cool, target_heat):
+            return None
+        return (self._sp_baseline_cool, self._sp_baseline_heat)
+
     def _apply_setpoint_nudge(self, hvac_mode, hvac_action, target_cool,
                               target_heat, mode="Auto"):
         """Temporarily move the thermostat setpoint to force compressor escalation.
@@ -2556,15 +2638,10 @@ class SmartVentController(hass.Hass):
 
         # Which axis did we move? (The moved axis is the one we compare readback
         # against — the other axis may be coupled, but ownership pivots on the
-        # active cooling/heating axis we actually changed.)
-        if not heating:
-            matches = (live_cool is not None
-                       and abs(live_cool - self._sp_commanded_cool)
-                       <= SETPOINT_NUDGE_TOLERANCE_F)
-        else:
-            matches = (live_heat is not None
-                       and abs(live_heat - self._sp_commanded_heat)
-                       <= SETPOINT_NUDGE_TOLERANCE_F)
+        # active cooling/heating axis we actually changed.) Shared predicate so
+        # ownership and vent-scoring baseline substitution can never disagree
+        # about whether the nudge's readback is trusted.
+        matches = self._nudge_readback_matches(heating, live_cool, live_heat)
 
         if not matches:
             # Readback does NOT match our commanded value.
