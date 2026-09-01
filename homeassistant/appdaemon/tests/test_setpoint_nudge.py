@@ -121,12 +121,33 @@ class FakeHA(svc.SmartVentController):
                 "current_temperature": 72.0,
             },
         }
+        # Cloud-truth setpoint sensors. Default to the mirror values so the
+        # pre-existing suites (which treat the mirror as the live readback)
+        # behave identically; a test that wants them to DIVERGE uses
+        # set_cloud_truth(). Ownership decisions now follow THESE, not the
+        # mirror, so a suite must keep them in sync unless it is deliberately
+        # exercising the mirror-vs-cloud disagreement.
+        self.states[svc.SETPOINT_TRUTH_COOL] = self._sp_cool
+        self.states[svc.SETPOINT_TRUTH_HEAT] = self._sp_heat
 
     def live_cool(self):
         return self.attrs[(svc.THERMOSTAT, "all")]["attributes"]["target_temp_high"]
 
     def live_heat(self):
         return self.attrs[(svc.THERMOSTAT, "all")]["attributes"]["target_temp_low"]
+
+    def set_cloud_truth(self, cool=None, heat=None, **dummy):
+        """Set ONLY the cloud-truth setpoint sensors (leave the mirror alone).
+
+        This is how a test makes the mirror and cloud truth DISAGREE, which the
+        ownership logic must distinguish. `dummy` absorbs a mirrored
+        set_live_setpoints signature so the same call shape works both ways.
+        Values may be numeric, None, 'unknown', or 'unavailable'.
+        """
+        if cool is not None:
+            self.states[svc.SETPOINT_TRUTH_COOL] = cool
+        if heat is not None:
+            self.states[svc.SETPOINT_TRUTH_HEAT] = heat
 
     def set_room_temp(self, zone, room, temp):
         s = svc.ZONES[zone]["rooms"][room]
@@ -137,12 +158,17 @@ class FakeHA(svc.SmartVentController):
         self.states[s["occupancy"]] = "on"
 
     def set_live_setpoints(self, cool=None, heat=None):
-        """Simulate the ecobee readback changing (our echo or a user change)."""
+        """Simulate the ecobee readback changing (our echo or a user change).
+
+        A live ecobee write echo appears on BOTH the mirror AND the cloud-truth
+        sensors (they are the same real setpoints), so keep them in sync.
+        """
         a = self.attrs[(svc.THERMOSTAT, "all")]["attributes"]
         if cool is not None:
             a["target_temp_high"] = float(cool)
         if heat is not None:
             a["target_temp_low"] = float(heat)
+        self.set_cloud_truth(cool=cool, heat=heat)
 
     def set_hvac_action(self, action):
         """Flip the thermostat's hvac_action (e.g. to 'idle' / 'fan')."""
