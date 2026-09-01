@@ -217,14 +217,14 @@ if writes:
     kw = writes[0]
     check("T2 cool_temp_f == baseline_cool - nudge(5.5)",
           kw["cool_temp_f"] == 70.0 - nudge_amount(5.5))
-    # TRAP 1 in heat_cool: dropping cool to 67.5 must drag heat down to
-    # 67.5 - 6.0 = 61.5 so the min heatCoolMinDelta gap is preserved.
-    check("T2 heat_temp_f == 61.5 (dragged to preserve 6F gap)",
-          kw["heat_temp_f"] == 61.5)
+    # TRAP 1 in heat_cool: dropping cool to 68.0 must drag heat down to
+    # 68.0 - 6.0 = 62.0 so the min heatCoolMinDelta gap is preserved.
+    check("T2 heat_temp_f == 62.0 (dragged to preserve 6F gap)",
+          kw["heat_temp_f"] == 62.0)
     check("T2 hold_type == nextTransition", kw["hold_type"] == "nextTransition")
 check("T2 _sp_owned True", ha._sp_owned is True)
 check("T2 _sp_baseline_cool captured live 70.0", ha._sp_baseline_cool == 70.0)
-check("T2 _sp_commanded_cool recorded", ha._sp_commanded_cool == 67.5)
+check("T2 _sp_commanded_cool recorded", ha._sp_commanded_cool == 68.0)
 
 # =============================================================================
 # 3. NUDGE IS CAPPED: worst_excess 20.0 -> commanded cool never more than
@@ -321,14 +321,14 @@ check("T7 confirmed override: baseline NOT restored (cool live 69.5, not 70)",
 #    _sp_mismatch_since cleared, zero calls.
 # =============================================================================
 ha = build_occupied_room(zone="upstairs", room="Game Room", temp=77.0, sp_cool=70.0)
-ha.run_nudge()  # engage, cool 67.5
-# A transient echo mismatch (poll lag) shows 68.0 for ONE cycle...
-ha.set_live_setpoints(cool=68.0, heat=64.0)
+ha.run_nudge()  # engage, cool 68.0
+# A transient echo mismatch (poll lag) shows 69.0 for ONE cycle...
+ha.set_live_setpoints(cool=69.0, heat=64.0)
 ha.run_nudge()
 check("T8 echo: ownership still held on first mismatch",
       ha._sp_owned is True and ha._sp_mismatch_since is not None)
-# ...then the readback settles to our commanded 67.5 on the next cycle.
-ha.set_live_setpoints(cool=67.5, heat=64.0)
+# ...then the readback settles to our commanded 68.0 on the next cycle.
+ha.set_live_setpoints(cool=68.0, heat=64.0)
 ha.run_nudge()
 check("T8 echo: ownership RETAINED after readback re-matches",
       ha._sp_owned is True)
@@ -365,13 +365,13 @@ if writes:
           kw["cool_temp_f"] - kw["heat_temp_f"] >= svc.SETPOINT_HEATCOOL_MIN_DELTA_F)
 
 # =============================================================================
-# 10. MIN DELTA: heat_cool mode, baseline cool=70 heat=64, nudge cool down 1.5
-#     -> the SAME service call must ALSO send heat_temp_f <= 62.5 so the 6F gap
+# 10. MIN DELTA: heat_cool mode, baseline cool=70 heat=64, nudge cool down 1.0
+#     -> the SAME service call must ALSO send heat_temp_f <= 63.0 so the 6F gap
 #     is preserved.
-#     nudge 1.5 -> excess where nudge_amount = 1.5 -> excess*0.5 >= 1.5 and
-#     floor((excess*0.5)/0.5) == 3 -> excess in [3.0, 4.0). Use excess 3.5:
-#     nudge = floor(3.5*0.5/0.5)*0.5 = 1.5 -> cool 70-1.5=68.5.
-#     commanded_heat = min(64, 68.5-6) = min(64,62.5) = 62.5.
+#     nudge 1.0 -> excess where nudge_amount = 1.0 -> floor(excess*0.5/1.0)==1
+#     -> excess in [2.0, 4.0). Use excess 3.5:
+#     nudge = floor(3.5*0.5/1.0)*1.0 = 1.0 -> cool 70-1.0=69.0.
+#     commanded_heat = min(64, 69.0-6) = min(64,63.0) = 63.0.
 # =============================================================================
 ha = FakeHA(hvac_mode="heat_cool", hvac_action="cooling", sp_cool=70.0, sp_heat=64.0)
 ha.occupy("upstairs", "Game Room")
@@ -382,9 +382,9 @@ writes = setpoint_calls(ha)
 check("T10 mindelta: exactly one write", len(writes) == 1)
 if writes:
     kw = writes[0]
-    check("T10 cool_temp_f == 68.5", kw["cool_temp_f"] == 68.5)
+    check("T10 cool_temp_f == 69.0 (whole degree)", kw["cool_temp_f"] == 69.0)
     check("T10 cold-cool drags heat down to preserve 6F gap",
-          kw["heat_temp_f"] <= 62.5)
+          kw["heat_temp_f"] <= 63.0)
     check("T10 gap preserved (cool - heat >= 6F)",
           kw["cool_temp_f"] - kw["heat_temp_f"] >= svc.SETPOINT_HEATCOOL_MIN_DELTA_F)
 
