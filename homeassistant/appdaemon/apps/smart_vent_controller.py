@@ -432,6 +432,15 @@ PRIORITY_MAX_DONORS = 8
 # closures at MAX_CLOSED_RATIO, so this can't choke the system.
 PRIORITY_ESCALATE_OVER = 3.0
 PRIORITY_DONOR_POS_ESCALATED = 0
+# Per-room escalation override: lets a specific room escalate to full (0%)
+# donor throttling sooner than the flat PRIORITY_ESCALATE_OVER, without
+# changing behavior for every other room. Game Room runs hot most cycles
+# (2026-08-31, user asked to prioritize it further) — escalate at 1.5F over
+# setpoint instead of waiting for 3.0F, so it starts pulling maximum donor
+# CFM much earlier in an overshoot.
+PRIORITY_ESCALATE_OVERRIDES = {
+    ("upstairs", "Game Room"): 1.5,
+}
 
 # ── Delivery / capacity handicap (achieved-cooling-rate axis) ──────────────────
 # The SECOND handicap axis, orthogonal to the supply-air penalty above.
@@ -1364,7 +1373,7 @@ class SmartVentController(hass.Hass):
                 # capacity-limited room (GB2) is already wide open, so maximum
                 # donor throttling is the only software lever left to push more
                 # CFM at it — don't wait for it to drift 4°F over first.
-                escalated = (off >= PRIORITY_ESCALATE_OVER
+                escalated = (off >= PRIORITY_ESCALATE_OVERRIDES.get(key, PRIORITY_ESCALATE_OVER)
                              or self._delivery_penalty.get(key, 0.0)
                              >= DELIVERY_ESCALATE_PENALTY)
                 beneficiaries.append((off, key, temp, escalated, is_occupied))
@@ -1540,7 +1549,7 @@ class SmartVentController(hass.Hass):
                 margin = self._room_margin(key, heating, base_margin=FAN_ASSIST_OVER)
                 if off < margin:
                     continue
-                escalated = (off >= PRIORITY_ESCALATE_OVER
+                escalated = (off >= PRIORITY_ESCALATE_OVERRIDES.get(key, PRIORITY_ESCALATE_OVER)
                              or self._delivery_penalty.get(key, 0.0)
                              >= DELIVERY_ESCALATE_PENALTY)
                 beneficiaries.append((off_by(temp), key, temp, escalated))
