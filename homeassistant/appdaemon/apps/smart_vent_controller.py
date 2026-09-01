@@ -577,7 +577,19 @@ SETPOINT_NUDGE_ENGAGE_F   = 1.5   # worst_excess at/above this engages a nudge
 SETPOINT_NUDGE_RELEASE_F  = 0.5   # worst_excess at/below this releases it (hysteresis band; MUST be < ENGAGE)
 SETPOINT_NUDGE_GAIN       = 0.5   # degrees of setpoint nudge per degree of worst_excess
 SETPOINT_NUDGE_MAX_F      = 3.0   # hard cap on how far we may ever move the user's setpoint
-SETPOINT_NUDGE_STEP_F     = 0.5   # ecobee setpoint granularity; quantize to this
+# ecobee stores/reports setpoints as WHOLE DEGREES only. The baseline captured at
+# engage is already a whole degree, so quantizing nudge_amount to a whole-degree
+# multiple makes every COMMANDED setpoint land exactly on a value the thermostat
+# can represent. That is load-bearing: a 0.5F command (e.g. 71.5) reads back as
+# the nearest whole degree (71), a 0.5F mismatch that trips the readback-match
+# tolerance (0.2F), which the app misreads as "the user changed the setpoint",
+# adopts its OWN nudge residue as the new baseline, and nudges AGAIN — ratcheting
+# the house 73->71->69->66. Whole-degree command == whole-degree readback, so
+# spurious ownership loss is impossible. ACCEPTED consequence: the minimum
+# effective nudge is now 1.0F instead of 0.5F (a 0.5F nudge was physically
+# unrepresentable and could never have worked). preserve the quantize-DOWN
+# (floor) behavior and the 0..SETPOINT_NUDGE_MAX_F clamp below.
+SETPOINT_NUDGE_STEP_F     = 1.0   # ecobee setpoint granularity (whole degrees); quantize to this
 SETPOINT_NUDGE_DWELL_SEC  = 600   # min seconds between setpoint writes (>= compressor min-ON 10min; prevents fighting the ecobee's own staging)
 SETPOINT_NUDGE_CONFIRM_SEC= 420   # readback mismatch must persist this long before it's believed (ecobee cloud poll floor is 3 min)
 SETPOINT_NUDGE_TOLERANCE_F= 0.2   # readback match tolerance
