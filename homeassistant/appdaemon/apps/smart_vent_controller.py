@@ -189,6 +189,18 @@ THERMOSTAT = "climate.ecobee_thermostat"
 MODE_SELECT = "input_select.vent_control_mode"
 ENABLED_SWITCH = "input_boolean.vent_control_enabled"
 
+# Cloud-truth setpoint sensors exposed by the ecobee_enhanced integration.
+# They mirror the ecobee runtime's authoritative desiredCool/desiredHeat — the
+# LIVE setpoints the cloud actually holds, updated on the coordinator's poll
+# AND immediately after any write (the integration force-refreshes). The
+# setpoint-nudge MUST read its ownership readback and baseline from THESE, NOT
+# from the homekit_controller mirror (THERMOSTAT / climate.ecobee_thermostat),
+# which does NOT reflect a cloud-side hold and caused the live relinquish /
+# re-engage churn loop (it kept reporting 66/60 while the real hold was
+# cool 63 / heat 57). These are whole-degree °F strings, e.g. "63.0".
+SETPOINT_TRUTH_COOL = "sensor.ecobee_edgewater_road_desired_cool"
+SETPOINT_TRUTH_HEAT = "sensor.ecobee_edgewater_road_desired_heat"
+
 # Liveness heartbeat: the control loop stamps this sensor every cycle (even when
 # disabled). An external cron watchdog alerts if it goes stale, catching the
 # "app silently died / stopped looping" failure that originally went unnoticed.
@@ -730,6 +742,10 @@ class SmartVentController(hass.Hass):
         self._sp_last_write_ts = None
         self._sp_mismatch_since = None
         self._sp_heating = None
+        # One-shot log guard for a missing/unavailable cloud-truth setpoint
+        # sensor (see _apply_setpoint_nudge): True after we've logged the
+        # "cloud-truth unavailable" line once, so we don't spam every 120s cycle.
+        self._sp_truth_unavailable_logged = False
 
         # Persistence of the nudge-ownership record. _nudge_state_file is the
         # single source of truth for the state-file path; _nudge_persist_disable
@@ -2807,6 +2823,34 @@ class SmartVentController(hass.Hass):
                     and abs(live_heat - self._sp_commanded_heat)
                     <= SETPOINT_NUDGE_TOLERANCE_F)
 
+    def _cloud_truth_setpoints(self):
+        """Read the ecobee cloud-truth desiredCool/desiredHeat (°F) sensors.
+
+        Returns (cool, heat) as floats, or None on EACH axis that is missing /
+        None / 'unknown' / 'unavailable' / non-numeric. The caller must treat
+        the read as USABLE only when BOTH axes return a float, because a hold
+        written on one axis couples the other (TRAP 1 heatCoolMinDelta) and a
+        half-truth is no truth at all.
+
+        These sensors (SETPOINT_TRUTH_COOL / SETPOINT_TRUTH_HEAT) are the
+        ecobee runtime's AUTHORITATIVE desiredCool/desiredHeat — the live
+        setpoints the cloud actually holds, force-refreshed by the integration
+        right after any write. The nudge's ownership readback and engage
+        baseline MUST come from here; the homekit_controller mirror
+        (THERMOSTAT / climate.ecobee_thermostat) does not reflect a cloud-side
+        hold (it kept reporting 66/60 during a real hold of cool 63/heat 57),
+        which drove the live relinquish/re-engage churn loop.
+        """
+        def _f(entity):
+            state = self.get_state(entity)
+            if state is None:
+                return None
+            try:
+                return float(state)
+            except (ValueError, TypeError):
+                return None
+        return _f(SETPOINT_TRUTH_COOL), _f(SETPOINT_TRUTH_HEAT)
+
     def _active_nudge_baseline(self, target_cool, target_heat):
         """Return (baseline_cool, baseline_heat) iff a setpoint nudge is active
         AND its live readback matches what we commanded.
@@ -2973,10 +3017,31 @@ class SmartVentController(hass.Hass):
                 return
             if not actively_conditioning:
                 return
-            # Capture the baseline = the CURRENT live setpoints (the user's own
-            # effective setpoint — schedule or their manual hold).
-            baseline_cool = target_cool
-            baseline_heat = target_heat
+            # Baseline = the CURRENT live setpoints (the user's own effective
+            # setpoint — schedule or their manual hold), read from the ecobee
+            # CLOUD TRUTH, NOT the homekit_controller mirror: the mirror does
+            # not reflect a cloud-side hold, so capturing it would record a
+            # stale/wrong baseline (the live log showed `baseline cool 66.0` for
+            # a real hold of cool 63). Cloud truth is the only trustworthy
+            # measure of what the user's setpoint actually is right now.
+            truth_cool, truth_heat = self._cloud_truth_setpoints()
+            # CRITICAL SAFETY: a nudge may NOT engage without a trustworthy 2-axis
+            # baseline. If cloud truth is missing / None / 'unknown' /
+            # 'unavailable' / non-numeric on EITHER axis, do NOT engage — there is
+            # no trustworthy baseline to compute the command off of, so we stay
+            # not-owned and simply wait for the sensors to recover. Log at most
+            # once per occurrence, not on every 120s cycle. (Relinquish is
+            # separately guarded in the owned branch; this is the not-owned twin.)
+            if truth_cool is None or truth_heat is None:
+                if self._sp_truth_unavailable_logged is not True:
+                    self._sp_truth_unavailable_logged = True
+                    self.log(f"  SETPOINT-NUDGE: cloud-truth setpoint sensor "
+                             f"unavailable (cool={truth_cool}, heat={truth_heat}); "
+                             f"NOT engaging — no trustworthy baseline")
+                return
+            self._sp_truth_unavailable_logged = False
+            baseline_cool = truth_cool
+            baseline_heat = truth_heat
             commanded_cool, commanded_heat = self._commanded_setpoints(
                 baseline_cool, baseline_heat, heating, worst_excess, dual)
             # WRITE-AHEAD: persist the INTENDED ownership state BEFORE issuing
@@ -3007,8 +3072,32 @@ class SmartVentController(hass.Hass):
             return
 
         # ------------------------------------------------------------- Owned.
-        live_cool = target_cool
-        live_heat = target_heat
+        # Ownership readback comes from the ecobee CLOUD TRUTH (desiredCool/
+        # desiredHeat sensors), NOT the homekit_controller mirror (target_cool/
+        # target_heat). The mirror does not reflect a cloud-side hold — it kept
+        # reporting the PRE-hold values (66/60) while the real hold was cool 63 /
+        # heat 57 — so value-matching against it failed every cycle and the app
+        # spurious-relinquished then re-engaged (~10 min churn loop, live log
+        # 13:13->14:06). Reading cloud truth makes the value-match honest.
+        truth_cool, truth_heat = self._cloud_truth_setpoints()
+        # CRITICAL SAFETY: if cloud truth is missing / None / 'unknown' /
+        # 'unavailable' / non-numeric on EITHER axis, we make NO ownership
+        # decision this cycle — no relinquish, no re-baseline, no service call.
+        # Relinquishing on an unknown readback is exactly what produced churn,
+        # and holding state is safe: the ecobee hold is holdType=nextTransition
+        # and expires on its own. Log at most once per occurrence, not on every
+        # 120s cycle.
+        if truth_cool is None or truth_heat is None:
+            if self._sp_truth_unavailable_logged is not True:
+                self._sp_truth_unavailable_logged = True
+                self.log(f"  SETPOINT-NUDGE: cloud-truth setpoint sensor "
+                         f"unavailable (cool={truth_cool}, heat={truth_heat}); "
+                         f"making NO ownership decision this cycle — holding "
+                         f"state, will expire on its own")
+            return
+        self._sp_truth_unavailable_logged = False
+        live_cool = truth_cool
+        live_heat = truth_heat
 
         # Which axis did we move? (The moved axis is the one we compare readback
         # against — the other axis may be coupled, but ownership pivots on the

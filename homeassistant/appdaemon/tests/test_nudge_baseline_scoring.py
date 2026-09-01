@@ -141,14 +141,31 @@ class FakeHA(svc.SmartVentController):
                 "current_temperature": 72.0,
             },
         }
+        # Cloud-truth setpoint sensors. Default to the (live) mirror values so
+        # pre-existing behavior is unchanged; a test can diverge them with
+        # set_cloud_truth(). Ownership readbacks follow THESE, not the mirror.
+        self.states.setdefault(svc.SETPOINT_TRUTH_COOL, self._live_cool)
+        self.states.setdefault(svc.SETPOINT_TRUTH_HEAT, self._live_heat)
+
+    def set_cloud_truth(self, cool=None, heat=None, **dummy):
+        """Set ONLY the cloud-truth setpoint sensors (leave the mirror alone)."""
+        if cool is not None:
+            self.states[svc.SETPOINT_TRUTH_COOL] = cool
+        if heat is not None:
+            self.states[svc.SETPOINT_TRUTH_HEAT] = heat
 
     def set_live_setpoints(self, cool=None, heat=None):
-        """Simulate the live readback changing (our echo or a user change)."""
+        """Simulate the live readback changing (our echo or a user change).
+
+        A live ecobee write echo appears on BOTH the mirror AND the cloud-truth
+        sensors, so keep them in sync.
+        """
         if cool is not None:
             self._live_cool = float(cool)
         if heat is not None:
             self._live_heat = float(heat)
         self._set_thermostat()
+        self.set_cloud_truth(cool=cool, heat=heat)
 
     def set_hvac_action(self, action):
         self._hvac_action = action
