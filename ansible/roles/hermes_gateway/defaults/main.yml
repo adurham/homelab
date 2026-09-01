@@ -54,6 +54,10 @@ hermes_gateway_ssh_targets:
     hostname: 192.168.86.202
     user: adam.durham
     description: "M4 Ultra Mac Studio — exo cluster node 2"
+  - host: work-macbook-m4
+    hostname: 100.97.72.92
+    user: adam.durham
+    description: "Corp MacBook (Tailscale IP — reachable regardless of which LAN it's on). CLI-only work via the dashboard chat; pubkey registered directly in ~/.ssh/authorized_keys on 2026-09-01 (not ansible-managed on that side, since it's a corp-managed machine outside this inventory)."
 
 # Main model provider for the gateway's primary reasoning thread. One of:
 #   exo           - local Mac Studio cluster (DeepSeek-V4-Flash), free/private,
