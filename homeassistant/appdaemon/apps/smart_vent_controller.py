@@ -1650,6 +1650,14 @@ class SmartVentController(hass.Hass):
         returns base_cooler_by unchanged. `heating` is passed for the contention
         computation only.
         """
+        # The contention-based relaxation is reserved for a VACANT donor zone: an
+        # OCCUPIED zone's rooms still deserve their full protected "must be cooler
+        # by" requirement even when someone elsewhere is suffering (contention
+        # scans OTHER zones, so an occupied zone can easily see non-zero
+        # contention for itself). Matches the docstring and both call-site
+        # comments — see _apply_priority_rooms / _apply_fan_assist.
+        if not self._zone_is_vacant(donor_zone):
+            return base_cooler_by
         c = self._zone_contention(donor_zone, heating)
         if c <= 0.0:
             return base_cooler_by

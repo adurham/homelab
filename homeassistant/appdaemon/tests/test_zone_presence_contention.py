@@ -399,6 +399,99 @@ if svc.ZONE_PRESENCE_ENTITY in haO.published:
     check("OBS published state is a string (coerced, not a bare float)",
           isinstance(st, str))
 
+# =============================================================================
+# 8. REGRESSION: TWO OCCUPIED ZONES — donor relaxation must NOT apply to an
+#    OCCUPIED (non-vacant) zone even when contention for it is non-zero.
+#    Fixed 2026-08-31: _donor_cooler_by now guards on _zone_is_vacant(donor_zone)
+#    at the top, so the contention-based relaxation is reserved for VACANT zones.
+#    Previously the entire suite only had ONE occupied zone, where contention
+#    for that zone is always 0.0 (its own zone is excluded) and the missing
+#    guard was masked.
+# =============================================================================
+# Cooling, cool setpoint 70:
+#   upstairs Game Room    77.0F  "on"   (struggling occupant, the beneficiary)
+#   upstairs Guest Bedr.1 72.0F  "off"
+#   downstairs Living Rm  74.0F  "on"   (a SECOND, genuinely occupied zone)
+#   downstairs Dining Rm  71.0F  "off"
+#   basement              72.0F  "off"
+# Both "upstairs" and "downstairs" are non-vacant. _zone_contention("downstairs")
+# sees Game Room's excess -> non-zero, which (before the fix) wrongly relaxed the
+# donor requirement for the OCCUPIED downstairs zone.
+def build_two_occupied():
+    h = fresh()
+    set_thermostat(h, action="cooling")
+    gr_s = svc.ZONES["upstairs"]["rooms"]["Game Room"]
+    h.states[gr_s["occupancy"]] = "on"
+    h.states[gr_s["temp"]] = 77.0
+    gb1_s = svc.ZONES["upstairs"]["rooms"]["Guest Bedroom 1"]
+    h.states[gb1_s["occupancy"]] = "off"
+    h.states[gb1_s["temp"]] = 72.0
+    lr_s = svc.ZONES["downstairs"]["rooms"]["Living Room"]
+    h.states[lr_s["occupancy"]] = "on"
+    h.states[lr_s["temp"]] = 74.0
+    dr_s = svc.ZONES["downstairs"]["rooms"]["Dining Room"]
+    h.states[dr_s["occupancy"]] = "off"
+    h.states[dr_s["temp"]] = 71.0
+    for zn, zone in svc.ZONES.items():
+        for rn, s in zone["rooms"].items():
+            if rn in ("Game Room", "Living Room"):
+                continue
+            if s.get("occupancy"):
+                h.states[s["occupancy"]] = "off"
+    presence(h)
+    return h
+
+
+ha8 = build_two_occupied()
+# B: contention for the OCCUPIED downstairs zone is genuinely non-zero (the
+# Game Room upstairs is suffering) — this is the path the old suite never
+# exercised, so the test would trivially pass if contention happened to be 0.
+cont8 = ha8._zone_contention("downstairs", heating=False)
+check("T8 B: contention(downstairs) > 0 while downstairs is OCCUPIED",
+      cont8 > 0.0)
+# A: the donor requirement for the OCCUPIED downstairs zone must stay EXACTLY
+# at PRIORITY_DONOR_COOLER_BY — relaxation is reserved for VACANT zones.
+got8a = ha8._donor_cooler_by("downstairs", svc.PRIORITY_DONOR_COOLER_BY, False)
+check("T8 A: _donor_cooler_by(downstairs OCCUPIED) == PRIORITY_DONOR_COOLER_BY exactly",
+      got8a == svc.PRIORITY_DONOR_COOLER_BY)
+print(f"    contention(downstairs)={cont8:.3f} | donor_cooler_by={got8a:.3f} "
+      f"({'relaxed(!)' if got8a < svc.PRIORITY_DONOR_COOLER_BY else 'unchanged'})")
+# D: end-to-end through _apply_priority_rooms, the OCCUPIED Living Room keeps
+# its normal protection (100% as beneficiary), never throttled to 0% as a donor.
+ha8d = build_two_occupied()
+out8 = ha8d._apply_priority_rooms(dict(all100()), "cooling", SP, None, "Auto")
+lr8_key = find_key(ha8d, "Living Room")
+check("T8 D: e2e occupied Living Room NOT throttled to 0% (keeps its 100%)",
+      out8[lr8_key] == 100)
+print(f"    Living Room position: {out8[lr8_key]}")
+
+# C: still-vacant zones KEEP the relaxation — with upstairs occupied+struggling
+# and downstairs fully vacant (never occupied, so past the hold), the donor
+# requirement IS relaxed below base and floored at the thermodynamic guard.
+# (Proves the fix didn't just disable lever B entirely.)
+ha8c = fresh()
+set_thermostat(ha8c, action="cooling")
+gr8c = svc.ZONES["upstairs"]["rooms"]["Game Room"]
+ha8c.states[gr8c["occupancy"]] = "on"
+ha8c.states[gr8c["temp"]] = 77.0
+for zn, zone in svc.ZONES.items():
+    for rn, s in zone["rooms"].items():
+        if rn == "Game Room":
+            continue
+        if s.get("occupancy"):
+            ha8c.states[s["occupancy"]] = "off"
+presence(ha8c)
+check("T8 C: downstairs is fully VACANT (never occupied)",
+      ha8c._zone_is_vacant("downstairs"))
+got8c = ha8c._donor_cooler_by("downstairs", svc.PRIORITY_DONOR_COOLER_BY, False)
+check("T8 C: vacant-zone donor requirement strictly relaxed (< base)",
+      got8c < svc.PRIORITY_DONOR_COOLER_BY)
+check("T8 C: relaxed requirement floored at ZONE_VACANCY_DONOR_MIN_COOLER_F",
+      got8c >= svc.ZONE_VACANCY_DONOR_MIN_COOLER_F)
+print(f"    vacant downstairs donor_cooler_by={got8c:.3f} "
+      f"(base {svc.PRIORITY_DONOR_COOLER_BY}, floor "
+      f"{svc.ZONE_VACANCY_DONOR_MIN_COOLER_F})")
+
 print()
 print(f"RESULT: {sum(PASS)}/{len(PASS)} checks passed")
 sys.exit(0 if all(PASS) else 1)
