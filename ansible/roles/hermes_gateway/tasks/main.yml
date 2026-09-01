@@ -45,18 +45,46 @@
 # rapidly goes stale. Installing Claude Code via the upstream npm package
 # keeps detection accurate; node is also handy for any future skill that
 # wants it.
-- name: Add NodeSource Apt Repository (Node 20 LTS)
+#
+# Node 24 LTS (was 20): upstream hermes-agent's web/package.json engines
+# field bumped to require node ^22.22.0 || ^24.11.0 || >=26.0.0 (verified
+# 2026-09-01 — `npm install --workspace web` on Node 20 fails hard with
+# EBADENGINE). Node 24 is the current active LTS line, matches the lower
+# engines bound with room to spare, and won't need re-bumping again as
+# soon as 22 would have (22 is Maintenance LTS as of this date).
+- name: Add NodeSource Apt Repository (Node 24 LTS)
   ansible.builtin.shell: |
     set -o pipefail
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
   args:
     creates: /etc/apt/sources.list.d/nodesource.list
     executable: /bin/bash
 
+# One-shot migration: a box provisioned before the Node 20->24 bump has
+# the old NodeSource repo file pinned to the 20.x feed. `creates:` above
+# makes the Add-Repository task a no-op on such a box, silently leaving
+# it on Node 20 forever. Detect and remove the stale repo file so the
+# Add-Repository task actually re-runs and lays down the 24.x feed.
+- name: Detect Stale NodeSource Repo (pre-Node-24 boxes)
+  ansible.builtin.command:
+    cmd: grep -q "node_20.x" /etc/apt/sources.list.d/nodesource.list
+  register: nodesource_stale_check
+  changed_when: false
+  failed_when: false
+
+- name: Remove Stale NodeSource Repo File (forces Node 24 re-add)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/nodesource.list
+    state: absent
+  when: nodesource_stale_check.rc == 0
+
+# state: latest (not present) — apt won't touch an already-installed
+# nodejs package on state:present even after the repo above moves from
+# the 20.x to 24.x feed, silently leaving an old box on Node 20 forever.
 - name: Install Node.js
   ansible.builtin.apt:
     name: nodejs
-    state: present
+    state: latest  # noqa: package-latest
     update_cache: true
 
 - name: Install Claude Code CLI Globally
