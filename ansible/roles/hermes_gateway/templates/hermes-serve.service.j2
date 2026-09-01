@@ -2,14 +2,32 @@
 # Managed by Ansible — do not edit by hand.
 # Source: roles/hermes_gateway/templates/hermes-serve.service.j2
 #
-# Persistent headless backend (`hermes serve`) that Hermes Desktop and
-# the CLI (`hermes submit`) attach to remotely. Distinct process from
-# hermes-gateway.service (the messaging bot) — same install, same
+# Persistent backend that Hermes Desktop, the CLI (`hermes submit`),
+# AND phone/browser access all attach to remotely. Distinct process
+# from hermes-gateway.service (the messaging bot) — same install, same
 # config.yaml, different entrypoint and port. See
 # website/docs/user-guide/features/web-dashboard.md
 # ("Connecting Hermes Desktop to a remote backend") for the upstream
 # doc this mirrors.
-Description=Hermes Agent — persistent remote backend (hermes serve)
+#
+# NOTE (2026-09-01): runs `hermes dashboard`, NOT `hermes serve`,
+# despite the unit's name. Upstream commit f0f8c84d1b ("make hermes
+# serve a real headless backend", 2026-06-30) split the two: `serve`
+# now mounts ZERO browser UI (pure JSON-RPC/WS for the Desktop
+# Electron app only) — hitting :9119/ returns
+# `{"error":"Headless backend (hermes serve): web UI disabled..."}`
+# instead of a page. `dashboard` boots the IDENTICAL backend
+# (`cmd_dashboard` -> `start_server`, same JSON-RPC/WS routes) and
+# additionally mounts the browser SPA, so switching the ExecStart
+# below does not break Desktop app connectivity — it only adds the
+# browser UI back. This surfaced when the fork's `main` (previously
+# ~10,422 commits behind upstream) was resynced and this box
+# redeployed; before that sync `serve` and `dashboard` behaved
+# identically on this fork, so the split was invisible until now.
+# Unit/service name kept as `hermes-serve` for backward compat with
+# existing ansible references (main.yml, handlers, README) rather
+# than a repo-wide rename.
+Description=Hermes Agent — persistent remote backend (hermes dashboard, headless-launch)
 After=network-online.target
 Wants=network-online.target
 
@@ -19,7 +37,7 @@ User=hermes
 Group=hermes
 WorkingDirectory=/home/hermes
 EnvironmentFile=/home/hermes/.hermes/.env
-ExecStart=/opt/hermes-agent/venv/bin/hermes serve --host 0.0.0.0 --port 9119 --skip-build
+ExecStart=/opt/hermes-agent/venv/bin/hermes dashboard --no-open --host 0.0.0.0 --port 9119 --skip-build
 # Bound on ALL interfaces (0.0.0.0), not the LXC's specific IP. Hermes's
 # DNS-rebinding Host-header guard (web_server.py _is_accepted_host)
 # requires an EXACT match between the Host header and --host when bound
