@@ -62,6 +62,7 @@ class FakeHA(svc.SmartVentController):
         self._sp_baseline_heat = None
         self._sp_last_write_ts = None
         self._sp_mismatch_since = None
+        self._sp_heating = None
         # Record every service call: list of (service, kwargs).
         self.sp_calls = []
         self.logs = []
@@ -142,6 +143,12 @@ class FakeHA(svc.SmartVentController):
             a["target_temp_high"] = float(cool)
         if heat is not None:
             a["target_temp_low"] = float(heat)
+
+    def set_hvac_action(self, action):
+        """Flip the thermostat's hvac_action (e.g. to 'idle' / 'fan')."""
+        a = self.attrs[(svc.THERMOSTAT, "all")]["attributes"]
+        a["hvac_action"] = action
+        self._hvac_action = action
 
     def run_nudge(self):
         """Drive one _apply_setpoint_nudge cycle; the call sites always pass
@@ -438,6 +445,135 @@ if len(writes2) == 2:
 #     confirms the new method leaves unrelated state paths intact by engaging
 #     and releasing cleanly through the full cycle (see T5).
 # =============================================================================
+
+# =============================================================================
+# 15. IDLE + OWNED + READBACK MATCHES + room STILL HOT (worst_excess 4.0, well
+#     above RELEASE) -> ZERO service calls; _sp_owned stays True; the nudge is
+#     RETAINED. Proves we no longer drop the nudge just because the compressor
+#     happens to be between cycles (the old code released on every idle
+#     transition, oscillating the hold / write-churning).
+#     Engage (cool 67.5, 1 write), echo the hold back, then the compressor
+#     satisfies and drops to idle. Room is still hot: vs live cool 67.5,
+#     temp 73.0 -> excess = (73.0-67.5)-1.5 = 4.0; nudge_amount(4.0)=2.0, which
+#     WOULD deepen (67.0 < 67.5) but only if conditioning — idle must suppress it.
+# =============================================================================
+ha = build_occupied_room(zone="upstairs", room="Game Room", temp=77.0, sp_cool=70.0)
+ha.run_nudge()  # engage -> 1 write, owned, _sp_heating False (cool)
+assert ha._sp_owned is True
+assert ha._sp_heating is False
+ha.set_live_setpoints(cool=ha._sp_commanded_cool, heat=ha._sp_commanded_heat)
+ha.set_hvac_action("idle")  # compressor satisfies, drops to idle
+ha.set_room_temp("upstairs", "Game Room", 73.0)  # excess 4.0 vs live 67.5
+ha.run_nudge()
+check("A idle+hot: ZERO service calls this cycle (no release, no deepen)",
+      len(ha.sp_calls) == 1)
+check("A idle+hot: _sp_owned stays True (nudge retained)",
+      ha._sp_owned is True)
+check("A idle+hot: no resume calls", len(resume_calls(ha)) == 0)
+check("A idle+hot: no set_hold writes", len(setpoint_calls(ha)) == 1)
+
+# =============================================================================
+# 16. IDLE + OWNED + READBACK MATCHES + room RECOVERED (worst_excess 0.2, <=
+#     RELEASE) -> exactly ONE resume_top_event; _sp_owned False; all _sp_*
+#     cleared. Proves a genuine recovery still releases cleanly WHILE idle.
+# =============================================================================
+ha = build_occupied_room(zone="upstairs", room="Game Room", temp=77.0, sp_cool=70.0)
+ha.run_nudge()  # engage, cool 67.5
+ha.set_live_setpoints(cool=ha._sp_commanded_cool, heat=ha._sp_commanded_heat)
+ha.set_hvac_action("idle")
+ha.set_room_temp("upstairs", "Game Room", 69.2)  # excess 0.2 vs live 67.5
+ha.run_nudge()
+res = resume_calls(ha)
+check("B idle+recovered: exactly ONE resume_top_event", len(res) == 1)
+check("B idle+recovered: _sp_owned False", ha._sp_owned is False)
+check("B idle+recovered: _sp_commanded_cool cleared", ha._sp_commanded_cool is None)
+check("B idle+recovered: _sp_baseline_cool cleared", ha._sp_baseline_cool is None)
+check("B idle+recovered: _sp_mismatch_since cleared", ha._sp_mismatch_since is None)
+check("B idle+recovered: _sp_heating cleared", ha._sp_heating is None)
+
+# =============================================================================
+# 17. THE REGRESSION THAT MOTIVATED THIS FIX: IDLE + OWNED + USER CHANGED THE
+#     SETPOINT (live cool readback differs from _sp_commanded_cool by 2.0F),
+#     mismatch first seen THIS cycle -> ZERO resume, ZERO set_hold, still owned
+#     (inside the confirm window), _sp_mismatch_since now set. The old idle path
+#     fired resume_top_event here, popping the USER's hold.
+# =============================================================================
+ha = build_occupied_room(zone="upstairs", room="Game Room", temp=77.0, sp_cool=70.0)
+ha.run_nudge()  # engage, commanded cool 67.5
+# The USER changes the cool setpoint to 69.5 (2.0F above our commanded) via the
+# ecobee app; their change becomes the top event. THEN the compressor drops to idle.
+ha.set_live_setpoints(cool=69.5, heat=64.0)
+ha.set_hvac_action("idle")
+ha.run_nudge()  # fresh mismatch, first seen this cycle
+check("C idle+user-change, fresh mismatch: ZERO resume_top_event",
+      len(resume_calls(ha)) == 0)
+check("C idle+user-change, fresh mismatch: ZERO set_hold writes",
+      len(setpoint_calls(ha)) == 1)
+check("C idle+user-change, fresh mismatch: _sp_owned still True (confirm window)",
+      ha._sp_owned is True)
+check("C idle+user-change, fresh mismatch: _sp_mismatch_since now set",
+      ha._sp_mismatch_since is not None)
+
+# =============================================================================
+# 18. Same as 17 but the mismatch has PERSISTED past SETPOINT_NUDGE_CONFIRM_SEC:
+#     _sp_owned becomes False, and STILL zero resume / zero set_hold. We
+#     relinquish silently — never pop the user's hold, never fight back.
+# =============================================================================
+ha = build_occupied_room(zone="upstairs", room="Game Room", temp=77.0, sp_cool=70.0)
+ha.run_nudge()  # engage, commanded cool 67.5
+ha.set_live_setpoints(cool=69.5, heat=64.0)  # user's change
+ha.set_hvac_action("idle")
+ha.run_nudge()  # fresh mismatch -> sets _sp_mismatch_since
+assert ha._sp_mismatch_since is not None
+ha.advance(svc.SETPOINT_NUDGE_CONFIRM_SEC + 1)  # mismatch persists past confirm
+ha.run_nudge()
+check("D idle+user-change, confirmed: _sp_owned False",
+      ha._sp_owned is False)
+check("D idle+user-change, confirmed: ZERO resume_top_event",
+      len(resume_calls(ha)) == 0)
+check("D idle+user-change, confirmed: ZERO set_hold writes (never fight back)",
+      len(setpoint_calls(ha)) == 1)
+check("D idle+user-change, confirmed: _sp_heating cleared", ha._sp_heating is None)
+
+# =============================================================================
+# 19. IDLE + NOT owned + a very hot occupied room (worst_excess 6.0): ZERO
+#     service calls. We never engage a brand-new nudge while the system is idle.
+# =============================================================================
+ha = FakeHA(hvac_mode="heat_cool", hvac_action="idle", sp_cool=70.0, sp_heat=64.0)
+ha.occupy("upstairs", "Game Room")
+ha.set_room_temp("upstairs", "Game Room", 70.0 + svc.PRIORITY_MARGIN_BASE + 6.0)
+ha._set_thermostat()  # idle + excess 6.0 (temp 77.5)
+ha.run_nudge()
+check("E idle+not-owned+hot: ZERO service calls (no engage while idle)",
+      len(ha.sp_calls) == 0)
+check("E idle+not-owned+hot: _sp_owned stays False", ha._sp_owned is False)
+
+# =============================================================================
+# 20. IDLE + OWNED + readback matches + room WORSENS substantially + dwell fully
+#     elapsed -> ZERO set_hold_temperature calls (no deepening while idle). The
+#     hold rides out the idle period; deepening only happens on the next real
+#     conditioning cycle.
+#     Engage at excess 2.5 (nudge 1.0 -> cool 69.0), echo, idle, then the room
+#     worsens so a deeper nudge IS warranted (vs live 69.0: temp 76.5 ->
+#     excess 6.0 -> new cool 67.0 < 69.0, would deepen if conditioning) AND the
+#     dwell has elapsed. Idle must still suppress the deepen.
+# =============================================================================
+ha = build_occupied_room(zone="upstairs", room="Game Room",
+                         temp=70.0 + svc.PRIORITY_MARGIN_BASE + 2.5, sp_cool=70.0)
+ha.run_nudge()  # engage, cool 69.0 (1 write)
+assert len(setpoint_calls(ha)) == 1
+ha.set_live_setpoints(cool=ha._sp_commanded_cool, heat=ha._sp_commanded_heat)
+ha.set_hvac_action("idle")
+ha.advance(svc.SETPOINT_NUDGE_DWELL_SEC + 1)  # dwell elapsed
+ha.set_room_temp("upstairs", "Game Room", 69.0 + svc.PRIORITY_MARGIN_BASE + 6.0)  # excess 6.0
+ha.run_nudge()
+check("F idle+owned+worsened+dwell elapsed: ZERO deepen writes",
+      len(setpoint_calls(ha)) == 1)
+check("F idle+owned+worsened+dwell elapsed: ZERO resume (still hot)",
+      len(resume_calls(ha)) == 0)
+check("F idle+owned+worsened+dwell elapsed: still owned",
+      ha._sp_owned is True)
+
 print()
 print(f"RESULT: {sum(PASS)}/{len(PASS)} checks passed")
 sys.exit(0 if all(PASS) else 1)

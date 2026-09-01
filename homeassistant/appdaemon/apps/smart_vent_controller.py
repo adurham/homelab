@@ -674,7 +674,11 @@ class SmartVentController(hass.Hass):
         # we match against for ownership + pop-safety). _sp_last_write_ts gates
         # the dwell. _sp_mismatch_since lets a transient echo (the ecobee cloud
         # poll is up to 3 min behind a write) be distinguished from a real user
-        # change after SETPOINT_NUDGE_CONFIRM_SEC.
+        # change after SETPOINT_NUDGE_CONFIRM_SEC. _sp_heating records the DIRECTION
+        # of the nudge we own (True = heat, False = cool) captured at engage time:
+        # when the system goes idle/fan there is no live axis to derive a direction
+        # from, but to compare readback (and thus stay pop-safe) we must still know
+        # which axis we moved. It is only meaningful while _sp_owned.
         self._sp_owned = False
         self._sp_commanded_cool = None
         self._sp_commanded_heat = None
@@ -682,6 +686,7 @@ class SmartVentController(hass.Hass):
         self._sp_baseline_heat = None
         self._sp_last_write_ts = None
         self._sp_mismatch_since = None
+        self._sp_heating = None
 
         # Dry-coil lockout tracking. _cooling_ended_at is the timestamp the
         # compressor last transitioned out of "cooling"; None while actively
@@ -2330,7 +2335,12 @@ class SmartVentController(hass.Hass):
     # readback still matches our _sp_commanded_* values — the "readback doesn't
     # match" branch exits WITHOUT resuming. This is the single most important
     # safety rule in this design. It is enforced structurally: _release_setpoint
-    # is only ever called from the "readback matches" branch.
+    # is only ever called from the "readback matches" branch. That includes the
+    # idle/fan path: the original unguarded release there (released whenever the
+    # compressor happened to drop to idle, with NO readback check) was unsafe
+    # and is gone — while idle we now run the SAME owned-branch match/mismatch
+    # logic, so a release only happens when readback still matches AND the room
+    # has actually recovered.
     def _release_setpoint_nudge(self):
         """Pop our own setpoint hold, clearing ownership state.
 
@@ -2341,7 +2351,9 @@ class SmartVentController(hass.Hass):
         already auto-expired (nextTransition fired) or the user resumed it, the
         readback would differ from _sp_commanded_* and we take the readback-
         mismatch branch instead — which exits WITHOUT ever reaching here — so a
-        user hold already on top of the stack can never be popped by us.
+        user hold already on top of the stack can never be popped by us. There
+        is exactly ONE call site reachable while idle/fan, and it is guarded by
+        the same readback-match check (see _apply_setpoint_nudge).
         """
         self.log(f"  SETPOINT-NUDGE: releasing (resume_top_event) — our hold "
                  f"is still the top event, safe to pop")
@@ -2360,6 +2372,7 @@ class SmartVentController(hass.Hass):
         self._sp_baseline_heat = None
         self._sp_last_write_ts = None
         self._sp_mismatch_since = None
+        self._sp_heating = None
 
     def _write_setpoint_nudge(self, heat_temp_f, cool_temp_f):
         """Issue a setpoint hold via ecobee_enhanced (fire-and-forget).
@@ -2407,9 +2420,17 @@ class SmartVentController(hass.Hass):
         Heating: commanded_heat = baseline_heat + nudge_amount. Fully symmetric.
 
         Only acts in Auto mode (the controller's enabled gate is already handled
-        by control_loop, but this re-guards on mode for safety). Only nudges in
-        an actively-conditioning HVAC action (cooling -> lower cool setpoint;
-        heating -> raise heat setpoint); it does nothing while idle/fan-only.
+        by control_loop, but this re-guards on mode for safety). The DIRECTION of
+        the nudge comes from the active HVAC action (cooling -> lower cool
+        setpoint -> heating=False; heating -> raise heat setpoint ->
+        heating=True). While idle/fan there is no active axis to derive a
+        direction from, so we fall back to the recorded _sp_heating of any nudge
+        we already own: an idle drop must NOT short-circuit into an unguarded
+        release — it instead continues into the same owned state machine, so a
+        between-cycles idle transition can neither pop the user's hold (TRAP 2)
+        nor drop a live nudge just because the compressor happens to be between
+        cycles. Deepening happens only while actively conditioning; a brand-new
+        nudge is never engaged while idle.
         Mutates no state it doesn't own (all _sp_*).
         """
         if mode != "Auto":
@@ -2419,11 +2440,31 @@ class SmartVentController(hass.Hass):
         elif hvac_action == "heating" and target_heat is not None:
             heating = True
         else:
-            # Not actively conditioning (idle/fan) — nothing to escalate, and
-            # no reason to hold a setpoint. Ensure we release any stale hold.
-            if getattr(self, "_sp_owned", False):
-                self._release_setpoint_nudge()
-            return
+            # Not actively conditioning (idle/fan). There is no live axis to
+            # derive a direction from, so fall back to the direction of any nudge
+            # we already own. The ORIGINAL code released here with NO readback
+            # check, which was unsafe two ways: (1) when the compressor satisfies
+            # and drops to idle while a room is still hot, releasing on every
+            # idle transition lets the room reheat and the nudge re-engage next
+            # cycle (the oscillator loop this mechanism exists to prevent); (2)
+            # worse, if the USER had changed the setpoint (their hold now on top),
+            # releasing would pop THEIR hold, bypassing the _sp_mismatch_since /
+            # CONFIRM_SEC machinery entirely (TRAP 2 violation). So while idle we
+            # run the SAME readback-guarded ownership logic below: never resume on
+            # a mismatch, only release on a genuine recovery, and never deepen.
+            # If we own nothing, there is nothing to do here — return as before.
+            if not getattr(self, "_sp_owned", False):
+                return
+            if self._sp_heating is None:
+                # Defensive: we own a nudge but somehow have no recorded
+                # direction — nothing safe to compare, so leave the hold alone.
+                return
+            heating = self._sp_heating
+
+        # True only while the compressor/burner is actually running. Deepening a
+        # nudge (and engaging a fresh one) is gated on this below.
+        actively_conditioning = (hvac_action == "cooling"
+                                 or hvac_action == "heating")
 
         # Worst excess over OCCUPIED rooms, measured exactly like _zone_contention
         # (line ~1530): off_target - _room_margin, clamped at >= 0.
@@ -2477,8 +2518,16 @@ class SmartVentController(hass.Hass):
 
         if not getattr(self, "_sp_owned", False):
             # NOT owned. Engage only if the worst occupied excess clears the
-            # engage threshold (with hysteresis below via the release bound).
+            # engage threshold (with hysteresis below via the release bound), AND
+            # only while actually conditioning. While idle/fan we engage nothing:
+            # engaging a brand-new setpoint hold on a compressor that isn't even
+            # running would just push the whole house's setpoint for no reason
+            # (the escalation a nudge drives only happens once it runs) — and it
+            # would write-churn on every idle/fan cycle. The compressor will
+            # re-engage on its own schedule and we can nudge then.
             if worst_excess < SETPOINT_NUDGE_ENGAGE_F:
+                return
+            if not actively_conditioning:
                 return
             # Capture the baseline = the CURRENT live setpoints (the user's own
             # effective setpoint — schedule or their manual hold).
@@ -2494,6 +2543,7 @@ class SmartVentController(hass.Hass):
             self._sp_commanded_heat = commanded_heat
             self._sp_last_write_ts = now
             self._sp_mismatch_since = None
+            self._sp_heating = heating
             self.log(f"  SETPOINT-NUDGE: engaged ({'cool' if not heating else 'heat'}) "
                      f"worst_excess {worst_excess:.2f}F, nudge to "
                      f"cool {commanded_cool:.1f}F heat {commanded_heat:.1f}F "
@@ -2541,6 +2591,7 @@ class SmartVentController(hass.Hass):
                 self._sp_baseline_heat = None
                 self._sp_last_write_ts = None
                 self._sp_mismatch_since = None
+                self._sp_heating = None
             # else: still within the confirm window — keep waiting, no action.
             return
 
@@ -2558,7 +2609,16 @@ class SmartVentController(hass.Hass):
         # Still engaged and warranted. Re-nudge DEEPER (never shallower here —
         # release is the only way out of the band, per hysteresis) off the ORIGINAL
         # baseline, but only after the dwell so we don't fight the ecobee's own
-        # staging (SETPOINT_NUDGE_DWELL_SEC >= compressor min-on).
+        # staging (SETPOINT_NUDGE_DWELL_SEC >= compressor min-on), AND only while
+        # actually conditioning. While idle/fan we do NOT deepen: an idle drop
+        # gives us no evidence the current nudge is insufficient — the compressor
+        # may simply be in its min-off protection window (ecobee waits 5 min
+        # before letting the compressor restart), and hammering the setpoint
+        # deeper mid-min-off wouldn't escalate anything. The hold simply rides out
+        # the idle period and, if the room is still hot, the release gate below
+        # does not trip, so we pick up again on the next real conditioning cycle.
+        if not actively_conditioning:
+            return
         new_cool, new_heat = self._commanded_setpoints(
             self._sp_baseline_cool, self._sp_baseline_heat, heating,
             worst_excess, dual)
@@ -2585,7 +2645,7 @@ class SmartVentController(hass.Hass):
 
     def _commanded_setpoints(self, baseline_cool, baseline_heat, heating,
                              worst_excess, dual):
-        """Compute (commanded_heat, commanded_cool) for a nudge off the baseline.
+        """Compute (commanded_cool, commanded_heat) for a nudge off the baseline.
 
         Pure function (no state): returns the two setpoints to write for the
         given baseline and worst_excess, applying the gain/max quantized cap and
@@ -2593,6 +2653,12 @@ class SmartVentController(hass.Hass):
         mode) is passed in — computed ONCE per cycle by the caller — so this
         helper stays stateless and the two call sites can never disagree about
         whether the gap is enforced.
+
+        NOTE the tuple is (commanded_cool, commanded_heat) — the same order both
+        call sites unpack (`commanded_cool, commanded_heat = ...`). This is the
+        reverse of _write_setpoint_nudge's (heat, cool) parameter order, which is
+        why the call sites swap when handing off (`_write_setpoint_nudge(new_heat,
+        new_cool)`). Do NOT reorder this return.
         """
         nudge = worst_excess * SETPOINT_NUDGE_GAIN
         nudge = max(0.0, min(nudge, SETPOINT_NUDGE_MAX_F))
