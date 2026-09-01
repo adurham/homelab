@@ -9,6 +9,7 @@ Controls:
   input_select.vent_control_mode      - Auto / Manual / Cool Upstairs / Cool Downstairs
 """
 
+import math
 import re
 
 import appdaemon.plugins.hass.hassapi as hass
@@ -541,6 +542,44 @@ ZONE_VACANCY_OVERRIDE_HYST_F    = 0.5    # hysteresis band so a demoted room doe
 ZONE_VACANCY_DONOR_RELAX        = 0.75   # fraction of the donor "must be cooler by" requirement waived at full contention
 ZONE_VACANCY_DONOR_MIN_COOLER_F = 0.25   # floor: never pull air from a room that isn't at least this much more comfortable than the beneficiary
 
+# ── Setpoint nudge (the TRIGGER axis — make the compressor escalate) ─────────
+# The zone-presence-contention fix solves AIRFLOW REDISTRIBUTION once the
+# compressor runs. This solves the TRIGGER problem: the ecobee's
+# climate.ecobee_thermostat.current_temperature is a FLAT AVERAGE across all 14
+# remote sensors, so a single hot room (Game Room at 77F) can sit far above its
+# cool setpoint while the whole-house average stays comfortably under the
+# ecobee's own call-for-cooling thresholds — the compressor simply never
+# escalates to stage 2, and the only lever that reaches the thermostat is moving
+# the SETPOINT the ecobee sees (the stage-2 differential is manual-only on the
+# physical unit, not API-settable). Tonight the owner had to hand-drop the cool
+# setpoint 73->71->70 to force the compressor on.
+#
+# Mechanism: every cycle we already compute each occupied room's `off_target`
+# (degrees past the active setpoint in the unhelpful direction, sign-aware for
+# heat vs cool) and `_room_margin(key, heating)` (that room's derived activation
+# margin, lowered by measured supply-air and delivery handicaps). Their
+# difference — `worst_excess = max over OCCUPIED rooms of (off_target - margin)`
+# — is exactly the quantity _zone_contention already computes (measured axis,
+# NOT a hardcoded schedule), so we reuse that same measured idiom to drive the
+# setpoint. When the worst occupied excess clears the engage threshold we write
+# a temporary hold via the existing, verified ecobee_enhanced service family
+# (the SAME family fan-assist already uses), dragging both setpoints so the
+# compressor sees a genuine call and escalates. Fully heating/cooling symmetric
+# (cooling: drop the cool setpoint; heating: raise the heat setpoint).
+#
+# Hard-won lesson reused here: ALL service calls are fire-and-forget with
+# callback=self._service_call_done (see _set_vent — a blocking call_service
+# froze this app's single pinned thread for ~4.5h once).
+SETPOINT_NUDGE_ENGAGE_F   = 1.5   # worst_excess at/above this engages a nudge
+SETPOINT_NUDGE_RELEASE_F  = 0.5   # worst_excess at/below this releases it (hysteresis band; MUST be < ENGAGE)
+SETPOINT_NUDGE_GAIN       = 0.5   # degrees of setpoint nudge per degree of worst_excess
+SETPOINT_NUDGE_MAX_F      = 3.0   # hard cap on how far we may ever move the user's setpoint
+SETPOINT_NUDGE_STEP_F     = 0.5   # ecobee setpoint granularity; quantize to this
+SETPOINT_NUDGE_DWELL_SEC  = 600   # min seconds between setpoint writes (>= compressor min-ON 10min; prevents fighting the ecobee's own staging)
+SETPOINT_NUDGE_CONFIRM_SEC= 420   # readback mismatch must persist this long before it's believed (ecobee cloud poll floor is 3 min)
+SETPOINT_NUDGE_TOLERANCE_F= 0.2   # readback match tolerance
+SETPOINT_HEATCOOL_MIN_DELTA_F = 6.0  # ecobee heatCoolMinDelta, see TRAP 1 below
+
 # ── Fan-assist redistribution (the thermostat blind-spot workaround) ───────────
 # A single hallway thermostat goes idle when the HOUSE AVERAGE is satisfied, even
 # while an individual room is still hot — that's the core reason a disadvantaged
@@ -624,6 +663,25 @@ class SmartVentController(hass.Hass):
         self._zone_last_occupied = {}
         self._zone_occupied = {}
         self._zone_vacancy_demoted = set()
+
+        # Setpoint-nudge ownership state (see the constants block + the state-
+        # machine comment on _apply_setpoint_nudge). _sp_owned = True while WE
+        # hold an active setpoint hold on the thermostat. _sp_baseline_* is the
+        # LIVE setpoint we captured the moment we engaged (whatever the user's
+        # own effective setpoint was — schedule or their manual hold) and is the
+        # ONLY base any re-nudge may compute off of, so we can NEVER ratchet
+        # away unboundedly. _sp_commanded_* is what we last wrote (the readback
+        # we match against for ownership + pop-safety). _sp_last_write_ts gates
+        # the dwell. _sp_mismatch_since lets a transient echo (the ecobee cloud
+        # poll is up to 3 min behind a write) be distinguished from a real user
+        # change after SETPOINT_NUDGE_CONFIRM_SEC.
+        self._sp_owned = False
+        self._sp_commanded_cool = None
+        self._sp_commanded_heat = None
+        self._sp_baseline_cool = None
+        self._sp_baseline_heat = None
+        self._sp_last_write_ts = None
+        self._sp_mismatch_since = None
 
         # Dry-coil lockout tracking. _cooling_ended_at is the timestamp the
         # compressor last transitioned out of "cooling"; None while actively
@@ -883,6 +941,19 @@ class SmartVentController(hass.Hass):
         room_positions = self._apply_fan_assist(
             room_positions, mode, hvac_action, target_cool, target_heat
         )
+
+        # Setpoint nudge (the TRIGGER axis): independently of the vent-position
+        # math above, escape the ecobee's whole-house-average blind spot by
+        # temporarily moving the setpoint it sees when an OCCUPIED room's
+        # measured excess over its margin warrants it. Runs AFTER the priority
+        # and fan-assist passes on purpose: it is orthogonal to vent
+        # redistribution (which only helps once the compressor runs) and exists
+        # purely to make the compressor escalate at all. See the constants block
+        # + the method docstring. Guarded to only act in Auto mode and only while
+        # the controller is enabled (both enforced by the caller above, but the
+        # method re-guards on mode for safety).
+        self._apply_setpoint_nudge(hvac_mode, hvac_action, target_cool,
+                                   target_heat, mode)
 
         # Apply backpressure protection (dynamic coil-temp feedback when
         # available, static cap otherwise). Pass hvac_action for the cooling
@@ -2206,6 +2277,344 @@ class SmartVentController(hass.Hass):
                           hass_timeout=8,
                           callback=self._service_call_done)
         self._fan_assist_active = False
+
+    # ── Setpoint nudge (the TRIGGER axis) ─────────────────────────────────────
+    # Makes the compressor escalate by temporarily moving the thermostat
+    # setpoint when an OCCUPIED room's measured excess over its margin warrants
+    # it — the measured-axis complement to fan-assist (which solves airflow
+    # redistribution once the compressor runs). This is the ONLY lever that
+    # reaches the ecobee, because the stage-2 differential is manual-only (not
+    # API-settable); see the constants block for the full rationale.
+    #
+    # Ownership state machine. We match LIVE readback against what WE last wrote
+    # (_sp_commanded_*). Note this deliberately does NOT use hold_climate or
+    # schedule_status: an empty hold_climate (raw temperature hold) is produced
+    # by BOTH our set_hold_temperature call AND a user's manual setpoint change,
+    # so it cannot tell our write apart from theirs. Value-matching the
+    # setpoints is the only reliable discriminator.
+    #
+    #   NOT owned:
+    #     - worst_excess >= ENGAGE  -> capture baseline_* = current live setpoints
+    #       (the user's own effective setpoint, whatever it is), compute nudge,
+    #       write, _sp_owned = True.
+    #     - else                    -> no-op.
+    #   Owned + readback matches (on the axis we moved):
+    #     - clear _sp_mismatch_since.
+    #     - worst_excess <= RELEASE -> resume_top_event, clear all _sp_* state.
+    #     - deeper nudge warranted AND dwell elapsed -> re-write the LARGER
+    #       nudge, still off the ORIGINAL baseline (never off the already-nudged
+    #       value — that would ratchet away unboundedly).
+    #     - else                    -> no-op.
+    #   Owned + readback does NOT match:
+    #     - _sp_mismatch_since None -> set it to now, take NO action. (Fresh
+    #       mismatch right after our own write is the in-flight echo: the ecobee
+    #       cloud poll is up to 3 min behind, so it is EXPECTED and must not be
+    #       believed. Same bug class as the vent MANUAL_OVERRIDE_CONFIRM_SEC
+    #       debounce / _confirm_manual_override.)
+    #     - mismatch persisted >= CONFIRM  -> the USER changed it. _sp_owned =
+    #       False, clear state. Do NOT resume, do NOT restore the baseline. The
+    #       user's new value becomes the baseline for any FUTURE engagement.
+    #     - else                     -> keep waiting.
+    #
+    # TRAP 1 (heatCoolMinDelta): the ecobee enforces a min 6.0F gap between the
+    # heat and cool setpoints in heat_cool/auto mode, and REJECTS or silently
+    # auto-adjusts a write that violates it. So when we nudge cool DOWN we must
+    # also drag heat DOWN, and when we nudge heat UP we must also drag cool UP.
+    # Only coupled in a dual-setpoint mode; otherwise the other axis passes
+    # through at its current live value.
+    #
+    # TRAP 2 (never pop the user's hold): resume_top_event pops whatever event
+    # is on TOP of the ecobee's event stack. If our netTransition hold already
+    # auto-expired (or the user resumed it), the top event may now be the
+    # USER's own hold. Therefore we NEVER call resume_top_event unless the live
+    # readback still matches our _sp_commanded_* values — the "readback doesn't
+    # match" branch exits WITHOUT resuming. This is the single most important
+    # safety rule in this design. It is enforced structurally: _release_setpoint
+    # is only ever called from the "readback matches" branch.
+    def _release_setpoint_nudge(self):
+        """Pop our own setpoint hold, clearing ownership state.
+
+        SAFETY (TRAP 2): this must ONLY be called from the branch where the live
+        readback still matches what WE commanded. At that moment OUR hold is
+        still the top event, so resume_top_event (resumeAll=false) pops exactly
+        ours and leaves any user hold underneath untouched. If our hold had
+        already auto-expired (nextTransition fired) or the user resumed it, the
+        readback would differ from _sp_commanded_* and we take the readback-
+        mismatch branch instead — which exits WITHOUT ever reaching here — so a
+        user hold already on top of the stack can never be popped by us.
+        """
+        self.log(f"  SETPOINT-NUDGE: releasing (resume_top_event) — our hold "
+                 f"is still the top event, safe to pop")
+        # Fire-and-forget — see _set_vent for why (pinned-thread freeze
+        # incident). Same callback discipline as fan-assist.
+        self.call_service("ecobee_enhanced/resume_top_event",
+                          hass_timeout=8,
+                          callback=self._service_call_done)
+        # Ownership cleared AFTER issuing the call (fire-and-forget): the state
+        # must reflect that we no longer "own" a hold at the moment we give it
+        # back to the ecobee.
+        self._sp_owned = False
+        self._sp_commanded_cool = None
+        self._sp_commanded_heat = None
+        self._sp_baseline_cool = None
+        self._sp_baseline_heat = None
+        self._sp_last_write_ts = None
+        self._sp_mismatch_since = None
+
+    def _write_setpoint_nudge(self, heat_temp_f, cool_temp_f):
+        """Issue a setpoint hold via ecobee_enhanced (fire-and-forget).
+
+        The service schema REQUIRES both heat_temp_f and cool_temp_f, so to
+        "leave an axis untouched" we still send its current live value. Guard
+        against a missing axis (single-setpoint cool/heat mode reads the other
+        setpoint as None): skipping without writing is safe — the thermostat
+        this app targets lives in heat_cool, where both axes are always present.
+
+        hold_type MUST be "nextTransition", NOT "indefinite": it makes the
+        ecobee itself expire our hold at the next scheduled comfort transition —
+        a built-in dead-man's switch. If this app ever dies mid-nudge (it has
+        frozen before; see the _set_vent pinned-thread freeze bug), an
+        indefinite hold would be stuck on the user's thermostat forever. That is
+        the single worst outcome and this choice prevents it.
+        """
+        if heat_temp_f is None or cool_temp_f is None:
+            self.log(f"  SETPOINT-NUDGE: skipping write — missing setpoint axis "
+                     f"(heat={heat_temp_f}, cool={cool_temp_f})")
+            return
+        self.call_service(
+            "ecobee_enhanced/set_hold_temperature",
+            heat_temp_f=float(heat_temp_f),
+            cool_temp_f=float(cool_temp_f),
+            hold_type="nextTransition",
+            hass_timeout=8,
+            callback=self._service_call_done,
+        )
+
+    def _apply_setpoint_nudge(self, hvac_mode, hvac_action, target_cool,
+                              target_heat, mode="Auto"):
+        """Temporarily move the thermostat setpoint to force compressor escalation.
+
+        Computes `worst_excess` = max over OCCUPIED rooms of
+        (off_target - _room_margin), the SAME measured quantity _zone_contention
+        already uses for other zones (reusing its exact idiom to avoid inventing
+        a parallel axis). A room counts as occupied using the SAME determination
+        the priority pass uses, including the PIR-false-negative effective-
+        occupancy-override path (_effective_occupancy_override). A room in a
+        VACANT zone can never drive a nudge.
+
+        nudge_amount = clamp(worst_excess * GAIN, 0, MAX), quantized DOWN to a
+        multiple of STEP. Cooling: commanded_cool = baseline_cool - nudge_amount.
+        Heating: commanded_heat = baseline_heat + nudge_amount. Fully symmetric.
+
+        Only acts in Auto mode (the controller's enabled gate is already handled
+        by control_loop, but this re-guards on mode for safety). Only nudges in
+        an actively-conditioning HVAC action (cooling -> lower cool setpoint;
+        heating -> raise heat setpoint); it does nothing while idle/fan-only.
+        Mutates no state it doesn't own (all _sp_*).
+        """
+        if mode != "Auto":
+            return
+        if hvac_action == "cooling" and target_cool is not None:
+            heating = False
+        elif hvac_action == "heating" and target_heat is not None:
+            heating = True
+        else:
+            # Not actively conditioning (idle/fan) — nothing to escalate, and
+            # no reason to hold a setpoint. Ensure we release any stale hold.
+            if getattr(self, "_sp_owned", False):
+                self._release_setpoint_nudge()
+            return
+
+        # Worst excess over OCCUPIED rooms, measured exactly like _zone_contention
+        # (line ~1530): off_target - _room_margin, clamped at >= 0.
+        worst_excess = 0.0
+        for zone_name, zone in ZONES.items():
+            for room_name, sensors in zone["rooms"].items():
+                key = (zone_name, room_name)
+                occ_entity = sensors.get("occupancy")
+                temp = self._read_temp(sensors["temp"])
+                if temp is None:
+                    continue
+                is_occupied = ((not occ_entity)
+                               or self.get_state(occ_entity) == "on")
+                # Occupancy gate mirrors _apply_priority_rooms: an OCCUPIED room
+                # (or no sensor => assumed occupied) counts; an unoccupied room
+                # is NOT an occupant needing the compressor to escalate unless
+                # its PIR false-negative override applies (_effective_occupancy_
+                # override — the shared decision the priority and fan-assist
+                # passes use). A room in a VACANT zone can NEVER drive a nudge,
+                # categorically: an empty room in a zone nobody is in has no
+                # occupant to save, so letting it escalate the compressor would
+                # just push the whole house's setpoint for nobody. So we hard-
+                # exclude vacant zones BEFORE the override path — that override
+                # is only meaningful in an occupied zone, where it reduces to
+                # the bare OCCUPANCY_OVERRIDE_OVER (matching _apply_priority_rooms).
+                if not is_occupied:
+                    if self._zone_is_vacant(zone_name):
+                        continue
+                    _override = self._effective_occupancy_override(
+                        zone_name, key, heating)
+                    if self._off_target(room_name, temp, heating) < _override:
+                        continue
+                # NOTE: a donor_only room is NOT skipped here (deliberately
+                # different from _apply_priority_rooms). donor_only only means
+                # "never a BENEFICIARY of vent REDISTRIBUTION" — it does not mean
+                # the room can't burn its occupant. A genuinely hot donor-only
+                # room (Main Bedroom) still needs the compressor to escalate, so
+                # it is fully eligible to drive a nudge.
+                off = self._off_target(room_name, temp, heating)
+                margin = self._room_margin(key, heating)
+                excess = off - margin
+                if excess > worst_excess:
+                    worst_excess = excess
+
+        # ---------------------------------------------------------------- State
+        now = self.datetime()
+        # TRAP 1 coupling is only relevant in a dual-setpoint (heat_cool/auto)
+        # mode. Read `dual` ONCE for this whole cycle; it drives both the engage
+        # and any re-nudge so the two can never disagree about the gap.
+        dual = hvac_mode in ("heat_cool", "auto")
+
+        if not getattr(self, "_sp_owned", False):
+            # NOT owned. Engage only if the worst occupied excess clears the
+            # engage threshold (with hysteresis below via the release bound).
+            if worst_excess < SETPOINT_NUDGE_ENGAGE_F:
+                return
+            # Capture the baseline = the CURRENT live setpoints (the user's own
+            # effective setpoint — schedule or their manual hold).
+            baseline_cool = target_cool
+            baseline_heat = target_heat
+            commanded_cool, commanded_heat = self._commanded_setpoints(
+                baseline_cool, baseline_heat, heating, worst_excess, dual)
+            self._write_setpoint_nudge(commanded_heat, commanded_cool)
+            self._sp_owned = True
+            self._sp_baseline_cool = baseline_cool
+            self._sp_baseline_heat = baseline_heat
+            self._sp_commanded_cool = commanded_cool
+            self._sp_commanded_heat = commanded_heat
+            self._sp_last_write_ts = now
+            self._sp_mismatch_since = None
+            self.log(f"  SETPOINT-NUDGE: engaged ({'cool' if not heating else 'heat'}) "
+                     f"worst_excess {worst_excess:.2f}F, nudge to "
+                     f"cool {commanded_cool:.1f}F heat {commanded_heat:.1f}F "
+                     f"(baseline cool {baseline_cool:.1f} heat {baseline_heat:.1f})")
+            return
+
+        # ------------------------------------------------------------- Owned.
+        live_cool = target_cool
+        live_heat = target_heat
+
+        # Which axis did we move? (The moved axis is the one we compare readback
+        # against — the other axis may be coupled, but ownership pivots on the
+        # active cooling/heating axis we actually changed.)
+        if not heating:
+            matches = (live_cool is not None
+                       and abs(live_cool - self._sp_commanded_cool)
+                       <= SETPOINT_NUDGE_TOLERANCE_F)
+        else:
+            matches = (live_heat is not None
+                       and abs(live_heat - self._sp_commanded_heat)
+                       <= SETPOINT_NUDGE_TOLERANCE_F)
+
+        if not matches:
+            # Readback does NOT match our commanded value.
+            if self._sp_mismatch_since is None:
+                # Fresh mismatch right after our own write = the in-flight echo
+                # (ecobee cloud poll up to 3 min behind). Do NOT believe it this
+                # cycle; do NOT act.
+                self._sp_mismatch_since = now
+                return
+            if (now - self._sp_mismatch_since).total_seconds() \
+                    >= SETPOINT_NUDGE_CONFIRM_SEC:
+                # The mismatch has PERSISTED past the confirm window: the USER
+                # changed the setpoint. Relinquish ownership WITHOUT resuming
+                # (their new value / hold is now on top and must not be popped;
+                # TRAP 2) and WITHOUT restoring the baseline (their new value
+                # simply becomes the baseline for any future engagement).
+                self.log(f"  SETPOINT-NUDGE: user changed setpoint (cool "
+                         f"{self._sp_commanded_cool:.1f} -> {live_cool} live), "
+                         f"relinquishing ownership without resuming")
+                self._sp_owned = False
+                self._sp_commanded_cool = None
+                self._sp_commanded_heat = None
+                self._sp_baseline_cool = None
+                self._sp_baseline_heat = None
+                self._sp_last_write_ts = None
+                self._sp_mismatch_since = None
+            # else: still within the confirm window — keep waiting, no action.
+            return
+
+        # Readback matches. Clear any pending mismatch record.
+        self._sp_mismatch_since = None
+
+        if worst_excess <= SETPOINT_NUDGE_RELEASE_F:
+            # Satisfied (or room recovered) enough — pop our own hold. ONLY safe
+            # because readback still matches (TRAP 2). Clears all _sp_* state.
+            self._release_setpoint_nudge()
+            self.log(f"  SETPOINT-NUDGE: released (worst_excess {worst_excess:.2f}F "
+                     f"<= release {SETPOINT_NUDGE_RELEASE_F:.2f}F)")
+            return
+
+        # Still engaged and warranted. Re-nudge DEEPER (never shallower here —
+        # release is the only way out of the band, per hysteresis) off the ORIGINAL
+        # baseline, but only after the dwell so we don't fight the ecobee's own
+        # staging (SETPOINT_NUDGE_DWELL_SEC >= compressor min-on).
+        new_cool, new_heat = self._commanded_setpoints(
+            self._sp_baseline_cool, self._sp_baseline_heat, heating,
+            worst_excess, dual)
+        # A deeper nudge only when the new command is actually MORE aggressive on
+        # the moved axis, so we never re-issue an identical (or shallower) hold.
+        moved_new = new_cool if not heating else new_heat
+        moved_old = (self._sp_commanded_cool if not heating
+                     else self._sp_commanded_heat)
+        if (heating and moved_new <= moved_old) \
+                or (not heating and moved_new >= moved_old):
+            # No deeper nudge warranted (or identical after quantization) — no-op.
+            return
+        if (now - self._sp_last_write_ts).total_seconds() \
+                < SETPOINT_NUDGE_DWELL_SEC:
+            return
+        # Write the larger nudge, still off the ORIGINAL baseline.
+        self._write_setpoint_nudge(new_heat, new_cool)
+        self._sp_commanded_cool = new_cool
+        self._sp_commanded_heat = new_heat
+        self._sp_last_write_ts = now
+        self._sp_mismatch_since = None
+        self.log(f"  SETPOINT-NUDGE: deepened to cool {new_cool:.1f}F "
+                 f"heat {new_heat:.1f}F (worst_excess {worst_excess:.2f}F)")
+
+    def _commanded_setpoints(self, baseline_cool, baseline_heat, heating,
+                             worst_excess, dual):
+        """Compute (commanded_heat, commanded_cool) for a nudge off the baseline.
+
+        Pure function (no state): returns the two setpoints to write for the
+        given baseline and worst_excess, applying the gain/max quantized cap and
+        the heatCoolMinDelta coupling (TRAP 1). `dual` (True in a heat_cool/auto
+        mode) is passed in — computed ONCE per cycle by the caller — so this
+        helper stays stateless and the two call sites can never disagree about
+        whether the gap is enforced.
+        """
+        nudge = worst_excess * SETPOINT_NUDGE_GAIN
+        nudge = max(0.0, min(nudge, SETPOINT_NUDGE_MAX_F))
+        # Quantize DOWN to a multiple of STEP (never round up: we must never
+        # push the user's setpoint past what the excess warrants).
+        nudge = math.floor(nudge / SETPOINT_NUDGE_STEP_F) * SETPOINT_NUDGE_STEP_F
+
+        if heating:
+            commanded_heat = baseline_heat + nudge
+            commanded_cool = baseline_cool
+            if dual and baseline_cool is not None:
+                # TRAP 1: raising heat must not violate the min gap with cool.
+                commanded_cool = max(baseline_cool,
+                                     commanded_heat + SETPOINT_HEATCOOL_MIN_DELTA_F)
+        else:
+            commanded_cool = baseline_cool - nudge
+            commanded_heat = baseline_heat
+            if dual and baseline_heat is not None:
+                # TRAP 1: lowering cool must not violate the min gap with heat.
+                commanded_heat = min(baseline_heat,
+                                     commanded_cool - SETPOINT_HEATCOOL_MIN_DELTA_F)
+        return commanded_cool, commanded_heat
 
     # ── Backpressure protection ───────────────────────────────────────────────
 
