@@ -44,6 +44,16 @@ sys.modules["appdaemon.plugins.hass.hassapi"] = hassapi
 sys.path.insert(0, "/Users/adam.durham/repos/homelab/homeassistant/appdaemon/apps")
 import smart_vent_controller as svc  # noqa: E402
 
+# This suite validates the setpoint-nudge STATE MACHINE's correctness in
+# isolation (engage/deepen/release/readback logic) -- the mechanism itself
+# is disabled in production (SETPOINT_NUDGE_ENABLED = False, 2026-09-02: on
+# an ecobee that controls to the AVERAGE of 14 sensors, moving the whole-
+# house setpoint to chase one chronically-hot room drags every OTHER room
+# colder too -- see the smart-vent-controller skill). Force it on for this
+# offline unit-test run so the mechanism keeps being exercised/kept honest
+# for if/when a corrected, room-targeted redesign re-enables it.
+svc.SETPOINT_NUDGE_ENABLED = True
+
 GR = "Game Room"          # occupant-driving room (margin base 1.5, no override)
 GR_KEY = ("upstairs", GR)
 _SENTINEL = object()      # allows set_cloud_truth(cool=None) to set None
