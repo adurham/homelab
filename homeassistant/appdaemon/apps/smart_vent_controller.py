@@ -2185,6 +2185,41 @@ class SmartVentController(hass.Hass):
                 # throttled as donors but never steal airflow for themselves.
                 if sensors.get("donor_only"):
                     continue
+                # DOWNSTAIRS/BASEMENT LADDER CONSISTENCY (2026-09-02, bug fix):
+                # this pass has its OWN, separate "does this room deserve to be
+                # pinned to 100% and draft donor CFM" threshold (_room_margin,
+                # ~1.5F but reducible by supply/delivery penalties) — totally
+                # disconnected from the downstairs-occupied-cooling ladder
+                # _auto_calculate just computed for this exact room this exact
+                # cycle. Bug this closes: Kitchen at raw +1.2F over setpoint
+                # was correctly scored 50% by the ladder, then immediately
+                # yanked back to 100% here because 1.2F cleared this
+                # function's own (lower, penalty-adjustable) margin — the two
+                # thresholds disagreeing produced flapping between 100%
+                # (beneficiary) and 0% (donor), NEVER settling at the ladder's
+                # correct 50%. For downstairs/basement during COOLING, a room
+                # must clear the SAME DOWNSTAIRS_OCC_FULL_THRESHOLD_F (2.0F)
+                # the ladder uses for its own 100% tier before it can become a
+                # full priority-pass beneficiary (pinned 100%, entitled to
+                # draft donor CFM from elsewhere). Below that threshold it is
+                # NOT treated as struggling by this pass at all — it stays at
+                # whatever the ladder gave it (0% or 50%) and remains fully
+                # eligible to be selected as a DONOR for a genuinely
+                # struggling room elsewhere (e.g. Game Room) — that donor
+                # throttling is correct and desired (per user: comfortable
+                # downstairs air should go feed a roasting upstairs), it's
+                # the UNCONDITIONAL 100% beneficiary pin below that must not
+                # fire before the ladder says a downstairs room has earned it.
+                # Heating and upstairs are UNCHANGED (fall through to the
+                # original margin-based eligibility check untouched).
+                if not heating and zone_name in ("downstairs", "basement"):
+                    if off_by(temp) <= DOWNSTAIRS_OCC_FULL_THRESHOLD_F:
+                        continue
+                    escalated = (off >= PRIORITY_ESCALATE_OVERRIDES.get(key, PRIORITY_ESCALATE_OVER)
+                                 or self._delivery_penalty.get(key, 0.0)
+                                 >= DELIVERY_ESCALATE_PENALTY)
+                    beneficiaries.append((off, key, temp, escalated, is_occupied))
+                    continue
                 margin = self._room_margin(key, heating)
                 eff_margin = (PRECOOL_MARGIN
                               if (precool and PRECOOL_MARGIN < margin)
