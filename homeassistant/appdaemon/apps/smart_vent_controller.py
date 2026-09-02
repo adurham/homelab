@@ -586,32 +586,38 @@ ZONE_VACANCY_DONOR_MIN_COOLER_F = 0.25   # floor: never pull air from a room tha
 # callback=self._service_call_done (see _set_vent — a blocking call_service
 # froze this app's single pinned thread for ~4.5h once).
 #
-# DISABLED 2026-09-02 — root-cause finding (see smart-vent-controller skill,
-# "Setpoint-nudge on an AVERAGED-sensor thermostat drags the WHOLE HOUSE
-# colder" + independent Opus review same day): climate.ecobee_thermostat
-# controls to the AVERAGE of all 14 remote sensors, not to the worst room.
-# Dropping the cool setpoint to force Game Room's compressor to escalate does
-# NOT "stage harder for a fixed target" — it moves the whole-house TARGET
-# colder, so every well-behaved room (Living Room, Kitchen) gets dragged well
-# below ITS OWN comfortable point to pull the house average down to chase one
-# chronically-underserved room. That is what produced the "freezing Living
-# Room/Kitchen" complaint on 2026-09-02 (nudge engaged 07:44, deepened to
-# cool=70F by 07:55, user manually corrected back to 72F by 08:13).
+# DISABLED 2026-09-02 (SAME DAY, RE-ENABLED LATER) — root-cause finding (see
+# smart-vent-controller skill, "Setpoint-nudge on an AVERAGED-sensor
+# thermostat drags the WHOLE HOUSE colder" + independent Opus review same
+# day): climate.ecobee_thermostat controls to the AVERAGE of all 14 remote
+# sensors, not to the worst room. Dropping the cool setpoint to force Game
+# Room's compressor to escalate does NOT "stage harder for a fixed target" —
+# it moves the whole-house TARGET colder, so every well-behaved room (Living
+# Room, Kitchen) gets dragged well below ITS OWN comfortable point to pull
+# the house average down to chase one chronically-underserved room. That is
+# what produced the "freezing Living Room/Kitchen" complaint on 2026-09-02
+# (nudge engaged 07:44, deepened to cool=70F by 07:55, user manually
+# corrected back to 72F by 08:13).
 #
-# User's explicit requirement for ANY future setpoint-control mechanism
-# (2026-09-02): it must derive its "is the house actually satisfied" signal
-# from OUR OWN room sensor readings (the same sensor.* entities ZONES already
-# uses for vent logic), never from climate.ecobee_thermostat's own
-# current_temperature/hallway-thermostat-driven average — that average is
-# exactly the blind spot this mechanism was trying (and failing) to work
-# around. A correct redesign would target a SPECIFIC beneficiary room's own
-# sensor (not the whole-house average) or refuse to engage while any
-# chronically-off-target room's excess is structural (see PRIORITY_ESCALATE
-# _OVERRIDES) rather than physical (transient). Until that redesign exists,
-# this mechanism is disabled and Game Room's persistent 72-76F sawtooth is a
-# hardware/duct-capacity problem for vent redistribution + physical mitigation
-# (duct sizing, shading, a mini-split) — not a whole-house setpoint problem.
-SETPOINT_NUDGE_ENABLED    = False # master kill switch — see note above
+# RE-ENABLED same day (2026-09-02, afternoon) after two structural fixes
+# closed the actual failure mode (see commits 745414b/3ef9b6e + the RESOLVED
+# section of the skill):
+#   1. SETPOINT_NUDGE_GAIN/MAX_F collapsed to a fixed, hard-capped 1.0F
+#      nudge — it can NEVER again drag the house 3F+ colder no matter how
+#      hot Game Room gets. It can still move the AVERAGE, but only by 1F.
+#   2. SETPOINT_NUDGE_OVERRIDE_COOLDOWN_MIN (2h) makes any human correction
+#      final for 2 hours — it can never fight the user again after they
+#      touch the thermostat.
+# Live justification for re-enabling, verified from real data before
+# flipping this: Game Room at 76.5F, all 3 vents open 100%, duct temps
+# 54-56F (cold air genuinely reaching it — NOT a duct/airflow capacity
+# problem), compressor stuck at stage 1 all afternoon because the house
+# average reads 72-73F against the 72F setpoint. Vent redistribution had
+# already done everything it can (5 donor rooms throttled to 0%, escalated
+# tier) — the remaining lever is compressor staging, decided off the
+# average, the one thing vents can't touch. Exactly the scenario this
+# mechanism exists for, now with both required guardrails in place.
+SETPOINT_NUDGE_ENABLED    = True  # master switch — see note above (re-enabled 2026-09-02)
 SETPOINT_NUDGE_ENGAGE_F   = 1.5   # worst_excess at/above this engages a nudge
 SETPOINT_NUDGE_RELEASE_F  = 0.5   # worst_excess at/below this releases it (hysteresis band; MUST be < ENGAGE)
 # GAIN=1.0 + MAX_F=1.0 deliberately collapse to a SINGLE fixed-magnitude nudge
