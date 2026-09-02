@@ -351,8 +351,9 @@ check("R3 relinquish did NOT restore/ratchet the old baseline (owned False)",
 
 # =============================================================================
 # 4. HEATING-DIRECTION SYMMETRY: commanded heat setpoints (and the coupled cool
-#    axis) are whole degrees too. Baseline heat 72, excess 5.5 -> nudge 2.0 ->
-#    heat 74 (whole); cool axis raises only if needed for the 6F gap -> 80.
+#    axis) are whole degrees too. Baseline heat 72, excess 5.5 -> nudge 1.0
+#    (MAX_F cap) -> heat 73 (whole); cool axis raises only if needed for the
+#    6F gap -> 80.
 # =============================================================================
 ha = FakeHA(hvac_mode="heat_cool", hvac_action="heating", sp_cool=80.0, sp_heat=72.0)
 ha.occupy("upstairs", "Game Room")
@@ -365,7 +366,7 @@ if wr:
     kw = wr[0]
     check("R4 commanded heat is a WHOLE degree == baseline + nudge(5.5)",
           is_whole(kw["heat_temp_f"]) and kw["heat_temp_f"] == 72.0 + nudge_amount(5.5))
-    check("R4 commanded heat == 74.0", kw["heat_temp_f"] == 74.0)
+    check("R4 commanded heat == 73.0", kw["heat_temp_f"] == 73.0)
     check("R4 commanded cool is a WHOLE degree (coupled axis)", is_whole(kw["cool_temp_f"]))
     check("R4 gap preserved (cool - heat >= 6F)",
           kw["cool_temp_f"] - kw["heat_temp_f"] >= svc.SETPOINT_HEATCOOL_MIN_DELTA_F)
@@ -387,15 +388,16 @@ if wr:
           kw["cool_temp_f"] >= 73.0 - svc.SETPOINT_NUDGE_MAX_F)
     check("R5 commanded cool is a whole degree", is_whole(kw["cool_temp_f"]))
     check("R5 nudge is never negative", nudge_used >= 0.0)
-# floor(200*0.5/1.0)*1.0 = 100.0, but the MAX clamp keeps it at 3.0.
+# floor(min(200*1.0, 1.0)/1.0)*1.0 = 1.0, and the MAX clamp keeps it at 1.0.
 check("R5 nudge_amount(w) is always a whole, non-negative number",
       all(is_whole(nudge_amount(x)) and nudge_amount(x) >= 0.0
           for x in [0.0, 0.5, 1.0, 1.5, 2.05, 3.0, 5.84, 7.71, 20.0, 200.0]))
-# Minimum effective nudge is now 1.0F (a 0.5F nudge is unrepresentable; the
-# smallest excess that produces a non-zero nudge yields a whole degree —
-# nudge = floor(w*0.5), so w must clear 2.0 for a 1.0F nudge).
+# Minimum effective nudge is now 1.0F (a 0.5F nudge is unrepresentable; with
+# GAIN=1.0 + MAX_F=1.0 the nudge is a single fixed 1.0F step that engages for
+# ANY excess >= 1.0 — nudge = floor(min(w*1.0, 1.0)/1.0), so w must clear 1.0
+# for a 1.0F nudge, and anything below that is 0.0F).
 check("R5 minimum effective nudge is 1.0F (0.5F is now sub-quantum)",
-      nudge_amount(2.0) == 1.0 and nudge_amount(1.99) == 0.0)
+      nudge_amount(1.0) == 1.0 and nudge_amount(0.99) == 0.0)
 
 print()
 print(f"RESULT: {sum(PASS)}/{len(PASS)} checks passed")
