@@ -620,22 +620,44 @@ ZONE_VACANCY_DONOR_MIN_COOLER_F = 0.25   # floor: never pull air from a room tha
 SETPOINT_NUDGE_ENABLED    = True  # master switch — see note above (re-enabled 2026-09-02)
 SETPOINT_NUDGE_ENGAGE_F   = 1.5   # worst_excess at/above this engages a nudge
 SETPOINT_NUDGE_RELEASE_F  = 0.5   # worst_excess at/below this releases it (hysteresis band; MUST be < ENGAGE)
-# GAIN=1.0 + MAX_F=1.0 deliberately collapse to a SINGLE fixed-magnitude nudge
-# (2026-09-02 redesign requirement): once worst_excess clears ENGAGE_F, the
-# clamp below immediately saturates at MAX_F, so every engagement moves the
-# setpoint by EXACTLY 1.0F, never partially and never more. This directly
-# encodes the user's explicit requirement: "if it's set to 72, I don't want
-# the first floor cooling down to 70 to get the upstairs down to 73" — the
-# ORIGINAL baseline (see baseline_cool/baseline_heat, captured from cloud
-# truth at engage time = whatever the human currently has it at, manually or
-# via schedule) is the accepted reference point, and the nudge may move AT
-# MOST 1F past it, period. Because MAX_F == STEP_F, "deepening" (re-nudging
-# further off the same baseline after dwell) can never produce a MORE
-# aggressive value than what's already commanded — the deepen branch's own
-# "only write if strictly more aggressive" guard makes it a permanent no-op
-# once engaged, so this is a single-shot 1F nudge, not a ratchet.
-SETPOINT_NUDGE_GAIN       = 1.0   # degrees of setpoint nudge per degree of worst_excess
-SETPOINT_NUDGE_MAX_F      = 1.0   # hard cap on how far we may ever move the user's setpoint (2026-09-02, was 3.0)
+# GAIN/MAX_F chosen to guarantee a SINGLE, CONSTANT-MAGNITUDE nudge of exactly
+# MAX_F degrees whenever the mechanism engages at all (2026-09-02 redesign
+# requirement, tightened same day): nudge_amount = floor(clamp(worst_excess *
+# GAIN, 0, MAX_F) / STEP_F) * STEP_F. As long as GAIN * ENGAGE_F >= MAX_F, the
+# clamp ALWAYS saturates the instant a nudge is allowed to engage at all (the
+# minimum possible worst_excess to engage is ENGAGE_F itself) — so the nudge
+# can never be a smaller, in-between value; it is either 0 (not engaged) or
+# exactly MAX_F. This directly encodes the user's explicit requirement: "if
+# it's set to 72, I don't want the first floor cooling down to 70 to get the
+# upstairs down to 73" — the ORIGINAL baseline (see baseline_cool/
+# baseline_heat, captured from cloud truth at engage time = whatever the
+# human currently has it at, manually or via schedule) is the accepted
+# reference point, and the nudge may move AT MOST MAX_F degrees past it,
+# period, never partially and never more. Because MAX_F is the saturated
+# value from the very first engage, "deepening" (re-nudging further off the
+# same baseline after dwell) can never produce a MORE aggressive value than
+# what's already commanded — the deepen branch's own "only write if strictly
+# more aggressive" guard makes it a permanent no-op once engaged, so this is
+# always a single-shot nudge, never a ratchet.
+#
+# MAX_F raised 1.0 -> 2.0 (2026-09-02, same day as the fixed-magnitude
+# redesign above): this house's stage-2 cooling differential is a MANUAL-ONLY
+# ecobee setting (not API-readable — see the ecobee-api-reference skill),
+# confirmed at 2.0F, and the compressor stages up only once the AVERAGED
+# controlling temp EXCEEDS setpoint+2.0F, not merely reaches it. Live data
+# the day this was raised: house average sits ~1F over the user's real
+# baseline setpoint even before any nudge, so a 1.0F nudge only pushed the
+# gap to EXACTLY 2.0F — the boundary, not past it — and stage 2 never fired
+# even after 10+ minutes at that gap. GAIN raised 1.0 -> 2.0 alongside MAX_F
+# so saturation is still guaranteed (1.5 engage * 2.0 gain = 3.0 >= 2.0 cap)
+# — this is a magnitude change only, the single-shot/no-ratchet guarantee
+# above is unaffected. Vent scoring is UNCHANGED by this: _active_nudge_
+# baseline (see below) always scores every room against the pre-nudge
+# baseline setpoint, never the live nudged one, so deepening the nudge's
+# magnitude has zero effect on how Living Room/Kitchen are judged for
+# comfort — only the compressor's target moves, never the vents' target.
+SETPOINT_NUDGE_GAIN       = 2.0   # degrees of setpoint nudge per degree of worst_excess
+SETPOINT_NUDGE_MAX_F      = 2.0   # hard cap on how far we may ever move the user's setpoint (2026-09-02: 3.0 -> 1.0 -> 2.0, see note above)
 # ecobee stores/reports setpoints as WHOLE DEGREES only. The baseline captured at
 # engage is already a whole degree, so quantizing nudge_amount to a whole-degree
 # multiple makes every COMMANDED setpoint land exactly on a value the thermostat
