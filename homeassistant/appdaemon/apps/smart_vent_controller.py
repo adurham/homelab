@@ -614,8 +614,22 @@ ZONE_VACANCY_DONOR_MIN_COOLER_F = 0.25   # floor: never pull air from a room tha
 SETPOINT_NUDGE_ENABLED    = False # master kill switch — see note above
 SETPOINT_NUDGE_ENGAGE_F   = 1.5   # worst_excess at/above this engages a nudge
 SETPOINT_NUDGE_RELEASE_F  = 0.5   # worst_excess at/below this releases it (hysteresis band; MUST be < ENGAGE)
-SETPOINT_NUDGE_GAIN       = 0.5   # degrees of setpoint nudge per degree of worst_excess
-SETPOINT_NUDGE_MAX_F      = 3.0   # hard cap on how far we may ever move the user's setpoint
+# GAIN=1.0 + MAX_F=1.0 deliberately collapse to a SINGLE fixed-magnitude nudge
+# (2026-09-02 redesign requirement): once worst_excess clears ENGAGE_F, the
+# clamp below immediately saturates at MAX_F, so every engagement moves the
+# setpoint by EXACTLY 1.0F, never partially and never more. This directly
+# encodes the user's explicit requirement: "if it's set to 72, I don't want
+# the first floor cooling down to 70 to get the upstairs down to 73" — the
+# ORIGINAL baseline (see baseline_cool/baseline_heat, captured from cloud
+# truth at engage time = whatever the human currently has it at, manually or
+# via schedule) is the accepted reference point, and the nudge may move AT
+# MOST 1F past it, period. Because MAX_F == STEP_F, "deepening" (re-nudging
+# further off the same baseline after dwell) can never produce a MORE
+# aggressive value than what's already commanded — the deepen branch's own
+# "only write if strictly more aggressive" guard makes it a permanent no-op
+# once engaged, so this is a single-shot 1F nudge, not a ratchet.
+SETPOINT_NUDGE_GAIN       = 1.0   # degrees of setpoint nudge per degree of worst_excess
+SETPOINT_NUDGE_MAX_F      = 1.0   # hard cap on how far we may ever move the user's setpoint (2026-09-02, was 3.0)
 # ecobee stores/reports setpoints as WHOLE DEGREES only. The baseline captured at
 # engage is already a whole degree, so quantizing nudge_amount to a whole-degree
 # multiple makes every COMMANDED setpoint land exactly on a value the thermostat
@@ -633,6 +647,17 @@ SETPOINT_NUDGE_DWELL_SEC  = 600   # min seconds between setpoint writes (>= comp
 SETPOINT_NUDGE_CONFIRM_SEC= 420   # readback mismatch must persist this long before it's believed (ecobee cloud poll floor is 3 min)
 SETPOINT_NUDGE_TOLERANCE_F= 0.2   # readback match tolerance
 SETPOINT_HEATCOOL_MIN_DELTA_F = 6.0  # ecobee heatCoolMinDelta, see TRAP 1 below
+# HUMAN-OVERRIDE COOLDOWN (2026-09-02): once a live-readback mismatch confirms
+# the USER changed the setpoint out from under an active nudge, the mechanism
+# must NOT immediately turn around and re-engage a fresh nudge next cycle if
+# the offending room is still hot -- that is functionally "fighting" the human
+# the instant they act, just with an extra ~2-4 minute detection delay instead
+# of an instant pop. User's explicit requirement (2026-09-02): "anything done
+# by a human on the thermostat is THE be all end all" -- a detected override
+# must make the mechanism back off for a real window, not retry on the next
+# 120s cycle. This is a HARD requirement, not a tunable nicety: it applies
+# regardless of worst_excess, escalation, or how hot the room still is.
+SETPOINT_NUDGE_OVERRIDE_COOLDOWN_MIN = 120  # 2h: no new engagement after a detected human override
 
 # ── Setpoint-nudge ownership persistence (restart-amnesia / baseline-ratchet fix,
 #    added 2026-09-01) ─────────────────────────────────────────────────────────
@@ -769,6 +794,17 @@ class SmartVentController(hass.Hass):
         self._sp_last_write_ts = None
         self._sp_mismatch_since = None
         self._sp_heating = None
+        # HUMAN-OVERRIDE COOLDOWN (2026-09-02): timestamp of the most recent
+        # confirmed human setpoint change (detected via the readback-mismatch
+        # ->confirm path). None means no override on record / cooldown expired.
+        # Set at the moment of detection, persisted immediately (survives an
+        # app restart -- see _persist_nudge_state/_restore_nudge_ownership),
+        # and gates the not-owned engage branch in _apply_setpoint_nudge:
+        # no new nudge may engage while now - this < OVERRIDE_COOLDOWN_MIN,
+        # regardless of worst_excess. This is what makes a detected override
+        # STOP the mechanism instead of merely delaying the next re-engage by
+        # one CONFIRM_SEC window.
+        self._sp_override_cooldown_until = None
         # One-shot log guard for a missing/unavailable cloud-truth setpoint
         # sensor (see _apply_setpoint_nudge): True after we've logged the
         # "cloud-truth unavailable" line once, so we don't spam every 120s cycle.
@@ -2632,6 +2668,14 @@ class SmartVentController(hass.Hass):
         commanded fields are written as None when owned=False so a reader cannot
         mistake a stale value for ours.
 
+        The human-override cooldown (`self._sp_override_cooldown_until`) is
+        ALWAYS read from instance state, never taken as a parameter here —
+        it must survive every subsequent persist call (engage/deepen/release)
+        unmodified until it naturally expires, so a caller that doesn't know
+        about it can never accidentally clear it by omission. Set it via
+        `self._sp_override_cooldown_until = ...` BEFORE calling this, same
+        write-ahead discipline as every other _sp_* field.
+
         All I/O is defensive: any exception is caught and logged, and NEVER
         crashes the control loop or initialize(). A failed persist is a
         degraded-but-safe condition (the dead-man's switch bounds it), not fatal.
@@ -2652,6 +2696,8 @@ class SmartVentController(hass.Hass):
                              else float(baseline_cool))
             baseline_heat = (None if baseline_heat is None
                              else float(baseline_heat))
+            override_cooldown_until = getattr(
+                self, "_sp_override_cooldown_until", None)
             record = {
                 "version": NUDGE_STATE_VERSION,
                 "owned": bool(owned),
@@ -2663,6 +2709,12 @@ class SmartVentController(hass.Hass):
                 "baseline_cool": baseline_cool,
                 "baseline_heat": baseline_heat,
                 "heating": (None if heating is None else bool(heating)),
+                # Human-override cooldown (2026-09-02): ISO-8601 UTC, or None.
+                # Persisted unconditionally so an app restart mid-cooldown
+                # cannot amnesia it away and re-engage early.
+                "override_cooldown_until": (
+                    None if override_cooldown_until is None
+                    else override_cooldown_until.strftime("%Y-%m-%dT%H:%M:%SZ")),
             }
             payload = json.dumps(record)
             # Atomic write: temp file in the same dir + os.replace(). A reader
@@ -2722,10 +2774,29 @@ class SmartVentController(hass.Hass):
                 raise ValueError("state record not a JSON object")
             if data.get("version") != NUDGE_STATE_VERSION:
                 raise ValueError("unknown state version")
+            # HUMAN-OVERRIDE COOLDOWN (2026-09-02): restore this REGARDLESS of
+            # `owned` — the whole point is that a just-detected override
+            # persists owned=False alongside the cooldown timestamp, and this
+            # is exactly the record an app restart must not amnesia away. Parse
+            # defensively (missing/corrupt/expired -> just None, never raises)
+            # since a cooldown parse failure must not block the rest of restore.
+            cooldown_raw = data.get("override_cooldown_until")
+            if isinstance(cooldown_raw, str):
+                try:
+                    cooldown_ts = datetime.strptime(cooldown_raw,
+                                                     "%Y-%m-%dT%H:%M:%SZ")
+                    if cooldown_ts > self.datetime():
+                        self._sp_override_cooldown_until = cooldown_ts
+                        self.log(f"  SETPOINT-NUDGE: restored human-override "
+                                 f"cooldown, no new nudge until "
+                                 f"{cooldown_ts.isoformat()}")
+                except (ValueError, TypeError):
+                    pass  # corrupt cooldown field -> treat as no cooldown
             if not data.get("owned"):
                 # A clean relinquish/release wrote owned=False, or the previous
                 # run correctly discarded on a mismatch: not re-adopting is
-                # correct either way.
+                # correct either way. The cooldown (if any) was already
+                # restored above regardless of this early return.
                 return
             commanded_at = data.get("commanded_at")
             cmd_ts = None
@@ -3083,6 +3154,20 @@ class SmartVentController(hass.Hass):
             # gets safely handed back rather than being abandoned live.
             if not SETPOINT_NUDGE_ENABLED:
                 return
+            # HUMAN-OVERRIDE COOLDOWN (2026-09-02): a detected human setpoint
+            # change blocks ALL new engagement until the cooldown expires,
+            # unconditionally — checked BEFORE the worst_excess/ENGAGE_F gate
+            # below so a still-hot room can never re-trigger the mechanism
+            # early. Cleared naturally once `now` passes the timestamp; no
+            # explicit clear-on-expiry needed since every check is a live
+            # comparison against `now`, never a stale cached boolean.
+            cooldown_until = getattr(self, "_sp_override_cooldown_until", None)
+            if cooldown_until is not None:
+                if now < cooldown_until:
+                    return
+                # Cooldown has naturally expired — clear it so we stop
+                # persisting a stale future timestamp on the next state write.
+                self._sp_override_cooldown_until = None
             # NOT owned. Engage only if the worst occupied excess clears the
             # engage threshold (with hysteresis below via the release bound), AND
             # only while actually conditioning. While idle/fan we engage nothing:
@@ -3199,13 +3284,29 @@ class SmartVentController(hass.Hass):
                 # (their new value / hold is now on top and must not be popped;
                 # TRAP 2) and WITHOUT restoring the baseline (their new value
                 # simply becomes the baseline for any future engagement).
+                #
+                # HUMAN-OVERRIDE COOLDOWN (2026-09-02): a confirmed override is
+                # not just "relinquish and wait for the normal engage gate" --
+                # it starts a real cooldown window during which NO new nudge
+                # may engage at all, even if the room is still hot. Without
+                # this, a human correcting the thermostat gets fought again
+                # within one CONFIRM_SEC cycle (~7 min) the moment worst_excess
+                # re-clears ENGAGE_F -- which for a chronically hot room is
+                # almost immediately. "Anything done by a human on the
+                # thermostat is THE be-all end-all" (user, 2026-09-02).
+                self._sp_override_cooldown_until = now + timedelta(
+                    minutes=SETPOINT_NUDGE_OVERRIDE_COOLDOWN_MIN)
                 self.log(f"  SETPOINT-NUDGE: user changed setpoint (cool "
                          f"{self._sp_commanded_cool:.1f} -> {live_cool} live), "
-                         f"relinquishing ownership without resuming")
+                         f"relinquishing ownership without resuming — cooldown "
+                         f"until {self._sp_override_cooldown_until.isoformat()} "
+                         f"(no new nudge for {SETPOINT_NUDGE_OVERRIDE_COOLDOWN_MIN} min)")
                 # Persist the relinquishment BEFORE clearing in-memory state, so
                 # a crash mid-transition cannot leave a stale "we own it" record.
                 # The user's live value becomes the baseline for any future
-                # engagement once they release it back to schedule.
+                # engagement once they release it back to schedule. The
+                # cooldown timestamp (set above, on self) is persisted
+                # automatically — it cannot amnesia away and re-engage early.
                 self._persist_nudge_state(owned=False)
                 self._sp_owned = False
                 self._sp_commanded_cool = None
