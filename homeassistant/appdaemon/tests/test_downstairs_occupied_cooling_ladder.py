@@ -197,6 +197,39 @@ check("T9 heating is unaffected by the cooling-only ladder "
       "(flat need-based logic still applies)",
       out[lr] == 100)
 
+# =============================================================================
+# 10. PRIORITY-PASS CONSISTENCY (bug fix, same day as the ladder itself):
+#     _apply_priority_rooms has its OWN independent "is this room struggling
+#     enough to be pinned to 100% and draft donor CFM" threshold, previously
+#     disconnected from the ladder's thresholds -- so a room the ladder
+#     correctly scored 50% got immediately yanked back to 100% here because
+#     it cleared this pass's own (lower) margin. Reproduces the exact live
+#     bug (2026-09-02): Kitchen at 73.2F (raw +1.2F, correctly 50% per the
+#     ladder) while Game Room roasts at 79.3F -- Kitchen must NOT become a
+#     100% beneficiary (that would fight the whole point of redirecting air
+#     upstairs), and specifically must remain ELIGIBLE to donate to Game
+#     Room, since a comfortable-ish downstairs room feeding a roasting
+#     upstairs room is exactly the desired behavior.
+# =============================================================================
+ha = fresh()
+gr = find_key(ha, "Game Room")
+ha.states[svc.ZONES["upstairs"]["rooms"]["Game Room"]["occupancy"]] = "on"
+ha.states[svc.ZONES["upstairs"]["rooms"]["Game Room"]["temp"]] = 79.3
+# Kitchen has no occupancy sensor -- set its temp directly rather than via
+# the downstairs-occupied helper, which asserts an occupancy sensor exists.
+kk = find_key(ha, "Kitchen")
+ha.states[svc.ZONES["downstairs"]["rooms"]["Kitchen"]["temp"]] = 73.2  # raw +1.2F
+auto_out = ha._auto_calculate("heat_cool", "cooling", SP, 64.0)
+check("T10 pre-priority: ladder correctly scores Kitchen 50% (raw +1.2F)",
+      auto_out[kk] == 50)
+priority_out = ha._apply_priority_rooms(dict(auto_out), "cooling", SP, None, "Auto")
+check("T10 post-priority: Kitchen is NOT yanked to 100% as a beneficiary "
+      "(stays at the ladder's 50%, or is thrown lower as a DONOR to Game "
+      "Room -- either is correct, 100% is the only wrong outcome)",
+      priority_out[kk] != 100)
+check("T10 Game Room (genuinely roasting, off+7.3F) IS a full 100% beneficiary",
+      priority_out[gr] == 100)
+
 print()
 print(f"RESULT: {sum(PASS)}/{len(PASS)} checks passed")
 sys.exit(0 if all(PASS) else 1)
