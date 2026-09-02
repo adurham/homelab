@@ -292,8 +292,9 @@ check("T1 no-nudge: _sp_owned stays False", ha._sp_owned is False)
 # =============================================================================
 # 2. ACTIVE-NUDGE BASELINE SUBSTITUTION in _auto_calculate: with live cool 66 /
 #    baseline 72, Living Room 72.5 must NOT be hot-overridden to 100%. Under the
-#    (buggy) LIVE reference it would be need=+7.5 -> hot override 100%; under the
-#    baseline it is need=+1.5 (occupied, in the downstairs deadband) -> 50%.
+#    (buggy) LIVE reference it would be need=+7.5 -> hot override 100%; under
+#    the baseline it is raw 0.5F over setpoint -> under the 2026-09-02
+#    downstairs-occupied-cooling-ladder's 1.0F open threshold -> 0% (closed).
 # =============================================================================
 ha = build_nudged_house(action="cooling")
 set_production_temps(ha)
@@ -306,8 +307,9 @@ lr = find_key(ha, "Living Room")
 live_out = ha._auto_calculate(ha._hvac_mode, "cooling", 66.0, 60.0)
 check("T2 bug-confirm: with LIVE 66 the Living Room hot-overrides to 100%",
       live_out.get(lr) == 100)
-check("T2 fix: with BASELINE 72 the Living Room is NOT hot-overridden (50%)",
-      base_out.get(lr) == 50)
+check("T2 fix: with BASELINE 72 the Living Room is NOT hot-overridden (0%, "
+      "raw 0.5F under the 1.0F downstairs-occupied ladder open threshold)",
+      base_out.get(lr) == 0)
 # Game Room must stay 100% (it IS genuinely hot: +3.0 over baseline).
 gr = find_key(ha, "Game Room")
 check("T2 fix: Game Room stays 100% (genuinely hot over baseline)", base_out.get(gr) == 100)
@@ -449,8 +451,9 @@ check("T8 no-nudge: _auto_calculate identical whether eff or live passed",
       out_live == out_eff)
 lr = find_key(ha, "Living Room")
 gr = find_key(ha, "Game Room")
-check("T8 no-nudge: Living Room 72.5 occupied +0.5 -> 50% (deadband, as today)",
-      out_eff.get(lr) == 50)
+check("T8 no-nudge: Living Room 72.5 occupied raw+0.5 -> 0% (under the "
+      "2026-09-02 downstairs-occupied ladder's 1.0F open threshold)",
+      out_eff.get(lr) == 0)
 check("T8 no-nudge: Game Room still 100% (genuinely hot over 72)",
       out_eff.get(gr) == 100)
 
