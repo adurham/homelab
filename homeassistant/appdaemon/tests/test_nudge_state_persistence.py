@@ -380,7 +380,8 @@ check("F wrong-version: discarded", ha2._sp_owned is False)
 _rm(tmp)
 
 # =============================================================================
-# 8. PERSIST FIRES ON EVERY TRANSITION: engage, deepen, relinquish, release.
+# 8. PERSIST FIRES ON EVERY TRANSITION: engage, (no deepen — impossible now),
+#    relinquish, release.
 # =============================================================================
 tmp = tempfile.mkdtemp()
 # --- engage ---
@@ -388,22 +389,27 @@ ha = engaged_ha(sp_cool=72.0, sp_heat=66.0, tmp=tmp, worst_excess=2.5)
 ha.run_nudge()
 pc_engage = ha.persist_count
 check("G engage: persisted once", pc_engage == 1)
-# --- deepen --- (dwell elapses, room worsens while conditioning)
+# --- would-be deepen --- (dwell elapses, room worsens while conditioning)
+# 2026-09-02 redesign: GAIN=1.0 + MAX_F=1.0 collapse to a single fixed 1.0F
+# nudge, so the first engage already wrote the maximum possible value. A
+# would-be deepen cycle (room worsens, dwell elapsed) recomputes the SAME
+# commanded value (nudge_amount(6.0) is still 1.0) and the deepen branch's
+# own guard returns without writing — so it must NOT produce a second persist.
 ha.set_live_setpoints(cool=ha._sp_commanded_cool, heat=ha._sp_commanded_heat)
 ha.advance(svc.SETPOINT_NUDGE_DWELL_SEC + 1)
 ha.set_room_temp("upstairs", "Game Room",
                  ha.live_cool() + svc.PRIORITY_MARGIN_BASE + 6.0)  # excess 6.0
 ha.run_nudge()
-check("G deepen: persisted again (total 2)",
-      ha.persist_count == 2 and ha._sp_commanded_cool < 71.5)
+check("G would-be deepen: NO second persist (single 1F cap, no ratchet)",
+      ha.persist_count == 1 and ha._sp_commanded_cool == 71.0)
 # --- release --- (room recovers -> resume_top_event, persist owned=False)
 ha.set_live_setpoints(cool=ha._sp_commanded_cool, heat=ha._sp_commanded_heat)
 ha.set_room_temp("upstairs", "Game Room",
                  ha.live_cool() + svc.PRIORITY_MARGIN_BASE + 0.2)  # excess 0.2
 ha.set_hvac_action("cooling")
 ha.run_nudge()
-check("G release: persisted a relinquishment (total 3) + owned cleared",
-      ha.persist_count == 3 and ha._sp_owned is False)
+check("G release: persisted a relinquishment (total 2) + owned cleared",
+      ha.persist_count == 2 and ha._sp_owned is False)
 with open(ha._nudge_state_file) as f:
     rel = json.load(f)
 check("G release: file records owned=False", rel["owned"] is False)
