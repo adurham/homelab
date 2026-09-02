@@ -315,6 +315,25 @@ UNOCC_HOT_OVERRIDE_UP     = 5.0   # empty 2F room -> 100% at +5F (solar load)
 OCC_DEADBAND_DOWNSTAIRS = 1.5
 OCC_DEADBAND_UPSTAIRS   = 1.0
 
+# DOWNSTAIRS OCCUPIED COOLING LADDER (2026-09-02 redesign, user requirement):
+# "downstairs vents should be fully closed until an occupied room drifts
+# above 1F over setpoint, then 50% until 2F over, then 100%" — explicit
+# three-tier ladder measured against RAW distance-from-setpoint (temp -
+# target_cool), NOT the occ_bonus-inflated `need` the rest of this function
+# uses for scoring. Bug this replaces: `need` adds a flat +1.0F occupied
+# bonus BEFORE comparing to OCC_DEADBAND_DOWNSTAIRS (1.5F), so a room only
+# 0.5F raw over setpoint was already scoring 1.5F and opening — silently
+# halving the user's intended 1.0F margin. This ladder is self-contained
+# (both thresholds enforced directly against raw, not derived from
+# OCCUPANCY_OVERRIDE_OVER/occ_bonus) so it stays correct even if those
+# other constants are retuned later — see _auto_calculate's downstairs/
+# basement occupied-cooling branch for where this is applied. Heating and
+# upstairs are UNCHANGED (upstairs keeps its original tight OCC_DEADBAND_
+# UPSTAIRS behavior; downstairs/basement heating keeps the flat DEADBAND
+# ladder, "not the focus of this tuning" per the original comment above).
+DOWNSTAIRS_OCC_OPEN_THRESHOLD_F = 1.0  # raw °F over setpoint: closed -> 50%
+DOWNSTAIRS_OCC_FULL_THRESHOLD_F = 2.0  # raw °F over setpoint: 50% -> 100%
+
 # Cross-floor donor threshold: downstairs rooms need less proven per-cycle
 # margin to qualify as a donor to an UPSTAIRS beneficiary than the flat
 # PRIORITY_DONOR_COOLER_BY requires — downstairs is empirically cooler on
@@ -1236,12 +1255,28 @@ class SmartVentController(hass.Hass):
 
                 # Occupancy weight: occupied rooms get a bonus to their need
                 occ_bonus = 1.0 if is_occupied else 0.0
+                # Defensive init: only ever consumed under `if is_cooling and
+                # zone_name in ("downstairs", "basement")` below, where
+                # is_cooling guarantees it was actually set — but initialize
+                # unconditionally so static analysis (and any future
+                # reordering) can't accidentally read it unbound.
+                raw_off_setpoint = None
 
                 if is_cooling:
                     if target_cool is None:
                         room_positions[key] = 50
                         continue
                     need = temp - target_cool
+                    # RAW (pre-bonus) distance-over-setpoint, captured BEFORE
+                    # any heat-rise/occ_bonus adjustment below. Used by the
+                    # downstairs/basement occupied-cooling ladder (see
+                    # DOWNSTAIRS_OCC_OPEN_THRESHOLD_F/FULL_THRESHOLD_F) so
+                    # that ladder's 1.0F/2.0F thresholds are measured against
+                    # the room's ACTUAL temperature gap, never inflated by
+                    # the +1.0F occupied bonus meant for the rest of this
+                    # function's scoring (that inflation was the bug: it
+                    # silently halved the user's intended 1.0F margin).
+                    raw_off_setpoint = need
                     # Heat-rise bonus for upstairs
                     if zone_name == "upstairs":
                         need += UPSTAIRS_HEAT_RISE_BONUS
@@ -1329,12 +1364,45 @@ class SmartVentController(hass.Hass):
                     pos = 100
                     reason = f"hot, unoccupied ({need:+.1f}) — 100% (floor override)"
                 elif is_occupied:
+                    # DOWNSTAIRS/BASEMENT COOLING: explicit 3-tier ladder
+                    # against RAW distance-over-setpoint (2026-09-02 user
+                    # requirement — see DOWNSTAIRS_OCC_OPEN_THRESHOLD_F/
+                    # FULL_THRESHOLD_F comment): closed until >1.0F raw,
+                    # 50% from 1.0F to 2.0F raw, 100% past 2.0F raw. This
+                    # replaces the occ_bonus-inflated `need` comparison for
+                    # this specific branch only — upstairs and all heating
+                    # are UNCHANGED below (fall through to the original
+                    # occ_deadband logic, which still uses `need`).
+                    if is_cooling and zone_name in ("downstairs", "basement"):
+                        if raw_off_setpoint > DOWNSTAIRS_OCC_FULL_THRESHOLD_F:
+                            pos = 100
+                            reason = (f"needs airflow, occupied, raw "
+                                      f"{raw_off_setpoint:+.1f} > "
+                                      f"{DOWNSTAIRS_OCC_FULL_THRESHOLD_F:+.1f} "
+                                      f"— 100%")
+                        elif raw_off_setpoint > DOWNSTAIRS_OCC_OPEN_THRESHOLD_F:
+                            pos = 50
+                            reason = (f"needs airflow, occupied, raw "
+                                      f"{raw_off_setpoint:+.1f} > "
+                                      f"{DOWNSTAIRS_OCC_OPEN_THRESHOLD_F:+.1f} "
+                                      f"— 50%")
+                        else:
+                            # At/under the 1.0F raw open threshold: fully
+                            # closed, no hysteresis/trickle band. The user
+                            # was explicit this should be a hard binary step
+                            # at 1.0F, not the softer near-setpoint/hysteresis
+                            # treatment the rest of this function uses.
+                            pos = 0
+                            reason = (f"satisfied, occupied, raw "
+                                      f"{raw_off_setpoint:+.1f} <= "
+                                      f"{DOWNSTAIRS_OCC_OPEN_THRESHOLD_F:+.1f} "
+                                      f"— 0%")
                     # Per-floor OCCUPIED deadband: downstairs tolerates more
                     # real deviation before locking to 100% (and becoming
                     # donor-immune) than upstairs does — see OCC_DEADBAND_*
                     # comment above. Numerically equal to DEADBAND for
                     # upstairs, so upstairs behavior is unchanged.
-                    if need > occ_deadband:
+                    elif need > occ_deadband:
                         pos = 100
                         reason = (f"needs airflow, occupied ({need:+.1f}) "
                                   f"— 100% (floor deadband {occ_deadband:+.1f})")
