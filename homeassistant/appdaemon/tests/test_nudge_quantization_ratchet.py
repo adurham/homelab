@@ -240,11 +240,11 @@ writes1 = setpoint_calls(ha)
 check("R1 engage: exactly ONE set_hold_temperature call", len(writes1) == 1)
 if writes1:
     kw = writes1[0]
-    check("R1 commanded cool is a WHOLE degree (was 71.5, now 72.0)",
-          is_whole(kw["cool_temp_f"]) and kw["cool_temp_f"] == 72.0)
+    check("R1 commanded cool is a WHOLE degree (was 71.5 before quantization)",
+          is_whole(kw["cool_temp_f"]) and kw["cool_temp_f"] == 71.0)
     check("R1 commanded heat is a WHOLE degree (64.0)", is_whole(kw["heat_temp_f"]))
     check("R1 both axes whole", is_whole(kw["cool_temp_f"]) and is_whole(kw["heat_temp_f"]))
-    check("R1 commanded cool == baseline - nudge(3.35) == 72.0",
+    check("R1 commanded cool == baseline - nudge(3.35) == 71.0",
           kw["cool_temp_f"] == 73.0 - nudge_amount(3.35))
 check("R1 _sp_owned True", ha._sp_owned is True)
 check("R1 baseline cool captured as the true 73.0", ha._sp_baseline_cool == 73.0)
@@ -326,14 +326,14 @@ check("R2 ALL heating-sweep commanded values (both axes) are whole degrees",
 #    user's value is adopted (owned False, live stays 74). This proves the
 #    whole-degree fix did NOT blunt the existing user-change detection rule.
 # =============================================================================
-ha = engaged_ha(sp_cool=72.0, sp_heat=66.0, worst_excess=2.5)  # nudge 1.0 -> cool 71
-ha.run_nudge()  # engage, commanded cool 71 (whole)
-check("R3 genuine-change setup: commanded cool 71 (whole)",
-      is_whole(ha._sp_commanded_cool) and ha._sp_commanded_cool == 71.0)
+ha = engaged_ha(sp_cool=72.0, sp_heat=66.0, worst_excess=2.5)  # nudge 2.0 -> cool 70
+ha.run_nudge()  # engage, commanded cool 70 (whole)
+check("R3 genuine-change setup: commanded cool 70 (whole)",
+      is_whole(ha._sp_commanded_cool) and ha._sp_commanded_cool == 70.0)
 ha.set_live_setpoints(cool=ha._sp_commanded_cool, heat=ha._sp_commanded_heat)
 ha.run_nudge()  # our hold echoes back, matches
 check("R3 genuine-change setup: still owned after echo", ha._sp_owned is True)
-# The USER sets 74 (their own real change, 3.0F above our commanded 71).
+# The USER sets 74 (their own real change, 4.0F above our commanded 70).
 ha.set_live_setpoints(cool=74.0, heat=66.0)
 ha.run_nudge()  # fresh mismatch -> set _sp_mismatch_since, no action yet
 check("R3 fresh user change: mismatch recorded, not yet relinquished",
@@ -344,15 +344,15 @@ check("R3 genuine user change detected: _sp_owned False (relinquished)",
       ha._sp_owned is False)
 check("R3 genuine user change: ZERO resume_top_event (never pop user hold)",
       len(resume_calls(ha)) == 0)
-check("R3 user's value ADOPTED: live cool is 74 (not our old commanded 71)",
+check("R3 user's value ADOPTED: live cool is 74 (not our old commanded 70)",
       ha.live_cool() == 74.0)
 check("R3 relinquish did NOT restore/ratchet the old baseline (owned False)",
       ha._sp_baseline_cool is None)
 
 # =============================================================================
 # 4. HEATING-DIRECTION SYMMETRY: commanded heat setpoints (and the coupled cool
-#    axis) are whole degrees too. Baseline heat 72, excess 5.5 -> nudge 1.0
-#    (MAX_F cap) -> heat 73 (whole); cool axis raises only if needed for the
+#    axis) are whole degrees too. Baseline heat 72, excess 5.5 -> nudge 2.0
+#    (MAX_F cap) -> heat 74 (whole); cool axis raises only if needed for the
 #    6F gap -> 80.
 # =============================================================================
 ha = FakeHA(hvac_mode="heat_cool", hvac_action="heating", sp_cool=80.0, sp_heat=72.0)
@@ -366,7 +366,7 @@ if wr:
     kw = wr[0]
     check("R4 commanded heat is a WHOLE degree == baseline + nudge(5.5)",
           is_whole(kw["heat_temp_f"]) and kw["heat_temp_f"] == 72.0 + nudge_amount(5.5))
-    check("R4 commanded heat == 73.0", kw["heat_temp_f"] == 73.0)
+    check("R4 commanded heat == 74.0", kw["heat_temp_f"] == 74.0)
     check("R4 commanded cool is a WHOLE degree (coupled axis)", is_whole(kw["cool_temp_f"]))
     check("R4 gap preserved (cool - heat >= 6F)",
           kw["cool_temp_f"] - kw["heat_temp_f"] >= svc.SETPOINT_HEATCOOL_MIN_DELTA_F)
@@ -388,16 +388,18 @@ if wr:
           kw["cool_temp_f"] >= 73.0 - svc.SETPOINT_NUDGE_MAX_F)
     check("R5 commanded cool is a whole degree", is_whole(kw["cool_temp_f"]))
     check("R5 nudge is never negative", nudge_used >= 0.0)
-# floor(min(200*1.0, 1.0)/1.0)*1.0 = 1.0, and the MAX clamp keeps it at 1.0.
+# floor(min(200*2.0, 2.0)/1.0)*1.0 = 2.0, and the MAX clamp keeps it at 2.0.
 check("R5 nudge_amount(w) is always a whole, non-negative number",
       all(is_whole(nudge_amount(x)) and nudge_amount(x) >= 0.0
           for x in [0.0, 0.5, 1.0, 1.5, 2.05, 3.0, 5.84, 7.71, 20.0, 200.0]))
-# Minimum effective nudge is now 1.0F (a 0.5F nudge is unrepresentable; with
-# GAIN=1.0 + MAX_F=1.0 the nudge is a single fixed 1.0F step that engages for
-# ANY excess >= 1.0 — nudge = floor(min(w*1.0, 1.0)/1.0), so w must clear 1.0
-# for a 1.0F nudge, and anything below that is 0.0F).
-check("R5 minimum effective nudge is 1.0F (0.5F is now sub-quantum)",
-      nudge_amount(1.0) == 1.0 and nudge_amount(0.99) == 0.0)
+# Minimum effective nudge is now 2.0F (a 0.5F or 1.0F nudge is unrepresentable;
+# with GAIN=2.0 + MAX_F=2.0 the nudge is a single fixed 2.0F step that engages
+# for ANY excess >= 1.0 — nudge = floor(min(w*2.0, 2.0)/1.0), so w must clear
+# 0.5 for a 1.0F sub-quantum nudge and w>=1.0 for the full 2.0F cap; anything
+# below 0.5 is 0.0F).
+check("R5 minimum effective nudge is 2.0F (1.0F is now sub-quantum)",
+      nudge_amount(1.0) == 2.0 and nudge_amount(0.5) == 1.0
+      and nudge_amount(0.49) == 0.0)
 
 print()
 print(f"RESULT: {sum(PASS)}/{len(PASS)} checks passed")

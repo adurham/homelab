@@ -202,16 +202,16 @@ def check(name, cond):
 # =============================================================================
 ha = FakeHA(hvac_mode="heat_cool", hvac_action="cooling",
             sp_cool=72.0, sp_heat=66.0)
-# Game Room at excess 6.5 over the mirror 72 -> nudge 1.0 (MAX_F cap),
-# commanded cool 71, heat coupled down to 65 (6F gap). temp = 72 + 1.5 + 6.5 = 80.0.
+# Game Room at excess 6.5 over the mirror 72 -> nudge 2.0 (MAX_F cap),
+# commanded cool 70, heat coupled down to 64 (6F gap). temp = 72 + 1.5 + 6.5 = 80.0.
 ha.set_room_temp("upstairs", GR, 80.0)
 engage_cooling_hold(ha, echo=False)
-check("A1 engage: commanded cool 71 / heat 65",
-      ha._sp_commanded_cool == 71.0 and ha._sp_commanded_heat == 65.0)
+check("A1 engage: commanded cool 70 / heat 64",
+      ha._sp_commanded_cool == 70.0 and ha._sp_commanded_heat == 64.0)
 # Cloud truth echoes our exact hold; the MIRROR stays frozen at 66/60 (the bug).
-ha.set_cloud_truth(cool=71.0, heat=65.0)
+ha.set_cloud_truth(cool=70.0, heat=64.0)
 assert ha.live_cool() == 72.0 and ha.live_heat() == 66.0, "mirror must STAY stale"
-check("A1 setup: mirror contradicts cloud truth (66/60 vs 71/65)",
+check("A1 setup: mirror contradicts cloud truth (66/60 vs 70/64)",
       (ha.live_cool(), ha.live_heat()) == (72.0, 66.0))
 n_before = len(ha.logs)
 ha.advance(svc.SETPOINT_NUDGE_CONFIRM_SEC + 1)
@@ -233,11 +233,11 @@ check("A1 mismatch not recorded (cloud truth matched)", ha._sp_mismatch_since is
 # =============================================================================
 ha = FakeHA(hvac_mode="heat_cool", hvac_action="cooling",
             sp_cool=66.0, sp_heat=57.0)
-ha.set_room_temp("upstairs", GR, 66.0 + 1.5 + 6.5)  # excess 6.5 -> nudge 1.0
-engage_cooling_hold(ha)  # commanded cool 65 / heat 57 (cloud echo)
-check("A2 engage: commanded 65/57", ha._sp_commanded_cool == 65.0
+ha.set_room_temp("upstairs", GR, 66.0 + 1.5 + 6.5)  # excess 6.5 -> nudge 2.0
+engage_cooling_hold(ha)  # commanded cool 64 / heat 57 (cloud echo)
+check("A2 engage: commanded 64/57", ha._sp_commanded_cool == 64.0
       and ha._sp_commanded_heat == 57.0)
-# The USER raises cloud truth back to 66/60 (1.0F above our commanded 65).
+# The USER raises cloud truth back to 66/60 (2.0F above our commanded 64).
 ha.set_cloud_truth(cool=66.0, heat=60.0)
 n_before = len(ha.logs)
 ha.run_nudge()  # fresh mismatch -> set _sp_mismatch_since, no action yet
