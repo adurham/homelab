@@ -242,7 +242,7 @@ check("T1 below engage: _sp_owned stays False", ha._sp_owned is False)
 # 2. OCCUPIED ROOM WITH worst_excess 5.5 -> exactly ONE set_hold_temperature;
 #    cool_temp_f == baseline_cool - nudge(5.5); _sp_owned True.
 #    off = temp-70; margin=1.5; excess=5.5 -> off=7.0 -> temp=77.0
-#    nudge(5.5) = floor(min(5.5*1.0, 1.0)/1.0)*1.0 = 1.0; baseline cool 70 -> 69.0
+#    nudge(5.5) = floor(min(5.5*2.0, 2.0)/1.0)*1.0 = 2.0; baseline cool 70 -> 68.0
 # =============================================================================
 ha = build_occupied_room(zone="upstairs", room="Game Room", temp=77.0, sp_cool=70.0)
 ha.run_nudge()
@@ -253,14 +253,14 @@ if writes:
     kw = writes[0]
     check("T2 cool_temp_f == baseline_cool - nudge(5.5)",
           kw["cool_temp_f"] == 70.0 - nudge_amount(5.5))
-    # TRAP 1 in heat_cool: dropping cool to 69.0 must drag heat down to
-    # 69.0 - 6.0 = 63.0 so the min heatCoolMinDelta gap is preserved.
-    check("T2 heat_temp_f == 63.0 (dragged to preserve 6F gap)",
-          kw["heat_temp_f"] == 63.0)
+    # TRAP 1 in heat_cool: dropping cool to 68.0 must drag heat down to
+    # 68.0 - 6.0 = 62.0 so the min heatCoolMinDelta gap is preserved.
+    check("T2 heat_temp_f == 62.0 (dragged to preserve 6F gap)",
+          kw["heat_temp_f"] == 62.0)
     check("T2 hold_type == nextTransition", kw["hold_type"] == "nextTransition")
 check("T2 _sp_owned True", ha._sp_owned is True)
 check("T2 _sp_baseline_cool captured live 70.0", ha._sp_baseline_cool == 70.0)
-check("T2 _sp_commanded_cool recorded", ha._sp_commanded_cool == 69.0)
+check("T2 _sp_commanded_cool recorded", ha._sp_commanded_cool == 68.0)
 
 # =============================================================================
 # 3. NUDGE IS CAPPED: worst_excess 20.0 -> commanded cool never more than
@@ -357,14 +357,14 @@ check("T7 confirmed override: baseline NOT restored (cool live 69.5, not 70)",
 #    _sp_mismatch_since cleared, zero calls.
 # =============================================================================
 ha = build_occupied_room(zone="upstairs", room="Game Room", temp=77.0, sp_cool=70.0)
-ha.run_nudge()  # engage, cool 69.0
+ha.run_nudge()  # engage, cool 68.0
 # A transient echo mismatch (poll lag) shows 70.0 for ONE cycle...
 ha.set_live_setpoints(cool=70.0, heat=64.0)
 ha.run_nudge()
 check("T8 echo: ownership still held on first mismatch",
       ha._sp_owned is True and ha._sp_mismatch_since is not None)
-# ...then the readback settles to our commanded 69.0 on the next cycle.
-ha.set_live_setpoints(cool=69.0, heat=64.0)
+# ...then the readback settles to our commanded 68.0 on the next cycle.
+ha.set_live_setpoints(cool=68.0, heat=62.0)
 ha.run_nudge()
 check("T8 echo: ownership RETAINED after readback re-matches",
       ha._sp_owned is True)
@@ -373,12 +373,12 @@ check("T8 echo: zero new service calls", len(ha.sp_calls) == 1)
 
 # =============================================================================
 # 9. HEATING SYMMETRY: heating mode, coldest occupied room below the heat
-#    setpoint with worst_excess 4.0 -> heat setpoint moves UP by nudge(4.0)=1.0,
+#    setpoint with worst_excess 4.0 -> heat setpoint moves UP by nudge(4.0)=2.0,
 #    and the cool axis is NOT moved down. Uses the realistic heat_cool heating
 #    mode (the ecobee this app targets lives in heat_cool year-round).
 #    heat setpoint 70, margin 1.5, excess 4.0 -> off = 5.5 -> temp = 70-5.5=64.5.
-#    nudge(4.0) = floor(min(4.0*1.0, 1.0)/1.0)*1.0 = 1.0 -> commanded_heat = 71.0.
-#    TRAP 1 raises cool to preserve the gap (cool_baseline 75 -> max(75, 77)=77),
+#    nudge(4.0) = floor(min(4.0*2.0, 2.0)/1.0)*1.0 = 2.0 -> commanded_heat = 72.0.
+#    TRAP 1 raises cool to preserve the gap (cool_baseline 75 -> max(75, 78)=78),
 #    which is "not moved down".
 # =============================================================================
 ha = FakeHA(hvac_mode="heat_cool", hvac_action="heating",
@@ -391,9 +391,9 @@ writes = setpoint_calls(ha)
 check("T9 heat: exactly one write", len(writes) == 1)
 if writes:
     kw = writes[0]
-    check("T9 heat_temp_f == baseline_heat + nudge(4.0) == 71.0",
+    check("T9 heat_temp_f == baseline_heat + nudge(4.0) == 72.0",
           kw["heat_temp_f"] == 70.0 + nudge_amount(4.0))
-    check("T9 heat_temp_f == 71.0", kw["heat_temp_f"] == 71.0)
+    check("T9 heat_temp_f == 72.0", kw["heat_temp_f"] == 72.0)
     # Cool axis raised to preserve the min gap, NEVER moved down below baseline.
     check("T9 cool axis NOT moved down (>= baseline_cool)",
           kw["cool_temp_f"] >= 75.0)
@@ -401,13 +401,13 @@ if writes:
           kw["cool_temp_f"] - kw["heat_temp_f"] >= svc.SETPOINT_HEATCOOL_MIN_DELTA_F)
 
 # =============================================================================
-# 10. MIN DELTA: heat_cool mode, baseline cool=70 heat=64, nudge cool down 1.0
-#     -> the SAME service call must ALSO send heat_temp_f <= 63.0 so the 6F gap
+# 10. MIN DELTA: heat_cool mode, baseline cool=70 heat=64, nudge cool down 2.0
+#     -> the SAME service call must ALSO send heat_temp_f <= 62.0 so the 6F gap
 #     is preserved.
-#     nudge 1.0 -> excess where nudge_amount = 1.0 -> floor(min(excess*1.0,
-#     1.0)/1.0)==1 -> any excess >= 1.0 (MAX_F cap). Use excess 3.5:
-#     nudge = floor(min(3.5*1.0, 1.0)/1.0)*1.0 = 1.0 -> cool 70-1.0=69.0.
-#     commanded_heat = min(64, 69.0-6) = min(64,63.0) = 63.0.
+#     nudge 2.0 -> excess where nudge_amount = 2.0 -> floor(min(excess*2.0,
+#     2.0)/1.0)==2 -> any excess >= 1.0 (MAX_F cap). Use excess 3.5:
+#     nudge = floor(min(3.5*2.0, 2.0)/1.0)*1.0 = 2.0 -> cool 70-2.0=68.0.
+#     commanded_heat = min(64, 68.0-6) = min(64,62.0) = 62.0.
 # =============================================================================
 ha = FakeHA(hvac_mode="heat_cool", hvac_action="cooling", sp_cool=70.0, sp_heat=64.0)
 ha.occupy("upstairs", "Game Room")
@@ -418,9 +418,9 @@ writes = setpoint_calls(ha)
 check("T10 mindelta: exactly one write", len(writes) == 1)
 if writes:
     kw = writes[0]
-    check("T10 cool_temp_f == 69.0 (whole degree)", kw["cool_temp_f"] == 69.0)
+    check("T10 cool_temp_f == 68.0 (whole degree)", kw["cool_temp_f"] == 68.0)
     check("T10 cold-cool drags heat down to preserve 6F gap",
-          kw["heat_temp_f"] <= 63.0)
+          kw["heat_temp_f"] <= 62.0)
     check("T10 gap preserved (cool - heat >= 6F)",
           kw["cool_temp_f"] - kw["heat_temp_f"] >= svc.SETPOINT_HEATCOOL_MIN_DELTA_F)
 
@@ -450,38 +450,41 @@ ha.run_nudge()
 check("T12 guard (Cool Upstairs): zero service calls", len(ha.sp_calls) == 0)
 
 # =============================================================================
-# 13. NO DEEPENING PAST THE SINGLE 1F CAP (2026-09-02 redesign): owned at nudge
-#     1.0, room worsens, dwell elapsed -> ZERO additional writes. Because
-#     GAIN=1.0 + MAX_F=1.0 collapse to a single fixed-magnitude nudge, the
-#     first engage already writes the maximum possible value, so a would-be
-#     deepen cycle can never produce a MORE aggressive command — the deepen
-#     branch's own guard (`moved_new >= moved_old` for cooling) is always true
-#     and it returns without writing. This is the "no ratchet past the single
-#     1F cap" behavior the redesign explicitly requires.
-#     Engage at excess 2.5 (nudge 1.0 -> cool 69.0). Readback echoes 69.0.
-#     Room worsens to excess 6.0 (nudge_amount(6.0) is STILL 1.0 -> commanded
-#     cool stays 69.0, identical to what's already held). After dwell, the
+# 13. NO DEEPENING PAST THE SINGLE FIXED CAP (2026-09-02 redesign): owned at nudge
+#     2.0, room worsens, dwell elapsed -> ZERO additional writes. Because
+#     GAIN=2.0 + MAX_F=2.0 saturate the instant the mechanism engages (GAIN *
+#     ENGAGE_F = 2.0*1.5 = 3.0 >= MAX_F=2.0), the nudge collapses to a single
+#     fixed-magnitude value; the first engage already writes the maximum
+#     possible value (MAX_F), so a would-be deepen cycle can never produce a
+#     MORE aggressive command — the deepen branch's own guard (`moved_new >=
+#     moved_old` for cooling) is always true and it returns without writing.
+#     This is the "no ratchet past the single cap" behavior the redesign
+#     explicitly requires, unchanged by the magnitude bump (2.0F now instead of
+#     1.0F).
+#     Engage at excess 2.5 (nudge 2.0 -> cool 68.0). Readback echoes 68.0.
+#     Room worsens to excess 6.0 (nudge_amount(6.0) is STILL 2.0 -> commanded
+#     cool stays 68.0, identical to what's already held). After dwell, the
 #     deepen cycle must produce ZERO new writes.
 # =============================================================================
 ha = build_occupied_room(zone="upstairs", room="Game Room",
                          temp=70.0 + svc.PRIORITY_MARGIN_BASE + 2.5, sp_cool=70.0)
-# excess 2.5 -> nudge = floor(min(2.5*1.0, 1.0)/1.0)*1.0 = 1.0 -> cool 69.0
+# excess 2.5 -> nudge = floor(min(2.5*2.0, 2.0)/1.0)*1.0 = 2.0 -> cool 68.0
 ha.run_nudge()
 writes1 = setpoint_calls(ha)
-check("T13 initial nudge: cool 69.0", len(writes1) == 1 and writes1[0]["cool_temp_f"] == 69.0)
+check("T13 initial nudge: cool 68.0", len(writes1) == 1 and writes1[0]["cool_temp_f"] == 68.0)
 # Echo our hold; dwell elapses.
-ha.set_live_setpoints(cool=69.0, heat=64.0)
+ha.set_live_setpoints(cool=68.0, heat=62.0)
 ha.advance(svc.SETPOINT_NUDGE_DWELL_SEC + 1)
 # Room worsens to excess 6.0: temp = 70 + 1.5 + 6.0 = 77.5. nudge_amount(6.0)
-# is STILL 1.0 (MAX_F cap), so the would-be deepen command is identical to the
-# held 69.0 -> the deepen guard returns without writing.
+# is STILL 2.0 (MAX_F cap), so the would-be deepen command is identical to the
+# held 68.0 -> the deepen guard returns without writing.
 ha.set_room_temp("upstairs", "Game Room", 77.5)
 ha.run_nudge()
 writes2 = setpoint_calls(ha)
 check("T13 would-be deepen: ZERO additional writes (still exactly 1 total)",
       len(writes2) == 1)
-check("T13 no ratchet: commanded cool unchanged at 69.0 (single 1F cap)",
-      ha._sp_commanded_cool == 69.0)
+check("T13 no ratchet: commanded cool unchanged at 68.0 (single fixed cap)",
+      ha._sp_commanded_cool == 68.0)
 check("T13 no ratchet: ownership still held", ha._sp_owned is True)
 
 # =============================================================================

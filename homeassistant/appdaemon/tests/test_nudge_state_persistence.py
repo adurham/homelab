@@ -390,18 +390,19 @@ ha.run_nudge()
 pc_engage = ha.persist_count
 check("G engage: persisted once", pc_engage == 1)
 # --- would-be deepen --- (dwell elapses, room worsens while conditioning)
-# 2026-09-02 redesign: GAIN=1.0 + MAX_F=1.0 collapse to a single fixed 1.0F
-# nudge, so the first engage already wrote the maximum possible value. A
-# would-be deepen cycle (room worsens, dwell elapsed) recomputes the SAME
-# commanded value (nudge_amount(6.0) is still 1.0) and the deepen branch's
+# 2026-09-02 redesign: GAIN=2.0 + MAX_F=2.0 saturate the instant the mechanism
+# engages (GAIN * ENGAGE_F = 2.0*1.5 = 3.0 >= MAX_F=2.0), so the nudge collapses
+# to a single fixed 2.0F value and the first engage already wrote the maximum
+# possible. A would-be deepen cycle (room worsens, dwell elapsed) recomputes the
+# SAME commanded value (nudge_amount(6.0) is still 2.0) and the deepen branch's
 # own guard returns without writing — so it must NOT produce a second persist.
 ha.set_live_setpoints(cool=ha._sp_commanded_cool, heat=ha._sp_commanded_heat)
 ha.advance(svc.SETPOINT_NUDGE_DWELL_SEC + 1)
 ha.set_room_temp("upstairs", "Game Room",
                  ha.live_cool() + svc.PRIORITY_MARGIN_BASE + 6.0)  # excess 6.0
 ha.run_nudge()
-check("G would-be deepen: NO second persist (single 1F cap, no ratchet)",
-      ha.persist_count == 1 and ha._sp_commanded_cool == 71.0)
+check("G would-be deepen: NO second persist (single fixed cap, no ratchet)",
+      ha.persist_count == 1 and ha._sp_commanded_cool == 70.0)
 # --- release --- (room recovers -> resume_top_event, persist owned=False)
 ha.set_live_setpoints(cool=ha._sp_commanded_cool, heat=ha._sp_commanded_heat)
 ha.set_room_temp("upstairs", "Game Room",
