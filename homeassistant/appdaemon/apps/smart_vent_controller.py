@@ -585,6 +585,33 @@ ZONE_VACANCY_DONOR_MIN_COOLER_F = 0.25   # floor: never pull air from a room tha
 # Hard-won lesson reused here: ALL service calls are fire-and-forget with
 # callback=self._service_call_done (see _set_vent — a blocking call_service
 # froze this app's single pinned thread for ~4.5h once).
+#
+# DISABLED 2026-09-02 — root-cause finding (see smart-vent-controller skill,
+# "Setpoint-nudge on an AVERAGED-sensor thermostat drags the WHOLE HOUSE
+# colder" + independent Opus review same day): climate.ecobee_thermostat
+# controls to the AVERAGE of all 14 remote sensors, not to the worst room.
+# Dropping the cool setpoint to force Game Room's compressor to escalate does
+# NOT "stage harder for a fixed target" — it moves the whole-house TARGET
+# colder, so every well-behaved room (Living Room, Kitchen) gets dragged well
+# below ITS OWN comfortable point to pull the house average down to chase one
+# chronically-underserved room. That is what produced the "freezing Living
+# Room/Kitchen" complaint on 2026-09-02 (nudge engaged 07:44, deepened to
+# cool=70F by 07:55, user manually corrected back to 72F by 08:13).
+#
+# User's explicit requirement for ANY future setpoint-control mechanism
+# (2026-09-02): it must derive its "is the house actually satisfied" signal
+# from OUR OWN room sensor readings (the same sensor.* entities ZONES already
+# uses for vent logic), never from climate.ecobee_thermostat's own
+# current_temperature/hallway-thermostat-driven average — that average is
+# exactly the blind spot this mechanism was trying (and failing) to work
+# around. A correct redesign would target a SPECIFIC beneficiary room's own
+# sensor (not the whole-house average) or refuse to engage while any
+# chronically-off-target room's excess is structural (see PRIORITY_ESCALATE
+# _OVERRIDES) rather than physical (transient). Until that redesign exists,
+# this mechanism is disabled and Game Room's persistent 72-76F sawtooth is a
+# hardware/duct-capacity problem for vent redistribution + physical mitigation
+# (duct sizing, shading, a mini-split) — not a whole-house setpoint problem.
+SETPOINT_NUDGE_ENABLED    = False # master kill switch — see note above
 SETPOINT_NUDGE_ENGAGE_F   = 1.5   # worst_excess at/above this engages a nudge
 SETPOINT_NUDGE_RELEASE_F  = 0.5   # worst_excess at/below this releases it (hysteresis band; MUST be < ENGAGE)
 SETPOINT_NUDGE_GAIN       = 0.5   # degrees of setpoint nudge per degree of worst_excess
@@ -1934,6 +1961,40 @@ class SmartVentController(hass.Hass):
         """
         if mode in ("Cool Upstairs", "Cool Downstairs"):
             return room_positions
+        # Bug fix (2026-09-02, "freezing Living Room/Kitchen" incident): snapshot
+        # the room_positions this function was HANDED, before any mutation below.
+        # This is _auto_calculate's own verdict for every room this cycle —
+        # including its occ_bonus-adjusted "needs airflow" math, which is a
+        # DIFFERENT (more generous) computation than this function's own
+        # beneficiary-margin check below. An OCCUPIED room the base pass already
+        # pinned to 100% (past ITS OWN occ_deadband) can fail this function's
+        # stricter/differently-computed beneficiary test and still slip through
+        # as a donor for someone else's beneficiary — the two checks are meant
+        # to agree on "does this occupied room need its own air" but can
+        # silently disagree. See the "occupied room qualifies as its own
+        # beneficiary but still gets throttled to 0% as a DONOR" bug class in
+        # the smart-vent-controller skill. A beneficiary role and a donor role
+        # are semantically opposite; a room the house has already decided a
+        # PERSON needs full airflow in must never be treated as a source of air
+        # for a different room in the same cycle — UNLESS it's donor_only,
+        # which is an explicit, deliberate exception (Main Bedroom/Hallway/
+        # Laundry Room are meant to donate even while occupied).
+        #
+        # Deliberately scoped to OCCUPIED rooms only: an EMPTY room pinned to
+        # 100% via the hot-override / floor-throttle path is a different,
+        # already-correct mechanism (zone-presence-contention donor relaxation,
+        # see _donor_cooler_by) that intentionally lets a hot-but-empty room
+        # still donate to a genuinely occupied, suffering room elsewhere —
+        # protecting that path here would silently defeat it.
+        pre_priority_full = {
+            k for k, v in room_positions.items()
+            if v == 100
+            and not ZONES[k[0]]["rooms"][k[1]].get("donor_only")
+            and (
+                (occ_ent := ZONES[k[0]]["rooms"][k[1]].get("occupancy")) is None
+                or self.get_state(occ_ent) == "on"
+            )
+        }
         if hvac_action == "cooling" and target_cool is not None:
             heating = False
             setpoint = target_cool
@@ -2034,6 +2095,14 @@ class SmartVentController(hass.Hass):
             donors = []
             for (zn, rn), pos in room_positions.items():
                 if (zn, rn) == key or (zn, rn) in beneficiary_keys:
+                    continue
+                if (zn, rn) in pre_priority_full:
+                    # Fix (2026-09-02): the base pass already decided this room
+                    # needs full airflow this cycle (occupied, past its own
+                    # occ_deadband) — it is not donor_only, so it must never be
+                    # demoted to a donor for a DIFFERENT room's benefit, even if
+                    # it didn't independently qualify as a beneficiary under
+                    # THIS function's margin math. See snapshot comment above.
                     continue
                 droom = ZONES[zn]["rooms"][rn]
                 dtemp = self._read_temp(droom["temp"])
@@ -3005,6 +3074,15 @@ class SmartVentController(hass.Hass):
         dual = hvac_mode in ("heat_cool", "auto")
 
         if not getattr(self, "_sp_owned", False):
+            # DISABLED (see SETPOINT_NUDGE_ENABLED comment at the constant
+            # block, 2026-09-02): never engage a brand-new nudge while the
+            # mechanism is disabled. Nothing else in this function changes —
+            # if a nudge was somehow already owned from before the disable
+            # (e.g. mid-flip deploy), the owned branch below still runs its
+            # normal readback-guarded release path, so a stale hold still
+            # gets safely handed back rather than being abandoned live.
+            if not SETPOINT_NUDGE_ENABLED:
+                return
             # NOT owned. Engage only if the worst occupied excess clears the
             # engage threshold (with hysteresis below via the release bound), AND
             # only while actually conditioning. While idle/fan we engage nothing:
