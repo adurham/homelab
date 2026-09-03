@@ -243,14 +243,21 @@ check("T5 dewpoint-unavailable logged once across 3 calls, not 3 times",
 
 
 # =============================================================================
-# 6/7. Vent pass -- active sets exactly the right positions, inactive is a
-#      complete no-op
+# 6/7. Vent pass -- active sets ONLY the two target rooms; every other room,
+#      including Main Bedroom (the old "donor"), is a TRUE pass-through.
+#
+# Corrected 2026-09-03: this pass used to force Main Bedroom to a fixed
+# PRECOOL_DONOR_POS regardless of its own measured need, stomping the base
+# need-based ladder's already-correct value computed earlier in the pipeline
+# (_auto_calculate, refined by _apply_priority_rooms / _apply_fan_assist).
+# Per the user's explicit correction: "a donor's vent position should
+# reflect the donor's OWN comfort need, not a value forced by the
+# beneficiary passes." Main Bedroom is no longer special-cased at all --
+# _apply_precool_vents touches ONLY the two PRECOOL_TARGETS keys.
 # =============================================================================
 game_key = find_key("Game Room")
 gb1_key = find_key("Guest Bedroom 1")
-mb_key = svc.PRECOOL_DONOR_ROOM
-check("T6 PRECOOL_DONOR_ROOM resolves to Main Bedroom",
-      mb_key == ("downstairs", "Main Bedroom"))
+mb_key = find_key("Main Bedroom")
 
 base_positions = {}
 for zn, zone in svc.ZONES.items():
@@ -264,23 +271,41 @@ ha = fresh()
 result = ha._apply_precool_vents(dict(base_positions), active_gate)
 check("T6 Game Room -> 100", result[game_key] == 100)
 check("T6 Guest Bedroom 1 -> 100", result[gb1_key] == 100)
-# NOTE (2026-09-03): this check originally also asserted
-# `PRECOOL_DONOR_POS == 30`. That literal is now obsolete: 30 is not a
-# position this hardware has (Flair dampers here are 0/50/100 only, verified
-# live), and the app now quantizes the design's raw 30 to the nearest real
-# detent. The check's INTENT is preserved exactly -- the donor room is
-# throttled to PRECOOL_DONOR_POS and is NOT slammed fully closed (which the
-# design explicitly rejects). The hardware invariant itself is asserted in
-# the "HW:" block at the bottom of this file.
-check("T6 Main Bedroom -> PRECOOL_DONOR_POS (modest cut, never a full close)",
-      result[mb_key] == svc.PRECOOL_DONOR_POS and svc.PRECOOL_DONOR_POS != 0)
 
+# Main Bedroom must pass through EXACTLY, in both directions, proving the
+# function is a true no-op for this key rather than "happens not to force 50
+# this time". Two cases per spec: input 0, and separately input 100.
+mb_in_0 = dict(base_positions)
+mb_in_0[mb_key] = 0
+mb_out_0 = ha._apply_precool_vents(dict(mb_in_0), active_gate)
+check("T6 Main Bedroom input 0 -> output 0 (untouched; own need governs, "
+      "same as every other non-target room)",
+      mb_out_0[mb_key] == 0)
+
+mb_in_100 = dict(base_positions)
+mb_in_100[mb_key] = 100
+mb_out_100 = ha._apply_precool_vents(dict(mb_in_100), active_gate)
+check("T6 Main Bedroom input 100 -> output 100 (untouched; own need "
+      "governs, same as every other non-target room)",
+      mb_out_100[mb_key] == 100)
+
+# And in the original arbitrary-sentinel run (55 -- a value pre-cool never
+# has any reason to touch): Main Bedroom must ALSO read 55. There is no more
+# special case for it whatsoever.
+check("T6 Main Bedroom with arbitrary input 55 -> output 55 (no donor "
+      "override; behaves exactly like any other non-target room)",
+      result[mb_key] == 55)
+
+# The general pass-through check now INCLUDES Main Bedroom in the "must
+# equal input" set -- it is no longer excluded as a special case.
 other_keys_unchanged = all(
     result[k] == base_positions[k]
     for k in base_positions
-    if k not in (game_key, gb1_key, mb_key)
+    if k not in (game_key, gb1_key)
 )
-check("T6 no other room key differs from its input value",
+check("T6 every non-target room key (Main Bedroom included) is an exact "
+      "pass-through of its input value -- the function is a true no-op "
+      "for every key except the two PRECOOL_TARGETS keys",
       other_keys_unchanged)
 
 inactive_gate = svc.PrecoolGate(active=False, window_active=False,
@@ -370,46 +395,20 @@ check("Scope: no _apply_precool_* function calls _write_setpoint_nudge",
 
 
 # =============================================================================
-# HARDWARE INVARIANT: every position this app can command a Flair damper to
-# must be one the hardware actually has (0/50/100). Verified 2026-09-03 three
-# ways: all 18 available cover.*_vent entities live-read 0/50/100, 7 days of
-# recorder history shows no other value, and every sensor.*_vent_position
-# reads 0.0/50.0/100.0.
-#
-# This matters because there is NO quantization between room_positions and
-# the Flair service call -- control_loop hands each position straight to
-# _set_vent, which sends it verbatim. An off-detent value would (1) defeat
-# _set_vent's `if current == position` redundant-command guard, re-sending a
-# cloud call every cycle for the whole 5.5h window, and (2) feed
-# on_vent_manual_change a permanent commanded-vs-reported mismatch, latching
-# the silent 60-minute manual-override hold (the bug class fixed 2026-07-23).
+# HARDWARE INVARIANT (historical note, 2026-09-03): this block used to assert
+# that the donor override's quantized position (PRECOOL_DONOR_POS) was a real
+# Flair detent (0/50/100), because that quantizer was the only thing standing
+# between a forced Main Bedroom override and an off-detent command. That
+# entire donor-override mechanism (PRECOOL_DONOR_POS, PRECOOL_DONOR_POS_RAW,
+# PRECOOL_VALID_VENT_POSITIONS, _quantize_vent_position) is now deleted --
+# _apply_precool_vents no longer computes or commands ANY value for Main
+# Bedroom, so there is nothing left for a quantizer to protect. The only
+# positions this pass still emits are the literal 100s for the two
+# PRECOOL_TARGETS rooms (already asserted above, T6), which are trivially
+# on-detent. See test_precool_foundation.py git history for the original
+# quantizer test coverage if that mechanism is ever reintroduced.
 # =============================================================================
-check("HW: PRECOOL_DONOR_POS is a real hardware position (0/50/100)",
-      svc.PRECOOL_DONOR_POS in svc.PRECOOL_VALID_VENT_POSITIONS)
-check("HW: the design's raw 30 quantizes to 50 (modest cut, not full close)",
-      svc.PRECOOL_DONOR_POS == 50)
-check("HW: donor is NOT a full close (the design explicitly rejects 0)",
-      svc.PRECOOL_DONOR_POS != 0)
-check("HW: quantizer snaps to nearest detent",
-      (svc._quantize_vent_position(30) == 50
-       and svc._quantize_vent_position(0) == 0
-       and svc._quantize_vent_position(50) == 50
-       and svc._quantize_vent_position(100) == 100
-       and svc._quantize_vent_position(10) == 0
-       and svc._quantize_vent_position(80) == 100))
-check("HW: ties round DOWN (conservative for a donor)",
-      svc._quantize_vent_position(25) == 0 and svc._quantize_vent_position(75) == 50)
 
-# Every position the pre-cool vent pass actually emits must be on-detent.
-_ha_hw = fresh(clock=datetime(2026, 9, 3, 2, 0, 0))
-_ha_hw.states[svc.PRECOOL_DEWPOINT_ENTITY] = 56.0
-_ha_hw.states[svc.PRECOOL_HUMIDITY_ENTITY] = 54.0
-_gate_hw = _ha_hw._precool_gate()
-_out_hw = _ha_hw._apply_precool_vents({}, _gate_hw)
-check("HW: gate active for the emitted-position check (precondition)",
-      _gate_hw.active)
-check("HW: every position emitted by the pre-cool vent pass is on-detent",
-      all(p in svc.PRECOOL_VALID_VENT_POSITIONS for p in _out_hw.values()))
 
 
 # =============================================================================
