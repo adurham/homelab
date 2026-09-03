@@ -101,9 +101,16 @@ print("    Basement donor position:", out[donor],
 # ---- Test 2: a different room at the SAME off-by-setpoint margin does NOT
 #      escalate yet (proves this is per-room, not a global change) -----------
 ha2 = fresh()
-k2 = find_key(ha2, "Cat Room")  # any other upstairs room without an override
-tk2 = svc.ZONES[k2[0]]["rooms"]["Cat Room"]["temp"]
-ha2.states[svc.ZONES[k2[0]]["rooms"]["Cat Room"]["occupancy"]] = "on"
+# Control room must be a room that can still BE a beneficiary — i.e. NOT
+# donor_only. Cat Room was used here originally but became donor_only on
+# 2026-09-02 (cats are a real heat load but not a comfort requirement), which
+# made it permanently beneficiary-ineligible and invalidated this test's
+# premise. Guest Bedroom 2 is upstairs, has no escalate override, and is a
+# normal human-occupied room, so it isolates the same variable.
+CONTROL_ROOM = "Guest Bedroom 2"
+k2 = find_key(ha2, CONTROL_ROOM)  # upstairs room without an escalate override
+tk2 = svc.ZONES[k2[0]]["rooms"][CONTROL_ROOM]["temp"]
+ha2.states[svc.ZONES[k2[0]]["rooms"][CONTROL_ROOM]["occupancy"]] = "on"
 ha2.states[tk2] = SP + gr_over + 0.1   # same off-by-setpoint as T1
 donor2 = find_key(ha2, "Basement")
 ha2.states[svc.ZONES[donor2[0]]["rooms"]["Basement"]["temp"]] = SP - 3.0
@@ -114,7 +121,7 @@ for zn, zone in svc.ZONES.items():
 out2 = ha2._apply_priority_rooms(dict(positions2), "cooling", SP, None)
 check("T2 other rooms are unaffected: same off-by-setpoint stays at 50% (not escalated)",
       out2[donor2] == svc.PRIORITY_DONOR_POS)
-print("    Basement donor position (Cat Room beneficiary, no override):", out2[donor2])
+print(f"    Basement donor position ({CONTROL_ROOM} beneficiary, no override):", out2[donor2])
 
 print()
 print(f"RESULT: {sum(PASS)}/{len(PASS)} checks passed")
