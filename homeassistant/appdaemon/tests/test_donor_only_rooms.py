@@ -56,6 +56,10 @@ class FakeHA(svc.SmartVentController):
         self._supply_penalty = {}
         self._delivery_penalty = {}
         self._delivery_last = {}
+        # saturation state machine (2026-09-02)
+        self._saturation_streak = {}
+        self._saturated_rooms = set()
+        self._saturation_recover = {}
         self._last_zone_positions = {}
         self.logs = []
     def datetime(self, aware=False):
@@ -146,18 +150,18 @@ for room, room_temp in (("Cat Room", 74.8), ("Guest Bathroom", 75.0)):
 #    Game Room at 80.2F (the live value) must be able to take their air.
 #
 #    NOTE on fixture design: donors are sorted unoccupied-first then
-#    COOLEST-first, and only the first PRIORITY_MAX_DONORS (8) are throttled.
-#    Donor eligibility is judged against the BENEFICIARY's temp (must be
-#    >= PRIORITY_DONOR_COOLER_BY cooler than 80.2F), NOT against the setpoint
-#    -- so leaving the filler rooms at 72F does not disqualify them, it just
-#    makes them rank AHEAD of Cat Room (74.8) and Guest Bathroom (75.0), which
-#    then fall outside the 8-donor budget at ranks 9 and 10. That is correct
-#    production behavior (give up the most comfortable air first) but it hides
-#    the thing this test is actually asking.
-#    To isolate "are these two ELIGIBLE as donors at all", the filler rooms are
-#    parked at 76.0F: still comfortably eligible themselves, but WARMER than
-#    Cat Room / Guest Bathroom, so those two sort first and are guaranteed to
-#    be inside the budget.
+#    COOLEST-first, and each beneficiary now gets a FAIR-SHARE budget of
+#    PRIORITY_MAX_DONORS // n_beneficiaries (the 2026-09-02 donor-exhaustion
+#    fix), so the worst room can no longer drain the pool. Donor eligibility
+#    is judged against the BENEFICIARY's temp (must be >=
+#    PRIORITY_DONOR_COOLER_BY cooler than 80.2F), NOT against the setpoint.
+#    To isolate "are these two ELIGIBLE as donors at all" -- rather than
+#    accidentally testing budget arithmetic -- make Game Room the ONLY
+#    beneficiary (so it gets the full budget) and park the filler rooms at
+#    76.0F: still eligible themselves, but WARMER than Cat Room (74.8) and
+#    Guest Bathroom (75.0), so those two sort first and land inside the budget.
+#    Filler rooms are left UNoccupied so they don't become beneficiaries and
+#    fragment the budget.
 # =============================================================================
 ha = fresh()
 KEEP = {"Game Room", "Cat Room", "Guest Bathroom"}
@@ -165,6 +169,8 @@ for zn, zone in svc.ZONES.items():
     for rn, s in zone["rooms"].items():
         if rn not in KEEP:
             ha.states[s["temp"]] = 76.0
+            if s.get("occupancy"):
+                ha.states[s["occupancy"]] = "off"
 gr = find_key(ha, "Game Room")
 ha.states[svc.ZONES[gr[0]]["rooms"]["Game Room"]["occupancy"]] = "on"
 ha.states[svc.ZONES[gr[0]]["rooms"]["Game Room"]["temp"]] = 80.2
