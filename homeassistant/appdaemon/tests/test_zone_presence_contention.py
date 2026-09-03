@@ -54,6 +54,10 @@ class FakeHA(svc.SmartVentController):
         self._supply_penalty = {}
         self._delivery_penalty = {}
         self._delivery_last = {}
+        # saturation state machine (2026-09-02)
+        self._saturation_streak = {}
+        self._saturated_rooms = set()
+        self._saturation_recover = {}
         self._zone_last_occupied = {}
         self._zone_occupied = {}
         self._zone_vacancy_demoted = set()

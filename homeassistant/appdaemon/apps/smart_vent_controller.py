@@ -556,6 +556,53 @@ DELIVERY_MAX_DT_MIN = 10.0      # ignore long gaps (restart / sensor dropout) �
 DELIVERY_MARGIN_GAIN = 0.30     # °F margin reduction per °F of delivery penalty
 DELIVERY_ESCALATE_PENALTY = 1.5  # delivery penalty above this forces donor escalation
 
+# ── Saturation: when escalation has been PROVEN not to work ──────────────────
+# (2026-09-02, driven by a physical measurement.)
+#
+# The delivery-handicap detector above identifies a room that is occupied,
+# off-target, WIDE OPEN, receiving genuinely cold supply air, and STILL not
+# approaching setpoint. Until now the response was to ESCALATE: throttle that
+# room's donors from 50% all the way to 0% to shove even more CFM at it.
+#
+# A bag test on Game Room (13-gal bag, 2.0 s/register, 3 registers) measured
+# 156 CFM total — while all 3 of its vents were at 100% AND seven other rooms
+# were already throttled to 0% feeding it. That is the system at maximum
+# effort. Holding 72F in that room needs ~250 CFM. The duct is the ceiling,
+# not the damper positions and not the room's share of the house.
+#
+# So for a proven-saturated room, escalation is actively COUNTERPRODUCTIVE:
+#   - the blower is a 5-speed CONSTANT-TORQUE ECM, not constant-CFM, so every
+#     additional closed damper raises static and LOWERS total house CFM
+#   - the saturated room still receives only its duct's ~156 CFM regardless
+#   - the airflow removed from donor rooms is therefore purely wasted, and
+#     worse, it's taken from rooms that WOULD have responded to it
+#
+# Rather than hard-flipping on the penalty threshold (which would oscillate,
+# since Game Room's penalty hovers right at ~1.68 vs the 1.5 threshold), this
+# is a state machine that runs the escalation experiment FIRST and only
+# inverts after watching it fail. The detector cannot tell "duct-limited"
+# apart from "damper stuck / door closed / transient load spike" on a single
+# sample — escalating for a few cycles is the correct diagnostic probe.
+#
+# Entry: SATURATION_ENTER_CYCLES consecutive cycles already escalated, still
+#        below DELIVERY_STUCK_RATE. Exit needs a SUSTAINED responsive rate
+#        (separate, higher bar than entry — deliberate hysteresis), because
+#        saturation is LOAD-DEPENDENT, not permanent: Game Room does reach
+#        72.7F overnight, and a flag that never cleared would sabotage the
+#        overnight pre-cool window.
+SATURATION_ENTER_CYCLES = 3      # ~6 min at the 120s loop: probe, then judge
+SATURATION_EXIT_CYCLES = 2       # sustained recovery before un-latching
+SATURATION_EXIT_RATE = 0.08      # °F/min approach that counts as "responding"
+                                 # (higher than DELIVERY_STUCK_RATE=0.05 on
+                                 # purpose — the exit bar must clear the entry
+                                 # bar or the flag chatters at the boundary)
+# A saturated room keeps its OWN vents at 100% (it should still get every bit
+# of air its duct can carry) but its donor recruitment is capped to this many
+# rooms, and those donors are throttled to 50% rather than 0%. Not zero: a
+# small amount of concentration is still worth having, and a hard 0 would make
+# the inversion untestable against the "escalation helps a bit" hypothesis.
+SATURATION_MAX_DONORS = 2
+
 # ── Zone-presence contention (measured axis) ─────────────────────────────────
 # The production bug (2026-08-31): with everyone upstairs and the Game Room at
 # 77°F while the ecobee read a whole-house 73-74°F average, the owner dropped the
@@ -844,6 +891,19 @@ class SmartVentController(hass.Hass):
         # sample per room so we can compute the rate between control cycles.
         self._delivery_penalty = {}
         self._delivery_last = {}
+
+        # SATURATION state (2026-09-02). A room is "saturated" once we have
+        # PROVEN, by running the escalation experiment and watching it fail,
+        # that it is physically incapable of absorbing more airflow — its duct
+        # is the limit, not its vent position or its share of the house.
+        # _saturation_streak[key] counts consecutive cycles the room has sat at
+        # maximum effort (wide open, well-supplied, donors escalated) while
+        # STILL not approaching setpoint. _saturated_rooms is the latched set.
+        # See the constants block for the entry/exit thresholds and why this
+        # inverts the room's treatment instead of escalating harder.
+        self._saturation_streak = {}
+        self._saturated_rooms = set()
+        self._saturation_recover = {}
 
         # Zone-presence contention state. _zone_last_occupied[zone] = datetime
         # when any room in that zone last read occupancy "on" (None = never
@@ -1630,6 +1690,12 @@ class SmartVentController(hass.Hass):
 
                 contribution = 0.0
                 stuck = False
+                # Hoisted out of the `prev is not None` branch below so the
+                # saturation state machine can read it after this block. None
+                # means "no usable rate sample this cycle" (first sample after
+                # start/idle, or the gap between samples was out of range) —
+                # distinct from 0.0, which is a real measured non-response.
+                rate_for_saturation = None
                 if prev is not None:
                     prev_temp, prev_time = prev
                     dt_min = (now - prev_time).total_seconds() / 60.0
@@ -1659,6 +1725,7 @@ class SmartVentController(hass.Hass):
                         approach = ((prev_temp - temp) if not heating
                                     else (temp - prev_temp))
                         rate = approach / dt_min
+                        rate_for_saturation = rate
                         if (occupied and off > DEADBAND and wide_open
                                 and well_supplied and rate < DELIVERY_STUCK_RATE):
                             stuck = True
@@ -1669,6 +1736,62 @@ class SmartVentController(hass.Hass):
                     DELIVERY_PENALTY_EMA * contribution
                     + (1 - DELIVERY_PENALTY_EMA) * prevp
                 )
+
+                # ── Saturation state machine (2026-09-02) ───────────────────
+                # "stuck" above already means: occupied, off-target, WIDE OPEN,
+                # well-supplied, and not approaching setpoint. The remaining
+                # question is whether escalation can still rescue it, or whether
+                # the duct itself is the ceiling.
+                #
+                # We only count a cycle toward saturation once the room is
+                # ALREADY being escalated (penalty past DELIVERY_ESCALATE_PENALTY
+                # means the priority pass is throttling its donors to 0%). That
+                # ordering matters: it makes the streak a record of "maximum
+                # effort was applied and it still didn't move", i.e. the
+                # escalation experiment ran and failed — not merely "this room
+                # is hot". A room that is stuck but NOT yet escalated is still
+                # in the diagnostic-probe phase and must not latch.
+                already_escalated = (
+                    self._delivery_penalty[key] >= DELIVERY_ESCALATE_PENALTY)
+                if stuck and already_escalated:
+                    self._saturation_streak[key] = (
+                        self._saturation_streak.get(key, 0) + 1)
+                    if (self._saturation_streak[key] >= SATURATION_ENTER_CYCLES
+                            and key not in self._saturated_rooms):
+                        self._saturated_rooms.add(key)
+                        self.log(
+                            f"SATURATED: {room_name} — {SATURATION_ENTER_CYCLES}"
+                            f" consecutive cycles wide open, well-supplied, "
+                            f"donors already escalated, still <"
+                            f"{DELIVERY_STUCK_RATE}F/min. Escalation has been "
+                            f"proven ineffective; capping its donor recruitment "
+                            f"at {SATURATION_MAX_DONORS} (50%, not 0%) so the "
+                            f"airflow goes to rooms that can still use it.")
+                elif rate_for_saturation is not None and rate_for_saturation >= SATURATION_EXIT_RATE:
+                    # Responding again. Saturation is LOAD-dependent (Game Room
+                    # does recover overnight), so this must be able to clear.
+                    # Require a sustained recovery, and use a higher rate bar
+                    # than the entry test so the flag can't chatter.
+                    self._saturation_recover[key] = (
+                        self._saturation_recover.get(key, 0) + 1)
+                    if self._saturation_recover[key] >= SATURATION_EXIT_CYCLES:
+                        self._saturation_streak[key] = 0
+                        self._saturation_recover[key] = 0
+                        if key in self._saturated_rooms:
+                            self._saturated_rooms.discard(key)
+                            self.log(
+                                f"SATURATION CLEARED: {room_name} approaching "
+                                f"setpoint at >= {SATURATION_EXIT_RATE}F/min for "
+                                f"{SATURATION_EXIT_CYCLES} cycles — it can absorb "
+                                f"airflow again, restoring normal donor recruitment.")
+                else:
+                    # Neither clearly stuck-at-max-effort nor clearly recovering
+                    # (e.g. vents just moved, or the room is idle). Decay the
+                    # streak rather than resetting it hard, so one noisy sample
+                    # doesn't erase a real saturation trend.
+                    if self._saturation_streak.get(key):
+                        self._saturation_streak[key] -= 1
+
                 if stuck:
                     self.log(
                         f"Delivery handicap: {room_name} stuck "
@@ -2287,10 +2410,71 @@ class SmartVentController(hass.Hass):
         beneficiaries.sort(key=lambda b: (b[4], b[0]), reverse=True)
         beneficiary_keys = {b[1] for b in beneficiaries}
 
-        for off, key, temp, escalated, _is_occupied in beneficiaries:
+        # ── DONOR EXHAUSTION FIX (2026-09-02) ───────────────────────────────
+        # Bug found by replaying the live 21:58 log: donors were allocated
+        # first-come-first-served, so the WORST room consumed every eligible
+        # donor and the second-worst got none:
+        #
+        #   PASS 1  Game Room 79.3F -> 12 eligible, took ALL 12 -> all to 0%
+        #   PASS 2  GB1 76.3F       -> 11 rooms qualified by temperature,
+        #                              0 actually available
+        #                           -> "struggling but no donor rooms"
+        #
+        # That log line was NOT "the house is too hot for anyone to donate"
+        # (the obvious reading) — it was pure allocation starvation. Raising
+        # PRIORITY_MAX_DONORS 8 -> 12 earlier the same evening made it worse:
+        # at 8 there were incidentally 4 donors left over for GB1.
+        #
+        # The fix is a per-beneficiary budget so no single room can drain the
+        # pool. NOT an even split: dividing evenly collapses in exactly the
+        # case that matters. With 9 beneficiaries (a whole-house-hot evening)
+        # an even split gives 12 // 9 = 1 donor each, so the genuinely
+        # desperate room gets one donor while eight marginal rooms each get
+        # one too. Verified in a replay: Game Room at 80.2F was cut to a
+        # single donor that way — strictly worse than the bug being fixed.
+        #
+        # Instead: rank-weighted with a floor. The worst room keeps roughly
+        # half the pool, the next gets half of what remains, and so on, with
+        # every beneficiary guaranteed at least one donor. This preserves
+        # "concentrate on the worst room" (the whole point of the priority
+        # pass) while structurally guaranteeing the runner-up is never left
+        # with literally nothing, which is what produced GB1's spurious
+        # "struggling but no donor rooms".
+        #
+        # Note the saturation inversion above overrides this entirely for a
+        # duct-limited room: marginal benefit, not need, decides that case.
+        n_benef = max(1, len(beneficiaries))
+        budget_by_rank = []
+        remaining = PRIORITY_MAX_DONORS
+        for i in range(n_benef):
+            if i == n_benef - 1:
+                share = remaining
+            else:
+                share = max(1, remaining // 2)
+            share = max(1, min(share, remaining))
+            budget_by_rank.append(share)
+            remaining = max(0, remaining - share)
+
+        for rank, (off, key, temp, escalated, _is_occupied) in enumerate(beneficiaries):
             zone_name, room_name = key
-            donor_pos = (PRIORITY_DONOR_POS_ESCALATED if escalated
-                         else PRIORITY_DONOR_POS)
+            # SATURATION INVERSION (2026-09-02). A room proven duct-limited
+            # (see the SATURATION_* constants) gets the OPPOSITE treatment from
+            # a normally-struggling room: its own vents still go to 100%, but
+            # it may recruit at most SATURATION_MAX_DONORS donors and throttles
+            # them only to 50%, never 0%. Rationale, from a physical bag-test
+            # measurement: it already receives every CFM its duct can carry, so
+            # additional closures cannot help it, and on a constant-torque ECM
+            # they actively reduce total house airflow — starving rooms that
+            # WOULD have responded. This is also what frees donors for the
+            # next-worst beneficiary (the donor-exhaustion fix below).
+            saturated = key in self._saturated_rooms
+            if saturated:
+                donor_pos = PRIORITY_DONOR_POS       # 50%, never 0%
+                donor_budget = SATURATION_MAX_DONORS
+            else:
+                donor_pos = (PRIORITY_DONOR_POS_ESCALATED if escalated
+                             else PRIORITY_DONOR_POS)
+                donor_budget = budget_by_rank[rank]
 
             # Pin the beneficiary fully open.
             room_positions[key] = 100
@@ -2347,7 +2531,7 @@ class SmartVentController(hass.Hass):
             donors.sort(key=lambda x: (x[1], -x[2] if heating else x[2]))
             throttled = 0
             for dkey, docc, dtemp in donors:
-                if throttled >= PRIORITY_MAX_DONORS:
+                if throttled >= donor_budget:
                     break
                 room_positions[dkey] = donor_pos
                 throttled += 1
@@ -2369,7 +2553,13 @@ class SmartVentController(hass.Hass):
 
             mode_tag = "heat" if heating else "cool"
             tag = [mode_tag]
-            if escalated:
+            if saturated:
+                # Deliberately replaces ESCALATED rather than stacking with it:
+                # a saturated room is by definition one that WAS escalated and
+                # didn't respond, so showing both would be misleading about
+                # what the controller is currently doing to it.
+                tag.append("SATURATED")
+            elif escalated:
                 tag.append("ESCALATED")
             if precool and self._room_margin(key, heating) > PRECOOL_MARGIN:
                 tag.append("pre" + mode_tag)
@@ -2379,9 +2569,11 @@ class SmartVentController(hass.Hass):
                 self.log(f"  Priority {room_name} ({temp:.1f}F, off{off:+.1f})"
                          f"{tagstr} struggling but no donor rooms")
             else:
+                budget_note = (f", capped at {donor_budget} "
+                               f"{'(saturated)' if saturated else '(fair-share)'}")
                 self.log(f"  Priority {room_name} ({temp:.1f}F, off{off:+.1f})"
                          f"{tagstr}: pinned 100%, redirected flow from "
-                         f"{throttled} room(s) -> {donor_pos}%")
+                         f"{throttled} room(s) -> {donor_pos}%{budget_note}")
 
         return room_positions
 
