@@ -14,6 +14,7 @@ import math
 import os
 import re
 import tempfile
+from collections import namedtuple
 
 import appdaemon.plugins.hass.hassapi as hass
 from datetime import datetime, timedelta
@@ -853,14 +854,156 @@ FAN_ENTITY = "climate.ecobee_thermostat"
 # stays hot with no fan-assist firing, lower it.
 FAN_ASSIST_COIL_DRY_MIN = 5.0
 
-# ── Predictive pre-cool ───────────────────────────────────────────────────────
+# ── Midday predictive pre-cool (daytime priority-margin mechanism) ───────────
 # Sun-facing rooms start each afternoon already behind because the morning is
 # spent NOT favoring them. During the pre-sun window, while cooling is happening
 # anyway, bias ANY occupied room that's drifting up so it banks headroom before
 # the solar load arrives. Lower activation margin (react earlier) during these
 # local hours, applied house-wide.
-PRECOOL_HOURS = range(10, 14)   # 10:00–13:59 local time
-PRECOOL_MARGIN = 0.5            # engage priority pass when only this far over
+#
+# NOTE: renamed from the old bare names (2026-09-02, pure rename, no
+# behavior change) to disambiguate from the unrelated OVERNIGHT pre-cool
+# feature (PRECOOL_WINDOW_*, PRECOOL_TARGETS, etc. below) which merely shares
+# the word "precool" but is a completely separate mechanism.
+MIDDAY_PRECOOL_HOURS = range(10, 14)   # 10:00–13:59 local time
+MIDDAY_PRECOOL_MARGIN = 0.5            # engage priority pass when only this far over
+
+# ── Overnight pre-cool (PHASE 1: foundation layer) ────────────────────────────
+# Distinct from the midday priority-margin mechanism above -- shares the word
+# "precool", nothing else. Game Room has a documented ~40% duct deficit that
+# software cannot fix
+# (measured: ~156 CFM max at 100% open + 7 donors, needs ~250 CFM to hold 72F
+# -- see test_saturation_and_donor_budget.py). Overnight pre-cool's job is to
+# SHIFT/SHAVE the afternoon peak by cooling Game Room and Guest Bedroom 1 down
+# toward a floor overnight (when demand is low and there's spare capacity),
+# not to eliminate the deficit.
+#
+# Window: 01:00 inclusive - 06:30 exclusive local time. Minutes-since-midnight
+# comparison (NOT hour-only `in range()`) because the end boundary falls on a
+# half hour.
+PRECOOL_WINDOW_START_HOUR = 1
+PRECOOL_WINDOW_START_MIN = 0
+PRECOOL_WINDOW_END_HOUR = 6
+PRECOOL_WINDOW_END_MIN = 30
+
+# The ONLY two pre-cool target rooms and their floor temps (°F). NOT
+# house-wide, NOT "all upstairs rooms" -- exactly these two, by design.
+# Occupancy does NOT gate these targets (a sleeping person may not trip a
+# PIR) -- the floors themselves ARE the occupant-comfort protection.
+PRECOOL_TARGETS = {
+    ("upstairs", "Game Room"): 68.0,
+    ("upstairs", "Guest Bedroom 1"): 69.0,
+}
+
+# Hard safety floor: ANY occupied room (house-wide, not just the two
+# targets) reading at or below this aborts pre-cool for the cycle.
+PRECOOL_ABORT_OCCUPIED_F = 67.0
+
+# Humidity guard. Dewpoint is the PRIMARY, physically-correct gate: at a
+# fixed real dewpoint, RH mechanically RISES as sensible temp drops from
+# cooling alone, so an RH ceiling alone would trip on physics, not on an
+# actual moisture problem. RH is only a BACKSTOP against a frozen/broken
+# dewpoint sensor.
+PRECOOL_DEWPOINT_MAX_F = 58.0
+PRECOOL_RH_MAX_PCT = 65.0
+PRECOOL_DEWPOINT_ENTITY = "sensor.indoor_dew_point"
+PRECOOL_HUMIDITY_ENTITY = "sensor.indoor_humidity_live"
+
+# Main Bedroom donor throttle position while pre-cool is active.
+#
+# INTENT (from the feature design): a MODEST cut, explicitly NOT a full
+# close. Overnight the duct system is not CFM-limited the way it is during
+# peak afternoon load (constant-torque ECM blower), so aggressively closing
+# the donor just reduces TOTAL system CFM past a modest cut without
+# meaningfully redirecting more air to the targets. Do NOT "optimize" to 0.
+#
+# HARDWARE REALITY (2026-09-03): these Flair dampers are 3-position ONLY --
+# 0 / 50 / 100. Verified three independent ways: all 18 available
+# cover.*_vent entities live-read exactly 0/50/100; 7 days of recorder
+# history shows no other value; every sensor.*_vent_position reads
+# 0.0/50.0/100.0. Every other donor constant in this file already encodes
+# that reality (PRIORITY_DONOR_POS = 50 "never 0%",
+# PRIORITY_DONOR_POS_ESCALATED = 0).
+#
+# The design asked for 30, which is not a position this hardware has. There
+# is NO quantization anywhere between room_positions and the Flair service
+# call -- control_loop passes each position straight to _set_vent, which
+# sends it verbatim. Commanding a raw 30 would therefore:
+#   1. defeat _set_vent's redundant-command guard (`if current == position`)
+#      -- commanded 30 never equals a reported 0/50/100, so it would re-send
+#      a Flair cloud call EVERY cycle for the whole 5.5h window, and
+#   2. feed on_vent_manual_change a permanent commanded-vs-reported
+#      mismatch, which after two confirm rechecks LATCHES a 60-minute
+#      manual-override hold that makes _set_vent silently no-op on that vent
+#      with ZERO log output -- the exact bug class already fixed here on
+#      2026-07-23.
+#
+# So the raw design value is kept below as the stated INTENT, and is
+# quantized to the nearest position the hardware actually has. On {0,50,100}
+# the nearest detent to 30 is 50, which is also the only value that
+# expresses "modest cut, not a full close" (100 = no cut, 0 = the full close
+# the design explicitly rejects). Change PRECOOL_DONOR_POS_RAW to 0 or 100
+# to pick a different detent; the quantizer is the safety property, not the
+# number.
+PRECOOL_DONOR_POS_RAW = 30          # design intent, pre-hardware-quantization
+PRECOOL_VALID_VENT_POSITIONS = (0, 50, 100)
+
+
+def _quantize_vent_position(pos):
+    """Snap a desired vent position to the nearest position this hardware has.
+
+    Flair dampers here are 0/50/100 only. Commanding anything else is not a
+    softer version of the same request -- it breaks _set_vent's
+    redundant-command guard AND latches the silent 60-min manual-override
+    hold (see the PRECOOL_DONOR_POS comment above). Ties round DOWN (toward
+    the more-throttled position), which is the conservative direction for a
+    donor.
+    """
+    return min(PRECOOL_VALID_VENT_POSITIONS,
+               key=lambda valid: (abs(valid - pos), valid))
+
+
+PRECOOL_DONOR_POS = _quantize_vent_position(PRECOOL_DONOR_POS_RAW)  # -> 50
+PRECOOL_DONOR_ROOM = ("downstairs", "Main Bedroom")
+
+# Observability sensor -- mirrors DELIVERY_PENALTY_ENTITY's publishing shape
+# (numeric state + per-room attributes dict). Published every cycle,
+# including outside the window, so last night's result stays visible until
+# the next window engages.
+PRECOOL_ENTITY = "sensor.smart_vent_precool"
+
+# ── Overnight pre-cool (PHASE 2: setpoint-nudge demand source) ────────────────
+# Pre-cool's release threshold, measured on ITS OWN axis: pre-cool demand =
+# (room temp - its PRE-COOL FLOOR), NOT the comfort axis's (off_target -
+# _room_margin). Defined as its own constant, deliberately NOT an alias of
+# SETPOINT_NUDGE_RELEASE_F, even though both currently read 0.5:
+#   - they measure DIFFERENT quantities against DIFFERENT references (comfort
+#     setpoint + activation margin vs. the fixed overnight floor), so a future
+#     retune of one must never silently drag the other with it, and
+#   - the magnitude 0.5 is chosen on pre-cool's own merits: the floors are
+#     targets to converge on, not hard limits, so holding the compressor
+#     hostage for the last half degree overnight buys nothing measurable while
+#     risking an all-night hold. Within 0.5F of the floor, pre-cool is done.
+# Pre-cool's ENGAGE bar is deliberately NOT a separate constant: engagement
+# runs through the EXISTING SETPOINT_NUDGE_ENGAGE_F gate fed by the combined
+# (max) demand -- one engage threshold, one depth computation, per the
+# Kitchen/priority-pass two-layers-disagreeing bug class.
+PRECOOL_NUDGE_RELEASE_F = 0.5
+
+# Result of _precool_gate(), computed once per cycle and consumed by both the
+# vent pass (_apply_precool_vents) and the setpoint-nudge integration
+# (_precool_demand, consumed by _apply_setpoint_nudge). Keep ONE gate function
+# so the two consumers never disagree about a threshold.
+# `suppressed` is the PHASE 2 human-override veto: True while a confirmed human
+# setpoint override has vetoed pre-cool for the REST of the current window-
+# night. Defaulted so any caller constructing a gate positionally/by-keyword
+# without it (offline harnesses) keeps working unchanged.
+PrecoolGate = namedtuple(
+    "PrecoolGate",
+    ["active", "window_active", "cold_abort", "humidity_ok", "reason",
+     "suppressed"],
+    defaults=[False],
+)
 
 
 class SmartVentController(hass.Hass):
@@ -955,6 +1098,32 @@ class SmartVentController(hass.Hass):
         # sensor (see _apply_setpoint_nudge): True after we've logged the
         # "cloud-truth unavailable" line once, so we don't spam every 120s cycle.
         self._sp_truth_unavailable_logged = False
+
+        # OVERNIGHT PRE-COOL state (PHASE 1 foundation, 2026-09-02). See the
+        # PRECOOL_* constants block. _precool_min_temps[room_key] = the
+        # minimum temp that target room has reached so far during the
+        # CURRENT window-night. _precool_window_id identifies which window
+        # the tracker belongs to (the date of that window's 01:00 start, as
+        # an ISO string) so a new night resets the tracker instead of
+        # carrying over the prior night's minimum. One-shot log guards for
+        # the humidity gate mirror _sp_truth_unavailable_logged above: log a
+        # state CHANGE once, not every cycle.
+        self._precool_min_temps = {}
+        self._precool_window_id = None
+        self._precool_dewpoint_unavailable_logged = False
+        self._precool_humidity_blocked_logged = False
+        # PHASE 2 human-override veto. Holds the window-night id (same
+        # _precool_window_id_for string) of a window in which a CONFIRMED human
+        # setpoint override was detected. While it equals the CURRENT window's
+        # id, _precool_gate() stays inactive -- for the REST of that night, not
+        # merely the 2h SETPOINT_NUDGE_OVERRIDE_COOLDOWN_MIN: once a human has
+        # vetoed the mechanism overnight, waiting out a timer and quietly
+        # resuming the same night is exactly the "fighting the human" behavior
+        # the cooldown exists to prevent. Persisted with the nudge state so a
+        # restart mid-window cannot resurrect a vetoed pre-cool. A stale id
+        # from a previous night is inert by construction (it can never equal
+        # tonight's id), so it needs no expiry sweep.
+        self._precool_suppressed_window_id = None
 
         # Persistence of the nudge-ownership record. _nudge_state_file is the
         # single source of truth for the state-file path; _nudge_persist_disable
@@ -1276,6 +1445,17 @@ class SmartVentController(hass.Hass):
             room_positions, mode, hvac_action, eff_cool, eff_heat
         )
 
+        # Overnight pre-cool (PHASE 1 foundation): shifts Game Room / Guest
+        # Bedroom 1 toward their floors during the 01:00-06:30 window,
+        # throttling Main Bedroom as donor. Purely a vent-position pass, like
+        # fan-assist above -- runs before the setpoint nudge and before
+        # backpressure (which remains the final safety net). No-op outside
+        # the window / when the gate is inactive. The gate is also published
+        # every cycle so the last window's result stays observable.
+        precool_gate = self._precool_gate()
+        room_positions = self._apply_precool_vents(room_positions, precool_gate)
+        self._publish_precool_sensor(precool_gate)
+
         # Setpoint nudge (the TRIGGER axis): independently of the vent-position
         # math above, escape the ecobee's whole-house-average blind spot by
         # temporarily moving the setpoint it sees when an OCCUPIED room's
@@ -1286,8 +1466,17 @@ class SmartVentController(hass.Hass):
         # + the method docstring. Guarded to only act in Auto mode and only while
         # the controller is enabled (both enforced by the caller above, but the
         # method re-guards on mode for safety).
+        #
+        # PHASE 2: the SAME precool_gate computed above is passed in as the
+        # nudge's SECOND DEMAND SOURCE. It is deliberately the identical gate
+        # object the vent pass just consumed -- computed once per cycle, never
+        # re-evaluated -- so the two passes can never disagree about whether
+        # pre-cool is running this cycle. The nudge remains the ONLY setpoint
+        # writer in this app; pre-cool contributes a demand value, never a
+        # write.
         self._apply_setpoint_nudge(hvac_mode, hvac_action, target_cool,
-                                   target_heat, mode)
+                                   target_heat, mode,
+                                   precool_gate=precool_gate)
 
         # Apply backpressure protection (dynamic coil-temp feedback when
         # available, static cap otherwise). Pass hvac_action for the cooling
@@ -2304,7 +2493,7 @@ class SmartVentController(hass.Hass):
         def off_by(t):
             return (setpoint - t) if heating else (t - setpoint)
 
-        precool = self.datetime().hour in PRECOOL_HOURS
+        midday_precool = self.datetime().hour in MIDDAY_PRECOOL_HOURS
 
         # Build the beneficiary list: every occupied room past its (possibly
         # pre-conditioning-lowered) activation margin. Worst-first.
@@ -2383,8 +2572,8 @@ class SmartVentController(hass.Hass):
                     beneficiaries.append((off, key, temp, escalated, is_occupied))
                     continue
                 margin = self._room_margin(key, heating)
-                eff_margin = (PRECOOL_MARGIN
-                              if (precool and PRECOOL_MARGIN < margin)
+                eff_margin = (MIDDAY_PRECOOL_MARGIN
+                              if (midday_precool and MIDDAY_PRECOOL_MARGIN < margin)
                               else margin)
                 off = off_by(temp)
                 if off <= eff_margin:
@@ -2561,7 +2750,7 @@ class SmartVentController(hass.Hass):
                 tag.append("SATURATED")
             elif escalated:
                 tag.append("ESCALATED")
-            if precool and self._room_margin(key, heating) > PRECOOL_MARGIN:
+            if midday_precool and self._room_margin(key, heating) > MIDDAY_PRECOOL_MARGIN:
                 tag.append("pre" + mode_tag)
             tagstr = f" [{','.join(tag)}]"
 
@@ -2965,6 +3154,365 @@ class SmartVentController(hass.Hass):
         self._sp_mismatch_since = None
         self._sp_heating = None
 
+    # ── Overnight pre-cool (PHASE 1: foundation layer) ───────────────────────
+    # Vent-position pipeline pass + its supporting gate logic. Does NOT touch
+    # setpoints at all -- that's a later, separate phase (see the module-level
+    # PrecoolGate docstring above and _apply_setpoint_nudge's own docstring).
+
+    def _precool_window_active(self, now=None):
+        """True while local time is within the overnight pre-cool window.
+
+        01:00:00 inclusive through 06:30:00 EXCLUSIVE. Compared in minutes-
+        since-midnight (NOT hour-only `in range()`) because the end boundary
+        falls on a half hour -- an hour-only check would wrongly include all
+        of 06:xx.
+        """
+        if now is None:
+            now = self.datetime()
+        # Minute-of-day comparison; seconds/microseconds don't matter since
+        # both boundaries are defined on whole minutes.
+        minutes = now.hour * 60 + now.minute
+        start = PRECOOL_WINDOW_START_HOUR * 60 + PRECOOL_WINDOW_START_MIN
+        end = PRECOOL_WINDOW_END_HOUR * 60 + PRECOOL_WINDOW_END_MIN
+        return start <= minutes < end
+
+    def _precool_window_id_for(self, now=None):
+        """Identifier for the CURRENT window-night, used to reset the
+        min-temp tracker when a new night's window begins. The window starts
+        at 01:00, so any time from 00:00 up to (but not including) the next
+        day's 01:00 that is still "tonight's window" maps to the date the
+        01:00 boundary falls on. Simplest correct rule for a 01:00-06:30
+        window: the window-night id is just today's date while inside the
+        window (the window never crosses midnight).
+        """
+        if now is None:
+            now = self.datetime()
+        return now.date().isoformat()
+
+    def _precool_reset_if_new_window(self, now=None):
+        """Reset the min-temp tracker when a NEW window-night begins.
+
+        Called from _precool_gate() so it happens exactly once per cycle,
+        before any min-temp reads/writes for this cycle. Only resets while
+        the window is actually active and the stored id is stale -- an old
+        night's result must stay visible (via the published sensor) between
+        windows, so we don't clear on every cycle, only on entering a new one.
+        """
+        if now is None:
+            now = self.datetime()
+        if not self._precool_window_active(now):
+            return
+        window_id = self._precool_window_id_for(now)
+        if self._precool_window_id != window_id:
+            self._precool_window_id = window_id
+            self._precool_min_temps = {}
+
+    def _precool_update_min_temps(self, now=None):
+        """Record each target room's current temp into the min-temp tracker.
+
+        Only meaningful while the window is active (called from
+        _precool_gate() after the new-window reset, unconditionally -- if the
+        window isn't active this is a harmless no-op since nothing new
+        should be tracked, but we still allow the read so a room's min can be
+        captured on the very first active cycle of the window).
+        """
+        if now is None:
+            now = self.datetime()
+        if not self._precool_window_active(now):
+            return
+        for key in PRECOOL_TARGETS:
+            zone_name, room_name = key
+            sensors = ZONES[zone_name]["rooms"][room_name]
+            temp = self._read_temp(sensors["temp"])
+            if temp is None:
+                continue
+            prior = self._precool_min_temps.get(key)
+            if prior is None or temp < prior:
+                self._precool_min_temps[key] = temp
+
+    def _precool_cold_abort(self):
+        """True if pre-cool must abort: ANY occupied room, house-wide, reads
+        at or below PRECOOL_ABORT_OCCUPIED_F. Unconditional -- applies
+        regardless of whether the room is one of the two pre-cool targets.
+        Rooms with unreadable temps or that are not occupied are skipped.
+        """
+        for zone_name, zone in ZONES.items():
+            for room_name, sensors in zone["rooms"].items():
+                occ_entity = sensors.get("occupancy")
+                if not occ_entity:
+                    continue
+                if self.get_state(occ_entity) != "on":
+                    continue
+                temp = self._read_temp(sensors["temp"])
+                if temp is None:
+                    continue
+                if temp <= PRECOOL_ABORT_OCCUPIED_F:
+                    return True
+        return False
+
+    def _precool_humidity_ok(self):
+        """True if humidity conditions allow pre-cool to engage. FAIL CLOSED.
+
+        Primary gate: dewpoint (sensor.indoor_dew_point) must be readable and
+        numeric, and <= PRECOOL_DEWPOINT_MAX_F. Any missing/unavailable/
+        unknown/non-numeric reading blocks (fail closed) -- dewpoint LOW is
+        good, so absence of a trustworthy reading must NOT default to "ok".
+
+        Backstop: RH (sensor.indoor_humidity_live), only if it IS readable
+        and numeric -- if it reads >= PRECOOL_RH_MAX_PCT, block even though
+        dewpoint looked fine (catches a frozen/stuck dewpoint sensor). RH
+        HIGH is bad. A missing/unreadable RH sensor does NOT block by itself;
+        dewpoint is the primary gate and RH is only a backstop against it.
+        """
+        dp = self._read_temp(PRECOOL_DEWPOINT_ENTITY)
+        if dp is None:
+            if not self._precool_dewpoint_unavailable_logged:
+                self.log(f"  PRE-COOL: {PRECOOL_DEWPOINT_ENTITY} unavailable "
+                         f"-> humidity gate fails closed (blocked)")
+                self._precool_dewpoint_unavailable_logged = True
+            return False
+        self._precool_dewpoint_unavailable_logged = False
+
+        if dp > PRECOOL_DEWPOINT_MAX_F:
+            if not self._precool_humidity_blocked_logged:
+                self.log(f"  PRE-COOL: dewpoint {dp:.1f}F > "
+                         f"{PRECOOL_DEWPOINT_MAX_F}F -> blocked")
+                self._precool_humidity_blocked_logged = True
+            return False
+
+        rh = self._read_temp(PRECOOL_HUMIDITY_ENTITY)
+        if rh is not None and rh >= PRECOOL_RH_MAX_PCT:
+            if not self._precool_humidity_blocked_logged:
+                self.log(f"  PRE-COOL: RH backstop {rh:.1f}% >= "
+                         f"{PRECOOL_RH_MAX_PCT}% (dewpoint {dp:.1f}F ok) "
+                         f"-> blocked")
+                self._precool_humidity_blocked_logged = True
+            return False
+
+        self._precool_humidity_blocked_logged = False
+        return True
+
+    def _precool_gate(self):
+        """Compute the pre-cool engage/no-engage decision ONCE per cycle.
+
+        This is the SINGLE source of truth for whether pre-cool may act.
+        BOTH the vent pass (_apply_precool_vents) and the setpoint-nudge
+        integration (_precool_demand, consumed by _apply_setpoint_nudge)
+        MUST consume this same gate rather than re-deriving window/humidity/
+        abort/suppression logic themselves -- this codebase has previously
+        been bitten by two logic layers disagreeing about the same threshold
+        (see _apply_priority_rooms vs the base ladder).
+
+        PHASE 2 added the human-override suppression condition here, in this
+        one function, as the original docstring required. The other condition
+        that phase contemplated (`demand > 0`) deliberately did NOT land as a
+        gate term: pre-cool's demand is what the gate FEEDS (see
+        _precool_demand, which returns 0.0 whenever this gate is inactive), so
+        AND-ing demand into `active` would be circular and would additionally
+        turn the vent pass off the instant the floors are met -- which is
+        wrong, the vents should keep favoring the targets while the window
+        runs. The demand==0 case is already handled where it belongs, in the
+        nudge's own engage/release comparison.
+
+        Returns a PrecoolGate namedtuple. `active` is the final decision;
+        `reason` is a short string for logging/publishing.
+        """
+        now = self.datetime()
+        # Reset + update the min-temp tracker before evaluating the gate so
+        # the tracker reflects this cycle's readings.
+        self._precool_reset_if_new_window(now)
+
+        window_active = self._precool_window_active(now)
+        cold_abort = self._precool_cold_abort()
+        humidity_ok = self._precool_humidity_ok()
+        # Human-override veto for THIS window-night (see the instance-state
+        # comment in initialize()). Compared by window id, never by a bare
+        # boolean, so last night's veto can never leak into tonight and
+        # tonight's veto can never expire early inside the same night. Read
+        # via getattr with a safe default: an offline harness (or a restore
+        # path from an OLD-format state file) may not have set the attribute.
+        suppressed = bool(
+            window_active
+            and getattr(self, "_precool_suppressed_window_id", None)
+            == self._precool_window_id_for(now))
+
+        if window_active:
+            self._precool_update_min_temps(now)
+
+        active = (window_active and not cold_abort and humidity_ok
+                  and not suppressed)
+
+        if not window_active:
+            reason = "window inactive"
+        elif cold_abort:
+            reason = "cold-abort: an occupied room is at/below " \
+                     f"{PRECOOL_ABORT_OCCUPIED_F}F"
+        elif not humidity_ok:
+            reason = "humidity gate blocked"
+        elif suppressed:
+            reason = "suppressed for the rest of this window " \
+                     "(human setpoint override)"
+        else:
+            reason = "active"
+
+        return PrecoolGate(active=active, window_active=window_active,
+                            cold_abort=cold_abort, humidity_ok=humidity_ok,
+                            reason=reason, suppressed=suppressed)
+
+    def _precool_demand(self, gate=None):
+        """Pre-cool's OWN demand value, in °F, for the setpoint nudge.
+
+        Analogous IN SPIRIT to _apply_setpoint_nudge's `worst_excess`, but
+        measured against the overnight PRE-COOL FLOORS instead of the comfort
+        setpoint + activation margin:
+
+            demand_room = current_temp - floor_temp
+
+        SIGN CONVENTION (a known bug class on this file): POSITIVE means the
+        room is still ABOVE its floor, i.e. it still WANTS cooling. The
+        overall demand is the MAX across the two PRECOOL_TARGETS rooms,
+        floored at 0.0, so it is never negative and a room that has already
+        beaten its floor cannot cancel out the other room's real demand.
+
+        Rooms with an unreadable temp are SKIPPED (not treated as 0 demand and
+        not treated as infinite demand) -- exactly how worst_excess skips a
+        room whose sensor is missing.
+
+        OCCUPANCY DOES NOT GATE THIS, deliberately and unlike worst_excess: a
+        sleeping person may never trip a PIR overnight, so requiring occupancy
+        would make pre-cool silently not run on precisely the nights it is
+        for. The floors themselves (plus the house-wide
+        PRECOOL_ABORT_OCCUPIED_F cold-abort inside the gate) ARE the occupant-
+        comfort protection.
+
+        Returns exactly 0.0 whenever the pre-cool gate is not active (outside
+        the window, cold-abort, humidity-blocked, or human-suppressed), so a
+        non-running pre-cool contributes literally nothing to the nudge and
+        the nudge behaves byte-identically to its pre-PHASE-2 self.
+        """
+        if gate is None:
+            gate = self._precool_gate()
+        if not gate.active:
+            return 0.0
+        demand = 0.0
+        for key, floor in PRECOOL_TARGETS.items():
+            zone_name, room_name = key
+            sensors = ZONES[zone_name]["rooms"][room_name]
+            temp = self._read_temp(sensors["temp"])
+            if temp is None:
+                continue
+            room_demand = temp - floor
+            if room_demand > demand:
+                demand = room_demand
+        # The accumulator starts at 0.0 and only ever increases, so this max()
+        # cannot change the value -- it is an explicit restatement of the
+        # "never negative" invariant for the reader, not load-bearing logic.
+        # Do NOT rewrite the loop to seed `demand` from the first room; that
+        # WOULD make a below-floor room able to return a negative demand.
+        return max(0.0, demand)
+
+    def _precool_suppress_for_window(self, now=None):
+        """Veto pre-cool for the REST of the current window-night.
+
+        Called from the CONFIRMED human-override path in
+        _apply_setpoint_nudge (the readback-mismatch-past-CONFIRM_SEC branch
+        that also sets _sp_override_cooldown_until). No-op outside the window:
+        an override at 15:00 has nothing to do with tonight's pre-cool, and
+        pre-emptively vetoing a window that hasn't started would punish the
+        user for touching the thermostat during the day.
+
+        Sets ONLY pre-cool's own veto flag. It never touches any _sp_* field,
+        so the comfort nudge's engage/release/cooldown behavior is completely
+        unchanged by pre-cool's suppression.
+        """
+        if now is None:
+            now = self.datetime()
+        if not self._precool_window_active(now):
+            return
+        window_id = self._precool_window_id_for(now)
+        if getattr(self, "_precool_suppressed_window_id", None) == window_id:
+            return  # already vetoed this window; don't re-log every cycle
+        self._precool_suppressed_window_id = window_id
+        self.log(f"  PRE-COOL: human setpoint override detected inside the "
+                 f"overnight window -- pre-cool SUPPRESSED for the rest of "
+                 f"window-night {window_id} (not just the "
+                 f"{SETPOINT_NUDGE_OVERRIDE_COOLDOWN_MIN}min cooldown)")
+
+    def _apply_precool_vents(self, room_positions, gate):
+        """Vent-position pipeline pass for overnight pre-cool.
+
+        No-op (returns room_positions completely UNCHANGED) unless
+        gate.active. When active: Game Room + Guest Bedroom 1 vents to 100%,
+        Main Bedroom (the donor) vents to PRECOOL_DONOR_POS (30%). Touches NO
+        other room. Runs between _apply_fan_assist and _apply_setpoint_nudge
+        in control_loop; _apply_backpressure_rooms still runs last and can
+        still throttle these positions under real backpressure.
+        """
+        if not gate.active:
+            return room_positions
+
+        new_positions = dict(room_positions)
+        # room_positions is keyed by (zone, room), not by individual vent --
+        # the per-vent expansion happens later in control_loop's set-vents
+        # loop, which reads each room's ZONES[...]["vents"] list. Setting the
+        # room key here is sufficient and matches how every other pass
+        # (priority/fan-assist/backpressure) writes room_positions.
+        for key in PRECOOL_TARGETS:
+            new_positions[key] = 100
+
+        donor_zone, donor_room = PRECOOL_DONOR_ROOM
+        new_positions[(donor_zone, donor_room)] = PRECOOL_DONOR_POS
+
+        return new_positions
+
+    def _publish_precool_sensor(self, gate):
+        """Publish sensor.smart_vent_precool, mirroring the EXACT publishing
+        convention of _publish_delivery_penalty / DELIVERY_PENALTY_ENTITY:
+        numeric state (as a str -- see the state=str(...) comment on that
+        method for why a bare 0.0 float silently drops the state) + a dict
+        attribute of per-room detail. Published every cycle (including
+        outside the window) so last night's result stays visible until the
+        next window.
+
+        deficit_f convention: deficit_f = min_temp_reached_so_far - floor.
+        POSITIVE means the floor was NOT reached (min stayed warmer than
+        floor); NEGATIVE/zero means the floor was reached or beaten. State =
+        the max deficit_f across the two target rooms (0.0 when no reading
+        yet / floor already met everywhere).
+        """
+        try:
+            per_room = {}
+            deficits = []
+            for key, floor in PRECOOL_TARGETS.items():
+                zone_name, room_name = key
+                min_reached = self._precool_min_temps.get(key)
+                deficit_f = (round(min_reached - floor, 2)
+                             if min_reached is not None else 0.0)
+                deficits.append(deficit_f)
+                per_room[room_name] = {
+                    "floor_f": floor,
+                    "min_reached_f": min_reached,
+                    "deficit_f": deficit_f,
+                    "window_active": gate.window_active,
+                    "reason": gate.reason,
+                }
+            worst = max(deficits) if deficits else 0.0
+            self.set_state(
+                PRECOOL_ENTITY,
+                state=str(round(worst, 2)),
+                attributes={
+                    "friendly_name": "Smart Vent Overnight Pre-Cool deficit F",
+                    "icon": "mdi:snowflake-thermometer",
+                    "active": gate.active,
+                    "window_active": gate.window_active,
+                    "suppressed": gate.suppressed,
+                    "reason": gate.reason,
+                    "rooms": per_room,
+                },
+            )
+        except Exception as e:
+            self.log(f"pre-cool sensor publish failed (non-fatal): {e}")
+
     def _write_setpoint_nudge(self, heat_temp_f, cool_temp_f):
         """Issue a setpoint hold via ecobee_enhanced (fire-and-forget).
 
@@ -3038,6 +3586,24 @@ class SmartVentController(hass.Hass):
         `self._sp_override_cooldown_until = ...` BEFORE calling this, same
         write-ahead discipline as every other _sp_* field.
 
+        The overnight pre-cool suppression flag
+        (`self._precool_suppressed_window_id`) and the per-window min-temp
+        tracker (`self._precool_min_temps` + `self._precool_window_id`) follow
+        that SAME discipline for the SAME reason: they are sticky, they are
+        read from instance state here rather than passed in, and no caller can
+        clear them by omission. The suppression flag in particular MUST survive
+        a restart -- an AppDaemon restart mid-window would otherwise resurrect
+        a pre-cool the human already vetoed, which is the exact restart-amnesia
+        class of bug this file's persistence exists to prevent.
+
+        NUDGE_STATE_VERSION stays 1 on purpose despite the added keys. Bumping
+        it would make every existing state file on the live house fail the
+        version check and get DISCARDED, forfeiting restart-amnesia protection
+        for any in-flight comfort nudge at deploy time — a real regression to
+        buy nothing. The new keys are purely ADDITIVE and every reader uses
+        .get() with a safe default, so an OLD-format file (written before this
+        deploy, lacking all of them) restores exactly as it did before.
+
         All I/O is defensive: any exception is caught and logged, and NEVER
         crashes the control loop or initialize(). A failed persist is a
         degraded-but-safe condition (the dead-man's switch bounds it), not fatal.
@@ -3060,6 +3626,20 @@ class SmartVentController(hass.Hass):
                              else float(baseline_heat))
             override_cooldown_until = getattr(
                 self, "_sp_override_cooldown_until", None)
+            # OVERNIGHT PRE-COOL (PHASE 2) sticky fields. Read from instance
+            # state here, NEVER passed as parameters — same discipline as the
+            # override cooldown above, so no caller can clear them by omission.
+            precool_suppressed_window_id = getattr(
+                self, "_precool_suppressed_window_id", None)
+            precool_window_id = getattr(self, "_precool_window_id", None)
+            # The min-temp tracker is keyed by a (zone, room) TUPLE, which JSON
+            # cannot represent as an object key. Serialize as a list of
+            # [zone, room, temp] triples and rebuild the tuple keys on restore.
+            precool_min_temps = [
+                [k[0], k[1], float(v)]
+                for k, v in (getattr(self, "_precool_min_temps", None)
+                             or {}).items()
+            ]
             record = {
                 "version": NUDGE_STATE_VERSION,
                 "owned": bool(owned),
@@ -3077,6 +3657,13 @@ class SmartVentController(hass.Hass):
                 "override_cooldown_until": (
                     None if override_cooldown_until is None
                     else override_cooldown_until.strftime("%Y-%m-%dT%H:%M:%SZ")),
+                # Overnight pre-cool (PHASE 2, 2026-09-02). ADDITIVE keys only;
+                # NUDGE_STATE_VERSION deliberately stays 1 (see docstring).
+                # precool_suppressed_window_id is the load-bearing one: it is
+                # the human's overnight veto and must not amnesia away.
+                "precool_suppressed_window_id": precool_suppressed_window_id,
+                "precool_window_id": precool_window_id,
+                "precool_min_temps": precool_min_temps,
             }
             payload = json.dumps(record)
             # Atomic write: temp file in the same dir + os.replace(). A reader
@@ -3136,6 +3723,46 @@ class SmartVentController(hass.Hass):
                 raise ValueError("state record not a JSON object")
             if data.get("version") != NUDGE_STATE_VERSION:
                 raise ValueError("unknown state version")
+            # OVERNIGHT PRE-COOL (PHASE 2): restore FIRST, and REGARDLESS of
+            # `owned`, for the same reason as the cooldown below — the human's
+            # overnight veto is recorded alongside owned=False and is exactly
+            # the record a restart must not amnesia away. Restored before any
+            # of the ownership validation that can `raise` into the discard
+            # handler, so a corrupt/incomplete OWNERSHIP record can never also
+            # throw away a valid pre-cool veto (conservative direction: when in
+            # doubt, keep pre-cool suppressed).
+            #
+            # EVERY key below is read with .get() and a safe default, so an
+            # OLD-FORMAT file written before this deploy (which has none of
+            # them) restores without raising and simply leaves pre-cool state
+            # at its initialize() defaults. This is why NUDGE_STATE_VERSION can
+            # stay 1.
+            suppressed_id = data.get("precool_suppressed_window_id")
+            if isinstance(suppressed_id, str):
+                self._precool_suppressed_window_id = suppressed_id
+                self.log(f"  PRE-COOL: restored human-override suppression for "
+                         f"window-night {suppressed_id} — pre-cool stays "
+                         f"vetoed for the rest of that window")
+            window_id = data.get("precool_window_id")
+            if isinstance(window_id, str):
+                self._precool_window_id = window_id
+            # Rebuild the tuple-keyed min-temp tracker from its [zone, room,
+            # temp] triples. Any malformed entry is skipped individually rather
+            # than failing the whole restore: this tracker is observability
+            # only (it feeds the published deficit sensor), never a control
+            # decision, so a partial rebuild is strictly better than discarding
+            # the ownership record over it. _precool_reset_if_new_window() will
+            # clear it anyway the moment a NEW window-night starts.
+            min_temps_raw = data.get("precool_min_temps")
+            if isinstance(min_temps_raw, list):
+                restored_min = {}
+                for entry in min_temps_raw:
+                    if (isinstance(entry, (list, tuple)) and len(entry) == 3
+                            and isinstance(entry[0], str)
+                            and isinstance(entry[1], str)
+                            and isinstance(entry[2], (int, float))):
+                        restored_min[(entry[0], entry[1])] = float(entry[2])
+                self._precool_min_temps = restored_min
             # HUMAN-OVERRIDE COOLDOWN (2026-09-02): restore this REGARDLESS of
             # `owned` — the whole point is that a just-detected override
             # persists owned=False alongside the cooldown timestamp, and this
@@ -3394,7 +4021,7 @@ class SmartVentController(hass.Hass):
         return (self._sp_baseline_cool, self._sp_baseline_heat)
 
     def _apply_setpoint_nudge(self, hvac_mode, hvac_action, target_cool,
-                              target_heat, mode="Auto"):
+                              target_heat, mode="Auto", precool_gate=None):
         """Temporarily move the thermostat setpoint to force compressor escalation.
 
         Computes `worst_excess` = max over OCCUPIED rooms of
@@ -3422,6 +4049,40 @@ class SmartVentController(hass.Hass):
         cycles. Deepening happens only while actively conditioning; a brand-new
         nudge is never engaged while idle.
         Mutates no state it doesn't own (all _sp_*).
+
+        OVERNIGHT PRE-COOL (PHASE 2, 2026-09-02) -- SECOND DEMAND SOURCE, NOT A
+        SECOND WRITER. This function remains the SOLE writer of a thermostat
+        setpoint in this app; a second writer would command a value this
+        function never issued, its own readback validation would see a setpoint
+        it did not command, conclude a human changed it, and latch the 2h
+        human-override cooldown. Pre-cool therefore feeds in only as a demand
+        VALUE (_precool_demand, measured from the overnight FLOORS), combined
+        with comfort's worst_excess via MAX -- never SUM. MAX, because the two
+        are independent reasons to want the same single lever moved, not two
+        additive requests; and because SETPOINT_NUDGE_MAX_F is a TOTAL cap that
+        pre-cool SHARES, it does not get its own extra 2F. There is exactly ONE
+        depth computation (_commanded_setpoints), fed the combined effective
+        excess, so the two demand sources can never disagree about a threshold
+        (the Kitchen/priority-pass two-layers bug class).
+
+        The RELEASE gate is likewise extended, and ONLY while pre-cool is in its
+        active window: release then requires BOTH comfort satisfied (<=
+        SETPOINT_NUDGE_RELEASE_F) AND pre-cool satisfied (<=
+        PRECOOL_NUDGE_RELEASE_F). Releasing on comfort alone while pre-cool
+        still wants engagement pops the hold and re-engages on the very next
+        cycle -- chatter, every cycle, all night. OUTSIDE the window
+        precool_demand is exactly 0.0 and the extra term is vacuously true, so
+        the release gate is byte-identical to its pre-PHASE-2 behavior.
+
+        `precool_gate` is the PrecoolGate computed ONCE per cycle by
+        control_loop and passed down (the same "compute once in the caller,
+        pass it in" discipline `dual` and _commanded_setpoints already use, so
+        the vent pass and this pass can never evaluate a different gate within
+        one cycle). None means "pre-cool is not participating in this call" and
+        yields precool_demand == 0.0 -- i.e. exactly today's pre-PHASE-2
+        behavior. That default is the conservative direction (when in doubt,
+        suppress pre-cool, never the reverse) and it is what an offline harness
+        that only exercises the comfort axis gets.
         """
         if mode != "Auto":
             return
@@ -3499,6 +4160,22 @@ class SmartVentController(hass.Hass):
                 if excess > worst_excess:
                     worst_excess = excess
 
+        # ------------------------------------------- Pre-cool demand (PHASE 2)
+        # The SECOND demand source. 0.0 whenever pre-cool isn't gated active
+        # (no gate passed, outside the window, cold-abort, humidity-blocked, or
+        # human-suppressed), which makes every expression below collapse to its
+        # pre-PHASE-2 form exactly. `precool_window` is read from the SAME gate
+        # object, never re-derived from the clock here, so the release gate and
+        # the demand can never disagree about whether pre-cool is running.
+        precool_demand = (0.0 if precool_gate is None
+                          else self._precool_demand(precool_gate))
+        precool_window = bool(precool_gate is not None and precool_gate.active)
+        # ONE combined demand feeds the ONE existing depth computation
+        # (_commanded_setpoints). MAX, not SUM: SETPOINT_NUDGE_MAX_F is a TOTAL
+        # cap shared by both sources, so the deeper of the two independent
+        # requests wins and neither can stack past the cap.
+        effective_excess = max(worst_excess, precool_demand)
+
         # ---------------------------------------------------------------- State
         now = self.datetime()
         # TRAP 1 coupling is only relevant in a dual-setpoint (heat_cool/auto)
@@ -3538,7 +4215,7 @@ class SmartVentController(hass.Hass):
             # (the escalation a nudge drives only happens once it runs) — and it
             # would write-churn on every idle/fan cycle. The compressor will
             # re-engage on its own schedule and we can nudge then.
-            if worst_excess < SETPOINT_NUDGE_ENGAGE_F:
+            if effective_excess < SETPOINT_NUDGE_ENGAGE_F:
                 return
             if not actively_conditioning:
                 return
@@ -3568,7 +4245,7 @@ class SmartVentController(hass.Hass):
             baseline_cool = truth_cool
             baseline_heat = truth_heat
             commanded_cool, commanded_heat = self._commanded_setpoints(
-                baseline_cool, baseline_heat, heating, worst_excess, dual)
+                baseline_cool, baseline_heat, heating, effective_excess, dual)
             # WRITE-AHEAD: persist the INTENDED ownership state BEFORE issuing
             # the hold. A persisted intent whose readback never matches is safely
             # DISCARDED on restore; the reverse (a live hold with no persisted
@@ -3594,6 +4271,11 @@ class SmartVentController(hass.Hass):
                      f"worst_excess {worst_excess:.2f}F, nudge to "
                      f"cool {commanded_cool:.1f}F heat {commanded_heat:.1f}F "
                      f"(baseline cool {baseline_cool:.1f} heat {baseline_heat:.1f})")
+            if precool_demand > 0.0:
+                self.log(f"  SETPOINT-NUDGE: pre-cool demand {precool_demand:.2f}F "
+                         f"is a second demand source (effective excess "
+                         f"{effective_excess:.2f}F = max of the two; the "
+                         f"{SETPOINT_NUDGE_MAX_F}F cap is SHARED)")
             return
 
         # ------------------------------------------------------------- Owned.
@@ -3658,6 +4340,17 @@ class SmartVentController(hass.Hass):
                 # thermostat is THE be-all end-all" (user, 2026-09-02).
                 self._sp_override_cooldown_until = now + timedelta(
                     minutes=SETPOINT_NUDGE_OVERRIDE_COOLDOWN_MIN)
+                # OVERNIGHT PRE-COOL (PHASE 2): the 2h cooldown is not enough
+                # for pre-cool. If this override happened INSIDE the overnight
+                # window, the cooldown could expire while the SAME window is
+                # still open (e.g. override at 01:15 -> cooldown ends 03:15,
+                # window runs to 06:30) and pre-cool would quietly resume the
+                # very night the human vetoed it. So pre-cool is additionally
+                # suppressed for the REST of that window-night. This touches
+                # ONLY pre-cool's own flag -- the comfort nudge's cooldown
+                # semantics above are completely unchanged. Outside the window
+                # this is a no-op (see _precool_suppress_for_window).
+                self._precool_suppress_for_window(now)
                 self.log(f"  SETPOINT-NUDGE: user changed setpoint (cool "
                          f"{self._sp_commanded_cool:.1f} -> {live_cool} live), "
                          f"relinquishing ownership without resuming — cooldown "
@@ -3684,13 +4377,40 @@ class SmartVentController(hass.Hass):
         # Readback matches. Clear any pending mismatch record.
         self._sp_mismatch_since = None
 
-        if worst_excess <= SETPOINT_NUDGE_RELEASE_F:
+        # RELEASE GATE. Comfort's own condition is UNCHANGED. The pre-cool term
+        # is added ONLY while pre-cool is actually gated active this cycle: with
+        # precool_window False (every cycle outside the window, and every cycle
+        # pre-cool is aborted/blocked/suppressed) `precool_satisfied` is True by
+        # construction, so this reduces EXACTLY to the pre-PHASE-2
+        # `worst_excess <= SETPOINT_NUDGE_RELEASE_F`.
+        #
+        # Why the AND is required inside the window (the chatter bug): comfort
+        # is satisfied long before the overnight floors are reached, so
+        # releasing on comfort alone pops the hold, pre-cool's still-positive
+        # demand immediately re-clears ENGAGE_F on the next cycle, and the
+        # mechanism engages again -- pop/re-engage every cycle, all night, each
+        # cycle a real ecobee write. Requiring BOTH to be satisfied means the
+        # nudge stays continuously OWNED through the window instead: one engage,
+        # zero releases, which is the entire point of pre-cool being a second
+        # DEMAND SOURCE rather than a deeper nudge.
+        precool_satisfied = (not precool_window
+                             or precool_demand <= PRECOOL_NUDGE_RELEASE_F)
+        if worst_excess <= SETPOINT_NUDGE_RELEASE_F and precool_satisfied:
             # Satisfied (or room recovered) enough — pop our own hold. ONLY safe
             # because readback still matches (TRAP 2). Clears all _sp_* state.
             self._release_setpoint_nudge()
             self.log(f"  SETPOINT-NUDGE: released (worst_excess {worst_excess:.2f}F "
                      f"<= release {SETPOINT_NUDGE_RELEASE_F:.2f}F)")
             return
+        if worst_excess <= SETPOINT_NUDGE_RELEASE_F and not precool_satisfied:
+            # Comfort alone would have released. Held instead, on pre-cool's
+            # demand. Logged so the overnight hold is explainable from the log
+            # rather than looking like a stuck nudge.
+            self.log(f"  SETPOINT-NUDGE: comfort satisfied (worst_excess "
+                     f"{worst_excess:.2f}F) but HELD for pre-cool demand "
+                     f"{precool_demand:.2f}F > release "
+                     f"{PRECOOL_NUDGE_RELEASE_F:.2f}F (no release/re-engage "
+                     f"chatter)")
 
         # Still engaged and warranted. Re-nudge DEEPER (never shallower here —
         # release is the only way out of the band, per hysteresis) off the ORIGINAL
@@ -3707,7 +4427,7 @@ class SmartVentController(hass.Hass):
             return
         new_cool, new_heat = self._commanded_setpoints(
             self._sp_baseline_cool, self._sp_baseline_heat, heating,
-            worst_excess, dual)
+            effective_excess, dual)
         # A deeper nudge only when the new command is actually MORE aggressive on
         # the moved axis, so we never re-issue an identical (or shallower) hold.
         moved_new = new_cool if not heating else new_heat
