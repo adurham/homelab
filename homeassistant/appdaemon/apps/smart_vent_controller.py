@@ -55,6 +55,23 @@ ZONES = {
                     "cover.cat_room_b58e_vent",
                     "cover.cat_room_3075_vent",
                 ],
+                # donor_only: the room houses cats, not people. The animals are
+                # a real, continuous sensible heat load, so the room reads warm
+                # and the base scoring interprets that as cooling demand — but
+                # there is no human comfort requirement here, so it must never
+                # win airflow away from a room people actually occupy. Distinct
+                # rationale from the other donor_only rooms (Hallway/Main
+                # Bedroom = pass-through/typically-empty, Laundry = transient
+                # 10-min occupancy blips): this room is genuinely, permanently
+                # occupied and genuinely warm, it just isn't occupied by anyone
+                # whose comfort we're optimizing for. It can still be a DONOR
+                # (throttled to feed a hotter human-occupied room) and its own
+                # vents still open/close normally on its own temp — it simply
+                # can never be a BENEFICIARY. Added 2026-09-02 after the
+                # controller was observed pinning it to 100% ("hot override
+                # (+4.8) -> 100% regardless of occupancy") while Game Room sat
+                # +11.2F over with "no donor rooms" available.
+                "donor_only": True,
             },
             "Guest Bathroom": {
                 "temp": "sensor.guest_bathroom_temperature",
@@ -71,6 +88,19 @@ ZONES = {
                 # open/closed. The 50% position is physically held by the Flair
                 # damper (verified 2026-07-15).
                 "max_vent_pct": 50,
+                # donor_only: a guest bathroom is transient-use space, not a
+                # room anyone is settled in — same reasoning as Hallway and
+                # Laundry Room. max_vent_pct only CAPS how far it opens; it
+                # does not stop the room competing for airflow in the priority
+                # pass. Without this, the controller logs "Priority Guest
+                # Bathroom (75.0F, off+3.0) [cool,ESCALATED] struggling but no
+                # donor rooms" and treats a room with nobody in it as a
+                # beneficiary while Game Room sits +11F over with no donors
+                # available. It can still be a DONOR and its own vent still
+                # follows normal temp logic (including closing to 0% when
+                # satisfied — max_vent_pct is a ceiling, not a floor).
+                # Added 2026-09-02.
+                "donor_only": True,
             },
         },
     },
@@ -460,11 +490,20 @@ PRIORITY_DONOR_COOLER_BY = 1.5
 # Throttle position for donor rooms (Flair vents are 0/50/100 only).
 PRIORITY_DONOR_POS = 50
 # Never throttle more than this many donor rooms per beneficiary room.
-# Raised from 4 to 8 — with dynamic backpressure (coil-temp feedback) now
-# allowing up to 80% of vents closed, we can concentrate airflow harder on
-# the worst occupied room. The backpressure safety net still caps total
-# closures, so this just lets the priority pass find more donors.
-PRIORITY_MAX_DONORS = 8
+# 2026-09-02: raised 8 -> 12. There are 13 rooms total, so 12 == "every other
+# room", which effectively RETIRES this as a limiter and leaves the dynamic
+# backpressure pass (coil suction-temp feedback, MAX_CLOSED_RATIO 40-80%) as
+# the single authority on how much of the house may be closed at once. That
+# is the measured safety net; this was an arbitrary count sitting in front of
+# it. History: 4 -> 8 when dynamic backpressure landed, now -> 12 for the same
+# reason, one step further.
+# Worth being explicit about what this does NOT fix: on 2026-09-02 with Game
+# Room +11F over, only 5-6 rooms QUALIFIED as donors at all (a donor must be
+# PRIORITY_DONOR_COOLER_BY=1.5F cooler than the beneficiary, and on a losing
+# whole-house day almost nothing is). The cap was never the binding
+# constraint that night — eligibility was. Raising it only matters on days
+# when 9+ rooms are genuinely comfortable and one room is genuinely losing.
+PRIORITY_MAX_DONORS = 12
 # Escalation: when a beneficiary is THIS far over the cool setpoint, it's not
 # just lagging, it's losing. Throttle donors all the way to 0% (closed) instead
 # of 50% to dump maximum CFM into it. The backpressure pass still caps total
