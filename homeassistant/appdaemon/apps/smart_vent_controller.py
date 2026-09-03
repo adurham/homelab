@@ -909,62 +909,23 @@ PRECOOL_RH_MAX_PCT = 65.0
 PRECOOL_DEWPOINT_ENTITY = "sensor.indoor_dew_point"
 PRECOOL_HUMIDITY_ENTITY = "sensor.indoor_humidity_live"
 
-# Main Bedroom donor throttle position while pre-cool is active.
-#
-# INTENT (from the feature design): a MODEST cut, explicitly NOT a full
-# close. Overnight the duct system is not CFM-limited the way it is during
-# peak afternoon load (constant-torque ECM blower), so aggressively closing
-# the donor just reduces TOTAL system CFM past a modest cut without
-# meaningfully redirecting more air to the targets. Do NOT "optimize" to 0.
-#
-# HARDWARE REALITY (2026-09-03): these Flair dampers are 3-position ONLY --
-# 0 / 50 / 100. Verified three independent ways: all 18 available
-# cover.*_vent entities live-read exactly 0/50/100; 7 days of recorder
-# history shows no other value; every sensor.*_vent_position reads
-# 0.0/50.0/100.0. Every other donor constant in this file already encodes
-# that reality (PRIORITY_DONOR_POS = 50 "never 0%",
-# PRIORITY_DONOR_POS_ESCALATED = 0).
-#
-# The design asked for 30, which is not a position this hardware has. There
-# is NO quantization anywhere between room_positions and the Flair service
-# call -- control_loop passes each position straight to _set_vent, which
-# sends it verbatim. Commanding a raw 30 would therefore:
-#   1. defeat _set_vent's redundant-command guard (`if current == position`)
-#      -- commanded 30 never equals a reported 0/50/100, so it would re-send
-#      a Flair cloud call EVERY cycle for the whole 5.5h window, and
-#   2. feed on_vent_manual_change a permanent commanded-vs-reported
-#      mismatch, which after two confirm rechecks LATCHES a 60-minute
-#      manual-override hold that makes _set_vent silently no-op on that vent
-#      with ZERO log output -- the exact bug class already fixed here on
-#      2026-07-23.
-#
-# So the raw design value is kept below as the stated INTENT, and is
-# quantized to the nearest position the hardware actually has. On {0,50,100}
-# the nearest detent to 30 is 50, which is also the only value that
-# expresses "modest cut, not a full close" (100 = no cut, 0 = the full close
-# the design explicitly rejects). Change PRECOOL_DONOR_POS_RAW to 0 or 100
-# to pick a different detent; the quantizer is the safety property, not the
-# number.
-PRECOOL_DONOR_POS_RAW = 30          # design intent, pre-hardware-quantization
-PRECOOL_VALID_VENT_POSITIONS = (0, 50, 100)
-
-
-def _quantize_vent_position(pos):
-    """Snap a desired vent position to the nearest position this hardware has.
-
-    Flair dampers here are 0/50/100 only. Commanding anything else is not a
-    softer version of the same request -- it breaks _set_vent's
-    redundant-command guard AND latches the silent 60-min manual-override
-    hold (see the PRECOOL_DONOR_POS comment above). Ties round DOWN (toward
-    the more-throttled position), which is the conservative direction for a
-    donor.
-    """
-    return min(PRECOOL_VALID_VENT_POSITIONS,
-               key=lambda valid: (abs(valid - pos), valid))
-
-
-PRECOOL_DONOR_POS = _quantize_vent_position(PRECOOL_DONOR_POS_RAW)  # -> 50
-PRECOOL_DONOR_ROOM = ("downstairs", "Main Bedroom")
+# Main Bedroom -- and every other non-target room -- is intentionally NOT
+# configured here. Earlier versions of this feature forced Main Bedroom to a
+# fixed "donor throttle" position whenever pre-cool was active, regardless of
+# Main Bedroom's own measured comfort need. That was a bug: it stomped the
+# base need-based ladder's already-correct value computed earlier in the
+# pipeline (_auto_calculate, refined by _apply_priority_rooms /
+# _apply_fan_assist) with an arbitrary hardcoded number. Per the user's
+# explicit correction (2026-09-03): "a donor's vent position should reflect
+# the donor's OWN comfort need, not a value forced by the beneficiary
+# passes." _apply_precool_vents below now touches ONLY the two
+# PRECOOL_TARGETS rooms -- Main Bedroom's position during the pre-cool window
+# is purely a function of its own measured need, exactly like every other
+# non-target room, exactly as it was before this feature existed. (The
+# PRE-EXISTING, separate donor_only mechanism in ZONES -- consumed by
+# _apply_priority_rooms, unrelated to and untouched by this feature -- may
+# still independently throttle Main Bedroom to help a DIFFERENT struggling
+# room; that is orthogonal and not what this comment is about.)
 
 # Observability sensor -- mirrors DELIVERY_PENALTY_ENTITY's publishing shape
 # (numeric state + per-room attributes dict). Published every cycle,
@@ -3442,11 +3403,29 @@ class SmartVentController(hass.Hass):
         """Vent-position pipeline pass for overnight pre-cool.
 
         No-op (returns room_positions completely UNCHANGED) unless
-        gate.active. When active: Game Room + Guest Bedroom 1 vents to 100%,
-        Main Bedroom (the donor) vents to PRECOOL_DONOR_POS (30%). Touches NO
-        other room. Runs between _apply_fan_assist and _apply_setpoint_nudge
-        in control_loop; _apply_backpressure_rooms still runs last and can
-        still throttle these positions under real backpressure.
+        gate.active. When active: Game Room + Guest Bedroom 1 vents to 100%.
+        Touches NO other room -- every other room, INCLUDING Main Bedroom,
+        passes through with whatever value room_positions already holds from
+        the earlier passes (_auto_calculate -> _apply_priority_rooms ->
+        _apply_fan_assist). Runs between _apply_fan_assist and
+        _apply_setpoint_nudge in control_loop; _apply_backpressure_rooms
+        still runs last and can still throttle these positions under real
+        backpressure.
+
+        Corrected 2026-09-03: this pass used to force Main Bedroom to a fixed
+        donor position regardless of its own measured comfort need, stomping
+        the base need-based ladder's already-correct value (confirmed live:
+        "downstairs/Main Bedroom: 68.7F empty need=-3.3 -> 0% (satisfied
+        (-3.3))"). Per the user's explicit correction: "a donor's vent
+        position should reflect the donor's OWN comfort need, not a value
+        forced by the beneficiary passes." Main Bedroom is intentionally left
+        untouched here -- its own need-based logic (already correct, already
+        tested) governs it, exactly like every other non-target room, and
+        exactly as it did before this feature existed. The PRE-EXISTING,
+        separate donor_only mechanism in ZONES (consumed by
+        _apply_priority_rooms) still independently decides whether Main
+        Bedroom donates air to a DIFFERENT struggling room; that mechanism is
+        untouched by this pass.
         """
         if not gate.active:
             return room_positions
@@ -3459,9 +3438,6 @@ class SmartVentController(hass.Hass):
         # (priority/fan-assist/backpressure) writes room_positions.
         for key in PRECOOL_TARGETS:
             new_positions[key] = 100
-
-        donor_zone, donor_room = PRECOOL_DONOR_ROOM
-        new_positions[(donor_zone, donor_room)] = PRECOOL_DONOR_POS
 
         return new_positions
 
