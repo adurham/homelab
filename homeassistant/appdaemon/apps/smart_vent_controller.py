@@ -793,6 +793,18 @@ SETPOINT_HEATCOOL_MIN_DELTA_F = 6.0  # ecobee heatCoolMinDelta, see TRAP 1 below
 # regardless of worst_excess, escalation, or how hot the room still is.
 SETPOINT_NUDGE_OVERRIDE_COOLDOWN_MIN = 120  # 2h: no new engagement after a detected human override
 
+# SCHEDULE-TRANSITION CARVE-OUT (2026-09-03): a nextTransition hold is, by
+# design, popped by the ecobee's OWN program engine the instant it advances
+# through the schedule grid -- that is not a human touching the thermostat,
+# it's our own dead-man's-switch doing exactly what it was built to do. The
+# readback-mismatch logic on its own cannot distinguish that from a human
+# turning the dial, so these two sensors give it positive, multi-signal
+# evidence: `current_climate` moves ONLY when the program engine advances,
+# and a human action instead flips `schedule_status` to 'hold'.
+SCHEDULE_STATUS_ENTITY = "sensor.ecobee_edgewater_road_schedule_status"  # 'following_schedule' vs 'hold' -- 'hold' means a human (or us) is overriding the program
+CURRENT_CLIMATE_ENTITY = "sensor.ecobee_edgewater_road_current_climate"  # which schedule slot (e.g. 'home'/'sleep') the program engine is currently in; changes ONLY on a program advance
+SCHEDULE_TRANSITION_COINCIDENCE_SEC = 300  # how close (in the sensors' own UTC frame) current_climate/schedule_status must land to the cloud-truth setpoint move to count as the SAME event
+
 # ── Setpoint-nudge ownership persistence (restart-amnesia / baseline-ratchet fix,
 #    added 2026-09-01) ─────────────────────────────────────────────────────────
 # The ratchet: the restarted app has no memory of its OWN leftover nudge, so the
@@ -3956,6 +3968,96 @@ class SmartVentController(hass.Hass):
                 return None
         return _f(SETPOINT_TRUTH_COOL), _f(SETPOINT_TRUTH_HEAT)
 
+    @staticmethod
+    def _parse_last_changed(value):
+        """Best-effort parse of a `last_changed` value into a datetime.
+
+        Accepts an already-a-datetime value, or an ISO-8601 string possibly
+        ending in 'Z' (HA convention) or '+00:00', with or without
+        microseconds. Returns None on anything it cannot parse -- callers
+        MUST treat None as "no evidence", never as an error to propagate.
+        """
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if not isinstance(value, str):
+            return None
+        s = value.strip()
+        if not s:
+            return None
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(s)
+        except ValueError:
+            return None
+
+    def _mismatch_is_schedule_transition(self):
+        """Positive, multi-signal evidence that a readback mismatch is our OWN
+        nextTransition hold expiring at the ecobee's own schedule boundary,
+        NOT a human override.
+
+        On an ecobee, `current_climate` changes ONLY when the program engine
+        itself advances through the schedule grid; a human selecting a
+        comfort setting or changing a temperature instead creates a HOLD,
+        which makes `schedule_status` read 'hold'. So the fingerprint of our
+        own hold evaporating at its designed boundary is: schedule_status ==
+        'following_schedule' AND current_climate just changed AND that
+        change landed within SCHEDULE_TRANSITION_COINCIDENCE_SEC of the
+        cloud-truth setpoint move that triggered this mismatch in the first
+        place, all three timestamps compared purely within the sensors' own
+        UTC `last_changed` frame (never against self.datetime()).
+
+        Returns True ONLY when every signal lines up. Returns False on ANY
+        missing/None/'unknown'/'unavailable' state, ANY unparseable
+        timestamp, ANY axis ambiguity, or ANY exception whatsoever --
+        'never fight a human' is absolute, so every ambiguous or degraded
+        case MUST fall through to the existing human-override path.
+        """
+        try:
+            schedule_status = self.get_state(SCHEDULE_STATUS_ENTITY)
+            if schedule_status != "following_schedule":
+                return False
+
+            current_climate = self.get_state(CURRENT_CLIMATE_ENTITY)
+            if not isinstance(current_climate, str):
+                return False
+            if current_climate.strip().lower() in ("", "unknown", "unavailable", "none"):
+                return False
+
+            truth_entity = (SETPOINT_TRUTH_HEAT if self._sp_heating is True
+                             else SETPOINT_TRUTH_COOL)
+            t_truth = self._parse_last_changed(
+                self.get_state(truth_entity, attribute="last_changed"))
+            t_climate = self._parse_last_changed(
+                self.get_state(CURRENT_CLIMATE_ENTITY, attribute="last_changed"))
+            t_sched = self._parse_last_changed(
+                self.get_state(SCHEDULE_STATUS_ENTITY, attribute="last_changed"))
+            if t_truth is None or t_climate is None or t_sched is None:
+                return False
+
+            # Never subtract a naive datetime from an aware one: normalize all
+            # three to the SAME awareness before comparing. HA timestamps are
+            # UTC-aware; a bare-string parse without an offset stays naive.
+            aware = [t.tzinfo is not None for t in (t_truth, t_climate, t_sched)]
+            if any(aware) and not all(aware):
+                return False
+
+            if abs((t_climate - t_truth).total_seconds()) \
+                    > SCHEDULE_TRANSITION_COINCIDENCE_SEC:
+                return False
+            if abs((t_sched - t_truth).total_seconds()) \
+                    > SCHEDULE_TRANSITION_COINCIDENCE_SEC:
+                return False
+
+            return True
+        except Exception:
+            # Any parse/attribute/type surprise resolves to "not a schedule
+            # transition" -- degrade to the human-override path, never crash
+            # the control loop.
+            return False
+
     def _active_nudge_baseline(self, target_cool, target_heat):
         """Return (baseline_cool, baseline_heat) iff a setpoint nudge is active
         AND its live readback matches what we commanded.
@@ -4299,11 +4401,46 @@ class SmartVentController(hass.Hass):
                 return
             if (now - self._sp_mismatch_since).total_seconds() \
                     >= SETPOINT_NUDGE_CONFIRM_SEC:
-                # The mismatch has PERSISTED past the confirm window: the USER
-                # changed the setpoint. Relinquish ownership WITHOUT resuming
-                # (their new value / hold is now on top and must not be popped;
-                # TRAP 2) and WITHOUT restoring the baseline (their new value
-                # simply becomes the baseline for any future engagement).
+                # The mismatch has PERSISTED past the confirm window. Before
+                # assuming a human touched the thermostat, check for positive
+                # evidence this is instead our OWN nextTransition hold
+                # expiring at the ecobee's own schedule boundary (see
+                # _mismatch_is_schedule_transition). That check is fail-closed
+                # to the human-override path on every ambiguous/degraded case.
+                if self._mismatch_is_schedule_transition():
+                    # SCHEDULE-DRIVEN RELINQUISH: the ecobee's own program
+                    # engine advanced and popped our hold -- this is NOT a
+                    # human override, so it must NOT latch the override
+                    # cooldown or suppress pre-cool (those are reserved for
+                    # an actual human correction). Deliberately leave
+                    # self._sp_override_cooldown_until exactly as it was
+                    # (do not set it, do not clear a pre-existing one) and do
+                    # NOT call _precool_suppress_for_window. The baseline is
+                    # stale by definition (the schedule moved it), so
+                    # dropping ownership cleanly -- allowing a fresh
+                    # re-engage next cycle if still warranted -- is correct.
+                    self.log(f"  SETPOINT-NUDGE: ecobee schedule advanced "
+                             f"(schedule_status=following_schedule, "
+                             f"current_climate changed) — relinquishing "
+                             f"stale ownership (cool "
+                             f"{self._sp_commanded_cool:.1f} -> {live_cool} "
+                             f"live); this is NOT a human override, no "
+                             f"cooldown, re-engagement is allowed")
+                    self._persist_nudge_state(owned=False)
+                    self._sp_owned = False
+                    self._sp_commanded_cool = None
+                    self._sp_commanded_heat = None
+                    self._sp_baseline_cool = None
+                    self._sp_baseline_heat = None
+                    self._sp_last_write_ts = None
+                    self._sp_mismatch_since = None
+                    self._sp_heating = None
+                    return
+                # The USER changed the setpoint. Relinquish ownership WITHOUT
+                # resuming (their new value / hold is now on top and must not
+                # be popped; TRAP 2) and WITHOUT restoring the baseline
+                # (their new value simply becomes the baseline for any
+                # future engagement).
                 #
                 # HUMAN-OVERRIDE COOLDOWN (2026-09-02): a confirmed override is
                 # not just "relinquish and wait for the normal engage gate" --
