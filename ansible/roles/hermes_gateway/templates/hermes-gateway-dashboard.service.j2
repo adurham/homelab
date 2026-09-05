@@ -1,0 +1,72 @@
+[Unit]
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/hermes-gateway-dashboard.service.j2
+#
+# THIRD Hermes process on this box. The other two, both untouched by this unit:
+#   * hermes-gateway.service  — the Discord bot, MACHINE-ROOT profile
+#     (/home/hermes/.hermes), model tracks hermes_gateway_main_provider (exo),
+#     owns api_server on tcp/8642.
+#   * hermes-serve.service    — `hermes -p dashboard dashboard --isolated`,
+#     the web dashboard's JSON-RPC/WS + SPA backend on tcp/9119. Same
+#     PROFILE as this unit, completely different entrypoint: it mounts no
+#     api_server platform, so it is not peer-reachable.
+#
+# This unit exists solely to expose the api_server platform for the
+# `dashboard` profile, so `hermes peer dm` from the personal MacBook lands on
+# a target pinned to claude-sonnet-5/anthropic instead of the exo-backed
+# default profile (which 503s whenever the Mac Studio cluster is saturated by
+# benchmark workloads). See dashboard_profile_env.j2's API_SERVER_* block for
+# the full rationale, including why gateway.multiplex_profiles was rejected.
+#
+# Upstream's documented one-process-per-profile pattern and unit-naming
+# convention: website/docs/user-guide/multi-profile-gateways.md ("Every
+# profile already gets its own ... systemd user service
+# hermes-gateway-<name>.service"). Written by hand rather than generated with
+# `hermes -p dashboard gateway install --system` because that installer emits
+# a unit with no EnvironmentFile and its own PATH/WorkingDirectory opinions;
+# templating keeps the whole shape reviewable in git, matching how
+# hermes-serve.service is handled in this role.
+Description=Hermes Agent Gateway — dashboard profile (api_server for peer messaging)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/home/hermes
+# The SAME .env dashboard_profile_env.j2 renders — no second secrets file.
+# Hermes also loads this file itself (hermes_cli/env_loader.load_hermes_dotenv
+# reads $HERMES_HOME/.env); declaring it here too means `systemctl show` and
+# any ExecStart-adjacent tooling see the same values, matching how
+# hermes-serve.service declares the machine-root .env.
+EnvironmentFile=/home/hermes/.hermes/profiles/dashboard/.env
+Environment="HOME=/home/hermes"
+Environment="USER=hermes"
+Environment="LOGNAME=hermes"
+Environment="PATH=/opt/hermes-agent/venv/bin:/opt/hermes-agent/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="VIRTUAL_ENV=/opt/hermes-agent/venv"
+# Explicit HERMES_HOME so the profile resolves even if the sticky
+# active_profile file ever points elsewhere; `-p dashboard` on the command
+# line sets the same thing, belt and braces.
+Environment="HERMES_HOME=/home/hermes/.hermes/profiles/dashboard"
+# `gateway run`, NOT `dashboard --isolated` (that's hermes-serve.service).
+# No --replace: this process must never signal another gateway's PID.
+ExecStart=/opt/hermes-agent/venv/bin/hermes -p dashboard gateway run
+Restart=always
+RestartSec=10
+# Mirrors the exit-code contract in the upstream-generated
+# hermes-gateway.service unit (gateway/restart.py): 75 = requested restart,
+# 78 = fatal config error, don't crash-loop on it.
+RestartForceExitStatus=75
+RestartPreventExitStatus=78
+KillMode=mixed
+KillSignal=SIGTERM
+ExecReload=/bin/kill -USR1 $MAINPID
+TimeoutStopSec=120
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

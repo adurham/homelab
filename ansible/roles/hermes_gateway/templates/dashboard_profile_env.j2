@@ -22,3 +22,64 @@ ANTHROPIC_TOKEN=
 # a tiny "hi" from the dashboard 400s with "out of extra usage" on the
 # Claude Max personal subscription.
 HERMES_CONTEXT_1M_THRESHOLD_TOKENS=180000
+
+# ─── api_server for this profile (hermes-gateway-dashboard.service) ────────
+#
+# WHY (2026-09-05): `hermes peer dm hermes-gw-01 "..."` used to land on the
+# MACHINE-ROOT profile's api_server (tcp/8642, hermes-gateway.service), whose
+# model tracks hermes_gateway_main_provider — `exo` by default, i.e. the
+# shared Mac Studio cluster. That cluster is frequently memory-saturated by
+# perf-benchmark workloads, so peer DMs failed with
+#   HTTP 503: Cannot JIT-load model ... no admissible placement
+# Peer messaging should just work, so it now targets THIS profile instead:
+# permanently pinned to claude-sonnet-5/anthropic (see
+# dashboard_profile_config.yaml.j2), independent of the Discord bot's
+# provider. Getting there needs a peer-reachable HTTP endpoint into this
+# profile, which hermes-serve.service does NOT provide (that's the web
+# dashboard's JSON-RPC/WS backend on :9119, no api_server platform).
+#
+# So this profile gets its OWN `hermes -p dashboard gateway run` process —
+# upstream's documented one-process-per-profile pattern (see
+# website/docs/user-guide/multi-profile-gateways.md). The alternative,
+# gateway.multiplex_profiles + a /p/dashboard/ prefix on the default
+# listener, was deliberately rejected: it restructures the DEFAULT profile's
+# gateway (the live Discord bot) to serve every profile on the box — far more
+# blast radius than a second, independent process needs.
+#
+# Setting API_SERVER_KEY alone is what enables the api_server platform
+# adapter (gateway/config.py `_has_usable_api_server_key` gate at the
+# API_SERVER_KEY branch of load_gateway_config — a usable key force-enables
+# Platform.API_SERVER regardless of any `enabled:` flag). No Discord/Telegram
+# config is needed or wanted here: with zero messaging platforms configured,
+# gateway/run.py logs "No messaging platforms enabled. Gateway will continue
+# running for cron job execution." and stays up — it does NOT exit. That's
+# exactly the shape we want: one process whose only job is this API surface.
+#
+# DEDICATED key — deliberately NOT vault_hermes_gw_api_server_key and NOT any
+# principal from /etc/hermes-gateway/api_keys.yaml. Those stay bound to the
+# machine-root profile on 8642 (personal-macbook / discord-adapter / default);
+# compromise of one endpoint must not grant the other. No keys-file /
+# multi-principal setup here: a single key is the right weight for an
+# endpoint whose only client is `hermes peer`.
+API_SERVER_KEY={{ vault_hermes_gw_dashboard_api_server_key }}
+
+# Own port, one above the machine-root api_server's 8642 (verified free on
+# the CT — nothing else in this inventory binds it). Two gateway processes
+# cannot share a listener.
+API_SERVER_PORT=8643
+
+# 0.0.0.0 for the same reason the machine-root .env uses it (see env.j2's
+# block above API_SERVER_HOST): api_server.py's bind_guard refuses any
+# non-loopback bind without a real key — satisfied above — and the iptables
+# rules in tasks/main.yml restrict tcp/8643 to the tailnet + LXC-self, so
+# 0.0.0.0 does not mean "reachable from the LAN". Unlike 8642 there is no
+# lb-01 rule: this endpoint is tailnet-only by design (no Authentik M2M
+# route fronts it). `tailscale serve --bg --https=8443` terminates TLS and
+# proxies to 127.0.0.1:8643, so the peer URL is
+# https://hermes-gw-01.tail19c543.ts.net:8443.
+API_SERVER_HOST=0.0.0.0
+
+# Distinct filename in the same audit dir as the machine-root log so the two
+# processes never interleave writes. Rotated by the same logrotate config
+# (audit_logrotate.j2 globs the directory).
+API_SERVER_AUDIT_LOG=/var/log/hermes-gateway/audit-dashboard.log
