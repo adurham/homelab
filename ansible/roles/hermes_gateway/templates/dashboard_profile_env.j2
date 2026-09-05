@@ -23,6 +23,28 @@ ANTHROPIC_TOKEN=
 # Claude Max personal subscription.
 HERMES_CONTEXT_1M_THRESHOLD_TOKENS=180000
 
+# ─── Ollama Cloud — credentials for this profile's fallback provider ──────
+#
+# Backs the `fallback_providers: [{provider: ollama-cloud, model:
+# deepseek-v4-flash}]` chain in dashboard_profile_config.yaml.j2, so a
+# 429/5xx/auth failure on Anthropic doesn't take the web dashboard and
+# `hermes peer dm hermes-gw-01` down with it.
+#
+# These lines are REQUIRED here even though the machine-root .env
+# (templates/env.j2) already carries the identical pair: profiles are
+# separate HERMES_HOMEs with their own .env and inherit nothing from the
+# machine root — the same gap that made CLAUDE_CODE_OAUTH_TOKEN mandatory
+# above. Without them the fallback resolves its provider but finds no
+# credential and the failover is dead on arrival.
+#
+# Deliberately the SAME vault var the machine-root .env uses. Unlike the
+# api_server keys (distinct per principal, so a compromise of one endpoint
+# can't authenticate as another), this is an upstream vendor credential
+# with no per-principal audit meaning — one Ollama account, one key, reused
+# across every profile on the box exactly as it is across the MacBooks.
+OLLAMA_API_KEY={{ vault_hermes_gw_ollama_api_key }}
+OLLAMA_BASE_URL=https://ollama.com/v1
+
 # ─── api_server for this profile (hermes-gateway-dashboard.service) ────────
 #
 # WHY (2026-09-05): `hermes peer dm hermes-gw-01 "..."` used to land on the

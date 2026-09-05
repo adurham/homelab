@@ -18,6 +18,48 @@ model:
   default: claude-sonnet-5
   provider: anthropic
 
+# Ollama Cloud (ollama.com) — present ONLY to back the fallback_providers
+# chain below; it is never this profile's primary. Block shape is copied
+# verbatim from the machine-root config (templates/config.yaml.j2's
+# providers.ollama-cloud) so both profiles on this CT describe the same
+# endpoint the same way. Auth is OLLAMA_API_KEY / OLLAMA_BASE_URL from THIS
+# profile's own .env (dashboard_profile_env.j2) — profiles are separate
+# HERMES_HOMEs and do NOT inherit the machine-root .env.
+providers:
+  ollama-cloud:
+    base_url: https://ollama.com/v1
+    discover_models: false
+    models:
+      deepseek-v4-flash:
+        context_length: 163840
+      "gemma4:31b":
+        context_length: 131072
+
+# Failover for the primary above. Anthropic (Claude Max personal
+# subscription) is the only thing standing between `hermes peer dm
+# hermes-gw-01` / the web dashboard and a hard failure, so when it returns
+# 429 / 5xx / 401 / 403 / 404 or drops the connection, Hermes swaps in
+# ollama-cloud mid-turn and keeps the conversation.
+#
+# Semantics (website/docs/user-guide/features/fallback-providers.md):
+# ONE primary + an ordered chain tried on failure, and the chain is
+# TURN-SCOPED — every new user message starts back on claude-sonnet-5.
+# There is deliberately no "mutual/bidirectional primary" concept in a
+# single profile: with primary=anthropic, a chain pointing at ollama-cloud
+# IS the anthropic->ollama direction, and the reverse direction only exists
+# if some profile runs ollama-cloud as ITS primary (the machine-root config
+# already supports that via hermes_gateway_main_provider).
+#
+# Model id is the CLEAN `deepseek-v4-flash` — the exact key declared in the
+# providers block above and in the machine-root render, so the fallback
+# resolves to a model this config actually describes. (The personal MacBook
+# pins the dated `deepseek-v4-flash:0731`; both are live model ids on
+# ollama.com, but the floating alias is the better choice for an
+# availability fallback since it survives Ollama rotating checkpoints.)
+fallback_providers:
+  - provider: ollama-cloud
+    model: deepseek-v4-flash
+
 # Same Authentik OIDC gate as the machine-root config (roles/authentik_provider
 # /tasks/hermes.yml provisions the client). hermes-serve.service runs this
 # profile with --isolated, so THIS profile's dashboard: block is what the
