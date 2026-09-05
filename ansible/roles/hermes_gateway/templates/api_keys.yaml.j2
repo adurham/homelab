@@ -20,3 +20,8 @@
 # while we migrate clients to principal-specific keys.
 ---
 discord-adapter: "{{ vault_hermes_gw_api_key_discord_adapter }}"
+# `hermes peer` link from Adam's personal MacBook (adams-macbook-pro-m4).
+# Reached over the tailnet-serve HTTPS endpoint only
+# (https://hermes-gw-01.tail19c543.ts.net -> 127.0.0.1:8642). A future corp
+# MacBook peer gets its OWN principal — do not share this one.
+personal-macbook: "{{ vault_hermes_gw_api_key_personal_macbook }}"
