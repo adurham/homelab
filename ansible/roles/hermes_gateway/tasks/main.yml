@@ -115,6 +115,40 @@
     group: hermes
     mode: '0755'
 
+# A `git` command run as root at some point (a manual debug pull, a pre-
+# become-user version of this role) leaves root-owned blobs under
+# .git/objects/. Every later run as the hermes user then dies with
+#   error: insufficient permission for adding an object to repository
+#   database .git/objects / fatal: unpack-objects failed
+# even though the clone directory itself is hermes-owned. Reassert ownership
+# of the whole tree — the role already declares /opt/hermes-agent as
+# hermes:hermes above, so this only ever corrects drift.
+- name: Ensure /opt/hermes-agent is fully hermes-owned (repairs root-run-git drift)
+  ansible.builtin.command:
+    cmd: chown -R hermes:hermes /opt/hermes-agent
+  register: hermes_repo_chown
+  changed_when: false
+
+# `npm install --workspace web` (further down this role) rewrites
+# package-lock.json in the checkout, leaving /opt/hermes-agent permanently
+# dirty. ansible.builtin.git with force: false then refuses to update with
+# "Local modifications exist in the destination", which has forced every
+# subsequent deploy to use --start-at-task to skip past the clone. Discard
+# that one build artifact first so the clone is genuinely idempotent again.
+# Scoped to package-lock.json deliberately — a blanket `git checkout .` /
+# `git clean -fd` would silently destroy real local work if anyone ever
+# debugs from this checkout, and force: true on the git task would do the
+# same thing wholesale.
+- name: Discard npm-generated package-lock.json churn before clone (keeps git task idempotent)
+  ansible.builtin.command:
+    cmd: git checkout -- package-lock.json
+    chdir: /opt/hermes-agent
+  become: true
+  become_user: hermes
+  register: hermes_lockfile_reset
+  changed_when: false
+  failed_when: false
+
 - name: Clone Hermes Agent Repository
   ansible.builtin.git:
     repo: https://github.com/adurham/hermes-agent.git
@@ -161,6 +195,7 @@
   notify:
     - Restart Hermes Gateway
     - Restart Hermes Serve
+    - Restart Hermes Gateway Dashboard
 
 - name: Install web-search fallback (ddgs)
   # Keyless DuckDuckGo backend used as the web_search fallback when the
@@ -445,7 +480,41 @@
     group: hermes
     mode: '0600'
   no_log: true
-  notify: Restart Hermes Serve
+  notify:
+    - Restart Hermes Serve
+    - Restart Hermes Gateway Dashboard
+
+# ─── hermes-gateway-dashboard.service — api_server for the dashboard profile ──
+#
+# The `dashboard` profile's own gateway process, whose ONLY job is to expose
+# the api_server platform on tcp/8643 so `hermes peer dm` reaches a target
+# pinned to claude-sonnet-5/anthropic rather than the exo-backed machine-root
+# profile. Upstream's one-process-per-profile pattern; see
+# templates/hermes-gateway-dashboard.service.j2 and the API_SERVER_* block in
+# dashboard_profile_env.j2 for the full rationale.
+#
+# Deliberately NOT installed via `hermes -p dashboard gateway install
+# --system` (the mechanism used for hermes-gateway.service above): that
+# installer emits a unit with no EnvironmentFile and its own PATH/cwd
+# opinions. Templating keeps the unit reviewable in git, same as
+# hermes-serve.service.
+- name: Render Hermes Gateway Dashboard Systemd Unit
+  ansible.builtin.template:
+    src: hermes-gateway-dashboard.service.j2
+    dest: /etc/systemd/system/hermes-gateway-dashboard.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Hermes Gateway Dashboard
+
+- name: Enable & Start Hermes Gateway Dashboard
+  ansible.builtin.systemd:
+    name: hermes-gateway-dashboard.service
+    enabled: true
+    state: started
+    daemon_reload: true
 
 - name: Render Hermes Serve Systemd Unit
   ansible.builtin.template:
@@ -643,6 +712,74 @@
     state: present
   notify: Save iptables rules
 
+# ─── Firewall: restrict dashboard-profile api_server (tcp 8643) to Tailnet ──
+#
+# hermes-gateway-dashboard.service's api_server (the `hermes peer` target,
+# pinned to claude-sonnet-5/anthropic). Same posture as tcp/8642 above — the
+# bearer token is the auth boundary, the firewall is defense in depth — with
+# one deliberate difference: NO lb-01 rule. Port 8642 needs one because
+# lb-01's nginx fronts it as hermes-api.chi.lab.amd-e.com behind an Authentik
+# M2M forward-auth gate; nothing fronts 8643, and tailnet-only is the desired
+# posture (the personal MacBook reaches it over `tailscale serve` on :8443).
+#
+# The 8642 GOTCHA above (append landing AFTER an existing DROP) does not
+# apply here: tcp/8643 has no rule in the chain yet, so plain `state: present`
+# appends land in listed order — ACCEPTs first, DROP last — exactly how the
+# 8642 rules were originally written.
+- name: "iptables: allow loopback to dashboard api_server tcp/8643"
+  ansible.builtin.iptables:
+    chain: INPUT
+    in_interface: lo
+    protocol: tcp
+    destination_port: "8643"
+    jump: ACCEPT
+    comment: "hermes_gateway: loopback -> dashboard api_server"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow Tailnet (100.64.0.0/10) to dashboard api_server tcp/8643"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8643"
+    source: 100.64.0.0/10
+    jump: ACCEPT
+    comment: "hermes_gateway: tailnet -> dashboard api_server"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow tailscale subnet router ({{ ip_tailscale_gw }}) to dashboard api_server tcp/8643 (covers source-NAT case)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8643"
+    source: "{{ ip_tailscale_gw }}"
+    jump: ACCEPT
+    comment: "hermes_gateway: tailscale-gw -> dashboard api_server"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow LXC self ({{ ip_hermes_gateway }}) to dashboard api_server tcp/8643"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8643"
+    source: "{{ ip_hermes_gateway }}"
+    jump: ACCEPT
+    comment: "hermes_gateway: self -> dashboard api_server"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: drop all other inbound to dashboard api_server tcp/8643"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8643"
+    jump: DROP
+    comment: "hermes_gateway: deny dashboard api_server"
+    state: present
+  notify: Save iptables rules
+
 # ─── Firewall: restrict `hermes serve` dashboard (tcp 9119) to lb-01 + tailnet ──
 #
 # `hermes serve` is bound to a non-loopback address (see the
@@ -806,3 +943,28 @@
     executable: /bin/bash
   register: hermes_tailscale_serve
   changed_when: "'ALREADY_CONFIGURED' not in hermes_tailscale_serve.stdout"
+
+# Second TLS front-door, for the dashboard profile's api_server (the `hermes
+# peer` target). One hostname's :443 can only proxy to ONE backend, and
+# path-prefix routing (`--set-path`) would rewrite the API root out from under
+# every /api/* and /v1/* route the peer client calls — so this takes a
+# distinct HTTPS port instead. 8443 is one of the three ports tailscaled
+# serves HTTPS on without extra tailnet config (443, 8443, 10000), and the
+# existing Let's Encrypt cert for hermes-gw-01.tail19c543.ts.net covers it
+# (certs are per-host, not per-port).
+#
+# End state: https://hermes-gw-01.tail19c543.ts.net:8443 — real TLS over the
+# tailnet, same security posture as the :443 endpoint, never cleartext.
+- name: Configure tailscale serve to front dashboard api_server on https:8443
+  ansible.builtin.shell: |
+    set -o pipefail
+    current=$(tailscale serve status --json 2>/dev/null || echo '{}')
+    if echo "$current" | grep -q '"http://127.0.0.1:8643"'; then
+      echo "ALREADY_CONFIGURED"
+      exit 0
+    fi
+    tailscale serve --bg --https=8443 http://127.0.0.1:8643
+  args:
+    executable: /bin/bash
+  register: hermes_tailscale_serve_dashboard
+  changed_when: "'ALREADY_CONFIGURED' not in hermes_tailscale_serve_dashboard.stdout"

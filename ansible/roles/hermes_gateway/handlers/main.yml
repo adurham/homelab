@@ -11,6 +11,17 @@
     state: restarted
     daemon_reload: true
 
+# The `dashboard` profile's OWN gateway process (api_server on tcp/8643 for
+# `hermes peer` traffic). Separate from both "Restart Hermes Gateway" (the
+# Discord bot on the machine-root profile) and "Restart Hermes Serve" (the
+# web dashboard backend, same profile but a different entrypoint) — a change
+# to one must never bounce the others.
+- name: Restart Hermes Gateway Dashboard
+  ansible.builtin.systemd:
+    name: hermes-gateway-dashboard.service
+    state: restarted
+    daemon_reload: true
+
 - name: Reload Systemd
   ansible.builtin.systemd:
     daemon_reload: true

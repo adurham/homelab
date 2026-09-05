@@ -1,12 +1,16 @@
 # Managed by Ansible — do not edit by hand.
 # Source: roles/hermes_gateway/templates/audit_logrotate.j2
 #
-# Rotate the api_server audit log so it doesn't grow unbounded.
+# Rotate the api_server audit logs so they don't grow unbounded.
 # Daily rotation, keep 30 days, compress old files. `copytruncate` so
 # the gateway doesn't need to be restarted to release the file handle
 # (it appends in O_APPEND mode, so resuming on the truncated file is
 # safe — no overwrites of in-flight writes).
-/var/log/hermes-gateway/audit.log {
+#
+# Globs *.log (was a literal audit.log) so it covers BOTH api_server
+# processes: audit.log from the machine-root gateway on tcp/8642, and
+# audit-dashboard.log from hermes-gateway-dashboard.service on tcp/8643.
+/var/log/hermes-gateway/*.log {
     daily
     rotate 30
     compress
