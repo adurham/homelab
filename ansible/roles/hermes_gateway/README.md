@@ -29,6 +29,17 @@ this role only handles the application layer.
     `auth_request` forward-auth against an Authentik M2M
     client_credentials JWT, then re-attached with api_server's own
     `API_SERVER_KEY` server-side — two independent gates).
+- Writes `/home/hermes/.tmux.conf` from `templates/tmux.conf.j2` — sets
+  `default-terminal tmux-256color` + RGB `terminal-overrides` so the
+  interactive `hlxc` SSH+tmux session renders 24-bit color correctly
+  (the CT lacks kitty terminfo, so `hlxc` forces
+  `TERM=xterm-256color`; without this file tmux falls back to its
+  bundled `screen` terminfo, which has no truecolor capability, and
+  hermes-agent's RGB banner/gradients render washed-out/blocky). A
+  live `hermes-main` tmux session must have its server killed
+  (`tmux kill-server`, as the `hermes` user) for a fresh render to
+  pick up a first-time deploy of this file — not automated, since
+  killing a live interactive session unasked breaks trust.
 - Defense-in-depth iptables INPUT rules on tcp/8642 (api_server) and
   tcp/9119 (hermes serve): allow loopback, ESTABLISHED/RELATED, Tailnet
   CGNAT (100.64/10), `ip_tailscale_gw`, lb-01, and the LXC's own IP;
