@@ -14,3 +14,28 @@
 set -g default-terminal "tmux-256color"
 set -ag terminal-overrides ",xterm-256color:RGB"
 set -ag terminal-overrides ",screen-256color:RGB"
+
+# Shift+Enter passthrough for hlxc (2026-09-06).
+# hermes-agent's CLI already maps the Kitty CSI-u / xterm modifyOtherKeys
+# Shift+Enter byte sequences to a newline (hermes_cli/pt_input_extras.py),
+# but only if those distinct sequences actually reach the process. Without
+# `extended-keys`, tmux swallows the modifier and forwards a bare Enter to
+# the pane no matter what the outer terminal (kitty) sends. `always` makes
+# tmux emit the extended encoding unconditionally (kitty's Kitty Keyboard
+# Protocol push from inside the session — see hermes-agent's
+# _enable_extended_enter_keys — doesn't need tmux to auto-detect anything).
+# `extended-keys-format csi-u` matches the CSI-u form hermes-agent parses
+# (ESC[13;2u for Shift+Enter) rather than tmux's default xterm-style
+# ESC[27;2;13~ form. `terminal-features 'xterm*:extkeys'` tells tmux the
+# outer terminal (reported as xterm-256color by the hlxc SSH alias) is
+# trusted to support extended keys at all -- without it tmux won't emit
+# extended sequences even with extended-keys always (confirmed via
+# rectorspace.com/journal/tmux-shift-enter-extkeys: 'extkeys' is the
+# actual terminal-features flag name; 'extended-keys' as a flag name is
+# silently ignored, no warning). Requires tmux >= 3.5 for
+# extended-keys-format to exist at all (see the ansible task that builds
+# tmux 3.5a from source on this Ubuntu-22.04 box, whose apt repo only has
+# 3.2a).
+set -s extended-keys always
+set -as terminal-features 'xterm*:extkeys'
+set -s extended-keys-format csi-u

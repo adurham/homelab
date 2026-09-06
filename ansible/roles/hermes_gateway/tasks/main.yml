@@ -233,6 +233,65 @@
     - /home/hermes/.hermes/logs
     - /home/hermes/.claude
 
+# Shift+Enter fix for the interactive hlxc session (2026-09-06).
+# Ubuntu 22.04's apt tmux is 3.2a, which has no `extended-keys-format`
+# option — tmux can't re-emit Shift+Enter as a distinguishable CSI-u
+# sequence to the pane, so it collapses to plain Enter regardless of what
+# the outer terminal (kitty) or hermes-agent's own key-alias table
+# support. That option only landed in tmux 3.5 (Sept 2024). Build 3.5a
+# from source to /usr/local/bin, which the default PATH resolves ahead
+# of the apt-installed /usr/bin/tmux for both root and the hermes user
+# (confirmed via `which -a tmux` on both accounts) — no need to remove
+# the apt package, just shadow it.
+- name: Check installed tmux version
+  ansible.builtin.command: tmux -V
+  register: hermes_tmux_version
+  changed_when: false
+  failed_when: false
+
+- name: Install tmux 3.5a build dependencies
+  ansible.builtin.apt:
+    name:
+      - libevent-dev
+      - libncurses-dev
+      - bison
+      - wget
+    state: present
+  when: "'3.5' not in hermes_tmux_version.stdout"
+
+- name: Download tmux 3.5a source
+  ansible.builtin.get_url:
+    url: https://github.com/tmux/tmux/releases/download/3.5a/tmux-3.5a.tar.gz
+    dest: /usr/local/src/tmux-3.5a.tar.gz
+    mode: '0644'
+  when: "'3.5' not in hermes_tmux_version.stdout"
+
+- name: Extract tmux 3.5a source
+  ansible.builtin.unarchive:
+    src: /usr/local/src/tmux-3.5a.tar.gz
+    dest: /usr/local/src
+    remote_src: true
+    creates: /usr/local/src/tmux-3.5a/configure.ac
+  when: "'3.5' not in hermes_tmux_version.stdout"
+
+- name: Configure tmux 3.5a
+  ansible.builtin.command: ./configure --prefix=/usr/local
+  args:
+    chdir: /usr/local/src/tmux-3.5a
+  when: "'3.5' not in hermes_tmux_version.stdout"
+
+- name: Build tmux 3.5a
+  ansible.builtin.command: make -j{{ ansible_processor_vcpus | default(2) }}
+  args:
+    chdir: /usr/local/src/tmux-3.5a
+  when: "'3.5' not in hermes_tmux_version.stdout"
+
+- name: Install tmux 3.5a to /usr/local
+  ansible.builtin.command: make install
+  args:
+    chdir: /usr/local/src/tmux-3.5a
+  when: "'3.5' not in hermes_tmux_version.stdout"
+
 # Truecolor fix for the interactive hlxc session (2026-09-06) — see the
 # tmux.conf.j2 template header for the full why. Without this file the
 # hlxc tmux-main session renders hermes-agent's RGB banner/gradients
