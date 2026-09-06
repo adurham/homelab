@@ -250,6 +250,36 @@
     group: hermes
     mode: '0644'
 
+# Locale fix for the interactive hlxc session (2026-09-06). This LXC's
+# /etc/default/locale is LANG="C" (POSIX), which has no UTF-8 support. A
+# shell with LANG=C decodes hermes-agent's multibyte UTF-8 box-drawing/
+# banner glyphs byte-by-byte instead of codepoint-by-codepoint,
+# corrupting the HERMES-AGENT banner and sidebar line-art (garbled/
+# fragmented glyphs) — independent of the tmux truecolor fix above
+# (that one only fixes color depth, not character decoding). C.utf8 is
+# already present on the box (confirmed via `locale -a`), so no
+# locale-gen is needed.
+#
+# Deliberately targets ~/.profile, NOT ~/.bashrc: the hlxc alias runs
+# `su - hermes -c "tmux new-session ... hermes"`, i.e. a LOGIN shell
+# running a single command, which is NON-interactive ($- has no 'i').
+# ~/.bashrc's very first lines `case $- in *i*) ;; *) return;; esac`
+# would make any export appended there dead code for this exact
+# invocation path (it'd only fire for a real interactive bash prompt).
+# `su -` reads ~/.profile unconditionally as a login shell (no such
+# guard exists in .profile), so that's the file that actually runs.
+- name: Set UTF-8 locale for the hermes user's login shells (hlxc glyph fix)
+  ansible.builtin.blockinfile:
+    path: /home/hermes/.profile
+    marker: "# {mark} ANSIBLE MANAGED BLOCK (hermes_gateway UTF-8 locale fix)"
+    block: |
+      export LANG=C.UTF-8
+      export LC_ALL=C.UTF-8
+    create: true
+    owner: hermes
+    group: hermes
+    mode: '0644'
+
 # Manage only a delimited block in /home/hermes/.hermes/.env so that values
 # the running gateway writes itself (e.g. DISCORD_HOME_CHANNEL set via the
 # `/sethome` slash command, anything `hermes setup` persists) survive
