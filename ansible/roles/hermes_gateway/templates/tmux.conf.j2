@@ -1,0 +1,16 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/hermes_gateway/templates/tmux.conf.j2
+#
+# Truecolor / kitty-adjacent rendering fix (2026-09-06).
+# The `hlxc` alias forces TERM=xterm-256color on the outer SSH hop because
+# this CT lacks xterm-kitty terminfo. Without an explicit tmux config, tmux
+# falls back to its bundled "screen" terminfo, which has no 24-bit color
+# capability — any RGB gradient output from hermes-agent (e.g. the banner)
+# gets quantized down to the 256-color palette, looking washed out/blocky
+# compared to a local kitty session that gets real truecolor. Setting
+# default-terminal to tmux-256color plus RGB terminal-overrides for both
+# xterm-256color (what hlxc's outer SSH sets) and screen-256color (tmux's
+# own internal reporting) restores full 24-bit color inside the session.
+set -g default-terminal "tmux-256color"
+set -ag terminal-overrides ",xterm-256color:RGB"
+set -ag terminal-overrides ",screen-256color:RGB"

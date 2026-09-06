@@ -233,6 +233,23 @@
     - /home/hermes/.hermes/logs
     - /home/hermes/.claude
 
+# Truecolor fix for the interactive hlxc session (2026-09-06) — see the
+# tmux.conf.j2 template header for the full why. Without this file the
+# hlxc tmux-main session renders hermes-agent's RGB banner/gradients
+# quantized to 256 colors, looking washed out vs a local kitty session.
+# NOTE: this only takes effect for a NEW tmux server. An already-running
+# hermes-main session needs a manual `tmux kill-server` (as the hermes
+# user) before the next hlxc reconnect picks it up — deliberately not
+# automated here since killing a live interactive session out from under
+# the user without asking is against house rules.
+- name: Render Hermes tmux.conf (hlxc truecolor fix)
+  ansible.builtin.template:
+    src: tmux.conf.j2
+    dest: /home/hermes/.tmux.conf
+    owner: hermes
+    group: hermes
+    mode: '0644'
+
 # Manage only a delimited block in /home/hermes/.hermes/.env so that values
 # the running gateway writes itself (e.g. DISCORD_HOME_CHANNEL set via the
 # `/sethome` slash command, anything `hermes setup` persists) survive
