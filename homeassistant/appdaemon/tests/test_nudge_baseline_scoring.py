@@ -19,12 +19,17 @@ effective values into all three vent-scoring passes. When no nudge is trusted
 live the helper returns None and the effective values equal the LIVE setpoints
 byte-for-byte (zero behavior change otherwise).
 
-ASYMMETRY (deliberate): ONLY the three vent-scoring call sites become
-baseline-aware. _apply_setpoint_nudge's own worst_excess computation and
-_update_delivery_penalties stay on LIVE setpoints — the nudge is a
-compressor-pressure signal; feeding it the baseline would break its release
-logic so it would never release. Test 9 is the regression guard proving the
-nudge still computes worst_excess from the LIVE setpoint.
+ASYMMETRY (corrected 2026-09-06): the vent-scoring call sites AND the nudge's
+own worst_excess loop AND _update_delivery_penalties are ALL baseline-aware
+now, sharing the one _active_nudge_baseline predicate. The ORIGINAL claim here
+("the nudge's own worst_excess stays on LIVE setpoints because feeding it the
+baseline would break its release logic so it would never release") was exactly
+backwards, and its pin (old T9) is what let the release gate demand the worst
+room come within margin+0.5F of a setpoint 2F BELOW the user's baseline —
+arithmetically unreachable, so the hold latched 15-20h/day until the ecobee
+schedule popped it (Aug30-Sep6 production data; see
+test_nudge_release_reference.py for the end-to-end repro). Test 9 now pins the
+corrected frame: worst_excess vs the BASELINE while owned+trusted.
 
 No pytest / appdaemon needed: same stub pattern as the other tests in tests/.
 """
@@ -462,31 +467,51 @@ check("T8 no-nudge: Game Room still 100% (genuinely hot over 72)",
       out_eff.get(gr) == 100)
 
 # =============================================================================
-# 9. ASYMMETRY REGRESSION GUARD: _apply_setpoint_nudge STILL computes
-#    worst_excess from the LIVE setpoint, not the baseline. Game Room at 70.0,
-#    owned cooling nudge with echo (live cool 66, baseline 72). vs LIVE 66:
-#    off 4.0, excess 2.5 > RELEASE 0.5 -> nudge retained. If it wrongly used the
-#    baseline 72, off would be -2.0 -> excess 0 -> it would RELEASE. So "still
-#    owned after this cycle" proves the nudge's own math is on the LIVE setpoint.
+# 9. RELEASE FRAME (corrected 2026-09-06): _apply_setpoint_nudge computes
+#    worst_excess from the BASELINE setpoint while a nudge is owned AND its
+#    readback matches. Game Room at 74.2, owned cooling nudge with echo (live
+#    cool 66, baseline 72). vs BASELINE 72: off 2.2, excess 0.7 — inside the
+#    release 0.5 / engage 1.5 hysteresis band -> nudge RETAINED, no release,
+#    no new writes (the band is real in the user's frame). The OLD test pinned
+#    the opposite ("retained because measured vs LIVE 66") with Game Room at
+#    70.0 — which under the corrected frame means the room RECOVERED to 2F
+#    UNDER the baseline, so the fixed code correctly RELEASES there; that
+#    release behavior is now pinned in test_nudge_release_reference.py (P).
 # =============================================================================
 ha = build_nudged_house(action="cooling")
-ha.set_room("upstairs", "Game Room", 70.0, True)   # off 4.0 vs live 66
+ha.set_room("upstairs", "Game Room", 74.2, True)   # excess 0.7 vs baseline 72
 for zn, zone in svc.ZONES.items():
     for rn, s in zone["rooms"].items():
         if rn == "Game Room":
             continue
-        ha.set_room_temp(zn, rn, 71.0)              # neutral, below live
+        ha.set_room_temp(zn, rn, 71.0)              # neutral, below baseline
         if s.get("occupancy"):
             ha.states[s["occupancy"]] = "off"
 mode, action, tc, th = ha._get_thermostat_state()
 ha._apply_setpoint_nudge(mode, action, tc, th, "Auto")
-check("T9 asymmetry: nudge retained (worst_excess measured vs LIVE 66, not baseline 72)",
+check("T9 release frame: nudge retained in the baseline hysteresis band "
+      "(worst_excess 0.7 vs baseline 72, between release 0.5 and engage 1.5)",
       ha._sp_owned is True)
-check("T9 asymmetry: zero resume calls", len(resume_calls(ha)) == 0)
-check("T9 asymmetry: zero new set_hold writes", len(setpoint_calls(ha)) == 0)
+check("T9 release frame: zero resume calls", len(resume_calls(ha)) == 0)
+check("T9 release frame: zero new set_hold writes", len(setpoint_calls(ha)) == 0)
 # And the SAME live readback still yields a trustworthy baseline for vent scoring.
-check("T9 asymmetry: vent scoring still uses baseline 72 via the helper",
+check("T9 release frame: vent scoring still uses baseline 72 via the helper",
       ha._active_nudge_baseline(66.0, 60.0) == (72.0, 60.0))
+# Recovery release (the behavior the old pin suppressed): Game Room 70.0 is
+# 2F UNDER the user's baseline -> worst_excess 0.0 -> RELEASES.
+ha2 = build_nudged_house(action="cooling")
+ha2.set_room("upstairs", "Game Room", 70.0, True)
+for zn, zone in svc.ZONES.items():
+    for rn, s in zone["rooms"].items():
+        if rn == "Game Room":
+            continue
+        ha2.set_room_temp(zn, rn, 71.0)
+        if s.get("occupancy"):
+            ha2.states[s["occupancy"]] = "off"
+mode, action, tc, th = ha2._get_thermostat_state()
+ha2._apply_setpoint_nudge(mode, action, tc, th, "Auto")
+check("T9 recovery: room 70.0 (2F under baseline) -> RELEASED (excess 0.0)",
+      ha2._sp_owned is False and len(resume_calls(ha2)) == 1)
 
 print()
 print(f"RESULT: {sum(PASS)}/{len(PASS)} checks passed")
