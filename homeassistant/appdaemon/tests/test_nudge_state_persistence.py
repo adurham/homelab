@@ -266,9 +266,14 @@ write_state_file(ha, state_record(commanded_at=ha.datetime().strftime(
 # 'Restart': fresh instance with the same temp state file and live readback 66.
 ha2 = FakeHA(hvac_mode="heat_cool", hvac_action="cooling",
              sp_cool=66.0, sp_heat=60.0, tmp=tmp)
-# Game Room at excess ~1.0 vs the LIVE 66 (hysteresis band: no release, no deepen)
+# Game Room at excess ~1.0 vs the BASELINE 72 (hysteresis band: no release, no
+# deepen). 2026-09-06 release-frame fix: worst_excess is measured against the
+# user's BASELINE while a trusted hold is owned, not against the live nudged
+# 66 — the old live-frame temp (66+2.5=68.5) reads as fully RECOVERED vs the
+# 72 baseline now, which would (correctly) release the stale hold instead of
+# exercising this restart scenario.
 ha2.occupy("upstairs", "Game Room")
-ha2.set_room_temp("upstairs", "Game Room", 66.0 + svc.PRIORITY_MARGIN_BASE + 1.0)
+ha2.set_room_temp("upstairs", "Game Room", 72.0 + svc.PRIORITY_MARGIN_BASE + 1.0)
 ha2._set_thermostat()
 restore_and_first_cycle(ha2)
 check("R1 restart: ownership RE-ADOPTED (readback matches commanded 66)",

@@ -1320,8 +1320,20 @@ class SmartVentController(hass.Hass):
         # should use), and passed to all three vent-scoring passes so they can
         # never drift apart (recurring-bug-class guard). When no nudge is trusted
         # live, _active_nudge_baseline returns None and these equal the LIVE
-        # setpoints byte-for-byte. The nudge's own pass and delivery penalties
-        # deliberately keep using the LIVE setpoints (see their call sites).
+        # setpoints byte-for-byte.
+        #
+        # 2026-09-06 (release-frame fix): _update_delivery_penalties now ALSO
+        # consumes these effective setpoints. The old comment here ("the
+        # nudge's own pass and delivery penalties deliberately keep using the
+        # LIVE setpoints") was exactly backwards for the delivery pass: fed the
+        # LIVE (nudged) 70F during a hold, every comfortable room at 71-72F vs
+        # the user's 72 baseline read as "past deadband and stuck" and accrued
+        # a margin-lowering delivery penalty, which inflated worst_excess and
+        # latched the nudge for 15-20h/day (see _apply_setpoint_nudge's
+        # RELEASE REFERENCE FRAME note). A capacity handicap must be measured
+        # against the room's REAL target, so the delivery pass gets the same
+        # baseline-aware values the vent passes get — with no nudge trusted,
+        # they are byte-identical to live and nothing changes.
         _bl = self._active_nudge_baseline(target_cool, target_heat)
         if _bl:
             eff_cool, eff_heat = _bl
@@ -1365,8 +1377,12 @@ class SmartVentController(hass.Hass):
         # penalties (it reads them to avoid double-counting the supply-air axis)
         # and BEFORE _apply_priority_rooms (which reads the delivery penalty for
         # both margin and escalation). Runs every cycle so the penalty decays
-        # when the room recovers or HVAC goes idle.
-        self._update_delivery_penalties(hvac_action, target_cool, target_heat)
+        # when the room recovers or HVAC goes idle. 2026-09-06: fed the
+        # BASELINE-AWARE effective setpoints (see the eff comment above) so a
+        # room "past deadband" is judged against the USER's baseline during an
+        # active nudge, not against our own nudged setpoint — the live frame
+        # penalized comfortable rooms and inflated worst_excess all week.
+        self._update_delivery_penalties(hvac_action, eff_cool, eff_heat)
 
         # Zone-presence contention (measured axis). Stamps each zone's last
         # occupied time and recomputes the per-zone occupied/vacant booleans for
@@ -2211,14 +2227,25 @@ class SmartVentController(hass.Hass):
             return 0.0
         return max(0.0, min(1.0, worst / ZONE_CONTENTION_SPAN_F))
 
-    def _off_target(self, room_name, temp, heating):
+    def _off_target(self, room_name, temp, heating, setpoint=None):
         """Sign-aware off-target magnitude for a room in the current mode.
 
         Cooling (heating=False): (room_temp - cool_setpoint), i.e. how hot.
         Heating (heating=True):  (heat_setpoint - room_temp), i.e. how cold.
         Both are positive when the room needs help.
+
+        `setpoint` (2026-09-06): optional explicit reference. None (the
+        default — the behavior of every pre-existing caller) reads the LIVE
+        setpoint from the thermostat exactly as before, byte-identical. The
+        setpoint nudge's own worst_excess loop passes the pre-nudge BASELINE
+        while it owns a trusted hold (see _apply_setpoint_nudge) so its
+        release gate is judged in the USER's frame, never against its own
+        nudge — scoring release against the nudged setpoint made release
+        unreachable and latched the hold for 15-20h/day (root-caused from
+        Aug30-Sep6 production data).
         """
-        setpoint = self._current_setpoint(heating)
+        if setpoint is None:
+            setpoint = self._current_setpoint(heating)
         if setpoint is None:
             return 0.0
         return (setpoint - temp) if heating else (temp - setpoint)
@@ -4065,11 +4092,19 @@ class SmartVentController(hass.Hass):
         Vent scoring must reference the USER's effective (pre-nudge BASELINE)
         setpoints while a nudge is actively holding the thermostat below/above
         them. The vents aim at how the house should FEEL, while the compressor is
-        separately being hammered harder by the nudge (so the nudge's own
-        worst_excess and _update_delivery_penalties deliberately stay on LIVE
-        setpoints — see callers). Without this substitution every room reads as
+        separately being hammered harder by the nudge. Without this substitution every room reads as
         far over the artificially-nudged setpoint during an active nudge and pins
         at 100%, defeating all redistribution.
+
+        2026-09-06: this helper is now ALSO the release-reference authority —
+        the nudge's own worst_excess loop (both the release gate and any
+        re-nudge) scores off this same baseline in the same trusted state, and
+        _update_delivery_penalties is fed the same effective setpoints. The old
+        "the nudge's own worst_excess and _update_delivery_penalties
+        deliberately stay on LIVE setpoints" note was backwards: the LIVE
+        frame is what made the release gate unreachable (see
+        _apply_setpoint_nudge's RELEASE REFERENCE FRAME comment) and what
+        penalized comfortable donor rooms during a hold.
 
         Returns None — so callers fall back to the LIVE setpoints, giving
         byte-identical behavior whenever no nudge is trusted live — unless we own
@@ -4195,6 +4230,46 @@ class SmartVentController(hass.Hass):
         actively_conditioning = (hvac_action == "cooling"
                                  or hvac_action == "heating")
 
+        # RELEASE REFERENCE FRAME (2026-09-06 root-cause fix): while we own a
+        # nudge whose readback is trusted live, worst_excess — the single
+        # quantity driving BOTH the release gate and any re-nudge — is scored
+        # against the recorded pre-nudge BASELINE, the SAME substitution the
+        # vent-scoring passes already make via _active_nudge_baseline (the
+        # owned + _nudge_readback_matches predicate, shared so the two can
+        # never disagree about whether the nudge is trusted). When we own
+        # NOTHING, live IS the user's effective baseline (schedule or manual
+        # hold — there is no hold of ours on top), so the live reference is
+        # correct there and engages exactly as before.
+        #
+        # THE BUG THIS FIXES (root-caused from Aug30-Sep6 production data and
+        # verified live 2026-09-06): the LIVE thermostat setpoint during our
+        # own hold IS our commanded (nudged) value — the entity mirrors the
+        # hold — so the old live-referenced loop demanded, to release, that
+        # the worst occupied room come within margin+RELEASE_F of a setpoint
+        # up to MAX_F BELOW the user's own baseline. For a room that engages
+        # the nudge by being ~2.4F over baseline and then plateaus ~1F over
+        # it (Game Room's chronic shape: never below ~72.3F against a 72F
+        # baseline), the live-frame release condition was arithmetically
+        # unreachable: excess-vs-70 STAYS at/above the engage threshold even
+        # at the room's best recovery. The hold then lived until the ecobee's
+        # own schedule popped the nextTransition hold (midnight/7am) and
+        # re-engaged within 1-2h — 15-20+ h/day of a 70F whole-house setpoint
+        # (the desired_cool sensor sat at 70F for 75% of the week), dragging
+        # comfort rooms to 65-66F while the hot rooms it was meant to help
+        # still overheated.
+        #
+        # With the baseline frame, release means "the worst occupied room has
+        # recovered to within RELEASE_F of ITS OWN comfort point" — the exact
+        # recovery the mechanism exists to wait for — and the engage/release
+        # hysteresis band (0.5F..1.5F) is real again, measured in the user's
+        # frame. TRAP 2 (never pop a user's hold) is untouched: release still
+        # fires only from the branch where the cloud-truth readback MATCHES
+        # our own commanded value, which is checked BEFORE this release gate.
+        _nudge_baseline = self._active_nudge_baseline(target_cool, target_heat)
+        _reference = (_nudge_baseline if _nudge_baseline is not None
+                      else (target_cool, target_heat))
+        _reference_cool, _reference_heat = _reference
+
         # Worst excess over OCCUPIED rooms, measured exactly like _zone_contention
         # (line ~1530): off_target - _room_margin, clamped at >= 0.
         worst_excess = 0.0
@@ -4224,7 +4299,10 @@ class SmartVentController(hass.Hass):
                         continue
                     _override = self._effective_occupancy_override(
                         zone_name, key, heating)
-                    if self._off_target(room_name, temp, heating) < _override:
+                    if self._off_target(room_name, temp, heating,
+                                        setpoint=(_reference_heat if heating
+                                                  else _reference_cool)) \
+                            < _override:
                         continue
                 # NOTE: a donor_only room is NOT skipped here (deliberately
                 # different from _apply_priority_rooms). donor_only only means
@@ -4232,7 +4310,9 @@ class SmartVentController(hass.Hass):
                 # the room can't burn its occupant. A genuinely hot donor-only
                 # room (Main Bedroom) still needs the compressor to escalate, so
                 # it is fully eligible to drive a nudge.
-                off = self._off_target(room_name, temp, heating)
+                off = self._off_target(
+                    room_name, temp, heating,
+                    setpoint=(_reference_heat if heating else _reference_cool))
                 margin = self._room_margin(key, heating)
                 excess = off - margin
                 if excess > worst_excess:
