@@ -285,6 +285,74 @@
   # live bot. A running hlxc tmux session picks the new shim up on its
   # next `op` invocation (the shim is exec'd per call).
 
+# ─── Per-session broker socket directory (multi-concurrent-hlxc, 2026-09-07) ──
+#
+# Originally the reverse forward landed on ONE fixed path,
+# /run/hermes-op-broker.sock. Only the first hlxc window could bind it;
+# a second window with ExitOnForwardFailure=yes had its whole SSH
+# connection killed by the colliding bind, so only one terminal at a
+# time ever had 1Password access.
+#
+# Now each hlxc window forwards to /run/hermes-op-broker/<tmux-session>.sock
+# — a distinct REMOTE path per window, all pointing back at the SAME local
+# broker socket on the Mac. Distinct remote paths do not collide, so every
+# window gets a working bridge and ExitOnForwardFailure=yes stays on
+# everywhere. The path is derived from the tmux session NAME (not the
+# connection) because tmux's `new-session -A -e VAR=VAL` sets the variable
+# only on the CREATE branch — on the ATTACH branch it is silently ignored,
+# and an already-running pane's environ can never be rewritten afterwards
+# (`tmux setenv` only affects processes started later; both measured on
+# tmux 3.5a, 2026-09-07). A name-derived path means a re-attach re-claims
+# the exact path that session's OP_BROKER_SOCK already points at, so
+# re-attach is correct by construction rather than by fix-up.
+#
+# The directory must pre-exist because sshd binds the socket INSIDE it and
+# will not create parents. Mode 0755 root:root: sshd binds as root (hlxc
+# connects as root), and the unprivileged hermes user only needs traverse
+# to reach the sockets. The sockets themselves land srw-rw-rw- via the
+# existing StreamLocalBindMask 0111 below — verified on the box with
+# `sshd -T | grep streamlocalbindmask` => 0111, so no sshd change was
+# needed for the directory layout.
+- name: Ensure /run/hermes-op-broker Socket Directory (hlxc per-session forwards)
+  ansible.builtin.file:
+    path: /run/hermes-op-broker
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+# /run is a tmpfs — the directory above evaporates on reboot, and the
+# first post-reboot hlxc would then die on a -R bind into a nonexistent
+# directory. tmpfiles.d recreates it on every boot. (hlxc ALSO mkdir -p's
+# it defensively in its pre-flight probe, so a box that has not been
+# re-provisioned since this change still works; this file is what makes
+# it survive without that belt-and-braces path.)
+- name: Install tmpfiles.d drop-in for /run/hermes-op-broker (survives reboot)
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (roles/hermes_gateway) — do not edit by hand.
+      # /run is tmpfs; recreate the hlxc per-session 1Password broker
+      # socket directory at every boot. See docs/1password-hlxc-bridge.md.
+      d /run/hermes-op-broker 0755 root root -
+    dest: /etc/tmpfiles.d/hermes-op-broker.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Apply tmpfiles.d drop-in now (create dir without waiting for a reboot)
+  ansible.builtin.command:
+    cmd: systemd-tmpfiles --create /etc/tmpfiles.d/hermes-op-broker.conf
+  changed_when: false
+
+# One-shot cleanup: the flat single-session socket path from the pre-
+# 2026-09-07 scheme. Nothing binds it anymore, and leaving a stale
+# srw-rw-rw- root-owned socket in /run is just confusing debris that
+# makes the old "is the bridge up?" probe answer yes when it is not.
+- name: Remove legacy flat /run/hermes-op-broker.sock (superseded by per-session dir)
+  ansible.builtin.file:
+    path: /run/hermes-op-broker.sock
+    state: absent
+
 # ─── kitten clipboard binary (Ctrl+V image paste over hlxc, 2026-09-07) ────
 #
 # hermes-agent's Ctrl+V/Alt+V image paste shells out to the platform
