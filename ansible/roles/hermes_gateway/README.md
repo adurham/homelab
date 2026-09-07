@@ -50,6 +50,16 @@ this role only handles the application layer.
   arbitrary Personal-vault items, physical approval per read, nothing
   secret ever on this box's disk. Full design + verification:
   `docs/1password-hlxc-bridge.md`.
+- Installs the **`kitten` standalone binary** (kitty v0.46.2,
+  linux-amd64, sha256-pinned) at `/home/hermes/.local/bin/kitten` so
+  hermes-agent's Ctrl+V/Alt+V clipboard-image paste works from inside
+  the `hlxc` session: the headless CT has no display server or clipboard
+  daemon, so the only reachable clipboard is the LOCAL kitty terminal's,
+  and `kitten clipboard -g` reads it over the OSC 5522 tty protocol
+  (auto-wrapped through tmux passthrough). Requires
+  `read-clipboard`/`read-primary` in the local kitty.conf's
+  `clipboard_control` (already set on the personal MacBook) for silent
+  reads — kitty's default config prompts per read instead.
 - Defense-in-depth iptables INPUT rules on tcp/8642 (api_server) and
   tcp/9119 (hermes serve): allow loopback, ESTABLISHED/RELATED, Tailnet
   CGNAT (100.64/10), `ip_tailscale_gw`, lb-01, and the LXC's own IP;
