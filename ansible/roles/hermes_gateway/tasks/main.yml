@@ -285,6 +285,42 @@
   # live bot. A running hlxc tmux session picks the new shim up on its
   # next `op` invocation (the shim is exec'd per call).
 
+# ─── kitten clipboard binary (Ctrl+V image paste over hlxc, 2026-09-07) ────
+#
+# hermes-agent's Ctrl+V/Alt+V image paste shells out to the platform
+# clipboard. On this headless CT there is no DISPLAY/WAYLAND_DISPLAY and
+# no clipboard daemon, so wl-paste/xclip have nothing to talk to — and the
+# image the user wants to paste lives on the LOCAL MacBook's clipboard,
+# not on this box at all. kitty's `kitten clipboard -g <file>` is the
+# upstream-blessed mechanism for exactly this: the request travels as an
+# OSC 5522 escape sequence down the controlling tty (auto-wrapped in the
+# tmux DCS passthrough when inside tmux), and the LOCAL kitty terminal
+# answers with the clipboard content. It needs no GUI, no X11, no kitty
+# install on this box.
+#
+# kitten ships as a standalone static binary in the kitty GitHub releases
+# (per-arch, no kitty install required on the remote host). Pinned to
+# v0.46.2 — the EXACT version of kitty running on the personal MacBook
+# (verified: /Applications/kitty.app == 0.46.2) — so the OSC 5522 dialect
+# spoken here matches the far-end terminal byte-for-byte. sha256 verified
+# against the release asset to make a tampered/corrupt download fail the
+# playbook instead of deploying a broken binary. Fetched at deploy time
+# rather than committed: it's a 24 MB binary that doesn't belong in a
+# public repo.
+#
+# No service notify: like the op shim, this backs the INTERACTIVE hlxc
+# session only. A running hermes-main tmux session picks the new binary
+# up on the next Ctrl+V (hermes spawns `kitten clipboard` per keypress).
+
+- name: Install kitten clipboard binary (kitty v0.46.2, linux-amd64)
+  ansible.builtin.get_url:
+    url: https://github.com/kovidgoyal/kitty/releases/download/v0.46.2/kitten-linux-amd64
+    dest: /home/hermes/.local/bin/kitten
+    owner: hermes
+    group: hermes
+    mode: '0755'
+    checksum: sha256:031d40a8a373457ea2ab9928a5ceb57c7abc67d17f1c0e38766bf95f1fd83b15
+
 - name: Configure sshd for the hlxc reverse-socket forward
   ansible.builtin.copy:
     content: |
