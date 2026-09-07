@@ -9,6 +9,12 @@ no vault password, and no decrypted secret ever written to the box's disk.
 Designed 2026-09-06 and verified end-to-end the same day (see
 "Verification" below).
 
+A second, unrelated capability — a clipboard-image bridge — was added
+2026-09-07 on top of the same broker process and socket. See "Layer 2:
+clipboard bridge" below. It has materially different security properties
+than the 1Password path documented in this section; read that section's
+"Security posture" before assuming the two share the same guarantees.
+
 ## Why this shape
 
 The end goal was 1Password as the single secrets source for the gateway.
@@ -157,3 +163,104 @@ decision from the user): a periodic approved refresh of `.env` from
 1Password during an interactive session; or re-evaluating a Personal-plan
 compatible unattended option. **Do not** point the live
 `hermes-gateway.service` at the bridge without an explicit decision.
+
+## Layer 2: clipboard bridge
+
+Added 2026-09-07 on top of the exact same broker process, socket, and
+reverse-tunnel forward described above — not a new bridge, a second
+request type carried over the existing one.
+
+### Why it exists
+
+Ctrl+V/Alt+V image paste needed to work for a `hermes` CLI session running
+on `hermes-gw-01`, but the image the user wants to paste lives on the
+MacBook's clipboard, not the headless box's (which has no display server
+or clipboard daemon at all). An earlier fix used kitty's `kitten
+clipboard` (OSC 5522 over the tty) to pull the image directly over the
+terminal protocol — that works for a plain SSH session, but the real
+day-to-day access path (the `hlxc` alias) always lands inside a tmux
+session, and tmux's server drops a pane's unwrapped OSC 5522 request
+outright. Inside tmux the OSC-5522 route silently does nothing. The
+clipboard bridge exists to reach the Mac's clipboard through a channel
+tmux cannot see: the same reverse-forwarded Unix socket the 1Password
+bridge already uses, which carries SSH-channel traffic, not tty bytes.
+
+### How it works
+
+Same architecture diagram as above, same socket, same daemon process
+(`~/bin/op-broker.py`) — no separate broker, no separate tunnel. The
+broker now dispatches on a `"type"` field in the JSON request:
+
+- No `"type"` key → the original 1Password `op`-forwarding behavior,
+  unchanged and byte-compatible.
+- `{"type": "clipboard_read"}` → the broker reads the Mac's clipboard
+  locally (`pngpaste`, falling back to `osascript`) and returns the image
+  as base64-encoded PNG: `{"returncode": 0, "png_b64": "..."}`.
+- `{"type": "clipboard_has_image"}` → a cheap existence check without
+  transferring image bytes: `{"returncode": 0, "has_image": true|false}`.
+
+Response codes carry meaning the remote client (`hermes_cli/clipboard.py`
+in the hermes-agent fork) depends on: `rc=0` success, `rc=1` a definitive
+"no image on the clipboard", `rc=2` an internal error or the size cap
+being hit (treated as "bridge unavailable, fall back to another
+clipboard backend"), and `rc=3` "refused — the Mac's screen is locked."
+The broker logs request type, return code, and byte lengths only — never
+clipboard content or base64 payloads, matching the existing `op` logging
+discipline.
+
+### Security posture: clipboard bridge (Layer 2)
+
+This section is deliberately blunt. The clipboard path reduces the
+security guarantee that the 1Password path above provides, and that
+reduction was a conscious tradeoff, not an oversight.
+
+- **Not Touch-ID-gated.** The 1Password `op` reads documented above are
+  safe specifically because the *real* `op` CLI runs natively on the Mac
+  and 1Password Desktop pops a physical Touch ID / security-key prompt on
+  every single call — there is no way to exfiltrate a vault item through
+  this bridge without the user's live physical approval. Clipboard reads
+  do **not** go through any such gate. Any process that can reach the
+  broker socket while an hlxc session is live can request the Mac's
+  current clipboard contents and get them back, no prompt, no approval,
+  no user awareness that a read happened.
+- **The only mitigations are narrow and partial, not a security
+  boundary.** Two checks run broker-side before a clipboard read is
+  served:
+  1. The broker refuses the request outright (`returncode=3`) if the
+     Mac's screen is locked (`ScreenSaverEngine` running) — a read
+     attempted while the user has stepped away and locked the machine
+     gets nothing.
+  2. A 24 MB cap on the clipboard payload bounds how much data a single
+     read can move.
+  Neither of these makes the clipboard read safe in the way the Touch-ID
+  gate makes the `op` read safe — they narrow the exposure window and cap
+  the blast radius, nothing more. While the Mac is unlocked and an hlxc
+  session is live, clipboard contents are readable with no per-read
+  consent of any kind.
+- **The forwarded socket is world-accessible on hermes-gw-01, and any
+  local user on that box can reach it.** The reverse-forwarded socket is
+  created by root's sshd, and the `StreamLocalBindMask 0111` sshd
+  drop-in (`/etc/ssh/sshd_config.d/hermes-op-forward.conf`, described
+  under "sshd prerequisite" above) makes it land `srw-rw-rw-` — world
+  read/write, not scoped to the `hermes` user. That mask exists because
+  the unprivileged `hermes` user (who is not the SSH-login user) has to
+  be able to reach a socket that root's sshd created on behalf of the
+  SSH-login session; there is no narrower mask that still lets `hermes`
+  connect. The practical consequence: **any local user on hermes-gw-01
+  can connect to that socket and read the Mac's clipboard for as long as
+  an hlxc session is live** — this is not hypothetical or theoretical,
+  it follows directly from the socket's permission bits. This was a
+  consciously accepted tradeoff at design time, mitigated by the
+  broker-side screen-lock refusal and size cap described above rather
+  than by tightening the socket mask (tightening the mask would break
+  the `hermes` user's own legitimate access, which is the entire point
+  of the bridge).
+- **Net assessment.** The clipboard bridge trades a real, unaudited
+  read-access exposure (bounded by "hlxc session live" + "screen
+  unlocked" + 24 MB) for tmux compatibility. It is materially weaker than
+  the 1Password path on this page, which has no such exposure because
+  every read requires the user's own physical Touch ID / security-key
+  approval at the moment of the read. Anyone extending this bridge to
+  carry additional request types should assume the same
+  no-per-read-consent, any-local-user-on-the-box exposure applies unless
+  a new type adds its own gate.
