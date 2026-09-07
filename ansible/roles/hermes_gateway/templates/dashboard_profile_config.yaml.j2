@@ -9,19 +9,30 @@
 # and the web dashboard used to share ONE config.yaml/model, both tracking
 # hermes_gateway_main_provider. The user wants the dashboard permanently on
 # Anthropic Claude Sonnet 5 regardless of what the Discord bot's main
-# provider is set to (exo by default) — there's no per-platform model
+# provider is set to (anthropic by default as of 2026-09-07, previously
+# exo — see defaults/main.yml) — there's no per-platform model
 # override in hermes-agent, so a separate profile (separate HERMES_HOME,
 # separate config.yaml/.env) is the supported isolation mechanism instead.
 # The Discord bot keeps using the machine-root config.yaml
 # (templates/config.yaml.j2) untouched.
+#
+# CONFIG-PARITY SYNC (2026-09-07): auxiliary/delegation/web/agent/tool_search
+# below are mirrored from the MacBook's ~/.hermes/config.yaml the same way
+# templates/config.yaml.j2 is (see that file's header comment for the full
+# provider-first-auxiliary-schema rationale) — this profile just ALSO keeps
+# its model: pin permanently on anthropic/claude-sonnet-5 rather than
+# tracking hermes_gateway_main_provider, and keeps its own dashboard.oauth /
+# public_url / fallback_providers blocks (dashboard-specific, unrelated to
+# the parity sync) exactly as they were.
 model:
   default: claude-sonnet-5
   provider: anthropic
 
-# Ollama Cloud (ollama.com) — present ONLY to back the fallback_providers
-# chain below; it is never this profile's primary. Block shape is copied
-# verbatim from the machine-root config (templates/config.yaml.j2's
-# providers.ollama-cloud) so both profiles on this CT describe the same
+# Ollama Cloud (ollama.com) — backs the fallback_providers chain below AND
+# the auxiliary ollama-cloud provider block (ollama-cloud-primary task
+# routing applies on this profile too, same as the other two). Block shape
+# is copied verbatim from the machine-root config (templates/config.yaml.j2's
+# providers.ollama-cloud) so all three profiles on this CT describe the same
 # endpoint the same way. Auth is OLLAMA_API_KEY / OLLAMA_BASE_URL from THIS
 # profile's own .env (dashboard_profile_env.j2) — profiles are separate
 # HERMES_HOMEs and do NOT inherit the machine-root .env.
@@ -73,6 +84,836 @@ dashboard:
       client_id: "{{ vault_hermes_gw_dashboard_oidc_client_id }}"
       scopes: "openid profile email"
   public_url: "https://hermes.chi.lab.amd-e.com"
+
+# ─── Web / agent / tool_search / delegation / auxiliary — CONFIG-PARITY SYNC (2026-09-07) ───
+#
+# This profile previously had NONE of these blocks, so it silently ran on
+# hermes-agent's built-in DEFAULT_CONFIG for all of them (profiles are
+# separate HERMES_HOMEs and do NOT inherit the machine-root config.yaml).
+# Mirrored below from the MacBook's ~/.hermes/config.yaml the same way
+# templates/config.yaml.j2 is, since this profile is a live, user-facing
+# surface (web dashboard + `hermes peer dm`) just as much as the Discord
+# bot and the interactive default profile — it deserves the same tuned
+# reasoning/tool-search/delegation/web settings, not silent defaults.
+#
+# web: mirrored verbatim. anthropic_native_search / by_provider.anthropic
+# (claude-code backend) apply directly since this profile's main provider
+# is always anthropic; by_provider.ollama-cloud/exo entries are inert here
+# (never selected — main never runs on those providers on this profile)
+# but kept for consistency with the other two profiles' identical block.
+web:
+  backend: brave-free
+  search_backend: brave-free
+  extract_backend: trafilatura
+  anthropic_native_search: true
+  anthropic_native_search_max_uses: 5
+  search_chain:
+    - brave-free
+    - ddgs
+  by_provider:
+    ollama-cloud:
+      search_backend: brave-free
+      extract_backend: trafilatura
+    anthropic:
+      search_backend: claude-code
+      extract_backend: claude-code
+    exo:
+      search_backend: brave-free
+      extract_backend: trafilatura
+
+# agent: mirrored from the MacBook, with the SAME two gateway-specific
+# deltas templates/config.yaml.j2 carries for the same reasons (Anthropic
+# billing-classifier compatibility on the OAuth path this profile also
+# runs on): system_prompt_mode: compact instead of normal, plus this
+# profile's own max_turns/timeouts sized for a chat surface rather than a
+# long autonomous coding session.
+agent:
+  max_turns: 90
+  gateway_timeout: 1800
+  restart_drain_timeout: 60
+  api_max_retries: 3
+  service_tier: ''
+  pin_anthropic_token: false
+  tool_use_enforcement: auto
+  task_completion_guidance: true
+  parallel_tool_call_guidance: true
+  environment_probe: true
+  environment_hint: ''
+  coding_context: auto
+  verify_on_stop: false
+  gateway_timeout_warning: 900
+  clarify_timeout: 600
+  gateway_notify_interval: 600
+  gateway_auto_continue_freshness: 3600
+  image_input_mode: auto
+  disabled_toolsets:
+    - feishu_doc
+    - feishu_drive
+    - yuanbao
+    - moa
+    - x_search
+    - video_gen
+    - spotify
+    - bfl
+    - browser-cdp
+    - hermes-yuanbao
+    - image_gen
+  system_prompt_mode: compact
+  adaptive_sampling:
+    cold_start_turns: 2
+    ema_alpha: 0.5
+    enabled: true
+    fp_max: 0.5
+    history_window: 3
+    log_decisions: true
+    pp_max: 0.2
+  interleaved_thinking: true
+  reasoning_effort: xhigh
+  strip_cache_on_overload: true
+  reasoning_effort_by_model:
+    claude-sonnet-5: high
+    deepseek-v4-flash: xhigh
+    deepseek-v4-flash:0731: xhigh
+    deepseek-ai/DeepSeek-V4-Flash-0731: xhigh
+
+# tool_search: same CC-mimicry deferral setup as the machine-root/Discord
+# config (see templates/config.yaml.j2's tool_search comment for the full
+# rationale) — this profile runs the same OAuth path and needs the same
+# billing-classifier-safe deferral behavior.
+tool_search:
+  enabled: true
+  mode: client_side
+  variant: regex
+  defer_mcp_tools: true
+  additional_eager:
+    - terminal
+    - read_file
+    - write_file
+    - patch
+    - search_files
+    - todo
+  additional_deferred:
+    - process
+    - clarify
+    - vision_analyze
+    - image_generate
+    - web_search
+    - web_extract
+    - skills_list
+    - skill_view
+    - skill_manage
+    - memory
+    - session_search
+    - delegate_task
+    - swarm_run
+    - execute_code
+    - text_to_speech
+
+# delegation: mirrored verbatim from the MacBook (2026-09-07 sync), same
+# as templates/config.yaml.j2's delegation block, EXCEPT provider/model
+# stay empty (no Jinja branching needed — this profile's main provider is
+# always anthropic, never exo, so subagents simply inherit the parent as
+# they would on the machine-root config's main=anthropic/ollama-cloud
+# branch) and max_concurrent_children/child_timeout_seconds keep this
+# profile's existing lighter footprint (a phone-chat/peer-messaging surface
+# doesn't need the same subagent headroom as the coding-agency Discord bot).
+delegation:
+  base_url: ''
+  api_key: ''
+  api_mode: ''
+  inherit_mcp_toolsets: true
+  max_iterations: 500
+  reasoning_effort: high
+  reasoning_effort_by_role:
+    orchestrator: max
+    reviewer: high
+    jr-coder: low
+    mid-coder: medium
+    sr-coder: high
+  provider: ''
+  model: ''
+  max_spawn_depth: 2
+  max_concurrent_children: 3
+  child_timeout_seconds: 600
+  orchestrator_enabled: true
+  subagent_auto_approve: true
+  ruflo_path: ''
+  by_provider:
+    anthropic:
+      model: claude-sonnet-5
+      provider: anthropic
+    ollama-cloud:
+      model: gemma4:31b
+      provider: ollama-cloud
+    exo:
+      model: mlx-community/Qwen3.6-35B-A3B-8bit
+      provider: exo
+  model_by_role:
+    reviewer:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    jr-coder:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    mid-coder:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    pm:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    sr-coder:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    coder:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    consultant:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-fable-5-1
+        provider: anthropic
+    pii-detector:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    project-board-sync:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    sync-coordinator:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    performance-monitor:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    resource-allocator:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    base-template-generator:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    release-manager:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    workflow-automation:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    load-balancer:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    test-long-runner:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    aidefence-guardian:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    claims-authorizer:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    researcher:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    scout-explorer:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    code-analyzer:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    analyze-code-quality:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    issue-tracker:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    pr-manager:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    tester:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    planner:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    github-modes:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    dev-backend-api:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    data-ml-model:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    ops-cicd-github:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    docs-api-openapi:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    spec-mobile-react-native:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    production-validator:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    test-architect:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    python-specialist:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    typescript-specialist:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    database-specialist:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    project-coordinator:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    topology-optimizer:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    benchmark-suite:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    performance-benchmarker:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    specification:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    pseudocode:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    refinement:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    memory-specialist:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    agent:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    goal-planner:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    code-goal-planner:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    performance-optimizer:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    arch-system-design:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    architecture:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    adr-architect:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    security-architect:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    security-architect-aidefence:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    security-auditor:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    ddd-domain-expert:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    performance-engineer:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    sparc-orchestrator:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    injection-analyst:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    repo-architect:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+    reasoningbank-learner:
+      model: glm-5.3
+      provider: ollama-cloud
+      fallback:
+        model: claude-opus-5
+        provider: anthropic
+  max_iterations_by_role:
+    orchestrator: 500
+    leaf: 300
+  auto_route:
+    tier_roles:
+      light: researcher
+      standard: coder
+      deep: arch-system-design
+
+# auxiliary: PROVIDER-FIRST schema, copied verbatim from the MacBook's
+# ~/.hermes/config.yaml auxiliary block (2026-09-07 sync), same as
+# templates/config.yaml.j2. Unlike that file, this profile needs NO local-
+# exo-vision override — main provider here is permanently anthropic, so
+# the exo/ollama-cloud provider blocks below are only ever consulted for
+# an explicitly-pinned cross-provider task, never for vision by default;
+# mirroring the MacBook's auxiliary.exo.vision (ollama-cloud/gemma4:31b)
+# verbatim is correct here since there's no local-endpoint delta to
+# preserve like the Discord/machine-root profile has.
+auxiliary:
+  defaults:
+    approval:
+      extra_body: {}
+      timeout: 180
+    compression:
+      extra_body: {}
+      timeout: 600
+    curator:
+      extra_body: {}
+      timeout: 600
+    kanban_decomposer:
+      extra_body: {}
+      timeout: 180
+    mcp:
+      extra_body: {}
+      timeout: 180
+    memory_extraction:
+      auto_commit_session_end: false
+      extra_body: {}
+      include_pre_compress: true
+      max_tokens_per_turn: 1024
+      max_tokens_session_end: 2048
+      timeout: 180
+    profile_describer:
+      extra_body: {}
+      timeout: 60
+    skills_hub:
+      extra_body: {}
+      timeout: 180
+    title_generation:
+      extra_body: {}
+      timeout: 180
+    triage_specifier:
+      extra_body: {}
+      timeout: 120
+    tts_audio_tags:
+      extra_body: {}
+      timeout: 30
+    vision:
+      download_timeout: 30
+      extra_body: {}
+      timeout: 120
+    web_extract:
+      extra_body: {}
+      timeout: 360
+  exo:
+    provider: exo
+    default: mlx-community/Qwen3.6-35B-A3B-8bit
+    vision:
+      model: gemma4:31b
+      provider: ollama-cloud
+    web_extract:
+      model: gemma4:31b
+      provider: ollama-cloud
+    compression:
+      model: deepseek-ai/DeepSeek-V4-Flash-0731
+      extra_body:
+        service_tier: flex
+    skills_hub:
+      model: gemma4:31b
+      provider: ollama-cloud
+    approval:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    mcp:
+      model: gemma4:31b
+      provider: ollama-cloud
+    title_generation:
+      model: gemma4:31b
+      provider: ollama-cloud
+    tts_audio_tags:
+      model: gemma4:31b
+      provider: ollama-cloud
+    triage_specifier:
+      model: gemma4:31b
+      provider: ollama-cloud
+    kanban_decomposer:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    profile_describer:
+      model: gemma4:31b
+      provider: ollama-cloud
+    curator:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    monitor:
+      model: gemma4:31b
+      provider: ollama-cloud
+    memory_extraction:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    background_review:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    consult:
+      model: deepseek-v4-pro
+      provider: ollama-cloud
+    goal_judge:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    memory_query_rewrite:
+      model: gemma4:31b
+      provider: ollama-cloud
+    moa_aggregator:
+      model: gemma4:31b
+      provider: ollama-cloud
+    moa_reference:
+      model: gemma4:31b
+      provider: ollama-cloud
+    pet_dialogue:
+      model: gemma4:31b
+      provider: ollama-cloud
+  anthropic:
+    default: claude-haiku-4-5-20251001
+    memory_extraction:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    monitor:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    provider: anthropic
+    title_generation:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    web_extract:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    skills_hub:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    mcp:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    approval:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    curator:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    compression:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    vision:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    consult:
+      model: claude-fable-5-1
+      provider: anthropic
+      fallback:
+        model: glm-5.3
+        provider: ollama-cloud
+      reasoning_effort: max
+      timeout: 180
+    tts_audio_tags:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    triage_specifier:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    profile_describer:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    moa_aggregator:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    moa_reference:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    pet_dialogue:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    memory_query_rewrite:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    background_review:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    goal_judge:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    kanban_decomposer:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    delegation_router:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+  ollama-cloud:
+    default: gemma4:31b
+    title_generation: gemma4:31b
+    tts_audio_tags: gemma4:31b
+    triage_specifier: deepseek-v4-pro:0813
+    profile_describer: gemma4:31b
+    skills_hub: gemma4:31b
+    moa_aggregator: deepseek-v4-pro:0813
+    moa_reference: gemma4:31b
+    pet_dialogue: gemma4:31b
+    memory_query_rewrite: gemma4:31b
+    web_extract: gemma4:31b
+    mcp: gemma4:31b
+    monitor: gemma4:31b
+    curator: deepseek-v4-flash:0731
+    background_review: deepseek-v4-pro:0813
+    goal_judge: deepseek-v4-pro:0813
+    kanban_decomposer: deepseek-v4-pro:0813
+    compression: deepseek-v4-pro:0813
+    vision: gemma4:31b
+    memory_extraction: deepseek-v4-pro:0813
+    approval: deepseek-v4-pro:0813
+    consult:
+      timeout: 180
+    delegation_router: deepseek-v4-pro:0813
 
 memory:
   memory_enabled: true

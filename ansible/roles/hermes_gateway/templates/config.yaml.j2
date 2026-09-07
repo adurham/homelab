@@ -3,6 +3,9 @@
 #
 # Main model provider is switchable via hermes_gateway_main_provider
 # (roles/hermes_gateway/defaults/main.yml) — currently: {{ hermes_gateway_main_provider }}.
+# Default flipped from exo -> anthropic on 2026-09-07 to mirror the
+# MacBook's current main provider (see defaults/main.yml comment); exo and
+# ollama-cloud remain fully switchable via the same var.
 # All three provider blocks (exo / anthropic / ollama-cloud) are always
 # rendered below with working credentials, so switching between them is
 # just changing that var + re-running the playbook — no manual editing.
@@ -10,14 +13,24 @@
 #   - delegate_task subagents -> Qwen3.6 on exo when main=exo (cheap local
 #     subagents alongside the free local main model); inherits the main
 #     model otherwise (delegation.provider/model left empty)
-#   - auxiliary tasks (compression, title-gen, memory, etc.) -> TASK-FIRST
-#     schema (auxiliary.<task>: {model, provider, fallback: {...}}), pinned
-#     explicitly per task below rather than resolved provider-first. Values
-#     mirror the MacBook's ~/.hermes/config.yaml auxiliary.anthropic.* pins
-#     (kept in sync manually — see 2026-09-04 sync).
+#   - auxiliary tasks (compression, title-gen, memory, etc.) -> PROVIDER-FIRST
+#     schema (auxiliary.<provider>: {defaults / exo / anthropic / ollama-cloud
+#     sub-blocks, each keyed by task}), copied verbatim from the MacBook's
+#     ~/.hermes/config.yaml auxiliary block (2026-09-07 full sync — see
+#     agent/auxiliary_client.py _get_auxiliary_task_config for how
+#     hermes-agent auto-selects the sub-block matching the live main
+#     provider at runtime; no Jinja branching needed for that selection).
+#     ONE deliberate non-mirror: auxiliary.exo.vision keeps this gateway's
+#     own LOCAL exo-cluster vision endpoint (custom:exo / Qwen3.6 on
+#     192.168.86.201) instead of the MacBook's auxiliary.exo.vision (which
+#     routes to ollama-cloud/gemma4:31b) — the MacBook has no local
+#     vision-capable endpoint to mirror, but this gateway does, and losing
+#     free local vision inference when main=exo would be a regression, not
+#     a mirror.
 #   - delegate_task personas -> delegation.model_by_role below, same
 #     ollama-cloud-primary/anthropic-fallback pattern, mirrored from the
-#     MacBook's delegation.model_by_role (2026-09-04 sync).
+#     MacBook's delegation.model_by_role (2026-09-04 sync, unchanged by the
+#     2026-09-07 pass — already byte-identical to the MacBook).
 ---
 {% if hermes_gateway_main_provider == 'anthropic' %}
 model:
@@ -29,7 +42,7 @@ model:
   provider: ollama-cloud
 {% else %}
 model:
-  default: mlx-community/DeepSeek-V4-Flash
+  default: deepseek-ai/DeepSeek-V4-Flash-0731
   provider: exo
 {% endif %}
 
@@ -44,12 +57,21 @@ providers:
     api_mode: chat_completions
     discover_models: false
     models:
-      mlx-community/DeepSeek-V4-Flash:
+      deepseek-ai/DeepSeek-V4-Flash-0731:
         context_length: 1048576
       mlx-community/Qwen3.6-35B-A3B-8bit:
         context_length: 262144
     extra_body:
       use_prefix_cache: true
+      # Mirrors the MacBook's exo provider extra_body (2026-09-07 sync) —
+      # request the priority service tier on the shared exo cluster so
+      # gateway inference isn't starved behind other jobs.
+      service_tier: priority
+    # Mirrors the MacBook's exo provider timeouts (2026-09-07 sync) — the
+    # 1M-context DSv4 model can take a long time to prefill/decode on a
+    # busy cluster; both defaults (300s) were too aggressive for that.
+    request_timeout_seconds: 3600
+    stale_timeout_seconds: 3600
   # Ollama Cloud (ollama.com) — cloud-hosted open models, no local
   # cluster dependency. Auth via OLLAMA_API_KEY (env.j2), base_url via
   # OLLAMA_BASE_URL. Model IDs are the CLEAN form (deepseek-v4-flash),
@@ -67,18 +89,51 @@ providers:
 # provider that resolves its own OAuth credentials
 # (vault_hermes_gw_claude_code_oauth_token in env.j2 / .claude/.credentials.json).
 
-# Web search for the all-local (exo/DSv4) gateway. brave-free is the
-# primary backend (BRAVE_SEARCH_API_KEY in env); ddgs (keyless DuckDuckGo)
-# is the auto-detect fallback. anthropic_native_search stays true so that
-# IF this gateway is ever switched back to a Claude main provider it uses
-# Anthropic's native server-side search — non-Claude providers (exo/DSv4)
-# always use the client web_search tool with search_backend below.
+# Turn-scoped failover for the main reasoning thread. Mirrors the
+# MacBook's top-level fallback_providers (2026-09-07 sync) — when the
+# active main provider returns 429/5xx/auth-failure/connection-drop mid
+# turn, Hermes swaps in ollama-cloud and keeps the conversation going.
+# Dated model id (deepseek-v4-flash:0731) matches the MacBook exactly;
+# the dashboard profile deliberately uses the floating `deepseek-v4-flash`
+# alias instead (see dashboard_profile_config.yaml.j2) since availability
+# there matters more than pinning an exact checkpoint.
+fallback_providers:
+  - provider: ollama-cloud
+    model: deepseek-v4-flash:0731
+
+# Web search/extract backends, mirrored from the MacBook's ~/.hermes/config.yaml
+# web block (2026-09-07 sync). brave-free is the primary backend
+# (BRAVE_SEARCH_API_KEY in env); search_chain lists the auto-detect fallback
+# order (ddgs = keyless DuckDuckGo). by_provider carries PER-PROVIDER
+# overrides that hermes-agent consults ahead of the flat backend/
+# search_backend/extract_backend fields above whenever the resolved
+# provider has an entry here: anthropic uses the `claude-code` backend
+# (shells out to the `claude` CLI already installed + authenticated on
+# this box — see tasks/main.yml "Install Claude Code CLI Globally" /
+# "Bootstrap Anthropic Claude Code Credentials") for native, zero-extra-
+# API-key search+extract; exo/ollama-cloud both use brave-free/trafilatura
+# same as the flat defaults. anthropic_native_search stays true as a
+# second, independent Anthropic-only native-search path (Claude's own
+# server-side web tool) — orthogonal to by_provider.anthropic above.
 web:
-  backend: ''
+  backend: brave-free
   search_backend: brave-free
-  extract_backend: ''
+  extract_backend: trafilatura
   anthropic_native_search: true
   anthropic_native_search_max_uses: 5
+  search_chain:
+    - brave-free
+    - ddgs
+  by_provider:
+    ollama-cloud:
+      search_backend: brave-free
+      extract_backend: trafilatura
+    anthropic:
+      search_backend: claude-code
+      extract_backend: claude-code
+    exo:
+      search_backend: brave-free
+      extract_backend: trafilatura
 
 # Discord verbosity: final-answer-only. By default the Discord adapter uses
 # the "high" display tier (gateway/display_config.py), which posts a message
@@ -103,18 +158,74 @@ agent:
   restart_drain_timeout: 60
   api_max_retries: 3
   service_tier: ''
+  # Mirrors the MacBook's agent block (2026-09-07 sync). pin_anthropic_token
+  # false / environment_probe true / coding_context auto / image_input_mode
+  # auto / verify_on_stop false are all upstream defaults on the MacBook too
+  # — included explicitly so this file is a genuine byte-level mirror rather
+  # than "same behavior via omitted defaults", which would silently drift
+  # the next time an upstream default changes.
+  pin_anthropic_token: false
   tool_use_enforcement: auto
+  task_completion_guidance: true
+  parallel_tool_call_guidance: true
+  environment_probe: true
+  environment_hint: ''
+  coding_context: auto
+  verify_on_stop: false
   gateway_timeout_warning: 900
+  clarify_timeout: 600
   gateway_notify_interval: 600
   gateway_auto_continue_freshness: 3600
-  reasoning_effort: high
-  interleaved_thinking: true
+  image_input_mode: auto
+  # Toolsets suppressed everywhere on this box (CLI-parity + gateway alike),
+  # mirrored verbatim from the MacBook's agent.disabled_toolsets — mostly
+  # toolsets the gateway would never plausibly need (feishu, yuanbao, moa,
+  # x_search, video_gen, spotify, bfl, browser-cdp, image_gen) that are
+  # disabled process-wide rather than left to accidentally leak in via a
+  # future platform_toolsets edit.
+  disabled_toolsets:
+    - feishu_doc
+    - feishu_drive
+    - yuanbao
+    - moa
+    - x_search
+    - video_gen
+    - spotify
+    - bfl
+    - browser-cdp
+    - hermes-yuanbao
+    - image_gen
   # Move hermes's app system prompt into the first user message to keep
   # `system` matching real Claude Code's shape. Anthropic's billing
   # classifier on personal Max plans rejects requests with a non-CC-shaped
   # system prompt — without this every gateway turn 400s with "out of
-  # extra usage". Behavior unchanged; placement only.
+  # extra usage". Behavior unchanged; placement only. (The MacBook uses
+  # `normal` here since it isn't behind the same OAuth billing classifier
+  # gate — this is a deliberate, documented per-profile delta, not a
+  # missed mirror.)
   system_prompt_mode: compact
+  # Adaptive sampling + reasoning settings mirrored verbatim from the
+  # MacBook (2026-09-07 sync). reasoning_effort xhigh applies to whichever
+  # model is actually running the main thread; reasoning_effort_by_model
+  # pins per-model overrides (Sonnet 5 stays at "high" — xhigh is wasted
+  # reasoning budget on a non-extended-thinking-tuned model tier; DSv4
+  # variants get the full xhigh budget).
+  adaptive_sampling:
+    cold_start_turns: 2
+    ema_alpha: 0.5
+    enabled: true
+    fp_max: 0.5
+    history_window: 3
+    log_decisions: true
+    pp_max: 0.2
+  interleaved_thinking: true
+  reasoning_effort: xhigh
+  strip_cache_on_overload: true
+  reasoning_effort_by_model:
+    claude-sonnet-5: high
+    deepseek-v4-flash: xhigh
+    deepseek-v4-flash:0731: xhigh
+    deepseek-ai/DeepSeek-V4-Flash-0731: xhigh
 
 # Anthropic server-side tool_search. With the CC-mimicry layer in
 # place (canonical CC tool names + x-anthropic-billing-header system
@@ -151,6 +262,12 @@ tools:
 
 tool_search:
   enabled: true
+  # Explicit client_side (MacBook mirror, 2026-09-07 sync) — the fork's
+  # back-compat default already resolves an unset `mode` to client_side,
+  # so this was already correct behavior, but pin it explicitly rather
+  # than relying on an implicit default drifting out from under both
+  # configs independently in the future.
+  mode: client_side
   variant: regex
   defer_mcp_tools: true
   # Eager set: high-frequency tools that ship every turn. Mirrors
@@ -192,17 +309,40 @@ tool_search:
 # Task tool behavior — orchestrator-style delegation with high reasoning
 # inherited from the parent.
 delegation:
+  base_url: ''
+  api_key: ''
+  api_mode: ''
+  # Let child subagents see the same MCP toolset catalog the parent
+  # resolved (mirrors the MacBook, 2026-09-07 sync) — without this,
+  # subagents spawned inside the gateway would lose access to MCP-backed
+  # tools the parent turn already has configured.
+  inherit_mcp_toolsets: true
+  max_iterations: 500
   reasoning_effort: high
+  reasoning_effort_by_role:
+    orchestrator: max
+    reviewer: high
+    jr-coder: low
+    mid-coder: medium
+    sr-coder: high
 {% if hermes_gateway_main_provider == 'exo' %}
   # Route delegate_task / swarm_run subagents to Qwen3.6 on the local exo
   # cluster (the lighter model), keeping the DSv4 main thread free for the
   # orchestrator. Resolution order is arg > delegation.model > parent model.
+  # (Superseded in practice by by_provider.exo below, which matches this
+  # exact provider/model pair — kept for documentation/fallback parity with
+  # the MacBook's Jinja-free provider-first resolution, and because
+  # tools/delegate_tool.py only consults by_provider when it is non-empty.)
   provider: exo
   model: mlx-community/Qwen3.6-35B-A3B-8bit
 {% else %}
   # main=anthropic/ollama-cloud: leave provider/model empty so subagents
   # inherit the parent's model/credentials (standard behavior) instead of
-  # being force-routed to exo, which may be down/unreachable.
+  # being force-routed to exo, which may be down/unreachable. by_provider
+  # below is what actually governs subagent routing at runtime for these
+  # two providers (mirrors the MacBook exactly); this scalar pair is the
+  # legacy fallback tools/delegate_tool.py._resolve_delegation_credentials
+  # uses only when no by_provider key matches the active main provider.
   provider: ''
   model: ''
 {% endif %}
@@ -212,12 +352,35 @@ delegation:
   max_spawn_depth: 2
   max_concurrent_children: 3
   child_timeout_seconds: 600
+  orchestrator_enabled: true
   # Auto-approve dangerous-cmd prompts inside subagents. The Discord bot
   # has no human-in-the-loop UI to resolve approvals, so the choice is
   # auto-deny (children silently skip the cmd) or auto-approve (children
   # run it). Bot operates in cloned repos via gh PR workflow — worst case
   # is a bad commit on a feature branch you'd reject in review anyway.
   subagent_auto_approve: true
+  ruflo_path: ''
+  # Per-provider subagent routing (mirrored verbatim from the MacBook's
+  # ~/.hermes/config.yaml delegation.by_provider, 2026-09-07 sync). This is
+  # the mechanism tools/delegate_tool.py._resolve_delegation_credentials
+  # actually consults first (before the Jinja-conditioned scalar provider/
+  # model pair above): it matches the ACTIVE main provider against these
+  # keys, so unlike the old binary if/else this explicitly covers all three
+  # hermes_gateway_main_provider values with the same intent as the exo
+  # branch above — subagents run a lighter/cheaper model than the parent's
+  # main thread (gemma4:31b on ollama-cloud) except on anthropic, where the
+  # MacBook pins the SAME model as main (claude-sonnet-5) since there's no
+  # cheaper Anthropic tier worth routing to here.
+  by_provider:
+    anthropic:
+      model: claude-sonnet-5
+      provider: anthropic
+    ollama-cloud:
+      model: gemma4:31b
+      provider: ollama-cloud
+    exo:
+      model: mlx-community/Qwen3.6-35B-A3B-8bit
+      provider: exo
   # Per-role model routing for delegate_task's ruflo agent_type personas.
   # Mirrored verbatim from the MacBook's ~/.hermes/config.yaml
   # delegation.model_by_role (2026-09-04 sync) — ollama-cloud primary,
@@ -607,205 +770,322 @@ delegation:
       deep: arch-system-design
 
 auxiliary:
-{% if hermes_gateway_main_provider == 'exo' %}
-  # Vision/image analysis -> Qwen3.6 on the local exo cluster. DSv4 can't
-  # see pixels, so images attached to the main thread are delegated here
-  # (text description fed back to DSv4). Explicit endpoint mirrors the
-  # MacBook/Studio vision config.
-  vision:
-    provider: custom:exo
-    model: mlx-community/Qwen3.6-35B-A3B-8bit
-    base_url: http://192.168.86.201:52415/v1
-    api_key: not-needed
-    api_mode: chat_completions
-    timeout: 120
-    extra_body: {}
-    download_timeout: 30
-{% else %}
-  # main=anthropic/ollama-cloud: mirrors the MacBook's auxiliary.anthropic.vision
-  # pin instead of force-routing to exo (which may be down when this isn't
-  # the main provider).
-  vision:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-    timeout: 120
-    extra_body: {}
-    download_timeout: 30
-{% endif %}
-  # Explicit per-task pins below mirror the MacBook's ~/.hermes/config.yaml
-  # auxiliary.anthropic.* block verbatim (2026-09-04 sync). These are
-  # task-first entries (top-level = task name), independent of
-  # hermes_gateway_main_provider — the ollama-cloud primary / anthropic
-  # fallback pattern applies regardless of which model runs the main thread.
-  web_extract:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-    timeout: 360
-    extra_body: {}
-  compression:
-    model: deepseek-v4-pro:0813
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: anthropic
-    timeout: 120
-    extra_body: {}
-  session_search:
-    provider: auto
-    model: ''
-    timeout: 30
-    extra_body: {}
-    max_concurrency: 3
-  skills_hub:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-    timeout: 30
-    extra_body: {}
-  memory_extraction:
-    model: deepseek-v4-pro:0813
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: anthropic
-    timeout: 30
-    extra_body: {}
-    # Phase 2 controls — only consumed by tools/memory_extraction
-    max_tokens_per_turn: 1024
-    max_tokens_session_end: 2048
-    include_pre_compress: true
-    # Auto-commit at session end. The gateway is headless so there's no
-    # confirm UI to surface proposals — without this, every session-end
-    # extraction stashes its facts back into the buffer and they never
-    # reach the warm tier. With auto_commit on:
-    #   - NEW facts auto-write
-    #   - DUPLICATE bumps recall-count instead of writing a duplicate
-    #   - REFINEMENT merges into the matched entry
-    #   - CONTRADICTION still stays uncommitted (apply_verdict's inner
-    #     auto_commit=False; the user resolves manually via memory tool)
-    # So cross-session learnings accumulate; the only thing left for
-    # human review is genuinely conflicting facts.
-    auto_commit_session_end: true
-  approval:
-    model: deepseek-v4-pro:0813
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: anthropic
-    timeout: 30
-    extra_body: {}
-  mcp:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-    timeout: 30
-    extra_body: {}
-  title_generation:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-    timeout: 30
-    extra_body: {}
-  curator:
-    model: deepseek-v4-flash:0731
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-    timeout: 600
-    extra_body: {}
-  monitor:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-  consult:
-    model: claude-fable-5-1
-    provider: anthropic
-    fallback:
-      model: glm-5.3
+  # PROVIDER-FIRST schema (top-level keys: defaults / exo / anthropic /
+  # ollama-cloud), copied verbatim from the MacBook's ~/.hermes/config.yaml
+  # auxiliary block (2026-09-07 full sync — replaces the prior task-first
+  # schema this file used before). hermes-agent auto-selects which
+  # provider block applies based on the LIVE main provider at runtime
+  # (agent/auxiliary_client.py _get_auxiliary_task_config /
+  # _aux_flatten_provider_first) — no Jinja branching needed here, unlike
+  # model:/delegation: above. Two deliberate gateway-specific deltas from
+  # the MacBook, both called out inline where they occur:
+  #   1. defaults.session_search — the gateway had a task-first
+  #      session_search pin (timeout/max_concurrency) the MacBook doesn't
+  #      carry; re-homed here under defaults (the schema's per-task
+  #      SETTINGS layer, consulted regardless of which provider block
+  #      matches) so the timeout/concurrency knobs keep working instead of
+  #      silently becoming dead config after the schema conversion.
+  #   2. exo.vision — local exo-cluster endpoint instead of the MacBook's
+  #      ollama-cloud/gemma4:31b (see the LOCAL VISION OVERRIDE comment
+  #      below and the file header for the full rationale).
+  defaults:
+    approval:
+      extra_body: {}
+      timeout: 180
+    compression:
+      extra_body: {}
+      timeout: 600
+    curator:
+      extra_body: {}
+      timeout: 600
+    kanban_decomposer:
+      extra_body: {}
+      timeout: 180
+    mcp:
+      extra_body: {}
+      timeout: 180
+    memory_extraction:
+      auto_commit_session_end: false
+      extra_body: {}
+      include_pre_compress: true
+      max_tokens_per_turn: 1024
+      max_tokens_session_end: 2048
+      timeout: 180
+    profile_describer:
+      extra_body: {}
+      timeout: 60
+    # GATEWAY-SPECIFIC ADDITION (not present on the MacBook): timeout +
+    # bounded concurrency for cross-session_search on the gateway, where
+    # the session DB can be larger and shared across more concurrent
+    # Discord/dashboard turns than a single-user MacBook session.
+    session_search:
+      timeout: 30
+      extra_body: {}
+      max_concurrency: 3
+    skills_hub:
+      extra_body: {}
+      timeout: 180
+    title_generation:
+      extra_body: {}
+      timeout: 180
+    triage_specifier:
+      extra_body: {}
+      timeout: 120
+    tts_audio_tags:
+      extra_body: {}
+      timeout: 30
+    vision:
+      download_timeout: 30
+      extra_body: {}
+      timeout: 120
+    web_extract:
+      extra_body: {}
+      timeout: 360
+  exo:
+    provider: exo
+    default: mlx-community/Qwen3.6-35B-A3B-8bit
+    # LOCAL VISION OVERRIDE (deliberate non-mirror — see file header):
+    # this gateway has a real local exo-cluster endpoint with a
+    # vision-capable model (Qwen3.6), so vision stays fully local/free
+    # when main=exo instead of following the MacBook's auxiliary.exo.vision
+    # (which points at ollama-cloud/gemma4:31b — the MacBook has no local
+    # vision endpoint of its own to mirror). All routing fields
+    # (provider/model/base_url/api_key/api_mode) live directly on this
+    # per-task entry and win over the block-level "auto" resolution
+    # (agent/auxiliary_client.py _aux_flatten_provider_first: per-task dict
+    # overrides are applied last).
+    vision:
+      provider: custom:exo
+      model: mlx-community/Qwen3.6-35B-A3B-8bit
+      base_url: http://192.168.86.201:52415/v1
+      api_key: not-needed
+      api_mode: chat_completions
+      timeout: 120
+      extra_body: {}
+      download_timeout: 30
+    web_extract:
+      model: gemma4:31b
       provider: ollama-cloud
-    reasoning_effort: max
-    timeout: 180
-  tts_audio_tags:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
+    compression:
+      model: deepseek-ai/DeepSeek-V4-Flash-0731
+      extra_body:
+        service_tier: flex
+    skills_hub:
+      model: gemma4:31b
+      provider: ollama-cloud
+    approval:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    mcp:
+      model: gemma4:31b
+      provider: ollama-cloud
+    title_generation:
+      model: gemma4:31b
+      provider: ollama-cloud
+    tts_audio_tags:
+      model: gemma4:31b
+      provider: ollama-cloud
+    triage_specifier:
+      model: gemma4:31b
+      provider: ollama-cloud
+    kanban_decomposer:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    profile_describer:
+      model: gemma4:31b
+      provider: ollama-cloud
+    curator:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    monitor:
+      model: gemma4:31b
+      provider: ollama-cloud
+    memory_extraction:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    background_review:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    consult:
+      model: deepseek-v4-pro
+      provider: ollama-cloud
+    goal_judge:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+    memory_query_rewrite:
+      model: gemma4:31b
+      provider: ollama-cloud
+    moa_aggregator:
+      model: gemma4:31b
+      provider: ollama-cloud
+    moa_reference:
+      model: gemma4:31b
+      provider: ollama-cloud
+    pet_dialogue:
+      model: gemma4:31b
+      provider: ollama-cloud
+  anthropic:
+    default: claude-haiku-4-5-20251001
+    memory_extraction:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    monitor:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    provider: anthropic
+    title_generation:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    web_extract:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    skills_hub:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    mcp:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    approval:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    curator:
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    compression:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    vision:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    consult:
+      model: claude-fable-5-1
       provider: anthropic
-  triage_specifier:
-    model: deepseek-v4-pro:0813
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: anthropic
-  profile_describer:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-  moa_aggregator:
-    model: deepseek-v4-pro:0813
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: anthropic
-  moa_reference:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-  pet_dialogue:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-  memory_query_rewrite:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: anthropic
-  background_review:
-    model: deepseek-v4-pro:0813
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: anthropic
-  goal_judge:
-    model: deepseek-v4-pro:0813
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: anthropic
-  kanban_decomposer:
-    model: deepseek-v4-pro:0813
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: anthropic
-  delegation_router:
-    model: deepseek-v4-pro:0813
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: anthropic
+      fallback:
+        model: glm-5.3
+        provider: ollama-cloud
+      reasoning_effort: max
+      timeout: 180
+    tts_audio_tags:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    triage_specifier:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    profile_describer:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    moa_aggregator:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    moa_reference:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    pet_dialogue:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    memory_query_rewrite:
+      model: gemma4:31b
+      provider: ollama-cloud
+      fallback:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    background_review:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    goal_judge:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    kanban_decomposer:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+    delegation_router:
+      model: deepseek-v4-pro:0813
+      provider: ollama-cloud
+      fallback:
+        model: claude-sonnet-5
+        provider: anthropic
+  ollama-cloud:
+    default: gemma4:31b
+    title_generation: gemma4:31b
+    tts_audio_tags: gemma4:31b
+    triage_specifier: deepseek-v4-pro:0813
+    profile_describer: gemma4:31b
+    skills_hub: gemma4:31b
+    moa_aggregator: deepseek-v4-pro:0813
+    moa_reference: gemma4:31b
+    pet_dialogue: gemma4:31b
+    memory_query_rewrite: gemma4:31b
+    web_extract: gemma4:31b
+    mcp: gemma4:31b
+    monitor: gemma4:31b
+    curator: deepseek-v4-flash:0731
+    background_review: deepseek-v4-pro:0813
+    goal_judge: deepseek-v4-pro:0813
+    kanban_decomposer: deepseek-v4-pro:0813
+    compression: deepseek-v4-pro:0813
+    vision: gemma4:31b
+    memory_extraction: deepseek-v4-pro:0813
+    approval: deepseek-v4-pro:0813
+    consult:
+      timeout: 180
+    delegation_router: deepseek-v4-pro:0813
 
 memory:
   memory_enabled: true
