@@ -233,6 +233,74 @@
     - /home/hermes/.hermes/logs
     - /home/hermes/.claude
 
+# ─── 1Password-over-hlxc bridge (2026-09-06) ────────────────────────────────
+#
+# The personal MacBook's `hlxc` shell function (see docs/1password-hlxc-
+# bridge.md) reverse-forwards a Unix socket to a Touch-ID-gated `op`
+# broker running on the Mac, so the hermes user can run `op read ...`
+# for ARBITRARY 1Password Personal vault items with nothing secret
+# ever written to this box's disk. Two pieces live here:
+#
+#   1. files/op_shim.py -> /home/hermes/.local/bin/op. A drop-in `op`
+#      replacement: forwards every call over the tunneled socket to the
+#      REAL `op` on the Mac, where 1Password Desktop pops its physical
+#      approval dialog (Touch ID / security key) per request. Fails
+#      clearly when no hlxc session is forwarding the socket. Deployed
+#      via copy (not template) — no Jinja in it, and copy's content
+#      hash keeps re-applies idempotent.
+#   2. /etc/ssh/sshd_config.d/hermes-op-forward.conf. StreamLocalBindMask
+#      0111 makes the reverse-forwarded socket land srw-rw-rw- instead
+#      of root-only (default 0177), which is what lets the unprivileged
+#      hermes user's shim connect to a socket created by root's SSH
+#      session. sshd re-reads config per connection (this CT runs ssh
+#      via per-connection systemd units, not a long-running daemon), so
+#      no reload is needed — but keep the Reload SSH notify for hosts
+#      where that's not true; its handler is failed_when: false.
+#
+# Root's SSH login is what carries the -R forward (hlxc connects as
+# root), so no additional sshd grant is required: AllowStreamLocal-
+# Forwarding defaults to yes and sshd -T confirms it. GatewayPorts is
+# TCP-only and irrelevant to Unix-socket forwards.
+
+- name: Ensure /home/hermes/.local/bin Exists (op shim home)
+  # 0755 (not the 0700 used for the private dirs above): this is a PATH
+  # bin dir. Stock Ubuntu skel .profile adds ~/.local/bin to PATH, which
+  # is how the shim is found as `op` for the hermes user.
+  ansible.builtin.file:
+    path: /home/hermes/.local/bin
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: '0755'
+
+- name: Deploy 1Password op Shim (hlxc bridge)
+  ansible.builtin.copy:
+    src: op_shim.py
+    dest: /home/hermes/.local/bin/op
+    owner: hermes
+    group: hermes
+    mode: '0755'
+  # No service notify: the shim backs the INTERACTIVE hlxc session only,
+  # never hermes-gateway.service — a change here must not bounce the
+  # live bot. A running hlxc tmux session picks the new shim up on its
+  # next `op` invocation (the shim is exec'd per call).
+
+- name: Configure sshd for the hlxc reverse-socket forward
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (roles/hermes_gateway) — do not edit by hand.
+      # See docs/1password-hlxc-bridge.md: the hlxc SSH alias reverse-
+      # forwards a Unix socket to the Mac's Touch-ID-gated 1Password
+      # broker. 0111 => srw-rw-rw- so the unprivileged hermes user
+      # (whose op shim connects to it) can reach it; the default 0177
+      # (root-only) makes the shim fail with EACCES.
+      StreamLocalBindMask 0111
+    dest: /etc/ssh/sshd_config.d/hermes-op-forward.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload SSH
+
 # Shift+Enter fix for the interactive hlxc session (2026-09-06).
 # Ubuntu 22.04's apt tmux is 3.2a, which has no `extended-keys-format`
 # option — tmux can't re-emit Shift+Enter as a distinguishable CSI-u

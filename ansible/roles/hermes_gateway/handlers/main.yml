@@ -31,3 +31,15 @@
 - name: Save iptables rules
   ansible.builtin.command: netfilter-persistent save
   changed_when: false
+
+# sshd re-reads its config per connection on hermes-gw-01 (ssh runs via
+# per-connection systemd units there, not a long-running daemon), so a
+# reload is genuinely unnecessary on that host — failed_when: false
+# keeps this handler harmless both there and on any future host where
+# ssh.service IS long-running and the drop-in needs a reload to apply.
+# Same shape as the media_ingest / media_gallery roles' handler.
+- name: Reload SSH
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded
+  failed_when: false
