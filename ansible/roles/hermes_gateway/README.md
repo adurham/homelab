@@ -40,6 +40,16 @@ this role only handles the application layer.
   (`tmux kill-server`, as the `hermes` user) for a fresh render to
   pick up a first-time deploy of this file — not automated, since
   killing a live interactive session unasked breaks trust.
+- Deploys the 1Password `op` shim (`files/op_shim.py` →
+  `/home/hermes/.local/bin/op`) and the sshd drop-in
+  (`/etc/ssh/sshd_config.d/hermes-op-forward.conf`,
+  `StreamLocalBindMask 0111`) backing the **1Password-over-hlxc
+  bridge**: while a `hlxc` session from the personal MacBook is
+  attached, the `hermes` user's `op` calls forward over a reverse
+  Unix-socket tunnel to the Touch-ID-gated real `op` on the Mac —
+  arbitrary Personal-vault items, physical approval per read, nothing
+  secret ever on this box's disk. Full design + verification:
+  `docs/1password-hlxc-bridge.md`.
 - Defense-in-depth iptables INPUT rules on tcp/8642 (api_server) and
   tcp/9119 (hermes serve): allow loopback, ESTABLISHED/RELATED, Tailnet
   CGNAT (100.64/10), `ip_tailscale_gw`, lb-01, and the LXC's own IP;
