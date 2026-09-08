@@ -7,7 +7,7 @@
 #
 # THIS ROLE IS DESTRUCTIVE (WITH REPLACE). It is deliberately kept out
 # of provision_tanium_windows_lab.yml (the clean-lab playbook) entirely
-# -- only provision_tanium_windows_lab_with_customer_db.yml includes it,
+# -- only provision_tanium_windows_lab_with_seed_db.yml includes it,
 # and only because restoring a customer backup is the explicit, stated
 # purpose of that playbook. Never add this role to the clean-lab
 # playbook "just in case."
@@ -54,14 +54,14 @@
 - name: "Get the local .bak's real size upfront (used both for the skip-check below and the final verification)"
   delegate_to: localhost
   ansible.builtin.stat:
-    path: "{{ tanium_customer_bak_local_path }}"
+    path: "{{ tanium_seed_bak_local_path }}"
     get_checksum: false
   register: bak_local_stat
 
 - name: "Check whether the destination already has a correctly-sized .bak (skip the whole transfer if so)"
   delegate_to: localhost
   ansible.windows.win_stat:
-    path: "{{ tanium_restore_staging_path }}\\{{ tanium_customer_bak_local_path | basename }}"
+    path: "{{ tanium_restore_staging_path }}\\{{ tanium_seed_bak_local_path | basename }}"
     get_checksum: false
   register: bak_existing_remote_stat
   vars:
@@ -139,8 +139,8 @@
       - scp
       - -o
       - StrictHostKeyChecking=accept-new
-      - "{{ tanium_customer_bak_local_path }}"
-      - "root@{{ tanium_restore_proxmox_node_ssh_host }}:{{ tanium_restore_proxmox_scratch_path }}/{{ tanium_customer_bak_local_path | basename }}"
+      - "{{ tanium_seed_bak_local_path }}"
+      - "root@{{ tanium_restore_proxmox_node_ssh_host }}:{{ tanium_restore_proxmox_scratch_path }}/{{ tanium_seed_bak_local_path | basename }}"
   register: bak_scp_result
   changed_when: true
 
@@ -155,7 +155,7 @@
       - "root@{{ tanium_restore_proxmox_node_ssh_host }}"
       - >-
         mkdir -p {{ tanium_restore_proxmox_scratch_path }}/iso_staging_{{ vmid }} &&
-        mv {{ tanium_restore_proxmox_scratch_path }}/{{ tanium_customer_bak_local_path | basename }} {{ tanium_restore_proxmox_scratch_path }}/iso_staging_{{ vmid }}/ &&
+        mv {{ tanium_restore_proxmox_scratch_path }}/{{ tanium_seed_bak_local_path | basename }} {{ tanium_restore_proxmox_scratch_path }}/iso_staging_{{ vmid }}/ &&
         genisoimage -udf -allow-limited-size
         -o {{ tanium_restore_proxmox_iso_storage_path }}/tanium_bak_transfer_{{ vmid }}.iso
         {{ tanium_restore_proxmox_scratch_path }}/iso_staging_{{ vmid }}/ &&
@@ -200,8 +200,8 @@
   when: tanium_bak_transfer_needed
   delegate_to: localhost
   ansible.windows.win_shell: >-
-    Copy-Item -Force -Path '{{ iso_drive_letter.stdout | trim }}:\{{ tanium_customer_bak_local_path | basename }}'
-    -Destination '{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'
+    Copy-Item -Force -Path '{{ iso_drive_letter.stdout | trim }}:\{{ tanium_seed_bak_local_path | basename }}'
+    -Destination '{{ tanium_restore_staging_path }}\{{ tanium_seed_bak_local_path | basename }}'
   register: bak_copy_result
   changed_when: true
   vars:
@@ -241,7 +241,7 @@
 - name: "Verify the .bak is on the SQL Server with the correct byte-for-byte size (cheap now: get_checksum: false)"
   delegate_to: localhost
   ansible.windows.win_stat:
-    path: "{{ tanium_restore_staging_path }}\\{{ tanium_customer_bak_local_path | basename }}"
+    path: "{{ tanium_restore_staging_path }}\\{{ tanium_seed_bak_local_path | basename }}"
     get_checksum: false
   register: bak_remote_stat
   vars:
@@ -271,7 +271,7 @@
   delegate_to: localhost
   ansible.windows.win_shell: >-
     sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
-    -Q "SET NOCOUNT ON; RESTORE HEADERONLY FROM DISK = N'{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'"
+    -Q "SET NOCOUNT ON; RESTORE HEADERONLY FROM DISK = N'{{ tanium_restore_staging_path }}\{{ tanium_seed_bak_local_path | basename }}'"
     -s "|" -W
   register: backup_header
   changed_when: false
@@ -430,7 +430,7 @@
       delegate_to: localhost
       ansible.windows.win_shell: >-
         sqlcmd -S localhost -U sa -P "{{ tanium_sql_sa_password }}"
-        -Q "RESTORE VERIFYONLY FROM DISK = N'{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'"
+        -Q "RESTORE VERIFYONLY FROM DISK = N'{{ tanium_restore_staging_path }}\{{ tanium_seed_bak_local_path | basename }}'"
       register: verify_result
       changed_when: false
       vars:
@@ -482,7 +482,7 @@
     - name: "List logical files, build MOVE clauses, and restore WITH REPLACE (single script to avoid fragile multi-hop parsing)"
       delegate_to: localhost
       ansible.windows.win_shell: |
-        $bakPath = '{{ tanium_restore_staging_path }}\{{ tanium_customer_bak_local_path | basename }}'
+        $bakPath = '{{ tanium_restore_staging_path }}\{{ tanium_seed_bak_local_path | basename }}'
         $dbName = '{{ tanium_target_db_name }}'
         $dataPath = '{{ tanium_sql_data_path }}'
         $logPath = '{{ tanium_sql_log_path }}'

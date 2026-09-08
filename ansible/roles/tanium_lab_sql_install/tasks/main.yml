@@ -128,7 +128,7 @@
     ansible_password: "{{ vault_win_admin_password }}"
 
 # Always Mixed Mode auth (SECURITYMODE=SQL) -- the rest of this repo's
-# roles (tanium_lab_restore_customer_db, tanium_server_install's
+# roles (tanium_lab_restore_seed_db, tanium_server_install's
 # preflight guard) assume a working sa login, and Tanium Server itself
 # needs a Windows-auth login too (handled separately by
 # tanium_lab_sql_login, granted AFTER this role runs).

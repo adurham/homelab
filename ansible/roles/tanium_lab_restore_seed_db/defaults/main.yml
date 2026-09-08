@@ -2,7 +2,7 @@
 # The database name to restore into (this is a real T-SQL RESTORE
 # DATABASE [name] target -- SQL Server itself doesn't care what you
 # name it, so per-case namespacing genuinely works AT THE RESTORE LEVEL,
-# unlike SetupServer.exe -- see provision_tanium_windows_lab_with_customer_db.yml's
+# unlike SetupServer.exe -- see provision_tanium_windows_lab_with_seed_db.yml's
 # header for why the Tanium installer itself can't be pointed at a
 # custom database name; it always targets one literally named "tanium").
 # Defaults to "tanium" for convenience/back-compat with the installer's
@@ -47,5 +47,5 @@ tanium_restore_proxmox_node_ssh_host: "{{ hostvars[target_node].ansible_host }}"
 # every run, so it's always available to reuse here).
 tanium_restore_iso_ide_slot: "ide2"
 
-# Required per-invocation: tanium_customer_bak_local_path (local path to
+# Required per-invocation: tanium_seed_bak_local_path (local path to
 # the customer's .bak on this Mac), tanium_sql_server_ip.

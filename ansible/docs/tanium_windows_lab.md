@@ -12,9 +12,9 @@ limitation and needed a domain — see "Why the AD domain exists" below.
   database it creates is brand new. **Never touches customer data.**
   Use this for ordinary Tanium-lab work with no customer backup
   involved.
-- **`provision_tanium_windows_lab_with_customer_db.yml`** — everything
+- **`provision_tanium_windows_lab_with_seed_db.yml`** — everything
   in the clean-lab playbook PLUS one inserted play
-  (`tanium_lab_restore_customer_db`) that restores a customer's `.bak`
+  (`tanium_lab_restore_seed_db`) that restores a customer's `.bak`
   into the target SQL Server, with real identity-based safety checks,
   BEFORE the Tanium Server install runs against it. Use this ONLY when
   the explicit goal is reproducing something against a customer's real
@@ -78,7 +78,7 @@ Local System combo on a single host doesn't need a domain at all — see
 | `tanium_lab_service_account` | Create the domain service account used as the Tanium Server's DB identity. |
 | `tanium_lab_sql_install` | Install the SQL Server 2022 engine itself + the modern `sqlcmd` client (no role did this before 2026-08-22 — every SQL box had been manually pre-built). |
 | `tanium_lab_sql_login` | `CREATE LOGIN ... FROM WINDOWS` + grant sysadmin, for one or more accounts. |
-| `tanium_lab_restore_customer_db` | **Customer-DB playbook only.** Identity-checked, guarded restore of a customer `.bak`. |
+| `tanium_lab_restore_seed_db` | **Customer-DB playbook only.** Identity-checked, guarded restore of a customer `.bak`. |
 | `tanium_server_install` | Silent-install Tanium Server (NSIS `/S` + real params, verified against source). Runs its DB-create/upgrade and admin-user steps under two different confirmed-correct Windows identities — see "Validated" below. |
 | `tanium_moduleserver_install` | Silent-install Tanium Module Server, register against the Server. |
 | `tanium_zoneserver_install` | Silent-install Tanium Zone Server (fetches its own key file automatically). |
@@ -166,7 +166,7 @@ corruption; don't chase disk-repair paths, just cold-cycle the VM.
 
 **Unattended reinstall aborted mid-run, service left uninstalled
 (high severity, recovered, 2026-08-21).** Something re-ran
-`SetupServer.exe` against an already-working win-ts-case1-01 hours after
+`SetupServer.exe` against an already-working win-ts-lab-01 hours after
 the earlier incident above was thought fully resolved (root trigger
 never conclusively identified). The re-run correctly used the fixed
 `/UseSQLServer=1 /UseExistingDB=1` parameters and successfully upgraded
@@ -214,7 +214,7 @@ name (confirmed 2026-08-21).** The real, source-verified parameter list
 for `SetupServer.exe` has no database-name override — every live
 install this session targeted a database literally named `tanium`.
 `tanium_target_db_name` in the customer-DB playbook controls what
-`tanium_lab_restore_customer_db` restores into and what
+`tanium_lab_restore_seed_db` restores into and what
 `tanium_server_install`'s safety pre-flight check queries, but does NOT
 get passed to the installer itself (there's no parameter to pass it
 to). If two investigations ever need to coexist on the same SQL Server
@@ -242,15 +242,15 @@ OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES ansible-playbook \
 ```bash
 cd ~/repos/homelab
 OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES ansible-playbook \
-  -i ansible/inventory/proxmox.yml ansible/provision_tanium_windows_lab_with_customer_db.yml \
+  -i ansible/inventory/proxmox.yml ansible/provision_tanium_windows_lab_with_seed_db.yml \
   -e tanium_setup_server_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupServer.exe \
   -e tanium_setup_moduleserver_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupModuleServer.exe \
   -e tanium_setup_zoneserver_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupZoneServer.exe \
   -e tanium_license_local_path=~/Downloads/tanium_7.8.2.1136/tanium.license \
-  -e tanium_customer_bak_local_path=/path/to/customer/backup.bak
+  -e tanium_seed_bak_local_path=/path/to/customer/backup.bak
 ```
 
-`tanium_lab_restore_customer_db` will refuse to run (loudly, with no
+`tanium_lab_restore_seed_db` will refuse to run (loudly, with no
 override flag) if the target database already exists without this
 exact backup's identity marker — see that role's task-file header for
 the full safety design. This playbook has NOT yet been run end-to-end
@@ -265,7 +265,7 @@ from the Tanium Server box as long as the Server install ran first
 
 To build a fresh set of VMs for a different case, copy the
 `tanium_windows_lab` inventory group in `inventory/proxmox.yml` (new
-VMIDs, new `ip_win_*_case` vars in `group_vars/all/vars.yml`) rather than
+VMIDs, new `ip_win_*_lab` vars in `group_vars/all/vars.yml`) rather than
 overwriting the case1 entries in place.
 
 ## Validated (2026-08-22 — clean-lab playbook confirmed fully working end-to-end)
@@ -349,7 +349,7 @@ below):
    their WinRM override. Jinja can't resolve the resulting cycle within
    the same host context and fails with "Recursive loop detected in
    template: maximum recursion depth exceeded." Fixed by referencing
-   the raw `ip_win_ts_case1` inventory variable directly instead of the
+   the raw `ip_win_ts_lab` inventory variable directly instead of the
    `ansible_host` alias that's also being overridden downstream.
 9. **Native-vs-WOW64 registry hive split for Tanium Server's DB config**
    (`ab7683f`, hardened in `0b9d097`) — `SetupServer.exe` only ever
@@ -403,7 +403,7 @@ below):
     (`github.com/microsoft/go-sqlcmd`, queried via the GitHub API for the
     current release rather than guessing a URL).
 
-**Not yet re-validated end-to-end: `provision_tanium_windows_lab_with_customer_db.yml`.**
+**Not yet re-validated end-to-end: `provision_tanium_windows_lab_with_seed_db.yml`.**
 Every individual step it wraps (SQL install, Tanium Server install
 against an existing DB, Module Server, Zone Server) is now proven via
 the clean-lab playbook's successful run, and the customer-restore role's
