@@ -922,6 +922,33 @@
     state: started
     daemon_reload: true
 
+# The hermes system user (no sudo group membership) runs all three units
+# above but has no way to restart them itself. Without this, an agent or
+# human logged in AS hermes on the box after editing/rebuilding code in
+# /opt/hermes-agent has to either wait for the next Ansible run (which
+# connects as root separately) or improvise — e.g. sending the running
+# process a raw SIGTERM, which systemd treats as a clean external stop:
+# Restart=on-failure does NOT fire for that, so the service is left dead
+# with no local path back up. That exact scenario took hermes-serve.service
+# down until a human intervened (2026-09-08 incident).
+#
+# Scoped tightly to `restart` (not stop/start/enable/disable, not a
+# wildcard) on exactly these three units — hermes gets just enough rope to
+# self-heal its own processes, nothing broader.
+- name: Allow hermes user passwordless restart of its own services
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible — do not edit by hand.
+      # Source: roles/hermes_gateway/tasks/main.yml
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl restart hermes-gateway.service
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl restart hermes-gateway-dashboard.service
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl restart hermes-serve.service
+    dest: /etc/sudoers.d/hermes-service-restart
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+
 # Periodic usage tracker — systemd timer fires the bot's local
 # scripts/hermes_usage_tracker.py every 5 minutes. Logs token spend
 # (5h / 24h / total) to /home/hermes/.hermes/usage.csv.
