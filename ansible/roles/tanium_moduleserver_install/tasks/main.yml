@@ -348,9 +348,9 @@
 # returns the correct Server TLS fingerprint immediately.
 - name: "Fetch the Tanium Server's TLS certificate fingerprint"
   when: not ms_exe_check.stat.exists
-  delegate_to: "{{ hostvars['win-ts-case1-01'].tanium_win_target_node | default(hostvars['win-ts-case1-01'].target_node) }}"
+  delegate_to: "{{ hostvars['win-ts-lab-01'].tanium_win_target_node | default(hostvars['win-ts-lab-01'].target_node) }}"
   ansible.builtin.command: >-
-    qm guest exec {{ hostvars['win-ts-case1-01'].vmid }} --
+    qm guest exec {{ hostvars['win-ts-lab-01'].vmid }} --
     powershell -NoProfile -NonInteractive -EncodedCommand {{ tanium_fingerprint_lookup_b64 }}
   register: server_fingerprint_raw
   until: "'\"exited\" : 1' in (server_fingerprint_raw.stdout | default(''))"
@@ -383,11 +383,33 @@
 # bare fingerprint string -- extract the actual value from "out-data"
 # for use by the assert/registration tasks below (which expect a
 # plain trimmed fingerprint string).
+# REAL BUG (continued), confirmed 2026-08-24 via a live run: when
+# `pki show` itself fails (e.g. the same intermittent "Failed to
+# connect to database" class of issue documented above) and the
+# qm guest exec JSON has no "out-data" field at all, regex_search
+# returns Python's real None, not an empty string. The old
+# `| default('')` did NOT catch this -- Jinja's default() filter only
+# substitutes on Ansible's notion of "undefined", not on a real None
+# value, unless its second (boolean) arg is set. Piping that raw None
+# into regex_replace('.*"', '') then string-coerces it to the literal
+# text "None" (Python str(None)) and the regex (which requires a
+# literal quote character to match) finds nothing to replace, so the
+# final stdout value was the 4-character string "None" -- which is
+# NOT empty, so the downstream `!= ''` SAFETY assert incorrectly
+# passed and let a genuinely-failed fingerprint lookup through
+# silently. Confirmed via a live run: TrustedFingerprint=None was
+# passed to SetupModuleServer.exe, yet the install still somehow
+# reported success this time (harmless in this specific run since a
+# retry of the whole role would have hit the same problem, but a
+# clear latent bug). Fixed with default('', true) -- the boolean arg
+# makes default() also substitute on a real None/falsy value, not
+# just Ansible's "undefined" sentinel -- confirmed live: now correctly
+# renders as a genuine empty string, which the SAFETY assert catches.
 - name: "Extract the fingerprint from the qm guest exec JSON result"
   when: not ms_exe_check.stat.exists
   ansible.builtin.set_fact:
     server_fingerprint_result:
-      stdout: "{{ (server_fingerprint_raw.stdout | regex_search('\"out-data\" : \"([0-9a-f]+)') | default('') | regex_replace('.*\"', '')) }}"
+      stdout: "{{ (server_fingerprint_raw.stdout | regex_search('\"out-data\" : \"([0-9a-f]+)') | default('', true) | regex_replace('.*\"', '')) }}"
 
 - name: "SAFETY: fail clearly if the Server's TLS fingerprint could not be determined"
   when: not ms_exe_check.stat.exists
