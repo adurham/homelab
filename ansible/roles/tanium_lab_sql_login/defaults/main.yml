@@ -11,4 +11,4 @@ tanium_sql_login_names: "{{ [tanium_sql_login_name] if tanium_sql_login_name is 
 
 # Required per-invocation: tanium_sql_login_names (list) or
 # tanium_sql_login_name (singular, back-compat), tanium_sql_server_ip
-# (the SQL Server box's IP, e.g. ip_win_sql_case).
+# (the SQL Server box's IP, e.g. ip_win_sql_lab).

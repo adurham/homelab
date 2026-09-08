@@ -134,6 +134,9 @@ gha-creds-*.json
 # (corp-only via SOCKS5 proxy). Never commit RPMs/licenses.
 /files/tanium-*/
 
+# Lab appliance plaintext creds note (disposable, never commit)
+docs/bwt/.lab_creds
+
 # go2rtc rendered config (contains Nest creds, host-only)
 ansible/go2rtc.rendered.yaml
 /tmp/go2rtc.rendered.yaml

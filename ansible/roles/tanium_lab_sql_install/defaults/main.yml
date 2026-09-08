@@ -21,7 +21,7 @@ tanium_sql_instance_name: "MSSQLSERVER"
 # complexity policy (8+ chars, 3 of: upper/lower/digit/symbol) since
 # this role always installs with Mixed Mode auth (needed for the sa
 # login the rest of this repo's roles/docs already assume, e.g.
-# tanium_lab_restore_customer_db's sa-based RESTORE commands).
+# tanium_lab_restore_seed_db's sa-based RESTORE commands).
 tanium_sql_sa_password: "{{ vault_tanium_lab_sql_sa_password }}"
 
 # Required per-invocation: tanium_sql_ip. This role is otherwise

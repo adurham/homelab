@@ -118,10 +118,10 @@ ip_win_dc: "172.16.0.94"
 # backup against a matching Tanium Server version). VMIDs and IPs here are
 # for the currently-active case1 investigation; treat as a template to copy
 # per future case, not a fixed permanent allocation.
-ip_win_sql_case1: "172.16.0.90"
-ip_win_ts_case1: "172.16.0.91"
-ip_win_tms_case1: "172.16.0.92"
-ip_win_tzs_case1: "172.16.0.93"
+ip_win_sql_lab: "172.16.0.90"
+ip_win_ts_lab: "172.16.0.91"
+ip_win_tms_lab: "172.16.0.92"
+ip_win_tzs_lab: "172.16.0.93"
 
 # Domain account used as the Tanium Server's DB connection identity
 # (created by tanium_lab_service_account, granted sysadmin on the SQL

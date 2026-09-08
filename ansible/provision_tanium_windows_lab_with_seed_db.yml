@@ -7,7 +7,7 @@
 # (the clean-lab playbook) deliberately never touches customer data.
 #
 # This playbook is everything in provision_tanium_windows_lab.yml PLUS
-# one inserted play: tanium_lab_restore_customer_db, which runs AFTER
+# one inserted play: tanium_lab_restore_seed_db, which runs AFTER
 # the SQL login grants (the service account + Server computer account
 # need sysadmin before the restore, same as the clean path) and BEFORE
 # the Tanium Server install (so the install's /UseExistingDB=1 sees the
@@ -17,12 +17,12 @@
 # Usage:
 #   cd ~/repos/homelab
 #   OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES ansible-playbook \
-#     -i ansible/inventory/proxmox.yml ansible/provision_tanium_windows_lab_with_customer_db.yml \
+#     -i ansible/inventory/proxmox.yml ansible/provision_tanium_windows_lab_with_seed_db.yml \
 #     -e tanium_setup_server_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupServer.exe \
 #     -e tanium_setup_moduleserver_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupModuleServer.exe \
 #     -e tanium_setup_zoneserver_exe_local_path=~/Downloads/tanium_7.8.2.1136/SetupZoneServer.exe \
 #     -e tanium_license_local_path=~/Downloads/tanium_7.8.2.1136/tanium.license \
-#     -e tanium_customer_bak_local_path=/path/to/customer/backup.bak \
+#     -e tanium_seed_bak_local_path=/path/to/customer/backup.bak \
 #     -e tanium_target_db_name=tanium_<case-id>
 #
 # NOTE ON DATABASE NAMING, confirmed 2026-08-21: SetupServer.exe's real
@@ -33,7 +33,7 @@
 # to hardcode this name, not read it from a parameter. This means the
 # "namespace per case" idea below is NOT currently achievable purely via
 # this playbook -- tanium_target_db_name only controls what
-# tanium_lab_restore_customer_db restores INTO and what
+# tanium_lab_restore_seed_db restores INTO and what
 # tanium_server_install's safety pre-flight check queries; it does NOT
 # get passed to SetupServer.exe, because there's nothing to pass it to.
 # If you actually need two different customer DBs coexisting on one SQL
@@ -44,12 +44,12 @@
 # been tested with a non-default instance.
 #
 # tanium_target_db_name still matters for the SAFETY checks even given
-# the above: it's what tanium_lab_restore_customer_db's identity-marker
+# the above: it's what tanium_lab_restore_seed_db's identity-marker
 # guard keys off, so leave it at the default "tanium" unless you have a
 # specific reason and have confirmed the instance-targeting question
 # above.
 #
-# SAFETY: tanium_lab_restore_customer_db refuses to RESTORE WITH REPLACE
+# SAFETY: tanium_lab_restore_seed_db refuses to RESTORE WITH REPLACE
 # over any existing database that doesn't carry its own
 # tanium_lab_restore_backup_guid marker matching THIS backup's real
 # identity (read via RESTORE HEADERONLY, not inferred from row counts).
@@ -82,7 +82,7 @@
         tanium_win_ip: "{{ ansible_host }}"
 
 - name: Create the Tanium DB service account in the domain
-  hosts: win-dc-case1-01
+  hosts: win-dc-lab-01
   gather_facts: false
   roles:
     - role: tanium_lab_service_account
@@ -95,7 +95,7 @@
 # restore -- the restore role needs a running instance to RESTORE
 # DATABASE into.
 - name: Install SQL Server on the SQL box
-  hosts: win-sql-case1-01
+  hosts: win-sql-lab-01
   gather_facts: false
   roles:
     - role: tanium_lab_sql_install
@@ -104,14 +104,14 @@
         tanium_console_admin_user: "{{ tanium_lab_domain_netbios }}\\Administrator"
 
 - name: Grant Tanium service account + Server computer account sysadmin on SQL Server
-  hosts: win-sql-case1-01
+  hosts: win-sql-lab-01
   gather_facts: false
   roles:
     - role: tanium_lab_sql_login
       vars:
         tanium_sql_login_names:
           - "{{ tanium_lab_domain_netbios }}\\{{ tanium_db_service_account }}"
-          - "{{ tanium_lab_domain_netbios }}\\{{ hostvars['win-ts-case1-01'].tanium_win_hostname }}$"
+          - "{{ tanium_lab_domain_netbios }}\\{{ hostvars['win-ts-lab-01'].tanium_win_hostname }}$"
         tanium_sql_server_ip: "{{ ansible_host }}"
 
 # THE ONE STEP THIS PLAYBOOK ADDS over the clean-lab path -- restores
@@ -123,21 +123,21 @@
 # wrapped in block/rescue/always so a failure never leaves the DB
 # permanently locked).
 - name: Restore the customer's SQL backup before Tanium Server installs
-  hosts: win-sql-case1-01
+  hosts: win-sql-lab-01
   gather_facts: false
   roles:
-    - role: tanium_lab_restore_customer_db
+    - role: tanium_lab_restore_seed_db
       vars:
         tanium_sql_server_ip: "{{ ansible_host }}"
 
 - name: Install Tanium Server (against the restored customer DB)
-  hosts: win-ts-case1-01
+  hosts: win-ts-lab-01
   gather_facts: false
   roles:
     - role: tanium_server_install
       vars:
         tanium_server_ip: "{{ ansible_host }}"
-        tanium_sql_server_ip: "{{ hostvars['win-sql-case1-01'].ansible_host }}"
+        tanium_sql_server_ip: "{{ hostvars['win-sql-lab-01'].ansible_host }}"
         tanium_db_username: "{{ tanium_db_service_account }}"
         tanium_db_domain: "{{ tanium_lab_domain_netbios }}"
         tanium_db_password: "{{ vault_tanium_lab_svc_password }}"
@@ -172,16 +172,16 @@
         tanium_allowed_hubs: "127.0.0.1"
 
 - name: Install Tanium Module Server
-  hosts: win-tms-case1-01
+  hosts: win-tms-lab-01
   gather_facts: false
   roles:
     - role: tanium_moduleserver_install
       vars:
         tanium_moduleserver_ip: "{{ ansible_host }}"
-        tanium_server_ip: "{{ hostvars['win-ts-case1-01'].ansible_host }}"
+        tanium_server_ip: "{{ hostvars['win-ts-lab-01'].ansible_host }}"
 
 - name: Install the Zone Server Hub (co-located directly on the Tanium Server box)
-  hosts: win-ts-case1-01
+  hosts: win-ts-lab-01
   gather_facts: false
   roles:
     - role: tanium_zoneserver_install
@@ -197,18 +197,18 @@
         # within the same host context, and fails with "Recursive loop
         # detected in template: maximum recursion depth exceeded".
         # Referencing the raw underlying inventory variable
-        # (ip_win_ts_case1) directly, instead of the ansible_host alias
+        # (ip_win_ts_lab) directly, instead of the ansible_host alias
         # that's also being overridden downstream, breaks the cycle
         # entirely -- no chain through "ansible_host" at all.
-        tanium_zoneserver_ip: "{{ ip_win_ts_case1 }}"
-        tanium_server_ip: "{{ ip_win_ts_case1 }}"
+        tanium_zoneserver_ip: "{{ ip_win_ts_lab }}"
+        tanium_server_ip: "{{ ip_win_ts_lab }}"
         tanium_zoneserver_hub_flag: 1
 
 - name: Install Tanium Zone Server
-  hosts: win-tzs-case1-01
+  hosts: win-tzs-lab-01
   gather_facts: false
   roles:
     - role: tanium_zoneserver_install
       vars:
         tanium_zoneserver_ip: "{{ ansible_host }}"
-        tanium_server_ip: "{{ hostvars['win-ts-case1-01'].ansible_host }}"
+        tanium_server_ip: "{{ hostvars['win-ts-lab-01'].ansible_host }}"

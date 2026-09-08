@@ -303,6 +303,38 @@ all:
         vm_storage: nvme-data
         vm_bridge: private
         vm_iso: "local:iso/TanOS.1.8.6.0134-DEV.iso"
+    # Disposable lab appliances — disposable TanOS appliances (separate from the
+    # long-lived tanium_cluster array; do not mix the two).
+    tanium_lab_appliances:
+      hosts:
+        lab-ts-01:
+          vmid: 210
+          vm_cores: 4
+          vm_memory: 32768
+          vm_disk: 500
+          ansible_host: 172.16.0.57
+          tanium_role: ts
+        lab-ts-02:
+          vmid: 211
+          vm_cores: 4
+          vm_memory: 32768
+          vm_disk: 500
+          ansible_host: 172.16.0.58
+          tanium_role: ts
+        lab-tms-01:
+          vmid: 212
+          vm_cores: 8
+          vm_memory: 32768
+          vm_disk: 1000
+          ansible_host: 172.16.0.59
+          tanium_role: tms
+      vars:
+        # ansible_user / SSH options live in
+        # inventory/group_vars/tanium_lab_appliances.yml so they override the
+        # defaults set in group_vars/all.yml.
+        vm_storage: nvme-data
+        vm_bridge: private
+        vm_iso: "local:iso/TanOS.1.8.6.0134-DEV.iso"
     # Tanium Clients
     tanium_clients:
       hosts:
@@ -532,7 +564,7 @@ all:
     # bridge. Two variants coexist:
     #   - *-01 (250-253): baseline WORKGROUP-only boxes, no domain, never
     #     touched by case work — see docs/windows_template_guide.md.
-    #   - win-dc-case1-01 + *-case1-01 (254-258): joined to the tanium.lab
+    #   - win-dc-lab-01 + *-case1-01 (254-258): joined to the tanium.lab
     #     AD domain, built for the active case1 SQL-restore/version-match
     #     investigation. VMIDs/names here reflect that specific case;
     #     future cases should copy this pattern with new VMIDs/IPs rather
@@ -545,30 +577,30 @@ all:
       children:
         tanium_windows_lab_dc:
           hosts:
-            win-dc-case1-01:
+            win-dc-lab-01:
               vmid: 258
               ansible_host: "{{ ip_win_dc }}"
               tanium_lab_host_role: dc
-        tanium_windows_lab_case1:
+        tanium_windows_lab_group:
           hosts:
-            win-sql-case1-01:
+            win-sql-lab-01:
               vmid: 254
-              ansible_host: "{{ ip_win_sql_case1 }}"
+              ansible_host: "{{ ip_win_sql_lab }}"
               tanium_lab_host_role: member
               tanium_win_hostname: WIN-SQL-CASE1
-            win-ts-case1-01:
+            win-ts-lab-01:
               vmid: 255
-              ansible_host: "{{ ip_win_ts_case1 }}"
+              ansible_host: "{{ ip_win_ts_lab }}"
               tanium_lab_host_role: member
               tanium_win_hostname: WIN-TS-CASE1
-            win-tms-case1-01:
+            win-tms-lab-01:
               vmid: 256
-              ansible_host: "{{ ip_win_tms_case1 }}"
+              ansible_host: "{{ ip_win_tms_lab }}"
               tanium_lab_host_role: member
               tanium_win_hostname: WIN-TMS-CASE1
-            win-tzs-case1-01:
+            win-tzs-lab-01:
               vmid: 257
-              ansible_host: "{{ ip_win_tzs_case1 }}"
+              ansible_host: "{{ ip_win_tzs_lab }}"
               tanium_lab_host_role: member
               tanium_win_hostname: WIN-TZS-CASE1
       vars:
