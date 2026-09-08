@@ -214,9 +214,12 @@ tool_search:
 # stay empty (no Jinja branching needed — this profile's main provider is
 # always anthropic, never exo, so subagents simply inherit the parent as
 # they would on the machine-root config's main=anthropic/ollama-cloud
-# branch) and max_concurrent_children/child_timeout_seconds keep this
-# profile's existing lighter footprint (a phone-chat/peer-messaging surface
-# doesn't need the same subagent headroom as the coding-agency Discord bot).
+# branch) and max_concurrent_children keeps this profile's existing
+# lighter footprint (a phone-chat/peer-messaging surface doesn't need the
+# same subagent headroom as the coding-agency Discord bot).
+# child_timeout_seconds is 0 (no wall-clock cap) everywhere, matching the
+# MacBook and templates/config.yaml.j2 — see that file for why a positive
+# value here silently kills productive long-running children (2026-09-08).
 delegation:
   base_url: ''
   api_key: ''
@@ -234,7 +237,7 @@ delegation:
   model: ''
   max_spawn_depth: 2
   max_concurrent_children: 3
-  child_timeout_seconds: 600
+  child_timeout_seconds: 0
   orchestrator_enabled: true
   subagent_auto_approve: true
   ruflo_path: ''

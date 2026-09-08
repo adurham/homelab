@@ -351,7 +351,17 @@ delegation:
   # Plan → leaf-research-agent flow without runaway recursion.
   max_spawn_depth: 2
   max_concurrent_children: 3
-  child_timeout_seconds: 600
+  # 0 = no wall-clock cap on subagents (mirrors the MacBook's live config,
+  # 2026-09-08 sync). Current tools/delegate_tool.py semantics: a positive
+  # value here is a hard timeout regardless of progress, which killed
+  # productive long-running children mid-fan-out (e.g. deep code review,
+  # large refactors) even though they were actively making tool calls.
+  # Stuck-child protection is handled separately by the heartbeat
+  # staleness monitor, not this stopwatch. Do not reintroduce a positive
+  # value without re-checking tools/delegate_tool.py's current default —
+  # this exact field has been silently re-enabled by stale Ansible
+  # renders before (2026-09-08).
+  child_timeout_seconds: 0
   orchestrator_enabled: true
   # Auto-approve dangerous-cmd prompts inside subagents. The Discord bot
   # has no human-in-the-loop UI to resolve approvals, so the choice is
