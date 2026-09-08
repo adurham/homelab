@@ -556,15 +556,17 @@
     access_time: preserve
 
 - name: Render Hermes .env (Ansible-managed block only)
-  # NOTE (2026-09-06): this renders the MACHINE-ROOT .env, which now backs
-  # the interactive `default` profile only (see "Discord Profile" section
-  # below for what actually drives hermes-gateway.service). Kept in sync
-  # via the same env.j2 template so the personal-MacBook-parity CLI
-  # session (`hlxc` alias -> tmux -> `hermes`, default profile) has the
-  # same credentials/toolset baseline as the bot — just isolated so a
-  # bad interactive session can never touch the live Discord bot's
-  # process. No longer notifies a gateway restart: machine-root changes
-  # don't affect the running service anymore.
+  # Machine-root .env, which backs BOTH the interactive `default` profile
+  # (the personal-MacBook-parity CLI session via the hlxc alias) AND the
+  # live Discord bot — merged back into one profile/process (2026-09-08,
+  # reverting the 2026-09-06 split). The split's isolation goal (a bad
+  # interactive session can't step on the bot's state) is explicitly
+  # accepted as a tradeoff here in exchange for `hermes gateway status`/
+  # `restart` on the default profile actually reflecting the real running
+  # service — those always resolve to hermes-gateway.service regardless
+  # of what other units exist (get_service_name() has no profile-name
+  # override for machine-root), so a second unit for `default` alone can
+  # never be made accurate while Discord keeps hermes-gateway.service.
   ansible.builtin.blockinfile:
     path: /home/hermes/.hermes/.env
     owner: hermes
@@ -576,82 +578,14 @@
     block: "{{ lookup('ansible.builtin.template', 'env.j2') }}"
     insertbefore: BOF
   no_log: true
+  notify: Restart Hermes Gateway
 
 - name: Render Hermes config.yaml
-  # See note on "Render Hermes .env" above — machine-root only, backs the
-  # interactive default profile, no longer the live Discord bot.
+  # See note on "Render Hermes .env" above — machine-root backs both the
+  # interactive default profile and the live Discord bot again.
   ansible.builtin.template:
     src: config.yaml.j2
     dest: /home/hermes/.hermes/config.yaml
-    owner: hermes
-    group: hermes
-    mode: '0600'
-
-# ─── Discord profile — the actual live bot (moved off machine-root 2026-09-06) ──
-#
-# WHY: machine-root was originally both "the Discord bot's config" AND
-# "the profile an interactive `hermes` CLI session lands in by default".
-# Those two purposes conflict: an interactive debugging session on the
-# default profile (e.g. via the `hlxc` SSH+tmux alias below) shares
-# process-level resources and, before this split, the SAME config/session
-# state as the live bot. Splitting the bot into its own `discord` profile
-# (same pattern as the existing `dashboard` profile — see
-# dashboard_profile_config.yaml.j2 for the precedent) means an interactive
-# session on `default` can never step on the bot's config, sessions, or
-# in-flight conversation state.
-#
-# Same env.j2/config.yaml.j2 templates as machine-root (deliberately no
-# separate discord_profile_env.j2 / discord_profile_config.yaml.j2 — unlike
-# the Anthropic-pinned dashboard profile, this profile IS meant to be a
-# byte-for-byte mirror of whatever the bot's config already was), just
-# rendered to a second destination. `hermes profile create` has no
-# --force flag (errors if the dir already exists), so probe first.
-- name: Probe Discord Hermes Profile
-  ansible.builtin.stat:
-    path: /home/hermes/.hermes/profiles/discord
-  register: hermes_discord_profile_stat
-
-- name: Create Discord Hermes Profile
-  ansible.builtin.command:
-    cmd: >
-      /opt/hermes-agent/venv/bin/hermes profile create discord
-      --description "Discord bot profile (moved off machine-root
-      2026-09-06 to free machine-root for interactive laptop-parity CLI
-      use via the hlxc SSH+tmux alias)"
-  become: true
-  become_user: hermes
-  environment:
-    HOME: /home/hermes
-  when: not hermes_discord_profile_stat.stat.exists
-
-- name: Ensure Discord Profile .env Exists
-  ansible.builtin.file:
-    path: /home/hermes/.hermes/profiles/discord/.env
-    state: touch
-    owner: hermes
-    group: hermes
-    mode: '0600'
-    modification_time: preserve
-    access_time: preserve
-
-- name: Render Discord Profile .env (Ansible-managed block only)
-  ansible.builtin.blockinfile:
-    path: /home/hermes/.hermes/profiles/discord/.env
-    owner: hermes
-    group: hermes
-    mode: '0600'
-    marker: "# {mark} ANSIBLE MANAGED BLOCK — hermes_gateway role (env.j2)"
-    marker_begin: BEGIN
-    marker_end: END
-    block: "{{ lookup('ansible.builtin.template', 'env.j2') }}"
-    insertbefore: BOF
-  no_log: true
-  notify: Restart Hermes Gateway
-
-- name: Render Discord Profile config.yaml
-  ansible.builtin.template:
-    src: config.yaml.j2
-    dest: /home/hermes/.hermes/profiles/discord/config.yaml
     owner: hermes
     group: hermes
     mode: '0600'
@@ -669,20 +603,18 @@
 # until the next /sethome, and the bot greets every new DM with the
 # "no home channel set" prompt instead of just working.
 #
-# Targets the DISCORD PROFILE .env (the file the live bot actually
-# reads) — moved here 2026-09-06 alongside the rest of the bot's
-# config; machine-root's .env has no DISCORD_HOME_CHANNEL consumer
-# anymore.
+# Targets the machine-root .env (the file the bot reads again as of
+# 2026-09-08 — see "Render Hermes .env" above).
 - name: Probe DISCORD_HOME_CHANNEL Presence
   ansible.builtin.command:
-    cmd: grep -q '^DISCORD_HOME_CHANNEL=' /home/hermes/.hermes/profiles/discord/.env
+    cmd: grep -q '^DISCORD_HOME_CHANNEL=' /home/hermes/.hermes/.env
   register: discord_home_probe
   changed_when: false
   failed_when: false
 
 - name: Seed DISCORD_HOME_CHANNEL Default (One-Shot)
   ansible.builtin.lineinfile:
-    path: /home/hermes/.hermes/profiles/discord/.env
+    path: /home/hermes/.hermes/.env
     line: "DISCORD_HOME_CHANNEL={{ vault_hermes_gw_discord_home_channel }}"
     insertafter: EOF
     owner: hermes
@@ -723,11 +655,7 @@
 # Use hermes's own systemd installer rather than templating a unit file
 # ourselves — keeps us aligned with the upstream PATH/working-dir/exec
 # logic, which evolves with the CLI. --run-as-user binds the unit to the
-# hermes account; --system writes to /etc/systemd/system. Always installs
-# against the machine-root profile regardless of which profile the unit
-# is overridden to actually run (see override.conf below) — `hermes
-# gateway install` has no --profile flag, and the installer's own
-# PATH/WorkingDirectory opinions get overridden anyway.
+# hermes account; --system writes to /etc/systemd/system.
 - name: Install Hermes Gateway Systemd Unit
   ansible.builtin.command:
     cmd: /opt/hermes-agent/venv/bin/hermes gateway install --system --run-as-user hermes --force
@@ -735,25 +663,32 @@
     creates: /etc/systemd/system/hermes-gateway.service
   notify: Restart Hermes Gateway
 
-# Systemd drop-in to override WorkingDirectory AND point the whole unit
-# at the `discord` profile instead of machine-root.
-#   * WorkingDirectory=/home/hermes — the unit installer
-#     (`hermes gateway install`) sets WorkingDirectory=/opt/hermes-agent,
-#     which is where the CLI source lives, not where the bot operates on
-#     user code. /home/hermes is the natural cwd: it owns the user's
-#     .hermes/, .claude/, .ssh/, and repos/, so "cd hermes-agent" from a
-#     bot tool call resolves to repos/hermes-agent without a discovery hop.
-#   * HERMES_HOME + EnvironmentFile + ExecStart override (added
-#     2026-09-06) — retarget the service at profiles/discord instead of
-#     the machine-root profile, per the split above. `ExecStart=` (empty)
-#     clears the installer-generated ExecStart before the second
-#     ExecStart= line sets the real one — systemd requires the clear-then-
-#     set pattern for any directive that's a list (ExecStart can have
-#     multiple values), otherwise the override APPENDS a second ExecStart
-#     instead of replacing the first, and systemd errors on multiple
-#     ExecStart with Type=simple.
-#   A drop-in survives `hermes gateway install --force` regenerations
-#   (the installer overwrites the main unit but leaves overrides alone).
+# Systemd drop-in to override WorkingDirectory only. `hermes gateway
+# install` sets WorkingDirectory=/opt/hermes-agent, which is where the CLI
+# source lives, not where the bot operates on user code. /home/hermes is
+# the natural cwd: it owns the user's .hermes/, .claude/, .ssh/, and
+# repos/, so "cd hermes-agent" from a bot tool call resolves to
+# repos/hermes-agent without a discovery hop.
+#
+# NOTE (2026-09-08): this used to ALSO retarget the unit at a separate
+# `discord` profile (HERMES_HOME override + distinct EnvironmentFile/
+# ExecStart), added 2026-09-06 to isolate the interactive hlxc CLI session
+# from the live bot's process/session state. Reverted: hermes-gateway.service
+# is the ONLY unit name the default/machine-root profile's own `hermes
+# gateway status`/`restart` will ever resolve to (get_service_name() has
+# no override for machine-root — see hermes_cli/gateway.py), so keeping
+# Discord on that unit under a different HERMES_HOME left the default
+# profile's dashboard Status/Restart controls permanently wrong (stale
+# "Stopped", restart silently affecting the wrong profile). Isolation
+# tradeoff explicitly accepted in exchange for that working correctly.
+# ~/.hermes/profiles/discord (2.5 days of bot conversation history/state
+# from the split) is deliberately left in place, not deleted — nothing
+# reads it anymore, but removing another profile's data isn't this role's
+# call to make unilaterally. New Discord messages land in machine-root's
+# session store going forward, same as pre-2026-09-06 behavior.
+#
+# A drop-in survives `hermes gateway install --force` regenerations
+# (the installer overwrites the main unit but leaves overrides alone).
 - name: Ensure Systemd Override Dir for Hermes Gateway
   ansible.builtin.file:
     path: /etc/systemd/system/hermes-gateway.service.d
@@ -762,17 +697,13 @@
     group: root
     mode: '0755'
 
-- name: Override Hermes Gateway to run the Discord profile
+- name: Override Hermes Gateway WorkingDirectory
   ansible.builtin.copy:
     content: |
       # Managed by Ansible — do not edit by hand.
       # Source: roles/hermes_gateway/tasks/main.yml
       [Service]
       WorkingDirectory=/home/hermes
-      Environment="HERMES_HOME=/home/hermes/.hermes/profiles/discord"
-      EnvironmentFile=/home/hermes/.hermes/profiles/discord/.env
-      ExecStart=
-      ExecStart=/opt/hermes-agent/venv/bin/hermes -p discord gateway run --replace
     dest: /etc/systemd/system/hermes-gateway.service.d/override.conf
     owner: root
     group: root
