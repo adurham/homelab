@@ -423,18 +423,19 @@ def fetch_installed_effective_versions(client: TaniumClient) -> dict:
         norm_sol = _normalize_name(sname)
 
         chosen_ver = sver
-        # exact normalized match
+        # Exact normalized-name match ONLY. A prior substring-containment
+        # fallback here (matching e.g. "guide" against "guide provider")
+        # caused unrelated workbenches to silently override a solution's real
+        # installed version -- e.g. "Tanium Guide" (solution) kept getting
+        # matched against "Guide Provider" (a different workbench, stuck on
+        # an old version), which made an already-current Guide solution look
+        # perpetually out-of-date and get needlessly re-imported every run,
+        # while the actually-stale Guide Provider workbench was never
+        # targeted at all (imports operate on solution ids, not workbenches).
+        # Substring matching is too unreliable for this reconciliation --
+        # only trust an exact normalized match.
         if norm_sol in norm_wb and norm_wb[norm_sol][1]:
             chosen_ver = norm_wb[norm_sol][1]
-        else:
-            # try contains either direction
-            # find any wb where wb_norm contained in sol_norm or vice versa
-            for wb_norm, (_wb_name, wb_ver) in norm_wb.items():
-                if not wb_ver:
-                    continue
-                if wb_norm in norm_sol or norm_sol in wb_norm:
-                    chosen_ver = wb_ver
-                    break
 
         effective[sid] = {"version": chosen_ver, "name": sname}
 
@@ -1115,6 +1116,7 @@ def import_solution(client: TaniumClient, solution_id: str, content_url: str, co
                 poll_path = f"/api/v2/import/{import_id}"
                 deadline = time.time() + DEFAULT_IMPORT_TIMEOUT
                 last_payload = None
+                terminal_failure = None
                 while time.time() < deadline:
                     try:
                         raw_status = client.get(poll_path)
@@ -1124,14 +1126,30 @@ def import_solution(client: TaniumClient, solution_id: str, content_url: str, co
                         if data_obj.get("success") is True:
                             logging.info(f"Import {import_id} completed successfully")
                             return last_payload
+                        # Terminal failure: the server already finished this import
+                        # (end_time is set) but success is not True. Stop polling
+                        # immediately instead of silently burning the full timeout
+                        # on an import that has already failed.
+                        if data_obj.get("end_time") and data_obj.get("success") is not True:
+                            terminal_failure = data_obj.get("exception") or "import finished without success"
+                            break
                     except Exception as poll_exc:
                         logging.warning(f"Polling import {import_id} failed once: {poll_exc}")
                     time.sleep(client.poll_interval)
 
-                # Timed out
+                if terminal_failure is not None:
+                    raise RuntimeError(f"Import {import_id} failed: {terminal_failure}")
+
+                # Timed out without ever observing success=True. Previously this
+                # silently returned the last (failed/incomplete) payload as if it
+                # were a success -- callers only checked for a raised exception, so
+                # a timed-out-but-actually-failed import was reported as
+                # "Import successful". Raise instead so the caller's except block
+                # correctly counts this as a failure.
                 logging.error(f"Import {import_id} did not complete within 10 minutes")
                 if last_payload is not None:
-                    return last_payload
+                    err = last_payload.get("data", {}).get("exception") or "no success=True observed before timeout"
+                    raise RuntimeError(f"Import {import_id} did not complete successfully: {err}")
                 raise TimeoutError(f"Import {import_id} timed out with no status payload")
 
     except Exception as exc:
