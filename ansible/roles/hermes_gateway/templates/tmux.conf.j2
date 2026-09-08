@@ -39,3 +39,23 @@ set -ag terminal-overrides ",screen-256color:RGB"
 set -s extended-keys always
 set -as terminal-features 'xterm*:extkeys'
 set -s extended-keys-format csi-u
+
+# Mouse + clipboard passthrough (2026-09-08).
+# Without `mouse on`, scroll-wheel input inside a full-screen app (like
+# hermes-agent's TUI) gets emulated as arrow-key presses by outer
+# terminals instead of scrolling tmux's own scrollback/copy-mode, and
+# click-drag can't select text without holding a terminal-specific
+# bypass modifier (Shift on most emulators) that fights tmux for mouse
+# ownership. `mouse on` gives tmux real mouse reporting: wheel scrolls
+# scrollback/copy-mode, and click-drag enters copy-mode + selects text,
+# copying to tmux's paste buffer on release automatically (default tmux
+# mouse behavior since 2.6, no keybinding needed).
+# `set-clipboard on` makes tmux forward that buffer via an OSC 52 escape
+# sequence to the *outer* terminal on copy, which (for OSC-52-aware
+# terminals — kitty and modern Terminal.app both qualify) writes straight
+# to the real macOS system clipboard through the SSH tunnel itself. That
+# makes click-drag-to-copy + Cmd+V behave identically to a fully local
+# terminal session, with no scp/file-drop workaround needed to get text
+# off the LXC.
+set -g mouse on
+set -g set-clipboard on
