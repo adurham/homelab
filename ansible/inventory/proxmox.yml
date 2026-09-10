@@ -101,7 +101,19 @@ all:
           # subnet-router host through itself. The Tailscale IP
           # (100.86.168.35) gets intercepted by Tailscale SSH and requires
           # browser auth, which breaks automation.
-          ansible_host: 192.168.86.32
+          #
+          # KNOWN RISK (found 2026-09-10, this IP had silently drifted
+          # from .32 -- confirmed via `pct exec 101 -- ip addr` on pve02):
+          # net0 on this CT is ip=dhcp, not a static reservation, despite
+          # this comment previously implying otherwise. Any DHCP lease
+          # renewal can change this IP again and break ansible/monitoring
+          # silently (host stays healthy on Tailscale/LAN the whole time --
+          # nothing pages, ansible just times out). Real fix is a static
+          # DHCP reservation or switching net0 to a static IP; not done
+          # yet. If this host goes unreachable again, check
+          # `pct exec 101 -- ip -4 addr show eth0` on whichever pve node
+          # hosts vmid 101 before assuming an outage.
+          ansible_host: 192.168.86.82
           vmid: 101
           target_node: pve01
       vars:
