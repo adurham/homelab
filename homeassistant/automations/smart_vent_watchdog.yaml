@@ -64,7 +64,7 @@
       {% if lr in ('unknown', 'unavailable', none) %}
         99999
       {% else %}
-        {{ ((now() - strptime(lr, '%Y-%m-%d %H:%M:%S')).total_seconds() / 60) | round(1) }}
+        {{ ((now() - as_local(as_datetime(lr))).total_seconds() / 60) | round(1) }}
       {% endif %}
 
   action:
