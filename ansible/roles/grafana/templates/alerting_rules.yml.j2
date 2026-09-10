@@ -1564,6 +1564,86 @@ groups:
         isPaused: false
 
 {% endif %}
+      # ---------------------------------------------------------------------
+      # SECOND dead-man's-switch layer, added 2026-09-10: the healthchecks.io
+      # rule above (gated behind healthchecks_dms_ping_url) only proves
+      # Grafana's own rule-evaluation engine + internet egress are alive --
+      # its expression is a constant `1`, datasourceUid __expr__, never
+      # touching VictoriaMetrics at all. It would keep happily pinging
+      # healthchecks.io even if VM died outright and every OTHER alert rule
+      # (21 of them depend on datasourceUid: victoriametrics) silently had
+      # zero real data to evaluate against. Given vm-01 and graf-01 run on
+      # SEPARATE hosts (vm-01/graf-01 both currently on pve03, but as
+      # distinct CTs/services that can fail independently of each other),
+      # this is a real, previously-uncovered gap, not a hypothetical one.
+      # Unlike the rule above, THIS one doesn't depend on healthchecks_dms_
+      # ping_url being configured -- it only needs the victoriametrics
+      # datasource, so it deploys unconditionally and routes through the
+      # normal Discord/email contact points like any other alert.
+      #
+      # This rule queries VM for a genuinely live, always-present metric
+      # (node_exporter's node_uname_info, remote-written by Alloy from every
+      # host in the fleet) and fires if VM has stopped actually ingesting
+      # real scrape data -- i.e. it proves the WHOLE pipeline (Alloy -> VM
+      # remote-write -> Grafana query) is alive, not just Grafana's alerting
+      # engine in isolation.
+      - uid: metrics_pipeline_dead
+        title: Metrics pipeline dead (VictoriaMetrics ingest stalled)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: count(node_uname_info)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        # noDataState=Alerting (not OK): a query returning literally no
+        # series at all is exactly the failure mode this rule exists to
+        # catch (VM down / unreachable), so NoData must page, not go quiet.
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "VictoriaMetrics has stopped ingesting real scrape data"
+          description: "Fewer than 5 hosts are reporting node_uname_info (out of ~31 normally) -- either VictoriaMetrics itself is down/unreachable, or Alloy's remote-write path is broken fleet-wide. This is the real data-path check; the plain 'Dead man's switch' rule above only proves Grafana's rule engine is alive, not that it has real data to evaluate. Check `systemctl status victoriametrics` on vm-01 first."
+        labels:
+          severity: critical
+        isPaused: false
+
       - uid: systemd_unit_failed
         title: systemd unit failed
         condition: C
