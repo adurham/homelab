@@ -1,0 +1,45 @@
+---
+# Fleet audit 2026-09-10: every CT in the cluster (Authentik, dns-01,
+# lb-01, mail-01, ntp-01, proxy-01, media-ingest-01/02, hermes-gw-01,
+# adblock-proxy-01, gallery-01, frigate-01) had NO unattended-upgrades
+# config at all -- 100-217 packages behind each, including 74 unpatched
+# SECURITY updates on Authentik alone (the fleet's identity provider).
+# Only the 3 pve nodes had this (roles/pve_unattended_upgrades). This
+# role is that same safe pattern (security-only, no auto-reboot)
+# generalized for CTs, which don't carry a PVE kernel stack to
+# blacklist.
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Deploy unattended-upgrades config (security-only, no auto-reboot)
+  ansible.builtin.template:
+    src: 50unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart unattended-upgrades
+
+- name: Deploy periodic apt update/upgrade timer config
+  ansible.builtin.template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable + start unattended-upgrades service
+  ansible.builtin.systemd:
+    name: unattended-upgrades
+    enabled: true
+    state: started
+
+- name: Validate unattended-upgrades config with a dry run
+  ansible.builtin.command: unattended-upgrade --dry-run --debug
+  register: uu_dryrun
+  changed_when: false
+  failed_when: uu_dryrun.rc != 0
