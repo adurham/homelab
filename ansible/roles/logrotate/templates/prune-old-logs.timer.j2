@@ -1,0 +1,12 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/logrotate/templates/prune-old-logs.timer.j2
+[Unit]
+Description=Daily age-based pruning of log trees not covered by logrotate
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
