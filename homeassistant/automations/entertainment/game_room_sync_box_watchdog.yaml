@@ -1,0 +1,74 @@
+# Game Room Hue Sync Box Watchdog
+#
+# The Game Room Hue Play HDMI Sync Box (model HSB1, "4K" gen, unique_id
+# C4299609BEA8, 192.168.86.207) was reported blipping (TV/lights briefly
+# drop then self-recover). Investigated 2026-09-10: its internal HTTPS
+# API (port 443) was found completely unresponsive -- every connection
+# reset, consistently, over 40+ attempts -- while the Living Room sync
+# box (same firmware 2.5.4, newer HSB2 "8K" gen) answered fine every
+# time. Not a network issue: same LAN, same client. A manual power
+# cycle brought the API back instantly. Content played at the time was
+# just Hulu (no VRR/high-bandwidth signal), so it isn't source-driven --
+# looks like an internal coordinator process on the box itself
+# wedging/crashing periodically.
+#
+# This watchdog just LOGS blip start/end (via persistent_notification +
+# logbook) using switch.game_room_sync_box_power going unavailable/back
+# -- no auto-restart action yet, since there's no smart plug on this
+# box's power (only a physical unplug can reboot it currently). Once
+# enough blip data is collected, consider: (a) a smart plug for remote
+# power-cycle, (b) filing the pattern with Hue support if it's a known
+# HSB1 firmware bug.
+- alias: "Entertainment: Game Room Sync Box Watchdog"
+  id: "gr_syncbox_watchdog"
+  description: "Logs blip start/end when the Game Room Hue Sync Box's power entity goes unavailable and recovers"
+  mode: queued
+  max: 10
+
+  trigger:
+    - platform: state
+      entity_id: switch.game_room_sync_box_power
+      to: "unavailable"
+      id: "drop"
+    - platform: state
+      entity_id: switch.game_room_sync_box_power
+      from: "unavailable"
+      id: "recover"
+
+  condition: []
+
+  action:
+    - choose:
+        - conditions:
+            - condition: trigger
+              id: "drop"
+          sequence:
+            - service: persistent_notification.create
+              data:
+                title: "Game Room Sync Box DROPPED"
+                message: >-
+                  Went unavailable at {{ now().strftime('%Y-%m-%d %H:%M:%S') }}
+                  (HDMI input was: {{ states('select.game_room_sync_box_hdmi_input') }})
+                notification_id: "gr_syncbox_drop_{{ now().timestamp() | int }}"
+            - service: logbook.log
+              data:
+                name: "Game Room Sync Box"
+                message: "went unavailable (blip start)"
+                entity_id: switch.game_room_sync_box_power
+
+        - conditions:
+            - condition: trigger
+              id: "recover"
+          sequence:
+            - variables:
+                down_seconds: "{{ (now() - trigger.from_state.last_changed).total_seconds() | round(1) }}"
+            - service: persistent_notification.create
+              data:
+                title: "Game Room Sync Box RECOVERED"
+                message: "Back online at {{ now().strftime('%Y-%m-%d %H:%M:%S') }} after {{ down_seconds }}s"
+                notification_id: "gr_syncbox_recover_{{ now().timestamp() | int }}"
+            - service: logbook.log
+              data:
+                name: "Game Room Sync Box"
+                message: "recovered after {{ down_seconds }}s (blip end)"
+                entity_id: switch.game_room_sync_box_power
