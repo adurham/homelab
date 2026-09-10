@@ -11,8 +11,17 @@
         - binary_sensor.garage_door_contact
         - binary_sensor.left_garage_bay_garage_door
         - binary_sensor.middle_garage_bay_garage_door
-        - binary_sensor.shelly1minig3_b08184ee0fd0_garage_door
+        - binary_sensor.right_garage_bay_garage_door
       to: 'on'
+      # Fixed 2026-09-10: the 4th entry was the raw Shelly device-ID
+      # entity_id (binary_sensor.shelly1minig3_b08184ee0fd0_garage_door),
+      # which does not exist in HA's current entity registry (confirmed
+      # via /api/states) -- likely stale from before this device got its
+      # friendly entity_id. The right garage bay door was silently NOT
+      # triggering the lights on its own open event (motion detection
+      # still caught it as a fallback, so this wasn't a total outage,
+      # just a redundant-not dead-simple gap). Retargeted to the real,
+      # currently-live entity_id, matching left/middle's naming pattern.
     # Trigger when motion is detected in garage
     - platform: state
       entity_id: binary_sensor.garage_door_motion
