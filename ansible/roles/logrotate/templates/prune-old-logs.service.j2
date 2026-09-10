@@ -1,0 +1,9 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/logrotate/templates/prune-old-logs.service.j2
+[Unit]
+Description=Age-based pruning of log trees not covered by logrotate
+ConditionFileIsExecutable=/usr/local/sbin/prune-old-logs.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/prune-old-logs.sh

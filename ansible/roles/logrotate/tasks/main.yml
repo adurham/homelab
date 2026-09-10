@@ -1,0 +1,122 @@
+---
+# roles/logrotate — install logrotate + render per-host stanzas for
+# app-level logs that aren't covered by the OS package defaults
+# (/etc/logrotate.d/{apt,dpkg,ufw,rsyslog,...}).
+#
+# Two distinct problems, two mechanisms:
+#
+# 1. Continuously-appended, fixed-name log files (e.g.
+#    /var/log/foo/app.log) — handled by real logrotate stanzas below,
+#    driven by `logrotate_configs` (see defaults/main.yml). logrotate's
+#    rename+truncate model fits this case: a long-running process holds
+#    the file open in append mode, `copytruncate` lets rotation happen
+#    without a service restart.
+#
+# 2. Uniquely-named files in dated subdirectories, one new file per run,
+#    never reopened (e.g. ofscraper's
+#    /var/lib/media-ingest-02/logging/main_profile_YYYY-MM-DD/*.log).
+#    logrotate's rename/truncate model doesn't apply here — there's
+#    nothing to "rotate", each file is already immutable once written.
+#    Handled instead by `logrotate_prune_paths`: a daily systemd timer
+#    that runs `find <path> -mtime +N -delete` (and removes now-empty
+#    dated directories), same age-based-retention intent, different
+#    mechanism because the file lifecycle is different.
+#
+# Both lists are empty by default; set per-group/per-host in
+# inventory/group_vars, same convention as alloy_log_unit_allowlist.
+
+- name: Install logrotate package (Debian)
+  ansible.builtin.apt:
+    name: logrotate
+    state: present
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Install logrotate package (RedHat)
+  ansible.builtin.dnf:
+    name: logrotate
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Install logrotate package (Suse)
+  community.general.zypper:
+    name: logrotate
+    state: present
+  when: ansible_facts['os_family'] == 'Suse'
+
+- name: Render per-app logrotate stanzas
+  ansible.builtin.template:
+    src: logrotate.conf.j2
+    dest: "/etc/logrotate.d/{{ item.name }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ logrotate_configs }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Ensure /usr/local/sbin exists (prune script target)
+  ansible.builtin.file:
+    path: /usr/local/sbin
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: logrotate_prune_paths | length > 0
+
+- name: Render age-based log prune script
+  ansible.builtin.template:
+    src: prune-old-logs.sh.j2
+    dest: /usr/local/sbin/prune-old-logs.sh
+    owner: root
+    group: root
+    mode: '0750'
+  when: logrotate_prune_paths | length > 0
+
+- name: Render prune-old-logs systemd service
+  ansible.builtin.template:
+    src: prune-old-logs.service.j2
+    dest: /etc/systemd/system/prune-old-logs.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: logrotate_prune_paths | length > 0
+  notify: Reload systemd
+
+- name: Render prune-old-logs systemd timer
+  ansible.builtin.template:
+    src: prune-old-logs.timer.j2
+    dest: /etc/systemd/system/prune-old-logs.timer
+    owner: root
+    group: root
+    mode: '0644'
+  when: logrotate_prune_paths | length > 0
+  notify: Reload systemd
+
+- name: Remove prune-old-logs unit + script when no prune paths defined
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/prune-old-logs.timer
+    - /etc/systemd/system/prune-old-logs.service
+    - /usr/local/sbin/prune-old-logs.sh
+  when: logrotate_prune_paths | length == 0
+  notify: Reload systemd
+
+- name: Flush handlers so systemd sees new/removed units before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Start and enable prune-old-logs timer
+  ansible.builtin.systemd:
+    name: prune-old-logs.timer
+    state: started
+    enabled: true
+  when: logrotate_prune_paths | length > 0
+
+- name: Disable prune-old-logs timer when no prune paths defined
+  ansible.builtin.systemd:
+    name: prune-old-logs.timer
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: logrotate_prune_paths | length == 0

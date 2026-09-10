@@ -1,0 +1,20 @@
+#!/bin/bash
+# Managed by Ansible — do not edit by hand.
+# Source: roles/logrotate/templates/prune-old-logs.sh.j2
+#
+# Age-based pruning for log trees that don't fit logrotate's
+# rename/truncate model (uniquely-named files in dated subdirectories,
+# never reopened after being written — e.g. ofscraper's
+# main_profile_YYYY-MM-DD/*.log tree). Run daily via
+# prune-old-logs.timer.
+set -euo pipefail
+
+{% for item in logrotate_prune_paths %}
+# {{ item.path }} — delete files older than {{ item.days | default(30) }} days
+if [ -d "{{ item.path }}" ]; then
+    find "{{ item.path }}" -type f -mtime +{{ item.days | default(30) }} -print -delete
+{% if item.remove_empty_dirs | default(true) %}
+    find "{{ item.path }}" -mindepth 1 -type d -empty -print -delete
+{% endif %}
+fi
+{% endfor %}

@@ -188,6 +188,24 @@ all:
         # line -- NEVER allowlisted. ssh/cron/postfix/systemd-journald
         # are safe, content-free infra signal -- allowlisted.
         alloy_log_unit_allowlist: '^(ssh(@.*)?|cron|postfix(@.*)?|systemd-journald)\.service$'
+        # Fleet log-retention audit 2026-09-10: no app-level log producer
+        # anywhere in the cluster had rotation configured (only stock
+        # OS-package logrotate.d entries existed). media-ingest-collector
+        # writes collector.log/harvester.log/reconcile.log directly to
+        # /var/log/media-ingest -- small today (~1MB) but unbounded, same
+        # class of bug that grew media-ingest-02's tree to 2.3GB. See
+        # roles/logrotate/README.md.
+        logrotate_configs:
+          - name: media-ingest
+            paths:
+              - /var/log/media-ingest/collector.log
+              - /var/log/media-ingest/harvester.log
+              - /var/log/media-ingest/reconcile.log
+            frequency: daily
+            rotate: 14
+            compress: true
+            owner: mediaingest
+            group: mediaingest
 
     # Secondary source gallery collector — mirrors media_ingest but scrapes a
     # different upstream source platform on a pull-based (timer) cadence instead
@@ -214,6 +232,28 @@ all:
         # kill-switch (a firewall-status unit -- "block all non-private
         # egress on eth0", no sensitive content) are safe -- allowlisted.
         alloy_log_unit_allowlist: '^(ssh(@.*)?|cron|postfix(@.*)?|systemd-journald|kill-switch)\.service$'
+        # Fleet log-retention audit 2026-09-10: this host's scraper.log
+        # (M02_LOG_FILE, see roles/media_ingest_02) grew to 263MB with zero
+        # rotation. Separately, ofscraper's own file-based logging (dated
+        # subdirectories under logging/, e.g.
+        # main_profile_2026-06-17/ofscraper_*.log) had NO retention since
+        # first deploy (2026-06-17) and grew to 2.3GB -- root cause of the
+        # container hitting 75% disk usage (2026-09-10 incident). That tree
+        # doesn't fit logrotate's rename/truncate model (unique filename
+        # per run, never reopened) so it's handled by logrotate_prune_paths
+        # (age-based find+delete) instead -- see roles/logrotate/README.md.
+        logrotate_configs:
+          - name: media-ingest-02
+            paths:
+              - /var/log/media-ingest-02/scraper.log
+            frequency: daily
+            rotate: 14
+            compress: true
+            owner: mediaingest
+            group: mediaingest
+        logrotate_prune_paths:
+          - path: /var/lib/media-ingest-02/logging
+            days: 30
 
     # Personal-device MITM ad-stripping proxy (mitmproxy explicit HTTPS
     # proxy). Devices opt in individually via Wi-Fi proxy settings pointed

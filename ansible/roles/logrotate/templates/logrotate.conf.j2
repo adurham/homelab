@@ -1,0 +1,29 @@
+# Managed by Ansible — do not edit by hand.
+# Source: roles/logrotate/templates/logrotate.conf.j2 -> {{ item.name }}
+{% for path in item.paths %}
+{{ path }}
+{% endfor %}
+{
+    {{ item.frequency | default('daily') }}
+    rotate {{ item.rotate | default(14) }}
+{% if item.compress | default(true) %}
+    compress
+    delaycompress
+{% else %}
+    nocompress
+{% endif %}
+{% if item.missingok | default(true) %}
+    missingok
+{% endif %}
+{% if item.notifempty | default(true) %}
+    notifempty
+{% endif %}
+{% if item.copytruncate | default(true) %}
+    copytruncate
+{% else %}
+    create {{ item.mode | default('0640') }} {{ item.owner | default('root') }} {{ item.group | default('root') }}
+{% endif %}
+{% if item.maxage is defined %}
+    maxage {{ item.maxage }}
+{% endif %}
+}

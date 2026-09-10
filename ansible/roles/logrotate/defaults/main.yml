@@ -1,0 +1,34 @@
+---
+# List of logrotate config "stanzas" to render for this host. Empty by
+# default — set per-group/per-host via `logrotate_configs` in inventory
+# group_vars, same convention as `alloy_log_unit_allowlist`.
+#
+# Each item:
+#   name: unique filename under /etc/logrotate.d/ (e.g. "media-ingest-02")
+#   paths: list of glob paths logrotate should manage (required)
+#   frequency: daily|weekly|monthly (default: daily)
+#   rotate: number of rotated copies to keep (default: 14)
+#   compress: bool (default: true)
+#   copytruncate: bool (default: true) — safe for long-running processes
+#     that hold the file open in append mode; avoids needing a service
+#     restart/reload to release the old file handle.
+#   owner / group: file ownership for the recreated log (default: root/root)
+#   mode: file mode for the recreated log (default: '0640')
+#   missingok: bool (default: true)
+#   notifempty: bool (default: true)
+#   maxage: optional, days — deletes rotated files older than this even
+#     if `rotate` count hasn't been reached (belt-and-suspenders).
+logrotate_configs: []
+
+# List of directory trees to age-prune daily, for logs that don't fit
+# logrotate's rename/truncate model (uniquely-named files, one per run,
+# in dated subdirectories — e.g. ofscraper's
+# main_profile_YYYY-MM-DD/*.log tree). Empty by default; set
+# per-group/per-host in inventory/group_vars.
+#
+# Each item:
+#   path: directory tree to prune (required)
+#   days: delete files older than this many days (default: 30)
+#   remove_empty_dirs: bool (default: true) — also removes now-empty
+#     dated subdirectories after their files are pruned
+logrotate_prune_paths: []
