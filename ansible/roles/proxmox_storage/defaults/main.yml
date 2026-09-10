@@ -2,3 +2,9 @@
 zfs_pool_name: nvme-pool
 zfs_disk_device: /dev/nvme0n1  # User should override if different
 zfs_storage_id: nvme-data
+# Day of month the monthly scrub runs on THIS node (1-28, avoid 29-31
+# for reliability across all months). Staggered per-node in
+# inventory/proxmox.yml so a 3-node cluster doesn't scrub simultaneously
+# (mirrors the vzdump backup staggering). Default here is a fallback;
+# each pve0N host should override this in inventory.
+zfs_scrub_day_of_month: 1

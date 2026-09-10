@@ -1,0 +1,43 @@
+---
+# Fleet audit 2026-09-10: found the pve nodes have unattended-upgrades
+# (security-only, no auto-reboot -- roles/pve_unattended_upgrades) but
+# NO CT anywhere in the cluster had any auto-patching at all. Fleet was
+# 100-217 packages behind per host, including 74 unpatched SECURITY
+# updates on Authentik (the identity provider) alone. This closes that
+# gap with the same safe pattern generalized for CTs (see
+# roles/unattended_upgrades) -- security-only, never auto-reboots a
+# live service container.
+#
+# Same exclusions as deploy_logrotate.yml (see that file for the
+# reasoning on each): tanium_cluster (vendor appliances, no custom
+# software), homeassistant (HAOS ships no apt/Python), localhost (not a
+# managed fleet member), bwt_lab (deleted 2026-08-05, inventory entries
+# remain but hosts don't exist). proxmox_nodes ALSO excluded here --
+# they already have their own more careful pve_unattended_upgrades role
+# (blacklists PVE kernel/cluster packages) and should not additionally
+# get this generic role layered on top.
+#
+# tanium_clients PARTIALLY excluded: this role only supports apt
+# (Debian/Ubuntu). tc-alma8/alma9/oracle8/oracle9/rhel8/rhel9/rocky8/
+# rocky9/suse15 are RHEL-family/SUSE and fail with
+# ansible.builtin.apt -- confirmed via a real deploy attempt
+# 2026-09-10, not assumed. tc-debian11/debian12/ubuntu22/ubuntu24 are
+# apt-based and correctly IN SCOPE. A dnf-automatic/zypper equivalent
+# for the RPM-family hosts is real future work, not done here -- these
+# are isolated Tanium client test/lab VMs, not production services, so
+# lower priority than the CT fleet this role was built for.
+#
+# tc-debian11 ALSO excluded (2026-09-10): Debian 11 (bullseye) security
+# support has moved past mainline maintenance, and deb.debian.org's
+# security mirror for bullseye is returning a release file that's
+# genuinely stale by 2d20h+ (confirmed: host clock is correct, this
+# isn't a clock-skew false positive -- `apt update` fails identically on
+# retry with an unchanged error). This is an EOL-distro upstream issue,
+# not a bug in this role or this host -- tc-debian11 is a purpose-built
+# old-distro compat test image, intentionally running an aged OS, so
+# not chasing this further tonight.
+- name: Install unattended security upgrades on CTs
+  hosts: all:!tanium_cluster:!homeassistant:!localhost:!bwt_lab:!proxmox_nodes:!tc-alma8:!tc-alma9:!tc-oracle8:!tc-oracle9:!tc-rhel8:!tc-rhel9:!tc-rocky8:!tc-rocky9:!tc-suse15:!tc-debian11
+  gather_facts: true
+  roles:
+    - unattended_upgrades
