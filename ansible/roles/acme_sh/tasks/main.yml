@@ -29,12 +29,28 @@
     --server letsencrypt
     --dns dns_desec
     -d {{ acme_primary_domain }}
-    --dnssleep {{ acme_dns_sleep | default(120) }}
+    --dnssleep {{ acme_dns_sleep | default(300) }}
   environment:
     DEDYN_TOKEN: "{{ acme_token }}"
   register: acme_issue
   changed_when: "'Cert success' in acme_issue.stdout"
   failed_when: acme_issue.rc != 0 and "Domains not changed" not in acme_issue.stdout and "Skip" not in acme_issue.stdout
+  # dnssleep 300 (was 120): confirmed 2026-09-10 during an incident recovery
+  # that 120s is genuinely NOT always enough for deSEC's public authoritative
+  # servers to propagate a fresh TXT record -- a manual --issue with
+  # --dnssleep 120 failed NXDOMAIN, retrying at --dnssleep 300 succeeded
+  # immediately after. Root incident: DEDYN_TOKEN silently vanished from
+  # /root/.acme.sh/account.conf on lb-01 sometime before 2026-08-21 (cause
+  # not identified -- possibly a manual acme.sh troubleshooting session or
+  # an --upgrade side effect), which made every unattended cron renewal for
+  # BOTH the wildcard AND proxmox certs fail silently ("You did not specify
+  # DEDYN_TOKEN yet") for ~3 weeks with zero alerting (the cert_renewer_wedged
+  # Grafana rule only fires at <30 days remaining, and this was caught with
+  # 41 days left). Fixed live by re-running --issue with DEDYN_TOKEN from
+  # vault (acme.sh re-persists it into account.conf automatically on use) +
+  # --install-cert to redeploy to nginx. If this task ever reports "Domains
+  # not changed" / "Skip" as a false-negative "success" again, check
+  # `grep DEDYN /root/.acme.sh/account.conf` on the target host FIRST.
 
 - name: Ensure SSL Directory Exists
   ansible.builtin.file:
