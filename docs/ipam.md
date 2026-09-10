@@ -12,6 +12,32 @@ sync when adding/removing/moving CTs or VMs.
 | BWT Lab (VXLAN) | `10.99.0.0/24`    | `bwt`     | Isolated subnet for Tanium bandwidth-throttle repro (NEC 00271560 et al) |
 | PVE Sync (VLAN 20) | `172.20.0.0/24` | `vmbr0.20` | Isolated L2 segment for corosync + ZFS replication, physically confined to switch ports 3/4/5 — see below |
 
+### LAN static-IP allocations (outside the Nest router's DHCP pool)
+
+Google Nest/Wifi's default DHCP pool is **192.168.86.20-250** (confirmed
+via vendor docs + a live nmap sweep 2026-09-10 finding active DHCP
+leases scattered up to .235, consistent with that default never having
+been customized). That leaves **.2-.19** and **.251-.254** safe for
+static allocations. No local API/CLI exists to change or query this
+scope directly (Nest's local HTTP API needs cloud/app auth; there's no
+SSH/SNMP access) — the Google Home app is the only way to verify/change
+the actual pool boundary if it's ever suspected to have changed.
+
+Current static allocations in the safe-outside-DHCP range:
+
+| IP | Host | Notes |
+| :--- | :--- | :--- |
+| `192.168.86.1` | Nest router | gateway |
+| `192.168.86.2` | Home Assistant (HAOS) | hosts AdGuard Home add-on for DoT upstream + iOS push |
+| `192.168.86.11` | `pve01` | |
+| `192.168.86.12` | `pve02` | |
+| `192.168.86.13` | `pve03` | |
+| `192.168.86.16` | `tailscale-gw` | eth0/vmbr0 -- was DHCP until 2026-09-10 (see Service CTs table below for why) |
+
+`.14`/`.15` also showed as live in the same nmap sweep — identity not
+confirmed, left alone. `.17`-`.19` still free if another static
+allocation is needed.
+
 ## Physical switch chain (LAN, non-Proxmox)
 
 Physical topology upstream of pve01/02/03 and the exo cluster Mac Studios:
@@ -243,7 +269,7 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | Hostname        | VMID | Private IP       | LAN IP (if any)    | Role                                        |
 | :-------------- | :--- | :--------------- | :----------------- | :------------------------------------------ |
 | `authentik`     | 100  | `172.16.0.20`    | -                  | SSO / OIDC provider                         |
-| `tailscale-gw`  | 101  | `172.16.0.1`     | `192.168.86.32`    | SDN VNet gateway + Tailscale subnet router  |
+| `tailscale-gw`  | 101  | `172.16.0.1`     | `192.168.86.16` (static) | SDN VNet gateway + Tailscale subnet router  |
 | `dns-01`        | 102  | `172.16.0.10`    | -                  | Bind9 authority for `chi.lab.amd-e.com`     |
 | `lb-01`         | 103  | `172.16.0.30`    | DHCP (`192.168.86.x`) | Nginx L7 reverse proxy                  |
 | `mail-01`       | 104  | `172.16.0.40`    | -                  | Postfix → iCloud SMTP relay                 |

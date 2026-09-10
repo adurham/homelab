@@ -43,6 +43,13 @@ ip_vm: "172.16.0.42"
 # net_private_gw.
 ip_tailscale_gw: "172.16.0.1"
 ip_tailscale_gw_bwt: "10.99.0.3"  # tailscale-gw eth2 on `bwt` SDN bridge — subnet router into 10.99.0.0/24
+ip_tailscale_gw_lan: "192.168.86.16"  # tailscale-gw eth0 on the LAN (vmbr0), STATIC -- see docs/ipam.md
+                                       # "LAN static-IP allocations" for why this changed from DHCP
+                                       # 2026-09-10 (silent lease drift .32 -> .82 broke ansible for
+                                       # an unknown period). .16 chosen: confirmed outside Nest/Google
+                                       # Wifi's default DHCP pool (.20-.250) via a live nmap sweep +
+                                       # vendor docs, consistent with pve01/02/03 already sitting
+                                       # static-outside-DHCP at .11/.12/.13.
 ip_hermes_gateway: "172.16.0.50"
 ip_media_gallery: "172.16.0.46"
 ip_media_ingest: "172.16.0.47"

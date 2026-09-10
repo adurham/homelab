@@ -16,7 +16,7 @@
     pct create 101 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
     --hostname tailscale-gw
     --cores 1 --memory 512 --swap 512
-    --net0 name=eth0,bridge=vmbr0,ip=dhcp
+    --net0 name=eth0,bridge=vmbr0,ip={{ ip_tailscale_gw_lan }}/24,gw={{ net_lan_gateway }}
     --net1 name=eth1,bridge=private,ip={{ net_private_gw }}/24
     --net2 name=eth2,bridge={{ net_bwt_bridge }},ip={{ ip_tailscale_gw_bwt }}/24,mtu={{ net_bwt_mtu }}
     --storage nvme-data
@@ -25,6 +25,38 @@
     --password "{{ tailscale_gw_root_pass }}"
   no_log: true
   when: not ct_exists
+
+# net0 was DHCP until 2026-09-10 -- its lease silently drifted (.32 ->
+# .82) at some unknown point, breaking ansible/monitoring access for an
+# unknown duration while the host stayed fully healthy on Tailscale/LAN
+# the whole time (nothing paged; ansible just timed out). Converted to
+# a static IP outside the LAN's DHCP pool (see ip_tailscale_gw_lan in
+# group_vars/all/vars.yml for the .16 choice reasoning). This task
+# fixes an EXISTING CT that still has the old DHCP net0 -- idempotent,
+# same pattern as the net2/BWT-bridge check below.
+- name: Read current CT 101 net0 config (cluster-API, node-agnostic)
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /nodes/{{ ct_node }}/lxc/101/config --output-format json |
+      python3 -c 'import json,sys; print(json.load(sys.stdin).get("net0",""))'
+  register: gw_net0
+  changed_when: false
+  when: ct_exists
+
+- name: Convert CT 101's net0 to a static LAN IP (was DHCP)
+  # `pvesh set ... -netN` issues a hotplug — no restart required
+  # (verified live 2026-09-10: new IP took effect immediately with zero
+  # downtime). Deliberately does NOT notify Restart Gateway -- that
+  # handler is node-local (`pct stop/start`) and fails when CT 101 runs
+  # on a different node than the one executing it (same caveat already
+  # documented on the net2 task below).
+  ansible.builtin.command: >
+    pvesh set /nodes/{{ ct_node }}/lxc/101/config
+    -net0 name=eth0,bridge=vmbr0,ip={{ ip_tailscale_gw_lan }}/24,gw={{ net_lan_gateway }},type=veth
+  when:
+    - ct_exists
+    - "'ip=dhcp' in gw_net0.stdout"
+
 
 # CT may have been created before the BWT VNet existed (originally only had
 # net0+net1). Ensure a net2 on the `bwt` bridge is present. `pvesh` is
@@ -72,7 +104,11 @@
   failed_when: gw_start.rc != 0 and ("already running" not in gw_start.stderr and "already running" not in gw_start.stdout)
   changed_when: gw_start.rc == 0
 
-# Since it uses DHCP on eth0, we must query it.
+# eth0 is now a static IP (ip_tailscale_gw_lan) as of 2026-09-10, but
+# this still queries it live rather than hardcoding the var here --
+# stays correct even if someone manually pvesh-sets a different IP
+# without updating this role, and the retry loop still guards against
+# the brief window right after `pct start` before networking settles.
 - name: Get Gateway IP
   ansible.builtin.shell: |
     set -o pipefail
