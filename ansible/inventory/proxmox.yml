@@ -5,12 +5,15 @@ all:
         pve01:
           ansible_host: 192.168.86.11
           pve_sync_vlan_ip: "172.20.0.11"
+          zfs_scrub_day_of_month: 1
         pve02:
           ansible_host: 192.168.86.12
           pve_sync_vlan_ip: "172.20.0.12"
+          zfs_scrub_day_of_month: 8
         pve03:
           ansible_host: 192.168.86.13
           pve_sync_vlan_ip: "172.20.0.13"
+          zfs_scrub_day_of_month: 15
       vars:
         ansible_user: root
         # Usage: ansible-playbook -i ansible/inventory/proxmox.yml ... --ask-pass

@@ -1,0 +1,50 @@
+// Managed by Ansible — roles/unattended_upgrades.
+// Security-only, matching roles/pve_unattended_upgrades' safe pattern
+// (NOT general package upgrades -- these CTs run live services like
+// Authentik/DNS/LB, so unattended non-security upgrades could break
+// something unexpectedly; that stays a manual/planned action).
+//
+// Directive name is DISTRO-DEPENDENT -- confirmed against each distro's
+// own packaged default (/usr/share/unattended-upgrades/50unattended-
+// upgrades) on real hosts in this fleet, not assumed:
+//   Ubuntu  -> Unattended-Upgrade::Allowed-Origins (Origin:Archive pairs)
+//   Debian  -> Unattended-Upgrade::Origins-Pattern  (keyword=value regex)
+// These are NOT interchangeable. An earlier version of this template
+// used Origins-Pattern unconditionally (copied from
+// roles/pve_unattended_upgrades, which only targets Debian-based
+// Proxmox hosts) and silently matched zero packages on the
+// Ubuntu-majority CT fleet -- confirmed via a live dry-run on Authentik
+// showing "No packages found that can be upgraded unattended" despite
+// 74 known pending security updates. Package-level blacklist available
+// via unattended_upgrades_blacklist (defaults to empty -- override
+// per-host in inventory if a specific package needs staged/manual
+// upgrades instead).
+{% if ansible_distribution == 'Ubuntu' %}
+Unattended-Upgrade::Allowed-Origins {
+        "${distro_id}:${distro_codename}-security";
+        "${distro_id}ESMApps:${distro_codename}-apps-security";
+        "${distro_id}ESM:${distro_codename}-infra-security";
+};
+{% else %}
+Unattended-Upgrade::Origins-Pattern {
+        "origin=${distro_id},codename=${distro_codename}-security,label=${distro_id}-Security";
+};
+{% endif %}
+
+{% if unattended_upgrades_blacklist | default([]) %}
+Unattended-Upgrade::Package-Blacklist {
+{% for pkg in unattended_upgrades_blacklist %}
+        "{{ pkg }}";
+{% endfor %}
+};
+{% endif %}
+
+// Never reboot automatically -- these are live service containers.
+Unattended-Upgrade::Automatic-Reboot "false";
+
+// Remove unused dependencies after upgrades, standard hygiene.
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Log to syslog for visibility (Grafana/VictoriaMetrics already scrape
+// journald -- makes upgrade activity queryable there too).
+Unattended-Upgrade::SyslogEnable "true";

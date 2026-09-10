@@ -30,3 +30,39 @@
   when:
     - inventory_hostname == groups['proxmox_nodes'][0]
     - pvesm_check.rc != 0
+
+# Fleet audit 2026-09-10: last scrub on every node was 2026-08-09 (a
+# one-off manual run, not scheduled) -- zfsutils-linux ships
+# zfs-scrub-monthly@.timer but it's disabled by default and nobody had
+# ever enabled it. Without this, silent bit-rot/corruption on the pool
+# backing every CT's storage could go undetected indefinitely. Staggered
+# across nodes (day-of-month offset via the override below) so a
+# 3-node simultaneous scrub doesn't hit shared/replicated I/O at once --
+# same reasoning as the vzdump backup staggering in
+# /cluster/backup (pve01 02:00, pve02 02:30, pve03 03:00).
+- name: Ensure zfs-scrub-monthly override dir exists
+  ansible.builtin.file:
+    path: "/etc/systemd/system/zfs-scrub-monthly@{{ zfs_pool_name }}.timer.d"
+    state: directory
+    mode: "0755"
+
+- name: Stagger scrub schedule across nodes (avoid simultaneous cluster-wide I/O)
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/zfs-scrub-monthly@{{ zfs_pool_name }}.timer.d/override.conf"
+    mode: "0644"
+    content: |
+      # Managed by ansible -- roles/proxmox_storage/tasks/main.yml.
+      # Staggered by node so a 3-node cluster doesn't scrub simultaneously.
+      [Timer]
+      OnCalendar=
+      OnCalendar=*-*-{{ '%02d' | format(zfs_scrub_day_of_month) }} 01:00:00
+      RandomizedDelaySec=30m
+  notify: Reload systemd for zfs scrub timer
+
+- name: Enable + start monthly zfs scrub timer
+  ansible.builtin.systemd:
+    name: "zfs-scrub-monthly@{{ zfs_pool_name }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+
