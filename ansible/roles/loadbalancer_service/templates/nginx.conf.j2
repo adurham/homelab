@@ -103,7 +103,22 @@ upstream proxmox_oidc {
 upstream tanium_servers {
     ip_hash;
 {% for node in groups['tanium_servers'] | sort %}
+{% if node == 'ts-02' %}
+    # ts-02 marked `down` 2026-09-10: confirmed known/intentional
+    # standby-incomplete state (user-confirmed, not a real gap -- see
+    # memory fact_id 2123). With ip_hash, a merely max_fails-marked
+    # backend still gets permanently assigned to whichever client IPs
+    # hash to it, hanging every request from those clients for a full
+    # proxy_read_timeout (60s) instead of failing over -- reproduced
+    # live from 4+ different internal hosts during tonight's sweep,
+    # traced via nginx error.log ("upstream timed out ... 172.16.0.52").
+    # `down` removes it from ip_hash's bucket assignment entirely, so
+    # ALL traffic goes to ts-01 until ts-02 is genuinely back in
+    # service -- remove this `down` marker (not the whole entry) then.
+    server {{ hostvars[node].ansible_host }}:443 down;
+{% else %}
     server {{ hostvars[node].ansible_host }}:443 max_fails=3 fail_timeout=10s;
+{% endif %}
 {% endfor %}
     keepalive 32;
 }
