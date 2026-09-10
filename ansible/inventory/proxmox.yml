@@ -105,18 +105,18 @@ all:
           # (100.86.168.35) gets intercepted by Tailscale SSH and requires
           # browser auth, which breaks automation.
           #
-          # KNOWN RISK (found 2026-09-10, this IP had silently drifted
-          # from .32 -- confirmed via `pct exec 101 -- ip addr` on pve02):
-          # net0 on this CT is ip=dhcp, not a static reservation, despite
-          # this comment previously implying otherwise. Any DHCP lease
-          # renewal can change this IP again and break ansible/monitoring
-          # silently (host stays healthy on Tailscale/LAN the whole time --
-          # nothing pages, ansible just times out). Real fix is a static
-          # DHCP reservation or switching net0 to a static IP; not done
-          # yet. If this host goes unreachable again, check
-          # `pct exec 101 -- ip -4 addr show eth0` on whichever pve node
-          # hosts vmid 101 before assuming an outage.
-          ansible_host: 192.168.86.82
+          # FIXED 2026-09-10: net0 used to be DHCP and its lease silently
+          # drifted from .32 to .82 at some point, breaking ansible for
+          # an unknown duration while the host stayed fully healthy on
+          # Tailscale/LAN the whole time (nothing paged, ansible just
+          # timed out). Converted to a real static IP via
+          # roles/tailscale_gw_host (pvesh set -net0, hot-applied, zero
+          # downtime, verified live) -- ip_tailscale_gw_lan in
+          # group_vars/all/vars.yml is now the single source of truth,
+          # referenced here instead of a literal so this file and the
+          # CT's actual config can't drift apart again the way ip_* vars
+          # already prevent drift for the private-subnet CTs.
+          ansible_host: "{{ ip_tailscale_gw_lan }}"
           vmid: 101
           target_node: pve01
       vars:
