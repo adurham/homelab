@@ -1595,8 +1595,22 @@ groups:
               # Grafana/vm-01 sweep). Excluded here instead of silently
               # tolerating alert fatigue; a real regression in one of
               # these would need its own named rule, not this generic one.
+              #
+              # apparmor.service added to the exclusion 2026-09-10: fails
+              # structurally on tailscale-gw (the only privileged CT with
+              # nesting=1 in this fleet -- confirmed via `pct config 101`
+              # showing no `unprivileged` key, vs. authentik/dns-01 which
+              # are unprivileged and load apparmor fine). Root error is
+              # "Permission denied; attempted to load a profile while
+              # confined?" -- apparmor_parser can't load nested profiles
+              # inside a privileged LXC's own host-applied AppArmor
+              # confinement. Can't be fixed without converting the CT to
+              # unprivileged (backup/recreate/restore per
+              # roles/tailscale_gw_host's own comment on this), so this
+              # will fail on every boot forever -- exclude rather than
+              # let it page every ~10min indefinitely.
               editorMode: code
-              expr: node_systemd_unit_state{state="failed", name!~"ifupdown-wait-online.service|networking.service|nvmf-autoconnect.service|openipmi.service"} == 1
+              expr: node_systemd_unit_state{state="failed", name!~"ifupdown-wait-online.service|networking.service|nvmf-autoconnect.service|openipmi.service|apparmor.service"} == 1
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
