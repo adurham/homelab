@@ -4,7 +4,20 @@
 // prometheus.exporter.unix produces the same metric shape as node_exporter
 // (it's a node_exporter fork). prometheus.scrape pulls from it in-process,
 // then prometheus.remote_write pushes to VictoriaMetrics.
-prometheus.exporter.unix "host" { }
+// systemd collector added 2026-09-10: fleet audit found pve03's chrony
+// and private-monitoring-firewall units silently `failed` for 3+ days
+// with zero alerting (no rule existed anywhere for "systemd unit
+// failed" — the gap this closes). unit_include scoped to *.service
+// only: excludes the high-cardinality noise of transient user-session
+// *.scope units (e.g. session-750.scope, seen going stale/failed
+// harmlessly on pve02 the same audit) and *.mount/*.socket units,
+// which aren't meaningful alert targets here.
+prometheus.exporter.unix "host" {
+    enable_collectors = ["systemd"]
+    systemd {
+        unit_include = ".+\\.service"
+    }
+}
 
 // Override the exporter's default `job="integrations/unix"` with
 // `job="node_exporter"` so series match what VM's old static_configs scrape

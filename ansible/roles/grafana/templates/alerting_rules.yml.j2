@@ -1564,6 +1564,78 @@ groups:
         isPaused: false
 
 {% endif %}
+      - uid: systemd_unit_failed
+        title: systemd unit failed
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # Requires roles/alloy's systemd collector (enable_collectors
+              # = ["systemd"], unit_include = ".+\\.service") -- added
+              # 2026-09-10 fleet audit, which found pve03's chrony and
+              # private-monitoring-firewall units both silently `failed`
+              # for 3+ days with NO alert coverage anywhere (this is the
+              # rule that closes that gap). state="failed" is one of
+              # node_exporter's systemd collector's possible values
+              # (active/inactive/failed/activating/deactivating).
+              #
+              # name!~ exclusion: live-fired on first deploy against
+              # ifupdown-wait-online/networking/nvmf-autoconnect/openipmi
+              # on graf-01, vm-01, media-ingest-01 -- these are the SAME
+              # cosmetic LXC-container boilerplate noise already confirmed
+              # benign this session (identical failures across unrelated
+              # containers, no functional impact -- see 2026-09-10
+              # Grafana/vm-01 sweep). Excluded here instead of silently
+              # tolerating alert fatigue; a real regression in one of
+              # these would need its own named rule, not this generic one.
+              editorMode: code
+              expr: node_systemd_unit_state{state="failed", name!~"ifupdown-wait-online.service|networking.service|nvmf-autoconnect.service|openipmi.service"} == 1
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "{{ '{{' }} $labels.name {{ '}}' }} failed on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "systemd unit {{ '{{' }} $labels.name {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} has been in `failed` state for 10+ minutes. SSH in and check `systemctl status {{ '{{' }} $labels.name {{ '}}' }}` + `journalctl -u {{ '{{' }} $labels.name {{ '}}' }}`. 10m threshold (vs. the usual 5m) to ride out transient restart-loop blips without paging."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: log_pve_replication_failed
         title: pve replication failure
         condition: C
