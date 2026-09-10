@@ -1,0 +1,26 @@
+---
+# Install logrotate + render per-host stanzas (logrotate_configs) and
+# age-based prune timers (logrotate_prune_paths) fleet-wide. Both lists
+# are empty by default (see roles/logrotate/defaults/main.yml), so this
+# is a no-op everywhere except hosts with entries set in
+# inventory/proxmox.yml or inventory/group_vars/*.yml — currently just
+# media_ingest and media_ingest_02 (see roles/logrotate/README.md for
+# why this was added, 2026-09-10 fleet log-retention audit).
+#
+# tanium_cluster excluded: vendor appliances run no custom software per
+# explicit direction (see deploy_monitoring.yml's Alloy play comment for
+# the same rule) — NOTE this only covers the TanOS server/module/zone
+# appliances; tanium_clients (tc-* test VMs, Debian/RHEL/Suse boxes used
+# to test client deploys across distros) are regular managed Linux boxes
+# and are correctly IN SCOPE. homeassistant excluded: HAOS ships no
+# Python interpreter at all (confirmed via --check, "python3: not
+# found") — same constraint documented for the Ansible HA plays
+# elsewhere in this repo, config there is managed via the HA REST API,
+# not Ansible modules. localhost excluded: not a managed fleet member.
+# bwt_lab excluded: fleet deleted 2026-08-05 (see deploy_monitoring.yml's
+# same exclusion) — inventory entries remain but the hosts don't exist.
+- name: Install log rotation / retention
+  hosts: all:!tanium_cluster:!homeassistant:!localhost:!bwt_lab
+  gather_facts: true
+  roles:
+    - logrotate
