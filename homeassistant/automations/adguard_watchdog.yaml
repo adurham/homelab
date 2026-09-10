@@ -3,13 +3,17 @@
 # Self-heal only -- alerting migrated to Grafana (uid: adguard_dns_down,
 # roles/grafana/templates/alerting_rules.yml.j2) 2026-08-09, so this can
 # route through the same ack/silence Discord flow as every other infra
-# alert instead of a separate iPhone-push channel. See that rule's
-# comment for why: this automation's OWN trigger entity
-# (binary_sensor.adguard_home_running) doesn't exist on this HA
-# instance, so the automation itself has been silently dead code, never
-# firing -- the restart action below is kept in case that entity gets
-# fixed later, but the actual working liveness check now lives in
-# Grafana against switch.adguard_home_protection's availability.
+# alert instead of a separate iPhone-push channel.
+#
+# FIXED 2026-09-10: this automation's original trigger entity
+# (binary_sensor.adguard_home_running) does not exist on this HA
+# instance (confirmed via /api/states -- "Entity not found") and never
+# has, so this automation was silently dead code since creation, never
+# firing once. Retargeted to switch.adguard_home_protection going
+# `unavailable` -- the same entity/signal the Grafana adguard_dns_down
+# rule already uses successfully (verified 2026-08-09 per that rule's
+# own comment), so both the alert AND this self-heal now key off a
+# real, currently-populated entity instead of a phantom one.
 - alias: "Infrastructure: AdGuard Home Watchdog"
   id: "infrastructure_adguard_watchdog"
   description: "Restart AdGuard if DNS service stops (alerting is in Grafana, see uid: adguard_dns_down)"
@@ -17,8 +21,8 @@
 
   trigger:
     - platform: state
-      entity_id: binary_sensor.adguard_home_running
-      to: "off"
+      entity_id: switch.adguard_home_protection
+      to: "unavailable"
       for: "00:02:00"
 
   action:
