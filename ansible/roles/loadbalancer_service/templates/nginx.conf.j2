@@ -19,6 +19,8 @@ server_tokens off;
 # Tanium server console — header regressions there fail silently in the
 # browser (white pane, 200 OK in nginx logs).
 {% set security_headers %}
+    proxy_hide_header X-Frame-Options;
+    proxy_hide_header Content-Security-Policy;
     add_header X-Frame-Options                "DENY" always;
     add_header X-Content-Type-Options         "nosniff" always;
     add_header Referrer-Policy                "strict-origin-when-cross-origin" always;
@@ -26,6 +28,8 @@ server_tokens off;
 {% endset %}
 
 {% set security_headers_self_frame %}
+    proxy_hide_header X-Frame-Options;
+    proxy_hide_header Content-Security-Policy;
     add_header X-Frame-Options                "SAMEORIGIN" always;
     add_header X-Content-Type-Options         "nosniff" always;
     add_header Referrer-Policy                "strict-origin-when-cross-origin" always;
