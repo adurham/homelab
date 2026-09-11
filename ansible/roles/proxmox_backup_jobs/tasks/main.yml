@@ -1,0 +1,67 @@
+---
+# Ensure this node's nightly vzdump backup job exists with the correct
+# vmid list. Idempotent: reads current job state via `pvesh get` and only
+# calls `pvesh set`/`create` when something is actually different, so this
+# is safe to run every deploy without spamming job-config writes.
+#
+# jobs.cfg lives in /etc/pve (pmxcfs, cluster-wide shared config) so any
+# node could technically write any node's job -- this task runs against
+# each node's own play host for clarity and to keep `node:` correct
+# without hardcoding it.
+
+- name: Check whether this node's backup job already exists
+  ansible.builtin.command:
+    cmd: "pvesh get /cluster/backup/{{ pve_backup_job_id }} --output-format json"
+  register: pve_backup_job_current
+  changed_when: false
+  failed_when: false
+
+- name: Parse current job state (empty dict if job doesn't exist yet)
+  ansible.builtin.set_fact:
+    pve_backup_job_parsed: "{{ (pve_backup_job_current.stdout | from_json) if pve_backup_job_current.rc == 0 else {} }}"
+
+- name: Build the desired vmid string (sorted, comma-joined, matches pvesh's own format)
+  ansible.builtin.set_fact:
+    pve_backup_vmid_str: "{{ pve_backup_vmids | sort | map('string') | join(',') }}"
+
+- name: Create the backup job if it doesn't exist yet
+  ansible.builtin.command:
+    cmd: >
+      pvesh create /cluster/backup
+      --id {{ pve_backup_job_id }}
+      --node {{ inventory_hostname }}
+      --schedule "{{ pve_backup_schedule }}"
+      --compress {{ pve_backup_compress }}
+      --mode {{ pve_backup_mode }}
+      --storage {{ pve_backup_storage }}
+      --vmid {{ pve_backup_vmid_str }}
+      --enabled 1
+      --mailnotification always
+      --prune-backups keep-last={{ pve_backup_keep_last }}
+      --notes-template "{{ pve_backup_notes_template }}"
+  when: pve_backup_job_parsed == {}
+  changed_when: true
+
+- name: Update the vmid list if it drifted from what's declared here
+  ansible.builtin.command:
+    cmd: "pvesh set /cluster/backup/{{ pve_backup_job_id }} --vmid {{ pve_backup_vmid_str }}"
+  when:
+    - pve_backup_job_parsed != {}
+    - pve_backup_job_parsed.vmid | default('') != pve_backup_vmid_str
+  changed_when: true
+
+- name: Update the schedule if it drifted from what's declared here
+  ansible.builtin.command:
+    cmd: "pvesh set /cluster/backup/{{ pve_backup_job_id }} --schedule \"{{ pve_backup_schedule }}\""
+  when:
+    - pve_backup_job_parsed != {}
+    - pve_backup_job_parsed.schedule | default('') != pve_backup_schedule
+  changed_when: true
+
+- name: Fix the notes-template if it's stale/missing (was falsely "ansible-managed" pre-2026-09-11 while genuinely unmanaged)
+  ansible.builtin.command:
+    cmd: "pvesh set /cluster/backup/{{ pve_backup_job_id }} --notes-template \"{{ pve_backup_notes_template }}\""
+  when:
+    - pve_backup_job_parsed != {}
+    - pve_backup_job_parsed['notes-template'] | default('') != pve_backup_notes_template
+  changed_when: true

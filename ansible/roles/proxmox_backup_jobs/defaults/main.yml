@@ -1,0 +1,11 @@
+---
+# Shared defaults for every node's nightly vzdump job. Per-node overrides
+# (job id, schedule, vmid list) live in inventory/proxmox.yml -- see the
+# comment on pve01's pve_backup_job_id for the history of why this role
+# exists (frigate-01 + bwt-dhcp silently missing from backup for months
+# because the jobs were hand-configured outside ansible, 2026-09-11).
+pve_backup_storage: local
+pve_backup_compress: zstd
+pve_backup_mode: snapshot
+pve_backup_keep_last: 3
+pve_backup_notes_template: "ansible-managed nightly backup"

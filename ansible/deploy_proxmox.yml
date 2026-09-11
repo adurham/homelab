@@ -22,3 +22,9 @@
 
     - role: proxmox_acme
       # Setup Let's Encrypt Account (and plugin/cert if configured)
+
+    - role: proxmox_backup_jobs
+      # Nightly vzdump jobs, per-node vmid lists in inventory/proxmox.yml.
+      # Brought under ansible 2026-09-11 after frigate-01/bwt-dhcp were
+      # found to have silently never been backed up (see inventory comment
+      # on pve01's pve_backup_job_id for the full story).
