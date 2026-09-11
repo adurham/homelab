@@ -1,5 +1,5 @@
 # {{ ansible_managed }}
-# Frigate config — all Nest cameras, CPU detection.
+# Frigate config — all Nest cameras, OpenVINO CPU-mode detection.
 #
 # Stream path per camera:
 #   nest: source (WebRTC) → ffmpeg remux (#video=copy, drops corrupt NALs)
@@ -37,8 +37,29 @@ mqtt:
 {% endif %}
 
 detectors:
-  cpu1:
-    type: cpu
+  ov:
+    type: openvino
+    device: CPU
+model:
+  width: 300
+  height: 300
+  input_tensor: nhwc
+  input_pixel_format: bgr
+  path: /openvino-model/ssdlite_mobilenet_v2.xml
+  labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+  # Frigate's bundled coco_91cl_bkgr.txt aliases index 8 to "car" (Frigate's
+  # own Dockerfile runs `sed -i 's/truck/car/g'` on the upstream Open Model
+  # Zoo labelmap -- confirmed 2026-09-11 via a fable consult cross-checking
+  # against the real TF-OD-API COCO-91 category id scheme; every other
+  # index in the bundled file is a correct, gap-preserving id map with no
+  # compaction shift, e.g. "street sign"=12, "shoe"=29, "door"=71 all land
+  # exactly where the original sparse COCO ids say they should). This
+  # override patches ONLY that one index back to "truck" without touching
+  # the model or the on-disk labelmap file, so it survives Frigate image
+  # upgrades. Needed for homeassistant/automations/mailbox_truck.yaml to
+  # be able to tell a mail/delivery truck apart from a passenger car.
+  labelmap:
+    8: truck
 
 # Nest WebRTC sources with ffmpeg remux to clean up corrupted frames.
 # Each camera has TWO streams:
@@ -113,9 +134,20 @@ cameras:
       fps: {{ frigate_camera_fps[name] | default(frigate_detect_fps) }}
     objects:
       track:
-{% for obj in frigate_track_objects %}
+{% for obj in (frigate_camera_objects[name] | default(frigate_track_objects)) %}
         - {{ obj }}
 {% endfor %}
+{% if name in frigate_camera_zones %}
+    zones:
+{% for zone_name, zone_cfg in frigate_camera_zones[name].items() %}
+      {{ zone_name }}:
+        coordinates: {{ zone_cfg.coordinates }}
+        objects:
+{% for obj in zone_cfg.objects %}
+          - {{ obj }}
+{% endfor %}
+{% endfor %}
+{% endif %}
     record:
       enabled: false
     snapshots:

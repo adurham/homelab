@@ -75,6 +75,47 @@ frigate_camera_fps:
 frigate_track_objects:
   - person
   - cat
+# Per-camera object overrides. driveway additionally tracks `car` and
+# `truck` for the mailbox-vehicle alert below -- scoped to just this
+# camera so the extra CPU detection load doesn't hit the other 5.
+#
+# NOTE (2026-09-11): switched detector from the stock CPU/tflite backend to
+# OpenVINO (see frigate-config.yml.j2 detectors: block) specifically to get
+# a real `truck` label distinct from `car`. Frigate's bundled OpenVINO
+# labelmap (/openvino-model/coco_91cl_bkgr.txt) also aliases index 8 to
+# "car" (Frigate's own Dockerfile runs `sed -i 's/truck/car/g'` on the
+# upstream Open Model Zoo file) -- fixed via a `model.labelmap: {8: truck}`
+# override in the config template, confirmed correct via a fable consult
+# cross-checking the real TF-OD-API COCO-91 category id scheme. `car` is
+# kept tracked alongside `truck` so nothing that previously matched `car`
+# silently stops being detected.
+frigate_camera_objects:
+  driveway:
+    - person
+    - cat
+    - car
+    - truck
+# Named detection zones per camera. Used for the mailbox-vehicle alert
+# (homeassistant/automations/mailbox_truck.yaml) -- Frigate publishes the
+# active-object count for this zone to frigate/mailbox/<object>/active (an
+# integer, NOT "1"/"0" -- zone topics are keyed by zone+object name only,
+# no camera prefix, per https://docs.frigate.video/integrations/mqtt/),
+# which the HA automation subscribes to directly via MQTT (same house
+# pattern as pet-accident-detector's frigate/events subscription).
+#
+# Coordinates confirmed visually 2026-09-10/11 against a live daytime
+# snapshot from the driveway camera (1920x1080 detect resolution) -- covers
+# the mailbox post itself plus enough adjacent street/curb that a stopped
+# vehicle's body overlaps the zone even though it can't pull fully onto
+# the property. Re-verify (screenshot + eyeball) if the camera is ever
+# repositioned or the mailbox moves.
+frigate_camera_zones:
+  driveway:
+    mailbox:
+      coordinates: "1230,10,1600,10,1600,190,1230,190"
+      objects:
+        - car
+        - truck
 # Motion-based recording (continuous OFF): records only segments with motion,
 # cutting disk ~70-90% vs 24/7 continuous (2-day continuous on 7x1080p already
 # filled the 60G disk to 95%). Keeps a week of the footage that actually
