@@ -8,23 +8,26 @@
   args:
     creates: /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
 
-# Cluster-wide existence check. `pct config` is node-local; HA can migrate
-# the CT to any node, so we ask pmxcfs for the full cluster resource list.
-# rc=0 means the CT exists somewhere in the cluster.
-- name: Check if Proxy Container Exists in cluster
-  ansible.builtin.shell: |
-    set -o pipefail
-    pvesh get /cluster/resources --type vm --output-format json |
-      python3 -c 'import json,sys; sys.exit(0 if any(r["vmid"]==108 for r in json.load(sys.stdin)) else 1)'
-  register: pct_check
-  failed_when: false
-  changed_when: false
+# Resolve the node CT 108 lives on now (HA-aware). Sets ct_exists + ct_node;
+# every node-local `pct` op below delegates to ct_node so it follows HA
+# migrations. FIXED 2026-09-11: this whole file previously ran bare `pct
+# exec/set/start 108` with no delegation, relying on the play running
+# directly on pve03 (this role's `hosts:` target) -- broke silently the
+# moment HA moved proxy-01 to pve02 (confirmed live: `pct config 108` on
+# pve03 failed with "Configuration file 'nodes/pve03/lxc/108.conf' does not
+# exist"). Brought in line with dns_host's already-correct pattern.
+- name: Resolve owning node for Proxy CT
+  ansible.builtin.include_role:
+    name: resolve_ct_node
+  vars:
+    ct_vmid: 108
 
 - name: Create Proxy Container
+  delegate_to: "{{ ct_node }}"
   ansible.builtin.command: >
     pct create 108 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
     --hostname proxy-01
-    --cores 1 --memory 512 --swap 512
+    --cores 1 --memory 1024 --swap 512
     --net0 name=eth0,bridge=private,ip={{ ip_proxy }}/24,gw={{ net_private_gw }}
     --storage nvme-data
     --unprivileged 1
@@ -33,15 +36,40 @@
     --start 1
     --onboot 1
   no_log: true
-  when: pct_check.rc != 0
+  when: not ct_exists
+
+# Idempotent memory bump for the already-existing CT (the `pct create`
+# above only ever runs once). 2026-09-11: this host (along with dns-01,
+# lb-01, tailscale-gw) got apt-daily-upgrade.service OOM-killed -- kernel
+# OOM line showed the cgroup hit its exact 512MB ceiling during a normal
+# 74-package security patch batch, no host-level memory pressure involved.
+# `--memory` is a cgroup ceiling not a reservation -- raising it costs
+# nothing at idle, only gives headroom for periodic burst dpkg/apt
+# operations. Confirmed via a fable consult before applying. Swap left at
+# 512 (see dns_host's identical fix for the full swap-vs-memory reasoning).
+- name: Check Proxy Container's current memory config
+  delegate_to: "{{ ct_node }}"
+  ansible.builtin.command: "pct config 108"
+  register: proxy_config_current
+  changed_when: false
+  when: ct_exists
+
+- name: Bump Proxy Container memory ceiling to 1024MB (see OOM comment above)
+  delegate_to: "{{ ct_node }}"
+  ansible.builtin.command: "pct set 108 --memory 1024"
+  when:
+    - ct_exists
+    - "'memory: 1024' not in proxy_config_current.stdout"
 
 - name: Ensure Proxy Container is Running
+  delegate_to: "{{ ct_node }}"
   ansible.builtin.command: pct start 108
   register: proxy_start
   failed_when: proxy_start.rc != 0 and ("already running" not in proxy_start.stderr and "already running" not in proxy_start.stdout)
   changed_when: proxy_start.rc == 0
 
 - name: Wait for Proxy Container IP
+  delegate_to: "{{ ct_node }}"
   ansible.builtin.shell: |
     set -o pipefail
     pct exec 108 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
@@ -52,23 +80,26 @@
   changed_when: false
 
 - name: Update Apt Cache in Proxy Container
+  delegate_to: "{{ ct_node }}"
   ansible.builtin.command: pct exec 108 -- apt-get update
-  when: pct_check.rc != 0
+  when: not ct_exists
   changed_when: true
 
 - name: Install Python3 in Proxy Container
+  delegate_to: "{{ ct_node }}"
   ansible.builtin.command: pct exec 108 -- apt-get install -y python3
   changed_when: false # Idempotency handled by apt itself (mostly) or we accept the "change" cost for robustness
 
 - name: Inject SSH Key into Proxy Container (via pipe)
+  delegate_to: "{{ ct_node }}"
   ansible.builtin.shell: |
     set -o pipefail
     pct exec 108 -- mkdir -p /root/.ssh
     cat /root/.ssh/authorized_keys | pct exec 108 -- sh -c "cat > /root/.ssh/authorized_keys"
     pct exec 108 -- chmod 700 /root/.ssh
     pct exec 108 -- chmod 600 /root/.ssh/authorized_keys
-  delegate_to: "{{ target_node | default('pve03') }}"
-  when: pct_check.rc != 0
+  when: not ct_exists
+
 - name: Ensure Proxy Firewall Configuration
   ansible.builtin.copy:
     dest: "/etc/pve/firewall/108.fw"
@@ -83,16 +114,18 @@
     owner: root
     group: www-data
     mode: '0640'
-  delegate_to: "{{ target_node | default('pve03') }}"
+  delegate_to: "{{ ct_node }}"
 
 - name: Enable Firewall on Net0
+  delegate_to: "{{ ct_node }}"
   ansible.builtin.command: pct set 108 -net0 name=eth0,bridge=private,ip={{ ip_proxy }}/24,gw={{ net_private_gw }},firewall=1
-  when: pct_check.rc != 0 or (ip_check.rc == 0) # Apply if created or existing
+  when: (not ct_exists) or (ip_check.rc == 0) # Apply if created or existing
   changed_when: false # Don't report change every time for now (lazy)
 
 # openssh-server ships with the Ubuntu LXC template but is not enabled by
 # default. Without this the CT is only reachable via `pct exec` from the
 # proxmox host — direct SSH from ansible against the CT's IP fails.
 - name: Ensure SSH is enabled and running
+  delegate_to: "{{ ct_node }}"
   ansible.builtin.command: pct exec 108 -- systemctl enable --now ssh
   changed_when: false
