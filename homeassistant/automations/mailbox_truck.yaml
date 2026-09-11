@@ -1,0 +1,98 @@
+# Mailbox Truck Alert
+#
+# Created 2026-09-11 per request: "if the mail truck stops at the mailbox I
+# get an alert from HA". Uses Frigate's `driveway` camera + a custom
+# `mailbox` detection zone (roles/frigate_host/defaults/main.yml,
+# frigate_camera_zones) that covers the mailbox post + adjacent curb,
+# confirmed by eye against a live daytime driveway snapshot.
+#
+# LABEL HISTORY (2026-09-11): first cut used `car` because Frigate's stock
+# CPU/tflite detector has no separate `truck` class (merged into `car`).
+# Fixed same day by switching the detector to OpenVINO (bundled in the
+# Frigate image, no download needed) + a `model.labelmap: {8: truck}`
+# override, since Frigate's own bundled OpenVINO labelmap
+# (/openvino-model/coco_91cl_bkgr.txt) ALSO aliases index 8 to "car" --
+# Frigate's Dockerfile runs `sed -i 's/truck/car/g'` on the upstream Open
+# Model Zoo file. The override patches just that one index back to "truck"
+# without touching the model or the on-disk labelmap file (survives image
+# upgrades). Confirmed correct via a fable consult cross-checking the real
+# TF-OD-API COCO-91 category id scheme, and confirmed live: `truck` is now
+# accepted with zero "not supported by the current model" warnings, and
+# passenger cars are still correctly labeled `car` (verified live via
+# MQTT during testing -- real cars scored 0.8-0.9 confidence as `car`, not
+# `truck`). See frigate-config.yml.j2 detectors:/model: blocks.
+#
+# This automation now fires ONLY on `truck` (not `car`) per an explicit
+# 2026-09-11 decision to match the literal ask ("mail truck stops") over
+# broader coverage -- trade-off: a carrier using an unmarked sedan/Prius
+# for a route (some rural/overflow routes do this) won't trigger it. If
+# that turns out to matter in practice, the fallback is re-adding `car` to
+# the label condition below (both are already tracked in the mailbox zone,
+# see frigate_camera_zones, so no Frigate-side config change would be
+# needed -- just widen the condition here).
+#
+# Trigger mechanism: subscribe to frigate/events (same pattern as
+# pet-accident-detector's cat_accident_daemon.py) and check
+# after.current_zones contains "mailbox" AND after.stationary transitions
+# true -- i.e. the truck has actually stopped in the zone, not just driven
+# past it. Zone membership is keyed off the BOTTOM-CENTER of the vehicle's
+# bounding box, which is why the mailbox zone (see frigate_camera_zones)
+# was drawn to cover the curb/street strip next to the post, not just the
+# post itself -- a truck's bbox bottom lands on the pavement, not on the
+# mailbox. stationary uses Frigate's default threshold (50 frames @ 5fps
+# = ~10s) -- not overridden per-camera; a genuinely instant drive-by drop
+# under 10s could be missed, accepted as a known limitation for a first cut.
+- alias: "Driveway: Mailbox Truck Alert"
+  id: "driveway_mailbox_vehicle_alert"
+  description: "Notify when a truck stops in the mailbox zone (driveway camera / Frigate OpenVINO truck detection)"
+  mode: single
+
+  trigger:
+    - platform: mqtt
+      topic: "frigate/events"
+      value_template: "{{ value_json['after']['camera'] }}"
+      payload: "driveway"
+
+  condition:
+    - condition: template
+      # Fire on the exact message where the truck TRANSITIONS to stationary
+      # while already in the mailbox zone -- not "just entered the zone"
+      # (a truck usually enters the zone while still moving, and only goes
+      # stationary a message or two later, by which point it's already
+      # "in" the zone -- debouncing on zone-entry instead of the
+      # stationary-transition would mean this condition is already false
+      # by the time stationary actually flips true, and the automation
+      # would silently never fire). before.stationary != true also covers
+      # the type=="new" case where `before` has no prior stationary state.
+      value_template: >
+        {{ 'mailbox' in trigger.payload_json['after']['current_zones']
+           and trigger.payload_json['after']['label'] == 'truck'
+           and trigger.payload_json['after']['stationary'] == true
+           and trigger.payload_json['before']['stationary'] != true }}
+    # 5-min cooldown: a single real mail stop can still generate >1
+    # transition (truck creeps forward to the next few mailboxes while
+    # still inside our wide zone -- stationary flips false/true again
+    # each time it re-settles; or occlusion from the carrier walking
+    # around it resets the tracker's motionless_count). Without this
+    # we'd get 2-4 notifications for one visit. Added 2026-09-11 per a
+    # consult() review of Frigate's before/after MQTT semantics.
+    - condition: template
+      value_template: >
+        {{ this.attributes.last_triggered is none
+           or (now() - this.attributes.last_triggered).total_seconds() > 300 }}
+
+  action:
+    - service: notify.mobile_app_adams_iphone_16
+      data:
+        title: "Mailbox"
+        message: "The mail truck just stopped at the mailbox."
+        data:
+          # Frigate is on the private 172.16.0.x subnet (not reachable from a
+          # phone off-LAN / off-Tailscale). Use frigate_lan_ip (192.168.86.85,
+          # roles/frigate_host/defaults/main.yml) which is routable from the
+          # home LAN a phone would normally be on. If the phone is OFF the
+          # home wifi this image link will simply fail to load in the push
+          # notification -- acceptable for a first cut, no VPN dependency.
+          image: "{{ 'http://192.168.86.85:5000/api/events/' ~ trigger.payload_json['after']['id'] ~ '/snapshot.jpg' }}"
+          push:
+            sound: default
