@@ -6,14 +6,37 @@ all:
           ansible_host: 192.168.86.11
           pve_sync_vlan_ip: "172.20.0.11"
           zfs_scrub_day_of_month: 1
+          # Nightly vzdump job (roles/proxmox_backup_jobs). Existing job id
+          # 41c3b19b-20ea-4ba0-b760-52a79d1cb83a was hand-configured in the
+          # Proxmox UI at some unknown point BEFORE this role existed --
+          # its notes-template falsely said "ansible-managed" the whole
+          # time it wasn't actually tracked anywhere, which is exactly how
+          # frigate-01 (170) and bwt-dhcp (114) silently fell out of the
+          # nightly backup rotation for months after being created
+          # (confirmed 2026-09-11: neither had ever been backed up).
+          # Brought under real ansible management same day, vmid list
+          # corrected via a live vzdump test-backup of both missing CTs
+          # (frigate: 12.4GB, bwt-dhcp: 196MB, both succeeded) before this
+          # was written down. Keep this list in sync with reality --
+          # `pct list` on the node is the source of truth for what SHOULD
+          # be here, this var is just what ansible enforces IS here.
+          pve_backup_job_id: "41c3b19b-20ea-4ba0-b760-52a79d1cb83a"
+          pve_backup_schedule: "Mon..Sun 02:00"
+          pve_backup_vmids: [107, 113, 114, 117, 118, 170]
         pve02:
           ansible_host: 192.168.86.12
           pve_sync_vlan_ip: "172.20.0.12"
           zfs_scrub_day_of_month: 8
+          pve_backup_job_id: "08bcc363-a9bf-4de3-9c73-5c4581cc0b78"
+          pve_backup_schedule: "Mon..Sun 02:30"
+          pve_backup_vmids: [101, 102, 103, 104, 105, 108, 115, 116]
         pve03:
           ansible_host: 192.168.86.13
           pve_sync_vlan_ip: "172.20.0.13"
           zfs_scrub_day_of_month: 15
+          pve_backup_job_id: "52cb07d6-1400-4437-9591-568cad479879"
+          pve_backup_schedule: "Mon..Sun 03:00"
+          pve_backup_vmids: [100]
       vars:
         ansible_user: root
         # Usage: ansible-playbook -i ansible/inventory/proxmox.yml ... --ask-pass
