@@ -50,6 +50,24 @@
   when: not lb_exists
   register: lxc_create
 
+# Idempotent memory bump for the already-existing CT (the `pct create`
+# above only ever runs once). 2026-09-11: apt-daily-upgrade.service got
+# OOM-killed hitting the exact 512MB cgroup ceiling (see lxc_memory
+# comment in defaults/main.yml for the full incident/reasoning).
+- name: Check Load Balancer LXC's current memory config
+  delegate_to: "{{ lb_node }}"
+  ansible.builtin.command: "pct config {{ lxc_id }}"
+  register: lb_config_current
+  changed_when: false
+  when: lb_exists
+
+- name: Bump Load Balancer LXC memory ceiling (see lxc_memory comment in defaults)
+  delegate_to: "{{ lb_node }}"
+  ansible.builtin.command: "pct set {{ lxc_id }} --memory {{ lxc_memory }}"
+  when:
+    - lb_exists
+    - "('memory: ' ~ lxc_memory) not in lb_config_current.stdout"
+
 - name: Start Load Balancer LXC
   # Only start right after creation (matches the lxc_create gate). After
   # that, HA (or the operator) owns the running-state. The "already

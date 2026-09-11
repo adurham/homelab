@@ -12,10 +12,11 @@
     ct_vmid: 101
 
 - name: Create Tailscale Gateway Container
+  delegate_to: "{{ ct_node }}"
   ansible.builtin.command: >
     pct create 101 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
     --hostname tailscale-gw
-    --cores 1 --memory 512 --swap 512
+    --cores 1 --memory 1024 --swap 512
     --net0 name=eth0,bridge=vmbr0,ip={{ ip_tailscale_gw_lan }}/24,gw={{ net_lan_gateway }}
     --net1 name=eth1,bridge=private,ip={{ net_private_gw }}/24
     --net2 name=eth2,bridge={{ net_bwt_bridge }},ip={{ ip_tailscale_gw_bwt }}/24,mtu={{ net_bwt_mtu }}
@@ -25,6 +26,37 @@
     --password "{{ tailscale_gw_root_pass }}"
   no_log: true
   when: not ct_exists
+
+# Idempotent memory bump for the already-existing CT (the `pct create`
+# above only ever runs once). 2026-09-11: this host (along with dns-01,
+# lb-01, proxy-01) got apt-daily-upgrade.service OOM-killed -- kernel OOM
+# line showed the cgroup hit its exact 512MB ceiling during a normal
+# 74-package security patch batch, no host-level memory pressure involved.
+# `--memory` is a cgroup ceiling not a reservation -- raising it costs
+# nothing at idle, only gives headroom for periodic burst dpkg/apt
+# operations. Confirmed via a fable consult before applying. Swap left at
+# 512 (see dns_host's identical fix for the full swap-vs-memory reasoning).
+#
+# FIXED 2026-09-11: this task (and the original pct create above) had no
+# `delegate_to` -- relied on the play running directly on the CT's node,
+# which broke the moment HA migrated CT 101 elsewhere (confirmed live:
+# `pct config 101` on the play's own host failed with "Configuration file
+# ... does not exist" since the CT was actually on pve02). Every other
+# pct/pvesh task in this file already correctly delegates to {{ ct_node }}
+# -- these two were the only ones that didn't.
+- name: Check Tailscale Gateway CT's current memory config
+  delegate_to: "{{ ct_node }}"
+  ansible.builtin.command: "pct config 101"
+  register: tsgw_config_current
+  changed_when: false
+  when: ct_exists
+
+- name: Bump Tailscale Gateway CT memory ceiling to 1024MB (see OOM comment above)
+  delegate_to: "{{ ct_node }}"
+  ansible.builtin.command: "pct set 101 --memory 1024"
+  when:
+    - ct_exists
+    - "'memory: 1024' not in tsgw_config_current.stdout"
 
 # net0 was DHCP until 2026-09-10 -- its lease silently drifted (.32 ->
 # .82) at some unknown point, breaking ansible/monitoring access for an

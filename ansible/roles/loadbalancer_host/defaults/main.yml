@@ -2,7 +2,18 @@
 lxc_id: 103
 lxc_hostname: "lb-01"
 lxc_cores: 1 # Nginx is efficient
-lxc_memory: 512 # 512MB is plenty
+lxc_memory: 1024 # bumped from 512 2026-09-11: apt-daily-upgrade.service got
+# OOM-killed hitting the exact 512MB cgroup ceiling during a normal
+# 74-package security patch batch (kernel OOM line: "memory: usage
+# 524288kB, limit 524288kB"), no host-level memory pressure involved.
+# --memory is a cgroup ceiling not a reservation -- costs nothing at idle,
+# only gives headroom for periodic burst dpkg/apt operations. Confirmed
+# via a fable consult before applying. Swap left at 512 deliberately --
+# see roles/dns_host/tasks/main.yml's identical fix for the full
+# swap-vs-memory reasoning (this node's host swap was separately found
+# near-full from unrelated accumulated creep, confirmed harmless via
+# /proc/pressure/memory showing 0 pressure -- leaning on more swap would
+# have been the wrong lever).
 lxc_swap: 512
 lxc_disk_size: "4G"
 lxc_net_ip: "{{ ip_loadbalancer }}/24"
