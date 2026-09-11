@@ -20,7 +20,7 @@
   ansible.builtin.command: >
     pct create 102 /var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst
     --hostname dns-01
-    --cores 1 --memory 512 --swap 512
+    --cores 1 --memory 1024 --swap 512
     --net0 name=eth0,bridge=private,ip={{ ip_dns_primary }}/24,gw={{ net_private_gw }}
     --storage nvme-data
     --unprivileged 1
@@ -30,6 +30,32 @@
     --onboot 1
   no_log: true
   when: not ct_exists
+
+# Idempotent memory bump for already-existing CTs (the `pct create` above
+# only ever runs once). 2026-09-11: dns-01, lb-01, tailscale-gw, proxy-01
+# all got apt-daily-upgrade.service OOM-killed on the same morning --
+# kernel OOM line showed the cgroup hit its exact 512MB ceiling
+# ("memory: usage 524288kB, limit 524288kB") during a normal 74-package
+# security patch batch, no host-level memory pressure involved (host PSI
+# was 0 throughout). `--memory` is a cgroup ceiling, not a reservation --
+# raising it costs nothing at idle (a CT using 90MB still uses 90MB with
+# a 1024MB ceiling), it only gives headroom for periodic burst dpkg/apt
+# operations. Confirmed via a fable consult before applying. Swap left at
+# 512 -- CT swap is a cap on shared HOST swap, not free capacity, and this
+# node's host swap was already near-full (unrelated accumulated creep,
+# confirmed harmless via /proc/pressure/memory showing 0 pressure) so
+# leaning on more swap would have been the wrong lever anyway.
+- name: Check DNS Container's current memory config
+  ansible.builtin.command: "pct config 102"
+  register: dns_config_current
+  changed_when: false
+  when: ct_exists
+
+- name: Bump DNS Container memory ceiling to 1024MB (see OOM comment above)
+  ansible.builtin.command: "pct set 102 --memory 1024"
+  when:
+    - ct_exists
+    - "'memory: 1024' not in dns_config_current.stdout"
 
 - name: Ensure DNS Container is Running
   ansible.builtin.command: pct start 102
