@@ -93,6 +93,42 @@ ollama-cloud leave `delegation.provider`/`model` empty so subagents
 inherit the parent model/credentials instead of being force-routed to
 a (possibly-down) exo cluster.
 
+## Updating hermes-agent's code (all 3 services run the same checkout)
+
+`hermes-gateway.service`, `hermes-serve.service`, and
+`hermes-gateway-dashboard.service` all run
+`/opt/hermes-agent/venv/bin/hermes*` — same editable install, different
+entrypoint args. A plain `ansible-playbook deploy_hermes_gateway.yml
+--limit hermes_gateway` re-run is enough to pick up new commits on
+`adurham/hermes-agent`'s `main` branch: `Clone Hermes Agent Repository`
+(the `ansible.builtin.git` task) pulls, and if HEAD actually moved, all
+three services restart to load the new code — no separate "update
+hermes" step needed.
+
+**Root-caused 2026-09-12, fixed:** this used to be unreliable in both
+directions. `ansible.builtin.git`'s own before/after SHA diff is the one
+correct "did the code change" signal, but its `notify` only listed
+`Restart Hermes Gateway` — a real code update updated all three services'
+code on disk but only restarted one, leaving the other two running stale
+in-memory code indefinitely. Meanwhile the very next task ("Install
+Hermes Agent Editable", `ansible.builtin.pip` with `-e`) *looked* like the
+complete restart trigger — it already notified all three — but
+`ansible.builtin.pip` reports `changed=True` on literally every run of an
+editable install regardless of whether source changed (`pip install -e`
+always prints "Successfully installed ..." for the local egg; verified
+directly with two back-to-back no-op runs, both `changed=True`). Net
+effect before the fix: *every* deploy of any kind — even a config-only
+change with no new commits — force-restarted all three services, while a
+genuine code update alone (with no other task also reporting `changed`)
+would have missed two of the three. Fixed by moving the full 3-service
+notify onto the git task (the one with real changed-detection) and
+pinning `changed_when: false` on the pip task so its false-positive
+signal stops firing.
+
+Verified end-to-end: a no-op deploy run now restarts 0 of the 3 services;
+rolling the checkout back one commit and re-running restarts all 3 and
+they come back healthy.
+
 ## Model-routing config drift (MacBook vs this gateway)
 
 The MacBook's local `~/.hermes/config.yaml` and this gateway's
