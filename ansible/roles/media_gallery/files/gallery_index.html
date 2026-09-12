@@ -458,7 +458,7 @@
   <button id="helpBtn" title="Keyboard shortcuts (?)">?</button>
   <button id="dedupBtn" title="Find duplicate photos">&#9783; Duplicates</button>
   <button id="uploadBtn">&#8593; Upload</button>
-  <select id="sort" style="display:none">
+  <select id="sort" autocomplete="off" style="display:none">
     <option value="new">Newest first</option>
     <option value="old">Oldest first</option>
     <option value="name">Name A–Z</option>
@@ -575,6 +575,12 @@
   var manifest=[], chats=[], chatMap={};
   var emptyFolders=[];     // user-created folders not yet in manifest
   var current=null;        // null = landing; "*" all; else chat name
+  // True once the initial manifest.json fetch (BOOT, bottom of file) has
+  // resolved. Distinguishes "manifest is [] because it's still loading"
+  // from "manifest is [] because the gallery is genuinely empty" — the
+  // Duplicates view's live-filter (renderDuplicates) must never treat the
+  // former as "everything's a ghost, hide all groups".
+  var bootDone=false;
   var view=[];             // current folder's sorted items
   var lbIndex=-1;
   var selectedFolders=new Set();   // landing-page multi-folder selection (declared early so render guards pass)
@@ -1346,6 +1352,7 @@
     ])
       .then(function(res){
         manifest=Array.isArray(res[0])?res[0]:[];
+        bootDone=true;
         var allFolders=Array.isArray(res[1])?res[1]:[];
         // retire pending folder-deletes the server's folders.json has dropped
         Object.keys(pendingRmdir).forEach(function(f){ if(allFolders.indexOf(f)<0){ delete pendingRmdir[f]; } });
@@ -2231,9 +2238,36 @@
     dupAction={};
     _dupReport=rep;   // remember the current report so deletes update it in place
     var groups=rep.groups||[];
+    // LIVE-FILTER against the manifest actually loaded in this browser tab.
+    // 2026-09-12 fix: dedup.json is a periodic snapshot (see triggerDupScan/
+    // the backend dedup_scan.py). Anything deleted (here, in another tab, or
+    // by another device) since that snapshot was generated still lists in
+    // the raw report — previously rendered as a "still duplicated" card
+    // pointing at a file that's already gone, so clicking Delete on it did
+    // nothing (there was nothing left to delete) and it never went away.
+    // Cross-referencing against `manifest` (already loaded before this view
+    // can be reached — see BOOT below, and showDuplicates() is only wired to
+    // a button that exists after boot completes) makes the view self-heal
+    // against ANY already-completed deletion without needing a fresh scan.
+    // Guard on manifest actually having loaded (non-empty OR boot finished)
+    // so an edge-case empty gallery doesn't get misread as "everything's
+    // gone" and hide every group.
+    var manifestReady = Array.isArray(manifest) && bootDone;
+    var liveTotal = 0, ghostTotal = 0;
+    if(manifestReady){
+      var liveStems={};
+      manifest.forEach(function(it){ liveStems[it.stem]=1; });
+      groups = groups.map(function(g){
+        var kept=g.filter(function(m){ return liveStems[m.stem]; });
+        ghostTotal += (g.length - kept.length);
+        liveTotal += kept.length;
+        return kept;
+      }).filter(function(g){ return g.length>=2; });
+    }
     var html='<div id="dupBar">'+
       '<b>'+groups.length+' duplicate group'+(groups.length===1?'':'s')+'</b> · '+
-      (rep.dup_items||0)+' items · scanned '+(rep.scanned||0)+
+      (manifestReady?liveTotal:(rep.dup_items||0))+' items · scanned '+(rep.scanned||0)+
+      (ghostTotal?(' · <span title="Already deleted since this report was generated — hidden automatically">'+ghostTotal+' already-deleted item'+(ghostTotal===1?'':'s')+' hidden</span>'):'')+
       ' <span class="grow"></span>'+
       '<span id="dupCount">0 marked for deletion</span>'+
       '<button id="dupTrash">🗑 Trash marked</button>'+
@@ -2371,6 +2405,17 @@
   document.getElementById('helpScrim').addEventListener('click',function(e){ if(e.target===this) this.classList.remove('show'); });
 
   // ---------- BOOT ----------
+  // Force the sort dropdown back to its coded default ("Newest first") on
+  // every fresh load. 2026-09-12 fix: browsers persist a <select>'s
+  // last-chosen value across page reloads as part of their own form-state
+  // restoration (separate from autofill) — so picking "Largest first" ONCE
+  // (e.g. while hunting for space-hogging files) silently became the
+  // permanent apparent default on every future visit, with nothing in this
+  // file ever having actually changed. autocomplete="off" on the <select>
+  // (see the HTML above) tells browsers not to do this in the first place;
+  // this explicit reset is belt-and-suspenders in case any browser/version
+  // restores the value before scripts run regardless.
+  elSort.value='new';
   // load the manifest AND the full folder list (incl. empty folders) in parallel
   Promise.all([
     fetch('/gallery/manifest.json').then(function(r){if(!r.ok)throw new Error(r.status);return r.json();}),
@@ -2378,6 +2423,7 @@
     fetch('/foldermeta?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():{};}).catch(function(){return {};})
   ]).then(function(res){
       manifest=Array.isArray(res[0])?res[0]:[];
+      bootDone=true;
       var allFolders=Array.isArray(res[1])?res[1]:[];
       folderMeta=(res[2]&&typeof res[2]==='object')?res[2]:{};
       buildChats();
