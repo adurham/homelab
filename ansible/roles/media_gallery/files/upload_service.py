@@ -25,6 +25,7 @@ Env: RCLONE_CONFIG, TG_RCLONE_REMOTE (gcrypt:), UPLOAD_PORT (8092),
 """
 import cgi
 import datetime as dt
+import fcntl
 import json
 import os
 import shutil
@@ -452,6 +453,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._move(p[len("/move/"):])
             if p.startswith("/rmdir/"):
                 return self._rmdir(p[len("/rmdir/"):])
+            if p.startswith("/sethidden"):
+                return self._sethidden()
             self._json(404, {"error": "not found"})
         except Exception as e:  # noqa: BLE001 — surface the real error, don't bare-500
             import traceback
@@ -793,6 +796,47 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"moved": stem, "from": srcf, "to": destf,
                          "file": f"by-chat/{destf}/{leaf}"})
 
+    def _sethidden(self):
+        """POST /sethidden  body {"stems": [...], "hidden": bool}
+
+        Mark stems as hidden from normal browsing (hidden=true) or explicitly
+        kept/visible (hidden=false). Updates the shared hidden.json ledger under
+        the fcntl hidden lock, then triggers an immediate manifest rebuild so the
+        change goes live without waiting on the hourly cycle. Returns the number
+        of stems applied.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, OSError) as e:
+            return self._json(400, {"error": f"bad json body: {e}"})
+        stems = body.get("stems")
+        hidden = body.get("hidden")
+        if not isinstance(stems, list) or not stems:
+            return self._json(400, {"error": "want non-empty 'stems' list"})
+        if not isinstance(hidden, bool):
+            return self._json(400, {"error": "want boolean 'hidden'"})
+        # reject anything that could escape the ledger / path semantics
+        for s in stems:
+            if not isinstance(s, str) or not s or "/" in s or ".." in s:
+                return self._json(400, {"error": "invalid stem in list"})
+        from dedup_live import HIDDEN_LOCK, load_hidden, save_hidden
+        HIDDEN_LOCK.parent.mkdir(parents=True, exist_ok=True)
+        with open(HIDDEN_LOCK, "w") as hf:
+            fcntl.flock(hf, fcntl.LOCK_EX)
+            h = load_hidden()
+            for s in stems:
+                if hidden:
+                    h["hidden"].add(s)
+                    h["keep"].discard(s)
+                else:
+                    h["keep"].add(s)
+                    h["hidden"].discard(s)
+            save_hidden(h)
+        _dirty.set()
+        _rebuild_now.set()  # structural change -> rebuild now, skip debounce
+        return self._json(200, {"stems": len(stems), "hidden": hidden})
+
     def _upload(self, raw):
         folder = sanitize_folder(raw)
         if not folder:
@@ -837,7 +881,7 @@ class Handler(BaseHTTPRequestHandler):
         # pusher never grabs a half-written file.
         pdir = PENDING_ROOT / folder
         pdir.mkdir(parents=True, exist_ok=True)
-        stored, errors, datemap_add = [], [], {}
+        stored, errors, datemap_add, staged = [], [], {}, []
         for item in items:
             if not getattr(item, "filename", None):
                 continue
@@ -863,6 +907,7 @@ class Handler(BaseHTTPRequestHandler):
                     dt.datetime.fromtimestamp(tmp.stat().st_mtime).isoformat()
                 os.replace(tmp, dest)  # atomic; now visible to the pusher
                 datemap_add[stem] = {"date": date, "out": out_override, "src": src_tag}
+                staged.append((stem, str(dest), ext in VIDEO_EXT))
                 stored.append({"stem": stem, "file": f"by-chat/{folder}/{stem}{ext}",
                                "orig": item.filename})
             except Exception as e:  # noqa: BLE001
@@ -879,6 +924,19 @@ class Handler(BaseHTTPRequestHandler):
             _uploads_total[0] += len(stored)
             with _push_lock:
                 _pending_count[0] += len(stored)
+        # Ingest-time duplicate detection: hash each just-staged non-video file
+        # against the shared dedup hash cache and hide any within-HAMMING match
+        # via hidden.json. Runs AFTER update_datemap above so the shared datemap
+        # already contains the new stems (dates are resolved from it inside the
+        # checker). MUST never break the upload response — any failure is logged
+        # and swallowed so the client still gets its 200.
+        if staged:
+            try:
+                from dedup_live import check_ingest_batch
+                check_ingest_batch(staged,
+                                   {s: datemap_add[s]["date"] for s in datemap_add})
+            except Exception as e:  # noqa: BLE001 — dedup must never fail an upload
+                print(f"[upload] ingest dedup check failed: {e}", flush=True)
         # 'queued' = accepted to local staging, GDrive push is async.
         self._json(200, {"folder": folder, "stored": len(stored),
                          "queued": len(stored), "items": stored,

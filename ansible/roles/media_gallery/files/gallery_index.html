@@ -581,6 +581,11 @@
   // Duplicates view's live-filter (renderDuplicates) must never treat the
   // former as "everything's a ghost, hide all groups".
   var bootDone=false;
+  // Number of non-hidden items (the server's build_manifest.py stamps items
+  // with "hidden":true when they're non-newest members of a duplicate group).
+  // Browsing shows only visible items; the Duplicates review page is the one
+  // place to inspect/unhide. No client toggle by design.
+  var visibleCount=0;
   var view=[];             // current folder's sorted items
   var lbIndex=-1;
   var selectedFolders=new Set();   // landing-page multi-folder selection (declared early so render guards pass)
@@ -901,12 +906,23 @@
     applyFolderDeletes();   // hide optimistically-deleted folders (survives refresh)
     applyPending();
     chatMap={}; chats=[];
+    visibleCount=0;
     manifest.forEach(function(it){
       var c=it.chat;
       // skip items with no folder — a transient empty chat (mid-rename/move/delete
       // re-key) must NOT spawn a phantom "(unknown)/untitled" folder tile.
       if(!c) return;
+      // Create the folder entry BEFORE the hidden check: a folder whose items
+      // are ALL hidden must still appear as a folder (with 0 visible items),
+      // not vanish entirely.
       if(!chatMap[c]){chatMap[c]=[];chats.push(c);}
+      if(it.hidden){
+        // hidden:true (stamped by build_manifest.py on non-newest members of
+        // duplicate groups) — excluded from browsing. No client toggle by
+        // design: the Duplicates review page is the inspect/unhide surface.
+        return;
+      }
+      visibleCount++;
       chatMap[c].push(it);
     });
     chats.sort(function(a,b){return chatMap[b].length-chatMap[a].length;});
@@ -1007,7 +1023,7 @@
     document.getElementById('statusBar').classList.remove('show');
     hideUploadBar();
     setCrumb(null);
-    elSub.textContent=chats.length+' folders · '+manifest.length+' items total';
+    elSub.textContent=chats.length+' folders · '+visibleCount+' items total';
     elState.style.display='none';
 
     var frag=document.createDocumentFragment();
@@ -1100,7 +1116,11 @@
     // openFolder(current) to refresh, and must not wipe an in-progress selection).
     var navigating = (chat !== current);
     current=chat;
-    var items=(chat==='*')?manifest.slice():(chatMap[chat]?chatMap[chat].slice():[]);
+    // "All items" reads manifest directly (bypassing chatMap), so apply the
+    // same hidden-flag filter here that buildChats() applies to real folders.
+    var items=(chat==='*')
+      ? manifest.filter(function(it){ return !it.hidden; })
+      : (chatMap[chat]?chatMap[chat].slice():[]);
     var name=(chat==='*')?'All items':chat;
     applySort(items);
     view=items;
@@ -1713,7 +1733,7 @@
 
   function rerenderCurrent(){
     if(current==null) return;
-    view=(current==='*'?manifest.slice():(chatMap[current]?chatMap[current].slice():[]));
+    view=(current==='*'?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]));
     applySort(view); renderPhotos(); renderFolderRail();
     elSub.textContent=view.length+' item'+(view.length===1?'':'s');
     elState.style.display=view.length?'none':'block';
@@ -1914,7 +1934,7 @@
   elZoom.addEventListener('input',function(){
     document.documentElement.style.setProperty('--tilesize', elZoom.value+'px');
   });
-  elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*'?manifest.slice():(chatMap[current]?chatMap[current].slice():[])); applySort(view); renderPhotos(); } });
+  elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*'?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[])); applySort(view); renderPhotos(); } });
 
   // ---------- RIGHT-CLICK CONTEXT MENU ----------
   var elCtx=document.getElementById('ctxMenu');
@@ -2253,6 +2273,11 @@
     // so an edge-case empty gallery doesn't get misread as "everything's
     // gone" and hide every group.
     var manifestReady = Array.isArray(manifest) && bootDone;
+    // stems hidden from browsing (server-stamped "hidden":true on non-newest
+    // members of duplicate groups) — shown here so the user sees which members
+    // are suppressed from normal folder browsing.
+    var hiddenStems={};
+    if(Array.isArray(manifest)){ manifest.forEach(function(it){ if(it.hidden) hiddenStems[it.stem]=1; }); }
     var liveTotal = 0, ghostTotal = 0;
     if(manifestReady){
       var liveStems={};
@@ -2268,6 +2293,7 @@
       '<b>'+groups.length+' duplicate group'+(groups.length===1?'':'s')+'</b> · '+
       (manifestReady?liveTotal:(rep.dup_items||0))+' items · scanned '+(rep.scanned||0)+
       (ghostTotal?(' · <span title="Already deleted since this report was generated — hidden automatically">'+ghostTotal+' already-deleted item'+(ghostTotal===1?'':'s')+' hidden</span>'):'')+
+      ' · <span title="Non-newest members of each duplicate group have been set to hidden:true server-side, so they stay out of normal folder browsing. Click Keep/KEEP on a card to unhide it.">non-newest members are hidden from browsing automatically</span>'+
       ' <span class="grow"></span>'+
       '<span id="dupCount">0 marked for deletion</span>'+
       '<button id="dupTrash">🗑 Trash marked</button>'+
@@ -2294,8 +2320,10 @@
         var di=dupShown.length; dupShown.push(m);
         var dt=m.date?(' · '+fmtDate(m.date)):'';
         var meta=(m.chat||'')+(m.size?(' · '+fmtBytes(m.size)):'')+dt;
-        html+='<div class="dupcard '+(act==='keep'?'dckeep':'dcdel')+'" data-stem="'+m.stem+'" data-chat="'+(m.chat||'')+'" data-di="'+di+'">'+
+        var hidden=!!hiddenStems[m.stem];
+        html+='<div class="dupcard '+(act==='keep'?'dckeep':'dcdel')+(hidden?' dchidden':'')+'" data-stem="'+m.stem+'" data-chat="'+(m.chat||'')+'" data-di="'+di+'">'+
           '<span class="dc-badge">'+(act==='keep'?'KEEP':'DELETE')+'</span>'+
+          (hidden?'<span class="dc-badge">hidden from gallery</span>':'')+
           '<img loading="lazy" src="/'+m.thumb+'" data-di="'+di+'">'+
           '<div class="dc-meta">'+meta+'</div>'+
           '<button class="dc-toggle">'+(act==='keep'?'✓ Keeping — click to delete':'🗑 Deleting — click to keep')+'</button>'+
@@ -2313,8 +2341,11 @@
     elDup.querySelectorAll('.dupcard .dc-toggle').forEach(function(btn){
       btn.addEventListener('click',function(e){
         e.stopPropagation();
-        var c=btn.closest('.dupcard'); setDupCard(c, dupAction[c.dataset.stem]==='trash'?'keep':'trash');
+        var c=btn.closest('.dupcard'); var newAct=dupAction[c.dataset.stem]==='trash'?'keep':'trash';
+        setDupCard(c, newAct);
         updateDupCount();
+        // keep -> unhide, trash -> re-hide (consistent with the group actions)
+        sethidden([c.dataset.stem], newAct==='trash');
       });
     });
     // per-group quick actions
@@ -2327,6 +2358,11 @@
           else setDupCard(c, idx===0?'keep':'trash');   // keepfirst
         });
         updateDupCount();
+        // group-level keep/trash also drives /sethidden: keep-newest hides the
+        // non-newest members, keep-all unhides them.
+        var allStems=Array.prototype.slice.call(cards).map(function(c){return c.dataset.stem;});
+        if(mode==='keepall') sethidden(allStems.slice(1), false);
+        else sethidden(allStems.slice(1), true);
       });
     });
     updateDupCount();
@@ -2336,6 +2372,42 @@
     c.classList.remove('dckeep','dcdel'); c.classList.add(act==='keep'?'dckeep':'dcdel');
     var badge=c.querySelector('.dc-badge'); if(badge) badge.textContent=act==='keep'?'KEEP':'DELETE';
     var tg=c.querySelector('.dc-toggle'); if(tg) tg.innerHTML=act==='keep'?'✓ Keeping — click to delete':'🗑 Deleting — click to keep';
+  }
+  // POST /sethidden (user override of the automatic duplicate-hiding). Fire-and-
+  // forget: a failed call just means the next hourly scan reconciles. hidden=true
+  // hides the stems from browsing, hidden=false unhides (user override).
+  function sethidden(stems, hidden){
+    fetch('/sethidden',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({stems:stems,hidden:hidden})})
+      .then(function(r){ if(r.status===200){ applyHiddenState(stems, hidden); } })
+      .catch(function(){});
+  }
+  // Apply a hidden-flag change to the in-memory manifest + the review page in
+  // place (no full re-render, so in-progress dupAction marks survive).
+  function applyHiddenState(stems, hidden){
+    var map={}; stems.forEach(function(s){ map[s]=1; });
+    manifest.forEach(function(it){
+      if(map[it.stem]){
+        if(hidden) it.hidden=true;
+        else delete it.hidden;
+      }
+    });
+    buildChats();
+    // update review cards for the affected stems without a full re-render
+    if(current==='__dup__'){
+      document.querySelectorAll('.dupcard').forEach(function(c){
+        if(!map[c.dataset.stem]) return;
+        if(hidden){ c.classList.add('dchidden'); }
+        else{
+          c.classList.remove('dchidden');
+          var badge=null;
+          c.querySelectorAll('.dc-badge').forEach(function(b){ if(b.textContent==='hidden from gallery') badge=b; });
+          if(badge) badge.remove();
+        }
+      });
+    }
+    if(current===null) renderFolders();   // refresh landing counts
   }
   // lightbox over the flat dup list (full-size compare, arrow-key paging)
   var dupShown=[];
