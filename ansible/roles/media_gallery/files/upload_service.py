@@ -36,6 +36,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
+# Durable folder-merge/redirect resolution (canonical module — see its docstring
+# for the embedded-copy contract with the ingest roles).
+import folder_redirect  # noqa: E402
+
 from PIL import Image
 
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
@@ -357,6 +361,65 @@ def new_stem() -> str:
     return f"up_{int(time.time()*1000)}_{secrets.token_hex(4)}"
 
 
+def merge_folder(meta, from_folder, to_folder, list_originals_fn, move_fn, delete_fn, purge_fn):
+    """Pure-ish core of POST /merge/<from>/<to> — all filesystem/remote side
+    effects go through the injected callbacks so the logic is unit-testable
+    without rclone/network.
+
+    Args:
+      meta: parsed folder_meta dict ({folder: {cover, chat_ids}, "redirects": {...}})
+      from_folder / to_folder: sanitized, non-equal folder names
+      list_originals_fn(folder) -> list[str] of LEAF filenames in by-chat/<folder>
+                                  (stems derived via splitext; [] if absent)
+      move_fn(from_folder, to_folder, leaf)   — relocate one original + its thumb
+      delete_fn(from_folder, leaf)            — delete one original (a dupe of to)
+      purge_fn(folder)                        — purge by-chat/<folder> originals + thumbs
+
+    Idempotent: if by-chat/from doesn't exist, no files move/delete, but the
+    redirects + chat_ids are still registered and the meta entry removed, so a
+    re-run collapses to just the redirect bookkeeping. Returns
+    (new_meta, moved, removed_dupes, chat_ids). `meta` is NOT mutated (a copy
+    is returned)."""
+    meta = dict(meta or {})
+    redirects = dict(meta.get("redirects", {}))
+
+    # chat ids = cover stem + all original-file stems in by-chat/from
+    cover_stems = []
+    entry_from = meta.get(from_folder, {})
+    if entry_from.get("cover"):
+        cover_stems = [str(entry_from["cover"])]
+    from_leaves = list_originals_fn(from_folder)  # [] if folder absent
+    stem_from = [os.path.splitext(l)[0] for l in from_leaves]
+    chat_ids = set(entry_from.get("chat_ids") or [])
+    chat_ids |= set(folder_redirect.extract_chat_ids(cover_stems + stem_from))
+    chat_ids = sorted(chat_ids)
+
+    # redirects (name/user/chat -> to), chain-collapsed
+    redirects = folder_redirect.merge_redirects(redirects, from_folder, to_folder, chat_ids)
+    meta["redirects"] = redirects
+
+    # merge chat_ids into the survivor's entry (keep existing cover)
+    entry_to = dict(meta.get(to_folder, {}))
+    entry_to["chat_ids"] = sorted(set(entry_to.get("chat_ids") or []) | set(chat_ids))
+    meta[to_folder] = entry_to
+    meta.pop(from_folder, None)
+
+    # per-file: same stem already in to -> dupe (delete), else move
+    to_leaves = set(os.path.splitext(l)[0] for l in list_originals_fn(to_folder))
+    moved = removed_dupes = 0
+    for leaf in from_leaves:
+        if os.path.splitext(leaf)[0] in to_leaves:
+            delete_fn(from_folder, leaf)
+            removed_dupes += 1
+        else:
+            move_fn(from_folder, to_folder, leaf)
+            moved += 1
+    # always purge (idempotent even if the folder is already gone)
+    purge_fn(from_folder)
+    return meta, moved, removed_dupes, chat_ids
+
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -453,6 +516,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._move(p[len("/move/"):])
             if p.startswith("/rmdir/"):
                 return self._rmdir(p[len("/rmdir/"):])
+            if p.startswith("/merge/"):
+                return self._merge(p[len("/merge/"):])
             if p.startswith("/sethidden"):
                 return self._sethidden()
             self._json(404, {"error": "not found"})
@@ -469,7 +534,9 @@ class Handler(BaseHTTPRequestHandler):
         """POST /rmdir/<folder> — delete a gallery folder AND its contents
         (originals + thumbnails). Refuses the safety-sensitive known person
         folders only if non-empty? No — Finder lets you delete non-empty folders;
-        we mirror that but the UI confirms first. Purges originals + thumbs."""
+        we mirror that but the UI confirms first. Purges originals + thumbs,
+        and drops the folder's folder_meta entry (no redirect is registered —
+        rmdir doesn't know the canonical target)."""
         folder = sanitize_folder(raw)
         if not folder:
             return self._json(400, {"error": "bad folder name"})
@@ -479,9 +546,80 @@ class Handler(BaseHTTPRequestHandler):
         if r.returncode != 0 and "directory not found" not in (r.stderr or "").lower():
             return self._json(500, {"error": "rmdir failed", "detail": r.stderr[:200]})
         rclone("purge", f"{REMOTE}thumbs/{folder}")
+        # drop metadata so the folder's chat_ids/cover don't linger as a dead key
+        with _fmeta_lock:
+            m = load_folder_meta()
+            if folder in m:
+                m.pop(folder, None)
+                save_folder_meta(m)
         _dirty.set()
         _rebuild_now.set()  # structural change -> rebuild now, skip debounce
         self._json(200, {"removed": folder})
+
+    def _merge(self, raw):
+        """POST /merge/<from>/<to> — durably merge folder <from> into <to>.
+
+        Moves every non-duplicate original + thumb from by-chat/<from> to
+        by-chat/<to>, deletes within-folder dupes (same stem already present in
+        <to> — identical content), then purges <from> originals + thumbs. Registers
+        durable redirects (chat:CID, name:<from>, user:<from> -> <to>) in
+        folder_meta so every future ingest of that chat/name routes permanently to
+        <to> (the authoritative backstop at ingest time re-applies the same
+        resolve). Idempotent: if <from> no longer exists, redirects + chat_ids
+        are still merged/removed and a rebuild is armed — safe to re-run.
+        """
+        parts = [s for s in raw.split("/") if s]
+        if len(parts) != 2:
+            return self._json(400, {"error": "want /merge/<from>/<to>"})
+        from_folder = sanitize_folder(parts[0])
+        to_folder = sanitize_folder(parts[1])
+        if not from_folder or not to_folder:
+            return self._json(400, {"error": "bad folder name"})
+        if from_folder == to_folder:
+            return self._json(400, {"error": "source and destination are the same"})
+
+        with _fmeta_lock:
+            meta = load_folder_meta()
+
+            def _list_originals(folder):
+                ls = rclone("lsf", f"{SRC}/{folder}/")
+                if ls.returncode != 0:
+                    return []  # folder absent -> idempotent
+                return [l.strip() for l in ls.stdout.splitlines() if l.strip()]
+
+            def _move(from_f, to_f, leaf):
+                rclone("mkdir", f"{SRC}/{to_f}")
+                rclone("moveto", f"{SRC}/{from_f}/{leaf}", f"{SRC}/{to_f}/{leaf}",
+                       "--retries", "5", "--low-level-retries", "10")
+                stem = os.path.splitext(leaf)[0]
+                rclone("move", f"{REMOTE}thumbs/{from_f}", f"{REMOTE}thumbs/{to_f}",
+                       "--include", f"{stem}.jpg", "--retries", "3",
+                       "--low-level-retries", "5")
+
+            def _delete(from_f, leaf):
+                rclone("delete", f"{SRC}/{from_f}/{leaf}",
+                       "--retries", "5", "--low-level-retries", "10")
+
+            def _purge(folder):
+                r = rclone("purge", f"{SRC}/{folder}")
+                # treat an already-gone folder as success (idempotent re-runs)
+                if r.returncode != 0 and "directory not found" not in (r.stderr or "").lower():
+                    print(f"[merge] purge {folder} originals failed: {r.stderr[:200]}", flush=True)
+                rclone("purge", f"{REMOTE}thumbs/{folder}")
+
+            new_meta, moved, removed_dupes, chat_ids = merge_folder(
+                meta, from_folder, to_folder,
+                _list_originals, _move, _delete, _purge)
+            save_folder_meta(new_meta)
+
+        _dirty.set()
+        _rebuild_now.set()  # structural change -> rebuild now, skip debounce
+        redirects = new_meta.get("redirects") or {}
+        self._json(200, {
+            "merged": from_folder, "into": to_folder,
+            "moved": moved, "removed_dupes": removed_dupes,
+            "chat_ids": chat_ids, "redirects": redirects})
+
 
     def _renamefile(self, raw):
         """POST /renamefile/<chat>/<oldstem>/<newstem> — rename a single item's
@@ -844,7 +982,6 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "")
         if "multipart/form-data" not in ctype:
             return self._json(400, {"error": "expected multipart/form-data"})
-
         # cgi.FieldStorage streams large parts to spooled temp files itself; we
         # then move each into a per-request staging dir under their final name.
         fs = cgi.FieldStorage(
@@ -874,6 +1011,21 @@ class Handler(BaseHTTPRequestHandler):
         date_override = field("date") if keyed else None
         out_override = (field("out") == "1") if keyed else False
         src_tag = "source" if keyed else "upload"
+
+        # ─── Durable-merge backstop (authoritative): resolve the folder through
+        # the redirect map BEFORE writing anything, so even a stale collector
+        # cache (a chat_id with no chat_ids mapping that would sanitize back to a
+        # merged-away name) cannot recreate a merged-away folder. chat_id is
+        # recovered from the collector stem's numeric prefix (CHATID_MSGID) when
+        # present; browser uploads (up_*) have none and rely on the name redirect.
+        try:
+            redirects = load_folder_meta().get("redirects", {}) or {}
+            ingest_chat_id = None
+            if stem_override:
+                ingest_chat_id = (folder_redirect.extract_chat_ids([stem_override]) or [None])[0]
+            folder = folder_redirect.resolve_folder(redirects, folder, ingest_chat_id)
+        except Exception as e:  # noqa: BLE001 — redirect must never break an upload
+            print(f"[upload] redirect resolve failed, using raw folder: {e}", flush=True)
 
         # Stream each file straight into PENDING/<folder>/ (local disk, LAN
         # speed) and return immediately. The _pusher_worker copies to GDrive
