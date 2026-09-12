@@ -18,12 +18,24 @@
 #     automatically stops doing real work (near-instant runs) once nothing
 #     is left to backfill -- no separate "done" state to track or forget
 #     to disable.
+#
+# OnUnitInactiveSec (not OnUnitActiveSec) is deliberate: OnUnitActiveSec
+# counts from the service's last START, not its completion. Real runs take
+# ~70-80 minutes (200 items x a real ~20-25s download+resize+reupload round
+# trip each, observed live 2026-09-12 -- much slower than first assumed),
+# so an OnUnitActiveSec interval shorter than the actual runtime doesn't
+# double-invoke (Type=oneshot + the timer going dormant while the unit is
+# "activating" prevents that), but it DOES mean the very next trigger lands
+# within about a second of the previous run finishing -- i.e. continuous
+# back-to-back runs with zero rest, the opposite of "throttled background
+# job". OnUnitInactiveSec counts from DEACTIVATION instead, giving a real
+# idle gap between runs regardless of how long any individual run takes.
 [Unit]
 Description=media-gallery thumbnail backfill schedule (background auto-cron)
 
 [Timer]
 OnBootSec=15min
-OnUnitActiveSec={{ media_gallery_thumb_backfill_interval }}
+OnUnitInactiveSec={{ media_gallery_thumb_backfill_interval }}
 Persistent=true
 
 [Install]
