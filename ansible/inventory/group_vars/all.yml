@@ -73,6 +73,32 @@ discord_infra_alerts_webhook_url: !vault |
 # listener) of the #infra-alerts channel above.
 discord_infra_alerts_channel_id: "1535865801947611178"
 
+# Separate, passive #infra-alerts-history channel (created 2026-09-12):
+# an append-only log of every Grafana alert fire/resolve EVENT, never
+# edited or deleted. #infra-alerts above shows ONLY currently-active
+# alerts by explicit design ("if they are resolved they are to be
+# removed from this channel... I want this to be ACTIVE and firing
+# alerts") -- a still-firing alert also reposts every repeat_interval
+# (4h, see roles/grafana/templates/alerting_policies.yml.j2) with no
+# state change, which without dedup created 24 duplicate messages for
+# two alerts firing continuously for 2 days before this was caught.
+# grafana_ack_bot's service.py now (a) dedupes same-fingerprint reposts
+# instead of creating a new #infra-alerts message each time, and
+# (b) mirrors every lifecycle event here as a one-line, permanent
+# record. Same bot/app as the main webhook, different channel+webhook.
+discord_infra_alerts_history_webhook_url: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          39313134613539346536353965663564623061613433656134646639626535636666306562363966
+          6239326234383634343166623537613238653831316434640a326563303437616232346332386464
+          33343230333130313630336332363361663165313035653534346463623831316462346435613234
+          6562303130366630340a653663346635633263613636653461623762393937343966323232333433
+          30633537393963376630366133356136636138616535313865346432653666366164313634396230
+          34636339636566633839326633653138663662646538623361393439343165313230663532333833
+          39393031373230656661623137643533326238393466333037383232653062333837333163383638
+          34323266383764616433333038333864343766653261623330653534373865656161383039396365
+          37663734643163663930393866366433323438383265323936383961316164306431323938366466
+          3233333566653162343333316162313838613134373363376536
+
 # Grafana Discord Ack Bot (roles/grafana_ack_bot). Standalone service on
 # hermes-gw-01: reacting to an alert message in #infra-alerts (1h/4h/24h
 # emoji) creates a matching Grafana Alertmanager silence via this
