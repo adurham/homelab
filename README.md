@@ -183,6 +183,7 @@ Home Assistant configuration deployed to the HA host. Notable subsystems:
 - `yubikey_vpn_connect.sh` — YubiKey-based VPN connection.
 - `patch_binary.sh` — binary patching helper.
 - `grafana_auth.py` + `grafana_curl.sh` — JWT-token extractor for browser-based Grafana SSO + curl wrapper that injects the token (see `README_GRAFANA_AUTH.md`).
+- `hermes_config_sync.py` — mirrors `ansible/roles/hermes_gateway/vars/model_routing.yml` (the delegate_task/auxiliary model-routing source of truth) into a local, non-ansible-managed `~/.hermes/config.yaml`. Dry-run by default, `--apply` to write (timestamped backup), `--check` for scripting. Requires `ruamel.yaml` (`uv pip install --python .venv/bin/python3 ruamel.yaml`). See `ansible/roles/hermes_gateway/README.md` for the full drift-prevention workflow.
 - `tanium/` — Tanium platform tooling (client API, TDS, performance testing, sensors, etc.).
 
 ## Operational Procedures
