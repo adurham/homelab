@@ -1,23 +1,47 @@
 # -------------------------------------------------------------------------
-# AMD-Enterprises branding (2026-08-04). Replaces the stock Authentik
-# wordmark/favicon/flow-background/accent-color on the default brand
-# with an AMD-Enterprises look: custom logo + favicon (so the
-# login/library pages read "AMD-Enterprises" instead of "authentik"),
-# a dark navy blueprint-grid background applied to BOTH the login flow
-# pages (via branding_default_flow_background) AND the "My
+# AMD-Enterprises branding (2026-08-04, image handling reworked 2026-09-12).
+# Replaces the stock Authentik wordmark/favicon/flow-background/accent-color
+# on the default brand with an AMD-Enterprises look: custom logo + favicon
+# (so the login/library pages read "AMD-Enterprises" instead of
+# "authentik"), a dark navy blueprint-grid background applied to BOTH the
+# login flow pages (via branding_default_flow_background) AND the "My
 # applications" library page (via custom CSS body background — see
-# templates/amd_enterprises_custom.css.j2 GOTCHA #2 for why the two
-# need separate mechanisms), and custom CSS overriding the default
-# orange accent with the brand blue (--ak-accent /
-# --pf-global--primary-color--* / link colors — see that same file's
-# GOTCHA #1).
+# templates/amd_enterprises_custom.css.j2 GOTCHA #2 for why the two need
+# separate mechanisms), and custom CSS overriding the default orange accent
+# with the brand blue (--ak-accent / --pf-global--primary-color--* / link
+# colors — see that same file's GOTCHA #1).
 #
-# Authentik's branding_logo/branding_favicon/branding_default_flow_
-# background/branding_custom_css fields all accept plain values
-# directly via PATCH — images as data: URIs, CSS as a raw string
-# (confirmed live). No separate file-upload endpoint needed here,
-# unlike application icons which require the set_icon/ multipart
-# endpoint (see tasks/bookmarks.yml for that gotcha).
+# IMAGE FIELDS (logo/favicon/flow-background): 2026-09-12 REWORK.
+# Originally these were pushed as raw data: URIs directly via PATCH — at
+# the time (2026-08-04) Authentik's docs confirmed there was no separate
+# file-upload API endpoint, so a data: URI was the only API-only way to
+# set an image value, and it worked and was confirmed live.
+#
+# That broke after this session's 2025.8.1 -> 2026.8.0 upgrade: Authentik
+# now unconditionally prepends /files/media/public/ to whatever string is
+# stored in these fields when building the URL the frontend fetches — even
+# when the stored value is already a full data: URI — producing a garbage
+# URL like /files/media/public/data:image/svg+xml;base64,.... This is a
+# known upstream regression (goauthentik/authentik#19541, #19573), not a
+# config mistake on our end; confirmed by reproducing the same duplicate/
+# mishandled-path symptom independently of our specific setup.
+#
+# Fix: the authentik_service role (roles/authentik_service/tasks/main.yml)
+# now copies these same SVG files into the running container's real
+# /media/public/brand/ directory (Authentik's actual, still-working file
+# storage backend) BEFORE this play runs. We PATCH the brand with plain
+# relative paths into that directory instead of data: URIs. Relative
+# paths resolve correctly via /files/media/public/<path>?token=...
+# regardless of the upstream bug above, because that bug is specifically
+# in the data:-URI handling branch, not the plain-relative-path branch.
+# Verified live 2026-09-12: this exact pattern returns a real 200
+# image/svg+xml for the logo.
+#
+# branding_custom_css is UNAFFECTED by this bug (it's a raw CSS string
+# field, not a file-picker image field) and is left as a data: URI
+# embedded inside the CSS background-image — that continues to work fine
+# via normal CSS url(data:...) syntax, which is standard browser behavior
+# unrelated to Authentik's own file-resolution logic.
 #
 # branding_title was already "AMD-Enterprises" (set outside ansible,
 # pre-existing) — left as-is, only visual assets are managed here.
@@ -36,15 +60,7 @@
       json:
         results: "{{ all_brands.json.results | selectattr('default') | list }}"
 
-- name: Read AMD-Enterprises logo SVG
-  ansible.builtin.set_fact:
-    amd_enterprises_logo_b64: "{{ lookup('file', role_path + '/files/amd_enterprises_logo.svg') | b64encode }}"
-
-- name: Read AMD-Enterprises favicon SVG
-  ansible.builtin.set_fact:
-    amd_enterprises_favicon_b64: "{{ lookup('file', role_path + '/files/amd_enterprises_favicon.svg') | b64encode }}"
-
-- name: Read AMD-Enterprises flow background SVG
+- name: Read AMD-Enterprises flow background SVG (still used inline in custom CSS)
   ansible.builtin.set_fact:
     amd_enterprises_flow_bg_b64: "{{ lookup('file', role_path + '/files/amd_enterprises_flow_bg.svg') | b64encode }}"
 
@@ -63,9 +79,11 @@
     body_format: json
     body:
       branding_title: "AMD-Enterprises"
-      branding_logo: "data:image/svg+xml;base64,{{ amd_enterprises_logo_b64 }}"
-      branding_favicon: "data:image/svg+xml;base64,{{ amd_enterprises_favicon_b64 }}"
-      branding_default_flow_background: "data:image/svg+xml;base64,{{ amd_enterprises_flow_bg_b64 }}"
+      # Relative paths into /media/public/ (populated by authentik_service
+      # role) — NOT data: URIs. See the file-header comment above for why.
+      branding_logo: "brand/logo.svg"
+      branding_favicon: "brand/favicon.svg"
+      branding_default_flow_background: "brand/flow_bg.svg"
       branding_custom_css: "{{ amd_enterprises_custom_css }}"
       # settings.layout.type controls the "My applications" library page
       # grid: row (default) / 2-column / 3-column. Read by
