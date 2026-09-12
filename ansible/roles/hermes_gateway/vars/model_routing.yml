@@ -18,31 +18,36 @@
 # out of sync THREE ways by 2026-09-12 -- including one real bug
 # (delegation.by_provider.anthropic silently pinning claude-sonnet-5 as
 # PRIMARY, defeating the ollama-first cost policy) that had been fixed on
-# one copy but not the other two. Editing model choices in exactly one
-# place (here) and re-running the sync/deploy steps is the fix.
+# one copy but not the other two.
+#
+# FIXED 2026-09-12: both templates (config.yaml.j2 AND
+# dashboard_profile_config.yaml.j2) now render their
+# delegation.model_by_role / delegation.by_provider / auxiliary.anthropic /
+# auxiliary.ollama-cloud / providers.ollama-cloud.models blocks DIRECTLY
+# from the hermes_routing_* vars below via
+# `{{ hermes_routing_X | to_nice_yaml(indent=2, sort_keys=False) |
+# indent(N, True) }}` -- editing this file is now the ONLY hand-edit
+# required on the ansible side (was three: this file + both templates).
+# tasks/main.yml's "Load Model-Routing Source of Truth" task
+# (`include_vars: file: model_routing.yml`, first task in the role) loads
+# these vars into scope before either config is rendered.
 #
 # HOW TO RE-TIER A ROLE OR TASK:
 #   1. Edit the relevant dict below.
-#   2. Manually mirror the same edit into BOTH templates/config.yaml.j2's
-#      AND templates/dashboard_profile_config.yaml.j2's
-#      delegation.model_by_role / delegation.by_provider / auxiliary.*
-#      blocks -- neither template renders from this file yet (see "Known
-#      gap" below), so today this is three hand-edits, not one.
-#   3. Re-run `ansible-playbook deploy_hermes_gateway.yml --limit
-#      hermes_gateway` to push both templates to hermes-gw-01.
-#   4. Run `python3 scripts/hermes_config_sync.py --apply` from the repo
+#   2. `ansible-playbook deploy_hermes_gateway.yml --limit hermes_gateway`
+#      to push the change to hermes-gw-01 (both templates re-render from
+#      the new values automatically).
+#   3. Run `python3 scripts/hermes_config_sync.py --apply` from the repo
 #      root to mirror the same values into the MacBook's local
-#      ~/.hermes/config.yaml.
+#      ~/.hermes/config.yaml (the local session has no ansible/Jinja
+#      machinery of its own, so this is the one remaining manual step).
 #
-# KNOWN GAP (as of 2026-09-12): neither template renders from this file --
-# both still hardcode the same data verbatim. Rewiring them (e.g. via
-# to_nice_yaml) is the proper fix; deferred because it touches a live prod
-# template and needs a zero-behavior-diff render proof before deploying.
-# All three copies (MacBook, config.yaml.j2, dashboard_profile_config.yaml.j2)
-# were reconciled to identical values as of 2026-09-12 (verified zero-diff
-# except the one deliberate delegation.max_concurrent_children delta noted
-# below), so today's state is "in sync, manually" -- the drift risk this
-# file exists to kill is in step 2 above, not in the current values.
+# Verification method used when wiring this up (repeat after any future
+# structural change to either template): render both templates locally
+# with `ansible-playbook`, deep-diff the parsed YAML against a live
+# pre-change snapshot pulled off hermes-gw-01, require zero semantic
+# diffs before deploying. Confirmed zero-diff both ways (config.yaml.j2
+# and dashboard_profile_config.yaml.j2) before this was ever pushed live.
 #
 # WHAT IS DELIBERATELY *NOT* HERE (stays host-specific, do not "fix" by
 # moving it into this file): model.default/model.provider (which provider

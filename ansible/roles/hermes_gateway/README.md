@@ -104,47 +104,44 @@ copy-paste more than once (2026-09-04/07/08/12), including one real bug
 (`delegation.by_provider.anthropic` silently pinning `claude-sonnet-5` as
 PRIMARY on one copy after the other had already been fixed).
 
-`vars/model_routing.yml` is the single written source of truth for that
-routing data. As of 2026-09-12 it is also mirrored into
-`templates/dashboard_profile_config.yaml.j2` (the third copy that used to
-carry stale pre-re-tier values, incl. a copy of the same
-`by_provider.anthropic` bug) — all three configs (MacBook, Discord bot,
-web dashboard) verified byte-identical on this routing data as of that
-date, except the one deliberate delta noted below. To re-tier a role or
-auxiliary task:
+`vars/model_routing.yml` is the single source of truth for that routing
+data, and as of 2026-09-12 both templates render it directly (via
+`{{ hermes_routing_X | to_nice_yaml(...) | indent(N, True) }}`, loaded by
+the role's first task, `Load Model-Routing Source of Truth` ->
+`include_vars: file: model_routing.yml`) — this file is now the ONLY
+place any of the three configs' routing tables live in written form. To
+re-tier a role or auxiliary task:
 
 1. Edit the relevant entry in `vars/model_routing.yml`.
-2. Manually mirror the same edit into **both**
-   `templates/config.yaml.j2`'s **and**
-   `templates/dashboard_profile_config.yaml.j2`'s
-   `delegation.model_by_role` / `delegation.by_provider` / `auxiliary.*`
-   blocks — **neither template renders from the vars file yet** (see
-   "Known gaps" below), so today this is three hand-edits, not one.
-3. `ansible-playbook deploy_hermes_gateway.yml --limit hermes_gateway` to
-   push both templates to hermes-gw-01.
-4. From the repo root: `.venv/bin/python3 scripts/hermes_config_sync.py
+2. `ansible-playbook deploy_hermes_gateway.yml --limit hermes_gateway` to
+   push it to hermes-gw-01 — both templates re-render from the new
+   values automatically, no template edits needed.
+3. From the repo root: `.venv/bin/python3 scripts/hermes_config_sync.py
    --apply` to mirror the same values into the MacBook's local
    `~/.hermes/config.yaml` (dry-run without `--apply`; `--check` exits
    non-zero on drift, for scripting). Requires `ruamel.yaml` in `.venv`
    (`uv pip install --python .venv/bin/python3 ruamel.yaml` if missing —
    it's listed in `scripts/requirements.txt` but that file is not
-   auto-installed by anything yet).
+   auto-installed by anything yet). This step remains manual — the local
+   session has no ansible/Jinja machinery of its own.
 
 **Deliberate delta (intentionally NOT synced):**
 `delegation.max_concurrent_children` is 10 on the MacBook and
 `config.yaml.j2`, but 3 on `dashboard_profile_config.yaml.j2` — documented
 in that file since profile creation: a phone-chat/peer-messaging surface
 doesn't need the same subagent fanout headroom as the coding-agency
-Discord bot. Leave this one alone; it isn't drift.
+Discord bot. This is the only field either template still hand-sets
+outside the shared vars file; leave it alone, it isn't drift.
 
-**Known gaps (as of 2026-09-12, not yet fixed):**
-
-- Neither template renders from `vars/model_routing.yml` — step 2 above
-  is a manual mirror across three files, which is exactly the failure
-  mode this file exists to prevent. Rewiring both templates to render
-  from the vars file (e.g. via `to_nice_yaml`) is the proper fix;
-  deferred because it touches live, working prod templates and needs a
-  zero-behavior-diff render proof before deploying.
+**How this was verified safe before going live (2026-09-12):** rendered
+both templates locally against `vars/model_routing.yml` and deep-diffed
+the parsed YAML against a live pre-change snapshot pulled straight off
+hermes-gw-01 — zero semantic diffs on both (`config.yaml.j2` and
+`dashboard_profile_config.yaml.j2`) before the rewired templates were
+ever deployed. Re-ran the same before/after deep-diff against the actual
+post-deploy live configs after pushing — zero diffs there too, plus all
+3 services (`hermes-gateway`, `hermes-serve`, `hermes-gateway-dashboard`)
+confirmed healthy with clean journals post-restart.
 
 ## Key variables
 
