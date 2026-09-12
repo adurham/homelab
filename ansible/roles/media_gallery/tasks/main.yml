@@ -168,6 +168,16 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+# Library imported by upload_service.py at ingest time — NOT a standalone
+# binary, so it has no systemd unit or handler.
+- name: Deploy Ingest-Time Duplicate Checker (dedup_live.py)
+  ansible.builtin.copy:
+    src: dedup_live.py
+    dest: "{{ media_gallery_dir }}/dedup_live.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
 # Deployed but deliberately NOT wired into any timer/service — this is a
 # manual, run-when-you-want-it tool (see its own module docstring for why:
 # it's a real, throttled, potentially multi-day bandwidth/API cost to

@@ -32,6 +32,7 @@ SESSION = os.environ.get("TG_SESSION", "/var/lib/media-gallery/galmeta")
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
 EXCLUDE_FILE = os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/excluded.json")
+HIDDEN_FILE = Path(os.environ.get("TG_HIDDEN_FILE", "/var/lib/media-gallery/hidden.json"))
 SRC = REMOTE + "by-chat"
 GALLERY = REMOTE + "gallery"
 
@@ -44,6 +45,25 @@ def load_excluded() -> set:
             return set(_j.load(f))
     except (OSError, ValueError):
         return set()
+
+
+def load_hidden() -> set:
+    """Stems currently hidden from browsing (non-newest members of duplicate
+    groups), read from the local hidden.json ledger. On missing/corrupt local
+    copy, fall back to the best-effort gcrypt mirror; else empty — a hidden
+    flag is a nicety, never a manifest blocker."""
+    try:
+        with open(HIDDEN_FILE) as f:
+            return set((json.load(f) or {}).get("hidden", []))
+    except (OSError, ValueError):
+        pass
+    try:
+        r = rclone("cat", f"{GALLERY}/hidden.json")
+        if r.returncode == 0 and r.stdout.strip():
+            return set((json.loads(r.stdout) or {}).get("hidden", []))
+    except (OSError, ValueError):
+        pass
+    return set()
 
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".gif"}
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
@@ -227,6 +247,7 @@ async def main():
 
     excluded = load_excluded()
     log(f"excluded (trashed): {len(excluded)}")
+    hidden_set = load_hidden()
 
     manifest = []
     skipped_excluded = skipped_outgoing = 0
@@ -241,7 +262,7 @@ async def main():
         if meta.get("out"):  # message YOU sent — keep only received media
             skipped_outgoing += 1
             continue
-        manifest.append({
+        item = {
             "stem": stem,
             "chat": chat,
             "file": f"by-chat/{chat}/{leaf}",
@@ -249,10 +270,16 @@ async def main():
             "type": "video" if is_video else "image",
             "date": meta.get("date"),
             "size": size,
-        })
+        }
+        # Only add the key when hidden — keeps the manifest compact and
+        # backward compatible (old SPAs ignore the unknown field).
+        if stem in hidden_set:
+            item["hidden"] = True
+        manifest.append(item)
     manifest.sort(key=lambda x: (x["date"] or ""), reverse=True)
+    n_hidden = sum(1 for m in manifest if m.get("hidden"))
     log(f"manifest items: {len(manifest)} (skipped {skipped_excluded} trashed, "
-        f"{skipped_outgoing} outgoing)")
+        f"{skipped_outgoing} outgoing), {n_hidden} flagged hidden")
 
     # Prune the exclusion ledger: an entry is dead weight once its file is gone
     # from the archive. We ONLY prune browser-upload stems (up_*) — collector

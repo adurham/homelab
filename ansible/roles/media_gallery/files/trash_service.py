@@ -26,6 +26,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import fcntl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
@@ -39,6 +40,10 @@ PORT = int(os.environ.get("TRASH_PORT", "8091"))
 BIND = os.environ.get("TRASH_BIND", "172.16.0.46")
 THUMB_CACHE = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))
 EXCLUDE_FILE = Path(os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/excluded.json"))
+HIDDEN_FILE = Path(os.environ.get("TG_HIDDEN_FILE", "/var/lib/media-gallery/hidden.json"))
+# fcntl lock guarding the hidden.json ledger (shared with dedup_scan.py).
+HIDDEN_LOCK = Path("/var/lock/media-gallery-hidden.lock")
+HIDDEN_REMOTE = REMOTE + "gallery/hidden.json"
 DEDUP_REMOTE = REMOTE + "gallery/dedup.json"
 # Persistent queue of {chat,stem} the user has marked for deletion. The HTTP
 # request only appends here + to the exclusion ledger (instant); a background
@@ -275,6 +280,10 @@ def _prune_dedup_report(stems) -> None:
     on-disk report itself accurate sooner.
     """
     def _work():
+        # A deleted stem must never stay in the hide ledger regardless of the
+        # dedup report's state, so prune it FIRST (independent of the report
+        # fetch/rewrite below).
+        _prune_hidden_ledger(stems)
         try:
             r = rclone("cat", DEDUP_REMOTE)
             if r.returncode != 0 or not r.stdout.strip():
@@ -297,17 +306,52 @@ def _prune_dedup_report(stems) -> None:
             rep["groups"] = new_groups
             rep["dup_groups"] = len(new_groups)
             rep["dup_items"] = sum(len(g) for g in new_groups)
-            tmp = tempfile.mktemp(suffix=".json")
+            fd, tmp = tempfile.mkstemp(suffix=".json")
+            os.close(fd)
             Path(tmp).write_text(json.dumps(rep, separators=(",", ":")))
             rclone("copyto", tmp, DEDUP_REMOTE)
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
-        except Exception:  # noqa: BLE001
-            pass  # best-effort only — client-side filter is the real fix
+        except Exception as e:  # noqa: BLE001
+            print(f"[trash] dedup-report prune failed: {e}", flush=True)
 
     threading.Thread(target=_work, daemon=True).start()
+
+
+def _prune_hidden_ledger(stems) -> None:
+    """Remove just-deleted stems from the hidden.json ledger (both 'hidden'
+    and 'keep'). A deleted stem must never stay in the hide ledger — if it
+    did, the next manifest rebuild could still reference it, and the SPA's
+    hidden filter would carry a ghost forever. Under fcntl HIDDEN_LOCK to
+    serialize with dedup_scan.py's own hourly rewrite. Best-effort: any
+    failure is swallowed, matching the sibling dedup-report prune."""
+    try:
+        with open(HIDDEN_LOCK, "w") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            ledger = {"hidden": [], "keep": []}
+            try:
+                raw = json.loads(HIDDEN_FILE.read_text())
+                ledger["hidden"] = raw.get("hidden") or []
+                ledger["keep"] = raw.get("keep") or []
+            except (OSError, ValueError):
+                pass  # missing/corrupt — start from empty, prune is still safe
+            sset = {str(s) for s in stems}
+            new_hidden = [s for s in ledger["hidden"] if str(s) not in sset]
+            new_keep = [s for s in ledger["keep"] if str(s) not in sset]
+            if new_hidden == ledger["hidden"] and new_keep == ledger["keep"]:
+                return  # nothing pruned
+            ledger["hidden"] = new_hidden
+            ledger["keep"] = new_keep
+            HIDDEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = str(HIDDEN_FILE) + ".tmp"
+            Path(tmp).write_text(json.dumps(ledger, separators=(",", ":")))
+            os.replace(tmp, HIDDEN_FILE)
+        # mirror to Drive (best-effort, background-safe — not fatal if slow)
+        rclone("copyto", str(HIDDEN_FILE), HIDDEN_REMOTE)
+    except Exception as e:  # noqa: BLE001
+        print(f"[trash] hidden-ledger prune failed: {e}", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
