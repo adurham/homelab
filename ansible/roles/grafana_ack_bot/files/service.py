@@ -47,6 +47,21 @@ Standalone service (deliberately NOT part of hermes-agent) that:
      uncluttered (2 reactions instead of 4) while still surfacing the
      durations for anyone who actually wants a timed silence instead of
      an EM7-style ack.
+  6. Dedup + history channel (added 2026-09-12): Grafana's notification
+     policy has repeat_interval=4h, so a still-firing alert reposts its
+     webhook every 4h with no state change -- without dedup this created
+     a brand new #infra-alerts message every 4h for as long as the
+     underlying problem stayed unresolved (24 duplicate messages for two
+     alerts that had been firing continuously for 2 days before this was
+     caught). `_post_alert_message` now skips creating a second message
+     for a fingerprint that already has a live unresolved entry in
+     `_pending`. Every fire/resolve lifecycle EVENT (not just the
+     Discord-message state) is also mirrored as one line to a SEPARATE,
+     passive history channel (DISCORD_HISTORY_WEBHOOK_URL) that is never
+     edited or deleted -- #infra-alerts shows only currently-active
+     alerts by explicit design, which is structurally incompatible with
+     also being a historical record, hence a second channel rather than
+     trying to make one channel serve both purposes.
 
 Why a separate service instead of extending hermes-agent's Discord
 adapter: Discord interactions (message components / buttons) are routed
@@ -83,6 +98,16 @@ log = logging.getLogger("grafana_ack_bot")
 DISCORD_BOT_TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 DISCORD_WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 DISCORD_CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
+# Separate, passive log channel: one line per lifecycle EVENT (started
+# firing / resolved), never edited or deleted. #infra-alerts (above)
+# shows ONLY currently-active alerts per the user's explicit design
+# ("if they are resolved they are to be removed from this channel...
+# I want this to be ACTIVE and firing alerts") -- that design is
+# incompatible with also being a historical record, hence a second
+# channel rather than trying to make one channel do both jobs. Optional
+# (empty string = history posting is a no-op) so a partial/staged
+# deploy that hasn't wired the history webhook yet doesn't crash.
+DISCORD_HISTORY_WEBHOOK_URL = os.environ.get("DISCORD_HISTORY_WEBHOOK_URL", "")
 GRAFANA_URL = os.environ["GRAFANA_URL"].rstrip("/")
 GRAFANA_SA_TOKEN = os.environ["GRAFANA_SA_TOKEN"]
 # Comma-separated Discord user IDs allowed to ack/silence. Reactions from
@@ -257,7 +282,73 @@ async def _add_reaction_with_retry(
         log.error("Giving up adding reaction %s to message %s after %d attempts", emoji, message_id, max_attempts)
 
 
+async def _post_history_event(session: aiohttp.ClientSession, text: str) -> None:
+    """Fire-and-forget post to the passive history channel. Never edited,
+    never deleted -- this is the append-only record of every alert
+    lifecycle event (fired / resolved), so it can safely accumulate
+    forever unlike #infra-alerts (which shows only currently-active
+    alerts by design). A failure here must never break the primary
+    #infra-alerts posting path, so this always swallows its own errors.
+    """
+    if not DISCORD_HISTORY_WEBHOOK_URL:
+        return
+    try:
+        async with session.post(
+            f"{DISCORD_HISTORY_WEBHOOK_URL}?wait=true",
+            json={"content": text, "username": "Grafana Alert History"},
+        ) as resp:
+            if resp.status == 429:
+                body = await resp.json()
+                retry_after = float(body.get("retry_after", 1.0))
+                await asyncio.sleep(retry_after + 0.1)
+                async with session.post(
+                    f"{DISCORD_HISTORY_WEBHOOK_URL}?wait=true",
+                    json={"content": text, "username": "Grafana Alert History"},
+                ) as retry_resp:
+                    if retry_resp.status >= 300:
+                        log.warning("History post failed after retry: %s", retry_resp.status)
+            elif resp.status >= 300:
+                text_body = await resp.text()
+                log.warning("History post failed: %s %s", resp.status, text_body)
+    except Exception:
+        log.exception("Failed to post to history channel (non-fatal, #infra-alerts unaffected)")
+
+
+def _history_line(alert: dict, event: str) -> str:
+    labels = alert.get("labels", {})
+    annotations = alert.get("annotations", {})
+    alertname = labels.get("alertname", "alert")
+    summary = annotations.get("summary") or alertname
+    severity = labels.get("severity", "unknown")
+    ts = alert.get("startsAt" if event == "FIRING" else "endsAt", "")
+    emoji = "\N{FIRE}" if event == "FIRING" else "\N{WHITE HEAVY CHECK MARK}"
+    return f"{emoji} `{event}` **{severity}** — {summary} ({ts})"
+
+
 async def _post_alert_message(session: aiohttp.ClientSession, alert: dict) -> None:
+    fingerprint = alert.get("fingerprint", "")
+    # Dedup: Grafana's notification policy has repeat_interval=4h, so a
+    # still-firing alert (e.g. a host down for days) reposts its webhook
+    # every 4h even though nothing changed. Without this check each
+    # repost created a BRAND NEW #infra-alerts message -- 24 duplicate
+    # messages accumulated for two alerts firing continuously since
+    # 2026-09-10 before this was caught. If this exact fingerprint
+    # already has a live, unresolved message in _pending, skip creating
+    # a second one; the existing message already represents this alert
+    # instance accurately (same severity/description -- Alertmanager
+    # gives a NEW fingerprint if labels genuinely change, e.g. a
+    # severity bump, so this cannot mask a real escalation).
+    if fingerprint:
+        for existing_id, existing in _pending.items():
+            if existing.get("fingerprint") == fingerprint and not existing.get("resolved"):
+                log.info(
+                    "Skipping duplicate repeat-notification for already-posted alert %s (fingerprint %s, message %s)",
+                    alert.get("labels", {}).get("alertname"), fingerprint, existing_id,
+                )
+                return
+
+    await _post_history_event(session, _history_line(alert, "FIRING"))
+
     severity, text = _severity_and_summary(alert)
     labels = alert.get("labels", {})
     alertname = labels.get("alertname", "alert")
@@ -365,6 +456,7 @@ async def handle_grafana_webhook(request: web.Request) -> web.Response:
                     "Alert %s resolved (not ack-watched), deleting message %s",
                     pending.get("alertname"), message_id,
                 )
+                await _post_history_event(session, _history_line(alert, "RESOLVED"))
                 await _delete_via_webhook(session, message_id)
                 # Re-check after the await: the user could have acked
                 # this exact message while the delete was in flight
@@ -537,6 +629,10 @@ async def _watch_for_resolution(
                 continue
 
             log.info("Alert %s (silence %s) resolved, tearing down ack silence and deleting message %s", alertname, silence_id, message_id)
+            await _post_history_event(
+                session,
+                f"\N{WHITE HEAVY CHECK MARK} `RESOLVED` — {alertname} (acked, resolved after watcher confirmation)",
+            )
             await _delete_silence(session, silence_id)
             await _delete_via_webhook(session, message_id)
             _pending.pop(message_id, None)
@@ -935,6 +1031,12 @@ async def _reconcile_pending() -> None:
                 continue
             log.info("Reconcile: found %d stale unacked message(s) not caught by the webhook path, cleaning up", len(stale))
             for message_id in stale:
+                stale_pending = _pending.get(message_id, {})
+                await _post_history_event(
+                    session,
+                    f"\N{WHITE HEAVY CHECK MARK} `RESOLVED` — {stale_pending.get('alertname', 'alert')} "
+                    "(caught by reconcile sweep, not the webhook path)",
+                )
                 await _delete_via_webhook(session, message_id)
                 _reconcile_miss_counts.pop(message_id, None)
                 still_pending = _pending.get(message_id)
