@@ -169,6 +169,27 @@
   changed_when: false
   failed_when: false
 
+# This checkout backs all THREE systemd units (hermes-gateway.service,
+# hermes-serve.service, hermes-gateway-dashboard.service all run
+# /opt/hermes-agent/venv/bin/hermes* — same editable install, different
+# entrypoint args), so a new commit here needs all three restarted, not
+# just one. Root-caused 2026-09-12: this task's own before/after SHA diff
+# IS the correct "did the code actually change" signal (an editable
+# install means the running process only picks up new source on
+# restart), but the very next task ("Install Hermes Agent Editable")
+# looked like a second, more complete restart trigger (it already
+# notified all three) and ISN'T — ansible.builtin.pip reports
+# changed=True on literally every run of an editable `pip install -e`
+# regardless of whether anything changed (verified directly: two
+# back-to-back real runs against this exact task both returned
+# changed=True). Left as-is, the pip task's bogus signal was the only
+# thing bouncing Serve/Dashboard, meaning EVERY deploy of ANY kind
+# (even a config-only change) force-restarted all three services
+# whether or not new code shipped — that's the opposite failure from
+# "hermes doesn't get updated," but the same root cause: nothing here
+# was actually gated on whether hermes-agent's code changed. Fixed by
+# making this task (the one with a real changed-detection) the sole
+# restart trigger and neutering the pip task's false signal below.
 - name: Clone Hermes Agent Repository
   ansible.builtin.git:
     repo: https://github.com/adurham/hermes-agent.git
@@ -178,7 +199,10 @@
     force: false
   become: true
   become_user: hermes
-  notify: Restart Hermes Gateway
+  notify:
+    - Restart Hermes Gateway
+    - Restart Hermes Serve
+    - Restart Hermes Gateway Dashboard
 
 - name: Create Hermes Virtualenv (Python 3.11)
   ansible.builtin.command: python3.11 -m venv /opt/hermes-agent/venv
@@ -212,10 +236,19 @@
     virtualenv: /opt/hermes-agent/venv
   become: true
   become_user: hermes
-  notify:
-    - Restart Hermes Gateway
-    - Restart Hermes Serve
-    - Restart Hermes Gateway Dashboard
+  # NOT a restart trigger — see "Clone Hermes Agent Repository" above for
+  # why. ansible.builtin.pip reports changed=True on EVERY run of an
+  # editable install regardless of whether anything actually changed
+  # (pip always prints "Successfully installed ..." for the local egg;
+  # verified 2026-09-12 with two back-to-back no-op runs, both
+  # changed=True). Any real dependency bump this task would need to act
+  # on only ever arrives via a pyproject.toml change in the SAME git repo
+  # the clone task above already diffs correctly, so there is no case
+  # where this task's own changed status carries information the git
+  # task doesn't already have. changed_when: false stops it from
+  # force-restarting all three services on every single deploy
+  # regardless of whether new code shipped.
+  changed_when: false
 
 - name: Install web-search fallback (ddgs)
   # Keyless DuckDuckGo backend used as the web_search fallback when the
