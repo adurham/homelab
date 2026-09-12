@@ -75,6 +75,11 @@ HASH_CACHE_FILE = Path(os.environ.get(
     "DEDUP_HASH_CACHE", "/var/lib/media-gallery/dedup_hash_cache.json"))
 LOCK_FILE = Path(os.environ.get(
     "DEDUP_LOCK_FILE", "/var/lock/media-gallery-dedup-scan.lock"))
+CACHE_LOCK = Path("/var/lock/media-gallery-dedup-cache.lock")
+HIDDEN_LOCK = Path("/var/lock/media-gallery-hidden.lock")
+HIDDEN_FILE = Path(os.environ.get(
+    "TG_HIDDEN_FILE", "/var/lib/media-gallery/hidden.json"))
+HIDDEN_REMOTE = GALLERY + "/hidden.json"
 # The SAME persistent local thumbnail mirror prewarm_thumbs.sh maintains
 # (refresh_gallery.sh runs prewarm right before this script). Reading from
 # here first means dedup_scan.py rides on work the refresh cycle has
@@ -272,14 +277,21 @@ def main():
     log(f"manifest items to hash: {len(items)} (videos {'in' if INCLUDE_VIDEO else 'ex'}cluded)")
 
     # ---- incremental: only hash stems we haven't seen before ----
-    hashes = load_hash_cache()
-    before_cache = len(hashes)
-    # prune dead stems (deleted since last run) so the cache can't grow
-    # without bound and never re-surfaces a ghost via a stale cache hit
-    dead = set(hashes) - set(items)
-    for s in dead:
-        del hashes[s]
-    new_stems = [s for s in items if s not in hashes]
+    # The hash cache is also written at INGEST time by dedup_live.py (the
+    # upload_service ingest-time duplicate checker), so every read/modify here
+    # must hold CACHE_LOCK to avoid clobbering an entry that ingest just
+    # added between our read and our write.
+    CACHE_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with open(CACHE_LOCK, "w") as cache_lock_fh:
+        fcntl.flock(cache_lock_fh, fcntl.LOCK_EX)
+        hashes = load_hash_cache()
+        before_cache = len(hashes)
+        # prune dead stems (deleted since last run) so the cache can't grow
+        # without bound and never re-surfaces a ghost via a stale cache hit
+        dead = set(hashes) - set(items)
+        for s in dead:
+            del hashes[s]
+        new_stems = [s for s in items if s not in hashes]
     log(f"hash cache: {before_cache} cached, {len(dead)} pruned (deleted), "
         f"{len(new_stems)} new to hash")
 
@@ -376,7 +388,19 @@ def main():
     else:
         log("no new items to hash — cache fully up to date")
 
-    save_hash_cache(hashes)
+    # Re-acquire CACHE_LOCK for the write so we don't lose hash entries the
+    # ingest-time checker (dedup_live.py) added concurrently while we were
+    # hashing new stems above. Freshly reload + merge under the same lock:
+    # preserved = (entries ingest added that we never saw) MINUS dead stems,
+    # then overlays our newly-computed hashes. Without the merge, this
+    # run's bare save would clobber those concurrent additions out of the
+    # cache and the ingest checker would just re-hash them next upload.
+    with open(CACHE_LOCK, "w") as cache_lock_fh:
+        fcntl.flock(cache_lock_fh, fcntl.LOCK_EX)
+        fresh = load_hash_cache()
+        merged = {k: v for k, v in fresh.items() if k not in dead}
+        merged.update(hashes)
+        save_hash_cache(merged)
 
     # ---- LSH-banded candidate generation, then precise Hamming check ----
     # (find_duplicate_pairs already does the Hamming check inline and only
@@ -441,6 +465,41 @@ def main():
         sys.exit(1)
     log(f"dedup.json: {len(dup_groups)} groups, {out['dup_items']} items, "
         f"{time.time() - t0:.1f}s — DONE")
+
+    # ---- hidden ledger ----
+    # Hide the non-newest members of each duplicate group from normal browsing
+    # (the SPA hides any stem listed in "hidden". Format {"hidden": [...],
+    # "keep": [...]}). 'keep' is the user's explicit unhide override — it
+    # survives this hourly recompute, so an unhid item stays visible even if
+    # the scanner keeps flagging it. Invariant: hidden ∩ keep = ∅.
+    HIDDEN_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with open(HIDDEN_LOCK, "w") as hidden_lock_fh:
+        fcntl.flock(hidden_lock_fh, fcntl.LOCK_EX)
+        # load the existing ledger; missing/corrupt -> empty
+        keep = set()
+        try:
+            raw = json.loads(HIDDEN_FILE.read_text())
+            keep = set(raw.get("keep") or [])
+        except (OSError, ValueError):
+            pass
+        # 'keep' survives only for stems still in the manifest
+        keep = {s for s in keep if s in items}
+        # hide every non-newest group member, minus the keep overrides
+        hidden = set()
+        for group in dup_groups:  # each group already newest-first
+            for m in group[1:]:
+                hidden.add(m["stem"])
+        hidden -= keep
+        ledger = {"hidden": sorted(hidden), "keep": sorted(keep)}
+        HIDDEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = str(HIDDEN_FILE) + ".tmp"
+        Path(tmp).write_text(json.dumps(ledger, separators=(",", ":")))
+        os.replace(tmp, HIDDEN_FILE)
+        log(f"hidden.json: {len(hidden)} hidden, {len(keep)} keep")
+    # best-effort mirror to Drive; never fail the run on an rclone error
+    r = rclone("copyto", str(HIDDEN_FILE), HIDDEN_REMOTE)
+    if r.returncode != 0:
+        log("hidden.json mirror to Drive failed (non-fatal):", r.stderr[:200])
 
     try:
         import shutil
