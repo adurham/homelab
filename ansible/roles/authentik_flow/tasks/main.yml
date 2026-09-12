@@ -526,11 +526,47 @@
 
 # -------------------------------------------------------------------------
 # Cleanup / Conflict Resolution
+#
+# BUG FIXED 2026-09-12: "Get Default Authentication Flow" (which populates
+# auth_flow_list, used by the two conflict-check tasks below) used to run
+# AFTER those tasks instead of before. Every run of this role failed with
+# "'auth_flow_list' is undefined" on the conflict-check task, meaning this
+# cleanup logic had NEVER successfully executed. Real-world consequence:
+# Authentik's own stock "default-authentication-mfa-validation" stage
+# stayed bound to the login flow at order=30 alongside our own
+# "MFA-Validation" stage (also order=30) indefinitely -- two MFA-validate
+# stages bound at the identical order. A user hit this live: their login
+# would pass identification+password fine, then silently stall forever at
+# the passkey/WebAuthn step with no further requests reaching the server
+# at all (the flow executor got two stages to reconcile at the same
+# order and the frontend never resolved which one to actually render).
+# Moving the flow lookup before its first use fixes the ordering so this
+# cleanup can finally run and remove the duplicate binding for real.
 # -------------------------------------------------------------------------
+
+- name: Get Default Authentication Flow
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-authentication-flow"
+    method: GET
+    headers: "{{ headers }}"
+  register: auth_flow_list
 
 - name: Get Default MFA Validation Stage (Conflict)
   ansible.builtin.uri:
-    url: "{{ authentik_url }}/api/v3/stages/authenticator/validate/?slug=default-authentication-mfa-validation"
+    # FIXED 2026-09-12: stage objects have no `slug` field, so the
+    # previous `?slug=default-authentication-mfa-validation` filter was
+    # silently IGNORED by the API and this returned every validate
+    # stage unfiltered, with OUR OWN "MFA-Validation" stage landing at
+    # results[0] (alphabetically first). That meant every run of this
+    # task's downstream "Get/Remove Conflicting Binding" pair was
+    # actually targeting our own binding, not the real duplicate --
+    # deleting our own binding and immediately recreating it via "Bind
+    # MFA Validation to Login Flow" below, while Authentik's real stock
+    # "default-authentication-mfa-validation" duplicate binding (the
+    # actual cause of two MFA-validate stages both bound at order=30)
+    # was never removed. `name=` is the correct, actually-filtered field
+    # for this endpoint -- verified live it returns exactly one result.
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/validate/?name=default-authentication-mfa-validation"
     method: GET
     headers: "{{ headers }}"
   register: conflict_mfa_stage
@@ -553,13 +589,6 @@
     - conflict_binding.json.results is defined
     - conflict_binding.json.results | length > 0
   changed_when: true
-
-- name: Get Default Authentication Flow
-  ansible.builtin.uri:
-    url: "{{ authentik_url }}/api/v3/flows/instances/?slug=default-authentication-flow"
-    method: GET
-    headers: "{{ headers }}"
-  register: auth_flow_list
 
 - name: Bind MFA Validation to Login Flow
   ansible.builtin.uri:
