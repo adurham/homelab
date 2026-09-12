@@ -149,8 +149,9 @@ def test_merge_folder_moves_and_dedupes():
         "FromF": {"cover": "101_1", "chat_ids": []},
         "ToF": {"cover": "keepcover", "chat_ids": ["555"]},
     }
-    new_meta, moved, dupes, cids = u.merge_folder(
+    new_meta, moved, dupes, cids, purged, failed = u.merge_folder(
         meta, "FromF", "ToF", list_fn, move_fn, delete_fn, purge_fn)
+    assert purged is True and failed == []
     # moved aaa + 101_1 (bbb already in to -> deleted), originals purged
     assert moved == 2, moved
     assert dupes == 1, dupes
@@ -189,14 +190,113 @@ def test_merge_folder_idempotent_when_absent():
         "ToF": {"chat_ids": ["111"]},
         "redirects": {"chat:101": "ToF", "name:FromF": "ToF", "user:FromF": "ToF"},
     }
-    new_meta, moved, dupes, cids = u.merge_folder(
+    new_meta, moved, dupes, cids, purged, failed = u.merge_folder(
         meta, "FromF", "ToF", list_fn, move_fn, delete_fn, purge_fn)
     assert moved == 0 and dupes == 0
+    assert purged is True and failed == []
     # from is absent, so no new chat_ids are extracted — survivor keeps its own
     assert new_meta["ToF"]["chat_ids"] == ["111"]  # re-merge is idempotent (dedupe)
     assert new_meta["redirects"]["chat:101"] == "ToF"
     assert "FromF" not in new_meta
     assert fs == {"ToF": {"x": "1"}}  # nothing moved
+
+
+def test_merge_folder_no_purge_on_move_failure():
+    """A failed move must NEVER be followed by a source purge (that would
+    silently destroy the file it failed to move)."""
+    import upload_service as u
+    fs = {"FromF": {"aaa": "x", "bbb": "y"}, "ToF": {}}
+
+    def list_fn(folder):
+        return ["%s.jpg" % s for s in fs.get(folder, {})]
+
+    def move_fn(f, t, leaf):
+        stem = os.path.splitext(leaf)[0]
+        if stem == "bbb":
+            return False  # simulated transient failure
+        fs.setdefault(t, {})[stem] = fs.get(f, {}).pop(stem)
+        return True
+
+    def delete_fn(f, leaf):
+        return True
+
+    purged = []
+
+    def purge_fn(f):
+        purged.append(f)
+        fs.pop(f, None)
+
+    meta = {"FromF": {}, "ToF": {}}
+    new_meta, moved, dupes, cids, was_purged, failed = u.merge_folder(
+        meta, "FromF", "ToF", list_fn, move_fn, delete_fn, purge_fn)
+    assert moved == 1 and dupes == 0
+    assert failed == ["bbb.jpg"]           # the failure is reported
+    assert was_purged is False and purged == []
+    assert fs["FromF"] == {"bbb": "y"}     # failed file still safely in source
+    assert fs["ToF"] == {"aaa": "x"}
+    # bookkeeping still happened (redirects registered), so a re-run finishes
+    assert new_meta["redirects"]["name:FromF"] == "ToF"
+
+
+def test_merge_folder_no_purge_on_listing_failure():
+    """A transient listing error = unknown source state -> no file ops and no
+    purge (previously: empty list + unconditional purge wiped the folder)."""
+    import upload_service as u
+    touched = []
+
+    def list_fn(folder):
+        return None  # listing failed (unknown state)
+
+    def move_fn(f, t, leaf):
+        touched.append(("move", leaf))
+        return True
+
+    def delete_fn(f, leaf):
+        touched.append(("delete", leaf))
+        return True
+
+    purged = []
+
+    def purge_fn(f):
+        purged.append(f)
+
+    meta = {"FromF": {"cover": None}, "ToF": {}}
+    new_meta, moved, dupes, cids, was_purged, failed = u.merge_folder(
+        meta, "FromF", "ToF", list_fn, move_fn, delete_fn, purge_fn)
+    assert touched == [] and purged == []
+    assert moved == 0 and dupes == 0 and failed == []
+    assert was_purged is False
+    assert new_meta["redirects"]["name:FromF"] == "ToF"
+
+
+def test_merge_folder_no_purge_on_midmerge_arrival():
+    """A file landing in the source between the move loop and the purge
+    (mid-merge arrival) is protected by the re-list emptiness check."""
+    import upload_service as u
+    n = {"list": 0}
+
+    def list_fn(folder):
+        if folder == "FromF":
+            n["list"] += 1
+            return ["a.jpg"] if n["list"] == 1 else ["late.jpg"]
+        return []
+
+    def move_fn(f, t, leaf):
+        return True
+
+    def delete_fn(f, leaf):
+        return True
+
+    purged = []
+
+    def purge_fn(f):
+        purged.append(f)
+
+    meta = {"FromF": {"cover": None}, "ToF": {}}
+    new_meta, moved, dupes, cids, was_purged, failed = u.merge_folder(
+        meta, "FromF", "ToF", list_fn, move_fn, delete_fn, purge_fn)
+    assert moved == 1 and failed == []
+    assert was_purged is False and purged == []
 
 
 # ── semantic-identity of copied resolve logic in the ingest roles ─────────
