@@ -1,0 +1,30 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+#
+# Background auto-cron for the one-time thumbnail backfill (2026-09-12).
+# Originally this tool was manual-run-only (see thumb_backfill.py's own
+# docstring for the full "why not just force-generate everything at once"
+# reasoning: real bandwidth + Drive API cost). User explicitly asked for
+# this to run as a background cron instead of requiring manual invocation.
+#
+# Self-limiting by design so this is genuinely safe to leave running
+# unattended indefinitely, unlike naively cron-ing the tool with no budget:
+#   - Each run processes only media_gallery_thumb_backfill_budget items
+#     (small, default 200) then exits cleanly -- never a multi-hour
+#     foreground process that could get stuck or pile up.
+#   - --delay throttles each individual request within a run, so even a
+#     single run can't hammer the Drive API or local generation pipeline.
+#   - thumb_backfill.py recomputes the missing-list fresh every run (not a
+#     stored offset), so it's naturally idempotent/self-correcting and
+#     automatically stops doing real work (near-instant runs) once nothing
+#     is left to backfill -- no separate "done" state to track or forget
+#     to disable.
+[Unit]
+Description=media-gallery thumbnail backfill schedule (background auto-cron)
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec={{ media_gallery_thumb_backfill_interval }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

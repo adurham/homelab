@@ -479,6 +479,36 @@
     state: started
     daemon_reload: true
 
+# ─── Thumbnail backfill (background auto-cron, 2026-09-12) ─────────────────
+# See thumb_backfill.py's own docstring + the timer template's comments for
+# the full "why a separate throttled background job, not part of the hourly
+# refresh" reasoning. User explicitly asked for this to run automatically
+# in the background rather than being a manual-only tool.
+- name: Render Thumbnail Backfill Service Unit
+  ansible.builtin.template:
+    src: thumb-backfill.service.j2
+    dest: /etc/systemd/system/media-gallery-thumb-backfill.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Thumbnail Backfill Timer Unit
+  ansible.builtin.template:
+    src: thumb-backfill.timer.j2
+    dest: /etc/systemd/system/media-gallery-thumb-backfill.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Thumbnail Backfill Timer
+  ansible.builtin.systemd:
+    name: media-gallery-thumb-backfill.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
 # ─── Security hardening ────────────────────────────────────────────────────
 # The gallery/thumb/trash services bind the private IP with NO auth of their own
 # (auth is enforced by Authentik at lb-01). Without a firewall, ANY host on the

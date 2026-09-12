@@ -1,0 +1,21 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+[Unit]
+Description=media-gallery thumbnail backfill (background auto-cron)
+# Never run alongside a refresh (which itself runs dedup_scan.py) -- both
+# would compete for the same Drive API quota and the same thumb_service.py
+# generation path. Simple ordering (not a hard dependency) is enough since
+# each is on its own independent timer.
+After=media-gallery-refresh.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+WorkingDirectory={{ media_gallery_dir }}
+Environment=RCLONE_CONFIG=/home/{{ media_gallery_user }}/.config/rclone/rclone.conf
+Environment=TG_RCLONE_REMOTE=gcrypt:
+ExecStart={{ media_gallery_dir }}/venv/bin/python {{ media_gallery_dir }}/thumb_backfill.py --budget {{ media_gallery_thumb_backfill_budget }} --delay {{ media_gallery_thumb_backfill_delay }}
+StandardOutput=append:/var/log/media-gallery/thumb_backfill.log
+StandardError=append:/var/log/media-gallery/thumb_backfill.log
