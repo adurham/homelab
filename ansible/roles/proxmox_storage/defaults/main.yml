@@ -2,6 +2,10 @@
 zfs_pool_name: nvme-pool
 zfs_disk_device: /dev/nvme0n1  # User should override if different
 zfs_storage_id: nvme-data
+# 'dir' storage (content=backup) backed by a dataset inside the ZFS pool
+# -- see the 2026-09-12 comment further down in tasks/main.yml for why
+# this has to be a dir storage and not the zfspool storage above.
+pve_backup_zfs_storage_id: vzdump-nvme
 # Day of month the monthly scrub runs on THIS node (1-28, avoid 29-31
 # for reliability across all months). Staggered per-node in
 # inventory/proxmox.yml so a 3-node cluster doesn't scrub simultaneously
