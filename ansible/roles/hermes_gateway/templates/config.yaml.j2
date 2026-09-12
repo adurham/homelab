@@ -233,10 +233,10 @@ agent:
     log_decisions: true
     pp_max: 0.2
   interleaved_thinking: true
-  reasoning_effort: xhigh
+  reasoning_effort: max
   strip_cache_on_overload: true
   reasoning_effort_by_model:
-    claude-sonnet-5: high
+    claude-sonnet-5: max
     deepseek-v4-flash: xhigh
     deepseek-v4-flash:0731: xhigh
     deepseek-ai/DeepSeek-V4-Flash-Vision-Exp: xhigh
@@ -364,7 +364,12 @@ delegation:
   # leaves can't spawn their own subagents. Matches Claude Code's
   # Plan → leaf-research-agent flow without runaway recursion.
   max_spawn_depth: 2
-  max_concurrent_children: 3
+  # Mirrors the MacBook's live config (verified 2026-09-12: local has been
+  # 10 for its entire visible config-backup history, May-2026 onward — the
+  # gateway's prior value of 3 had no supporting rationale/comment anywhere
+  # and did not correspond to any local value change; confirmed drift, not
+  # a deliberate fanout cap, before restoring the mirror here).
+  max_concurrent_children: 10
   # 0 = no wall-clock cap on subagents (mirrors the MacBook's live config,
   # 2026-09-08 sync). Current tools/delegate_tool.py semantics: a positive
   # value here is a hard timeout regardless of progress, which killed
