@@ -1,6 +1,16 @@
 const fs=require('fs');const {JSDOM}=require('jsdom');
 const html=fs.readFileSync('/Users/adam.durham/repos/homelab/ansible/roles/media_gallery/files/gallery_index.html','utf8');
-const manifest=[{stem:'a1',chat:'person2',thumb:'thumb/person2/a1.jpg',file:'f',type:'image',date:'2026-01-03',size:100}];
+// 2026-09-12: manifest now lists ALL THREE stems (a1/a2/a3), not just a1.
+// renderDuplicates() live-filters dup.json groups against the manifest (a
+// stem missing from the manifest is treated as already-deleted and hidden)
+// -- this test is about a fully-live 3-member group, so its manifest mock
+// must actually contain all three or the group would (correctly) collapse.
+// See test_dedup_live_filter.js for the "some members already deleted" case.
+const manifest=[
+  {stem:'a1',chat:'person2',thumb:'thumb/person2/a1.jpg',file:'f',type:'image',date:'2026-01-03',size:100},
+  {stem:'a2',chat:'person2',thumb:'thumb/person2/a2.jpg',file:'f',type:'image',date:'2026-01-02',size:100},
+  {stem:'a3',chat:'person2',thumb:'thumb/person2/a3.jpg',file:'f',type:'image',date:'2026-01-01',size:100}
+];
 const dedup={generated:'2026-06-04',hamming:6,scanned:3,dup_groups:1,dup_items:3,
  groups:[[{stem:'a1',chat:'person2',thumb:'thumb/person2/a1.jpg',file:'f',size:100,date:'2026-01-03'},
           {stem:'a2',chat:'person2',thumb:'thumb/person2/a2.jpg',file:'f',size:100,date:'2026-01-02'},
@@ -11,7 +21,12 @@ const dom=new JSDOM(html,{runScripts:'dangerously',resources:'usable',beforePars
    if(u.indexOf('manifest.json')>=0)return Promise.resolve({ok:true,status:200,json:()=>Promise.resolve(manifest)});
    if(u.indexOf('folders.json')>=0)return Promise.resolve({ok:true,status:200,json:()=>Promise.resolve(['person2'])});
    if(u.indexOf('dedup.json')>=0)return Promise.resolve({ok:true,status:200,json:()=>Promise.resolve(JSON.parse(JSON.stringify(dedup)))});
-   if(u.indexOf('/trashbatch')>=0){trashBody=JSON.parse(opts.body);return Promise.resolve({status:200,json:()=>Promise.resolve({deleted:trashBody.stems.length})});}
+   // NOTE: the real code's trashMarkedDups() posts to /trashmark, not
+   // /trashbatch (confirmed against gallery_index.html) -- this mock
+   // previously targeted the wrong endpoint and silently never fired,
+   // which is why the final assertion below always logged null/FAIL
+   // unnoticed. Fixed 2026-09-12 alongside the live-filter work.
+   if(u.indexOf('/trashmark')>=0){trashBody=JSON.parse(opts.body);return Promise.resolve({status:200,json:()=>Promise.resolve({marked:trashBody.stems.length})});}
    return Promise.resolve({status:200,json:()=>Promise.resolve({}),text:()=>Promise.resolve('')});};
  window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';window.scrollTo=()=>{};
 }});
