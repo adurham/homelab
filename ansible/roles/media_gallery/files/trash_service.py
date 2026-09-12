@@ -23,6 +23,7 @@ Env: RCLONE_CONFIG, TG_RCLONE_REMOTE (default gcrypt:), TRASH_PORT (8091),
 import json
 import os
 import subprocess
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +39,7 @@ PORT = int(os.environ.get("TRASH_PORT", "8091"))
 BIND = os.environ.get("TRASH_BIND", "172.16.0.46")
 THUMB_CACHE = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))
 EXCLUDE_FILE = Path(os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/excluded.json"))
+DEDUP_REMOTE = REMOTE + "gallery/dedup.json"
 # Persistent queue of {chat,stem} the user has marked for deletion. The HTTP
 # request only appends here + to the exclusion ledger (instant); a background
 # reaper thread does the actual rclone deletes. Survives restarts.
@@ -222,6 +224,7 @@ def trash_item(chat, stem) -> dict:
             save_excluded(ex)
             result["excluded_total"] = len(ex)
             _trigger_manifest_rebuild()
+            _prune_dedup_report([stem])
         else:
             result["excluded_total"] = len(load_excluded())
             result["note"] = "original not found; not added to ledger"
@@ -247,6 +250,64 @@ def _trigger_manifest_rebuild():
         )
     except Exception as e:  # noqa: BLE001
         print(f"[trash] failed to spawn build_manifest.py rebuild: {e}", flush=True)
+
+
+def _prune_dedup_report(stems) -> None:
+    """Strip just-deleted stems out of gcrypt:gallery/dedup.json IN PLACE, in
+    a background thread, so the "Find duplicates" view can never show an
+    already-deleted item as a live duplicate again — regardless of which
+    client/browser triggered the delete, and without waiting for the next
+    scheduled dedup_scan.py run.
+
+    2026-09-12: added after a real report — a user deleted one side of a
+    duplicate pair, then reopened Duplicates later (different session) and
+    it still showed as an active 2-member duplicate against the file that
+    was, in fact, already gone. The frontend's own live-manifest filter
+    (gallery_index.html renderDuplicates) already covers a client that has a
+    fresh manifest loaded; this covers the on-disk report itself so a NEW
+    page load doesn't even need to filter anything out — belt and suspenders,
+    matching the two-layer approach: fix the data at the source (here) AND
+    make the client resilient to any report that's still somehow stale
+    (clock skew, a scan mid-flight, etc).
+
+    Best-effort: any failure here is silently swallowed — the client-side
+    filter is the real safety net, this is purely a nicety that keeps the
+    on-disk report itself accurate sooner.
+    """
+    def _work():
+        try:
+            r = rclone("cat", DEDUP_REMOTE)
+            if r.returncode != 0 or not r.stdout.strip():
+                return  # no report yet, or fetch failed — nothing to prune
+            rep = json.loads(r.stdout)
+            sset = {str(s) for s in stems}
+            groups = rep.get("groups") or []
+            new_groups = []
+            changed = False
+            for g in groups:
+                kept = [m for m in g if str(m.get("stem")) not in sset]
+                if len(kept) != len(g):
+                    changed = True
+                if len(kept) >= 2:
+                    new_groups.append(kept)
+                elif kept:
+                    changed = True  # group collapsed below 2 — drop entirely
+            if not changed:
+                return
+            rep["groups"] = new_groups
+            rep["dup_groups"] = len(new_groups)
+            rep["dup_items"] = sum(len(g) for g in new_groups)
+            tmp = tempfile.mktemp(suffix=".json")
+            Path(tmp).write_text(json.dumps(rep, separators=(",", ":")))
+            rclone("copyto", tmp, DEDUP_REMOTE)
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        except Exception:  # noqa: BLE001
+            pass  # best-effort only — client-side filter is the real fix
+
+    threading.Thread(target=_work, daemon=True).start()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -342,6 +403,7 @@ class Handler(BaseHTTPRequestHandler):
         added = enqueue_deletes(chat, stems)
         # 3) kick a manifest rebuild so a fresh page load is already correct
         _trigger_manifest_rebuild()
+        _prune_dedup_report(stems)
         with _qlock:
             depth = len(load_queue())
         return self._json(200, {"marked": len(stems), "queued_added": added,
@@ -399,6 +461,7 @@ class Handler(BaseHTTPRequestHandler):
                 ex.add(s)
             save_excluded(ex)
             _trigger_manifest_rebuild()
+            _prune_dedup_report(stems)
             return self._json(200, {"deleted": deleted, "requested": len(stems),
                                     "excluded_total": len(ex)})
 

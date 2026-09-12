@@ -10,7 +10,12 @@ const dom=new JSDOM(html,{runScripts:'dangerously',resources:'usable',beforePars
  window.fetch=(url,opts)=>{const u=String(url);
    if(u.indexOf('manifest.json')>=0)return Promise.resolve({ok:true,status:200,json:()=>Promise.resolve(manifest)});
    if(u.indexOf('folders.json')>=0)return Promise.resolve({ok:true,status:200,json:()=>Promise.resolve(folders)});
-   if(u.indexOf('/trashbatch')>=0){ delBody=JSON.parse(opts.body); return Promise.resolve({status:200,json:()=>Promise.resolve({deleted:delBody.stems.length})}); }
+   // NOTE: bulkDelete's real click handler posts to /trashmark, not
+   // /trashbatch (confirmed against gallery_index.html) -- this mock
+   // targeted the wrong endpoint and silently never fired. Fixed
+   // 2026-09-12 (found while fixing the same class of bug in the
+   // Duplicates-view tests).
+   if(u.indexOf('/trashmark')>=0){ delBody=JSON.parse(opts.body); return Promise.resolve({status:200,json:()=>Promise.resolve({marked:delBody.stems.length})}); }
    return Promise.resolve({status:200,json:()=>Promise.resolve({}),text:()=>Promise.resolve('')});};
  window.alert=(m)=>{window.__a=m;};window.confirm=()=>true;window.prompt=()=>'NF';window.scrollTo=()=>{};window.AbortController=window.AbortController||function(){this.signal={};this.abort=function(){};};
 }});
