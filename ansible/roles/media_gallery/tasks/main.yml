@@ -168,6 +168,21 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+# Deployed but deliberately NOT wired into any timer/service — this is a
+# manual, run-when-you-want-it tool (see its own module docstring for why:
+# it's a real, throttled, potentially multi-day bandwidth/API cost to
+# backfill thumbnails for the ~37% of items never viewed in the gallery UI,
+# which is out of scope for an automatic hourly job). Run by hand:
+#   ssh gallery-01, then as the media_gallery_user:
+#   /opt/media-gallery/venv/bin/python /opt/media-gallery/thumb_backfill.py --budget 500
+- name: Deploy Thumbnail Backfill Tool (manual-run only, see its docstring)
+  ansible.builtin.copy:
+    src: thumb_backfill.py
+    dest: "{{ media_gallery_dir }}/thumb_backfill.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
 - name: Deploy Queue Watchdog (stuck-reaper detector)
   ansible.builtin.copy:
     src: queue_watchdog.py
@@ -222,6 +237,35 @@
     group: "{{ media_gallery_user }}"
     mode: '0600'
     force: false
+  no_log: true
+
+# force:false above means the WHOLE task (including owner/group/mode
+# enforcement, not just the content write) is skipped once the file exists
+# -- ansible.builtin.template's `force` only controls "transfer if
+# destination doesn't exist", it doesn't separately re-check permissions on
+# an existing file. Real incident 2026-09-12: a root-run ad-hoc rclone
+# invocation against this same config path (rclone can rewrite its own
+# config file in place, e.g. on an OAuth token refresh or format migration)
+# reset ownership to root:{{ media_gallery_user }} -- which, combined with
+# mode 0600 (owner-only), meant the {{ media_gallery_user }} service user
+# could no longer read its OWN config. thumb_service.py's on-the-fly
+# thumbnail generation silently 404'd for every never-before-cached image
+# for ~2 hours (every rclone subprocess it spawned failed with EACCES
+# opening the config, and a bare `except Exception: return None` swallowed
+# it with zero log output) -- a real, if brief, user-facing outage. Several
+# subsequent `ansible-playbook` runs during that window did NOT self-heal
+# it, because force:false skipped this task entirely once the file already
+# existed. This second task runs UNCONDITIONALLY (no force gate) and only
+# touches ownership/mode, never content -- so it can't clobber a
+# self-refreshed token, but it DOES guarantee the service user can always
+# read its own config, every single deploy, regardless of what touched the
+# file out-of-band in between.
+- name: Ensure rclone config ownership/permissions (self-heals regardless of force:false above)
+  ansible.builtin.file:
+    path: "/home/{{ media_gallery_user }}/.config/rclone/rclone.conf"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0600'
   no_log: true
 
 # ─── On-the-fly thumbnail service ──────────────────────────────────────────

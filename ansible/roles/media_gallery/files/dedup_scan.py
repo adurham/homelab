@@ -150,35 +150,80 @@ def save_hash_cache(cache: dict):
     os.replace(tmp, HASH_CACHE_FILE)
 
 
-def band_values(h: int):
-    """Split a 64-bit hash into NUM_BANDS band values (0..255 each)."""
-    mask = (1 << BAND_BITS) - 1
-    return tuple((h >> (b * BAND_BITS)) & mask for b in range(NUM_BANDS))
+def find_duplicate_pairs(stems, hash_list):
+    """LSH-banded candidate generation + inline Hamming check, memory-safe
+    at real-world scale.
 
+    v3 (2026-09-12, same day as v2): v2's single-band approach ("two hashes
+    matching in ANY ONE of 8 bands are a candidate") OOM-killed the host on
+    real data. The design was lossless (correct) but its memory/time cost
+    was never validated against this gallery's actual hash distribution:
+    ~104k real thumbnail hashes cluster far more than the naive n/256
+    average-bucket-size assumption suggested (many buckets of 1000-2100+
+    items -- similar overall photo composition produces correlated dHash
+    bits far more than a uniform-random-hash mental model predicts). That
+    produced ~30 MILLION candidate pairs PER BAND x 8 bands, and v2
+    additionally materialized every single one into a Python set of
+    (stem_a, stem_b) string tuples to de-duplicate pairs seen in multiple
+    bands before checking Hamming distance -- holding hundreds of millions
+    of tuples is what actually exhausted 8GB RAM + 1GB swap.
 
-def candidate_pairs(hashes: dict):
-    """LSH banding: yield each unique (stem_a, stem_b) pair that shares at
-    least one exact band value. Guaranteed superset of every true pair
-    within HAMMING distance (see module docstring/assert above)."""
-    stems = list(hashes.keys())
-    bands = {s: band_values(hashes[s]) for s in stems}
-    seen_pairs = set()
-    for band_idx in range(NUM_BANDS):
+    Per reference-model consult, this version fixes BOTH the real bug and
+    a latent one that would have hit at slightly larger scale regardless:
+
+    1. STRONGER PIGEONHOLE BOUND: bucket by PAIRS of bands (28 passes of
+       C(8,2), each a 16-bit key) instead of single bands (8 passes of
+       8-bit keys). Hamming<=6 across 8 disjoint 8-bit bands guarantees at
+       least 2 bands are exactly equal (not just 1) -- still fully lossless
+       for HAMMING<=6 -- but a candidate must now agree on 16 specific
+       bits, not 8, which collapses candidate counts by roughly 256x on
+       top of shrinking each individual bucket.
+    2. NO CROSS-PASS DEDUP SET: a pair can satisfy the "matches in this
+       band-pair" condition in more than one of the 28 passes. Instead of
+       collecting everything into a set to de-duplicate (the actual OOM
+       cause), each pair is only ever EMITTED in its single canonical pass
+       -- the pass corresponding to its two lowest-index all-zero (i.e.
+       exactly-matching) band positions. Every true pair has at least 2
+       such positions (guaranteed above), so every pair still gets found
+       exactly once, with zero extra memory for cross-pass tracking.
+    3. INLINE HAMMING CHECK, NO CANDIDATE MATERIALIZATION: the precise
+       Hamming distance is checked immediately inside the bucket loop, not
+       collected into a list/set first and checked afterward -- memory is
+       now O(true duplicate pairs found), not O(candidates considered).
+    4. INTEGER INDICES, NOT STRING STEMS: buckets/pairs work over an
+       int index into parallel stems/hash_list arrays, only translating
+       back to a stem string at the point of yielding a confirmed match --
+       cheaper to hash/store/compare than Python strings at this volume.
+
+    Yields (stem_a, stem_b) for every CONFIRMED (Hamming<=HAMMING) pair,
+    each exactly once.
+    """
+    from itertools import combinations
+    n = len(stems)
+    for i, j in combinations(range(NUM_BANDS), 2):
         buckets = {}
-        for s in stems:
-            buckets.setdefault(bands[s][band_idx], []).append(s)
+        shift_i, shift_j = i * BAND_BITS, j * BAND_BITS
+        mask = (1 << BAND_BITS) - 1
+        for idx in range(n):
+            h = hash_list[idx]
+            key = (((h >> shift_i) & mask) << BAND_BITS) | ((h >> shift_j) & mask)
+            buckets.setdefault(key, []).append(idx)
         for members in buckets.values():
             if len(members) < 2:
                 continue
-            n = len(members)
-            for i in range(n):
-                for j in range(i + 1, n):
-                    a, b = members[i], members[j]
-                    pair = (a, b) if a < b else (b, a)
-                    if pair in seen_pairs:
-                        continue
-                    seen_pairs.add(pair)
-                    yield pair
+            for a, b in combinations(members, 2):
+                x = hash_list[a] ^ hash_list[b]
+                if popcount(x) > HAMMING:
+                    continue
+                # canonical pass: only emit from the pass matching this
+                # pair's two lowest-index exactly-equal (zero-XOR) bands —
+                # guaranteed to exist and be unique, so this pair is never
+                # emitted from any other of the 28 passes.
+                zero_bands = [k for k in range(NUM_BANDS)
+                              if not ((x >> (k * BAND_BITS)) & mask)]
+                if len(zero_bands) < 2 or zero_bands[0] != i or zero_bands[1] != j:
+                    continue
+                yield stems[a], stems[b]
 
 
 def main():
@@ -190,7 +235,24 @@ def main():
     # (non-blocking) rather than queue: a skipped run just means the next
     # scheduled one picks up the same incremental work shortly after.
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    lock_fh = open(LOCK_FILE, "w")
+    try:
+        lock_fh = open(LOCK_FILE, "w")
+    except PermissionError:
+        # 2026-09-12 real incident: a manual test run executed as root (via
+        # ansible's default become) created this lock file owned by root.
+        # The REAL scheduled job runs as the unprivileged media_gallery
+        # service user and can't even OPEN a root-owned file for writing --
+        # this silently broke every scheduled dedup scan (visible only as
+        # "dedup scan failed" + a bare traceback in refresh.log) until
+        # someone happened to notice and manually chown it back. Loudly
+        # explain what's wrong rather than let this be another silent-
+        # failure mystery, since a stale root-owned lock is exactly the
+        # kind of thing that's easy to reintroduce by hand during
+        # future debugging and easy to misdiagnose without this message.
+        log(f"FATAL: cannot open lock file {LOCK_FILE} for writing -- "
+            f"likely owned by a different user (e.g. root from a manual "
+            f"debug run). Fix with: chown <service-user> {LOCK_FILE}")
+        sys.exit(1)
     try:
         fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -317,8 +379,14 @@ def main():
     save_hash_cache(hashes)
 
     # ---- LSH-banded candidate generation, then precise Hamming check ----
+    # (find_duplicate_pairs already does the Hamming check inline and only
+    # yields CONFIRMED matches — no separate "candidates" count available
+    # here anymore by design, since candidates were exactly what OOM-killed
+    # v2. See find_duplicate_pairs' own docstring for the full story.)
     log(f"banding {len(hashes)} hashes into candidate pairs…")
     parent = {s: s for s in hashes}
+    stems_list = list(hashes.keys())
+    hash_list = [hashes[s] for s in stems_list]
 
     def find(x):
         while parent[x] != x:
@@ -331,14 +399,11 @@ def main():
         if ra != rb:
             parent[rb] = ra
 
-    n_candidates = 0
     n_confirmed = 0
-    for a, b in candidate_pairs(hashes):
-        n_candidates += 1
-        if popcount(hashes[a] ^ hashes[b]) <= HAMMING:
-            n_confirmed += 1
-            union(a, b)
-    log(f"candidate pairs: {n_candidates:,}, confirmed duplicates: {n_confirmed:,}")
+    for a, b in find_duplicate_pairs(stems_list, hash_list):
+        n_confirmed += 1
+        union(a, b)
+    log(f"confirmed duplicate pairs: {n_confirmed:,}")
 
     groups = {}
     for s in hashes:

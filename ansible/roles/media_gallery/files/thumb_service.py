@@ -249,12 +249,26 @@ def ensure_thumb(chat, stem) -> Path | None:
             try:
                 r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
                 if r.returncode != 0:
+                    print(f"[thumb] download original failed {chat}/{leaf}: "
+                          f"rc={r.returncode} stderr={r.stderr[:300]!r}", flush=True)
                     return None
                 make_thumb(tmp_src, local, is_video)
                 # 3) persist to encrypted Drive cache (best effort, async-ish)
                 rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
                 return local if local.exists() else None
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                # 2026-09-12: this used to swallow every failure silently
+                # (bare `return None`, zero output) -- a real incident (a
+                # root-owned, 0600 rclone.conf this service user couldn't
+                # read) caused every rclone subprocess spawned from here to
+                # fail with EACCES, and NOTHING was logged anywhere for the
+                # ~2 hours it took to notice, because this branch ate the
+                # exception with no trace. Always log what actually failed;
+                # a thumb genuinely not being generatable is a normal,
+                # occasional outcome (return None is still correct), but it
+                # must never be indistinguishable from a real bug like this.
+                print(f"[thumb] generation failed {chat}/{stem}: "
+                      f"{type(e).__name__}: {e}", flush=True)
                 return None
             finally:
                 try:
