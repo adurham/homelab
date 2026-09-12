@@ -29,7 +29,18 @@ media_gallery_refresh_interval: "1h"
 # safe to leave running indefinitely: each run does a bounded amount of real
 # work then exits, throttled well under Drive's API pacer, and naturally
 # self-stops (near-instant runs) once nothing is left to backfill.
-media_gallery_thumb_backfill_interval: "20min"
+#
+# media_gallery_thumb_backfill_interval is the REST period between runs
+# (templated as OnUnitInactiveSec, counted from each run's completion, NOT
+# a fixed wall-clock cadence -- see thumb-backfill.timer.j2 for why that
+# distinction matters). Real observed runtime for a 200-item budget is
+# ~70-80 minutes (each item is a genuine download+resize+reupload round
+# trip, ~20-25s -- much slower than the original ~2.5s assumption from an
+# older, different script's comment). 10min rest between runs keeps
+# meaningful backlog progress (a ~46k-item backlog clears in low-single-
+# digit days at this rate) while still giving Drive's API a real break
+# between batches rather than hammering it in a tight loop forever.
+media_gallery_thumb_backfill_interval: "10min"
 media_gallery_thumb_backfill_budget: 200
 media_gallery_thumb_backfill_delay: 2.0
 
