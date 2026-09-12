@@ -93,6 +93,51 @@ ollama-cloud leave `delegation.provider`/`model` empty so subagents
 inherit the parent model/credentials instead of being force-routed to
 a (possibly-down) exo cluster.
 
+## Model-routing config drift (MacBook vs this gateway)
+
+The MacBook's local `~/.hermes/config.yaml` and this gateway's
+`templates/config.yaml.j2` both carry the same `delegation.model_by_role`
+(62 delegate_task personas), `delegation.by_provider`, and
+`auxiliary.anthropic`/`auxiliary.ollama-cloud` task-routing tables —
+independently maintained, and they've drifted out of sync via manual
+copy-paste more than once (2026-09-04/07/08/12), including one real bug
+(`delegation.by_provider.anthropic` silently pinning `claude-sonnet-5` as
+PRIMARY on one copy after the other had already been fixed).
+
+`vars/model_routing.yml` is the single written source of truth for that
+routing data. To re-tier a role or auxiliary task:
+
+1. Edit the relevant entry in `vars/model_routing.yml`.
+2. Manually mirror the same edit into `templates/config.yaml.j2`'s
+   `delegation.model_by_role` / `delegation.by_provider` / `auxiliary.*`
+   blocks — **the template does not yet render from the vars file** (see
+   "Known gaps" below), so today this is still two hand-edits, not one.
+3. `ansible-playbook deploy_hermes_gateway.yml --limit hermes_gateway` to
+   push it to hermes-gw-01.
+4. From the repo root: `.venv/bin/python3 scripts/hermes_config_sync.py
+   --apply` to mirror the same values into the MacBook's local
+   `~/.hermes/config.yaml` (dry-run without `--apply`; `--check` exits
+   non-zero on drift, for scripting). Requires `ruamel.yaml` in `.venv`
+   (`uv pip install --python .venv/bin/python3 ruamel.yaml` if missing —
+   it's listed in `scripts/requirements.txt` but that file is not
+   auto-installed by anything yet).
+
+**Known gaps (as of 2026-09-12, not yet fixed):**
+
+- `templates/config.yaml.j2` hardcodes this data rather than rendering it
+  from `vars/model_routing.yml` — step 2 above is a manual mirror, which
+  is exactly the failure mode this file exists to prevent. Rewiring the
+  template to render from the vars file (e.g. via `to_nice_yaml`) is the
+  proper fix; deferred because it touches a live, working prod template
+  and needs a zero-behavior-diff render proof before deploying.
+- `templates/dashboard_profile_config.yaml.j2` (the separate profile
+  behind `hermes.chi.lab.amd-e.com`, see "What it does" above) has its
+  **own third hardcoded copy** of this same routing data that neither the
+  2026-09-12 cost-review re-tier nor this fix touched. It is still on
+  pre-re-tier values (e.g. `glm-5.3` instead of the current tiers) and
+  still has the `by_provider.anthropic` primary-pinning bug, live on
+  `hermes-gateway-dashboard.service` + `hermes-serve.service`.
+
 ## Key variables
 
 Most secrets live in `ansible/inventory/group_vars/all.yml` as
