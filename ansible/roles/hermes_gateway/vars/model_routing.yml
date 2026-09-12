@@ -23,14 +23,26 @@
 #
 # HOW TO RE-TIER A ROLE OR TASK:
 #   1. Edit the relevant dict below.
-#   2. Re-run `ansible-playbook deploy_hermes_gateway.yml --limit
-#      hermes_gateway` to push it to hermes-gw-01's config.yaml.j2.
-#   3. Run `python3 scripts/hermes_config_sync.py --apply` from the repo
+#   2. Manually mirror the same edit into BOTH templates/config.yaml.j2's
+#      AND templates/dashboard_profile_config.yaml.j2's
+#      delegation.model_by_role / delegation.by_provider / auxiliary.*
+#      blocks -- neither template renders from this file yet (see "Known
+#      gap" below), so today this is three hand-edits, not one.
+#   3. Re-run `ansible-playbook deploy_hermes_gateway.yml --limit
+#      hermes_gateway` to push both templates to hermes-gw-01.
+#   4. Run `python3 scripts/hermes_config_sync.py --apply` from the repo
 #      root to mirror the same values into the MacBook's local
 #      ~/.hermes/config.yaml.
-#   4. (Not yet wired up as of 2026-09-12: dashboard_profile_config.yaml.j2
-#      still has its own hardcoded copy of this data and needs a similar
-#      migration -- see FORK.md / commit history for status.)
+#
+# KNOWN GAP (as of 2026-09-12): neither template renders from this file --
+# both still hardcode the same data verbatim. Rewiring them (e.g. via
+# to_nice_yaml) is the proper fix; deferred because it touches a live prod
+# template and needs a zero-behavior-diff render proof before deploying.
+# All three copies (MacBook, config.yaml.j2, dashboard_profile_config.yaml.j2)
+# were reconciled to identical values as of 2026-09-12 (verified zero-diff
+# except the one deliberate delegation.max_concurrent_children delta noted
+# below), so today's state is "in sync, manually" -- the drift risk this
+# file exists to kill is in step 2 above, not in the current values.
 #
 # WHAT IS DELIBERATELY *NOT* HERE (stays host-specific, do not "fix" by
 # moving it into this file): model.default/model.provider (which provider
@@ -38,7 +50,11 @@
 # (gateway-specific OAuth-billing-classifier and bot-loop tuning),
 # fallback_providers, web.by_provider, providers.exo.* (gateway's local
 # vision override is deliberately NOT mirrored to the MacBook, which has no
-# local exo vision endpoint of its own).
+# local exo vision endpoint of its own), delegation.max_concurrent_children
+# (dashboard_profile_config.yaml.j2 deliberately keeps 3 vs the other two
+# configs' 10 -- documented in that file since profile creation: "a
+# phone-chat/peer-messaging surface doesn't need the same subagent headroom
+# as the coding-agency Discord bot").
 # ============================================================================
 
 hermes_routing_model_by_role:
