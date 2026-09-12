@@ -31,7 +31,7 @@
 #     ollama-cloud-primary/anthropic-fallback pattern. Re-tiered 2026-09-12
 #     (cost-vs-capability review): Tier C arch/security roles moved off
 #     glm-5.3 (most expensive ollama model) onto deepseek-v4-pro:0813, with
-#     adversarial/audit roles on kimi-k2.6 for a different model family; see
+#     adversarial/audit roles on kimi-k2.7-code for a different model family; see
 #     the model_by_role comment block for the full mapping.
 ---
 {% if hermes_gateway_main_provider == 'anthropic' %}
@@ -95,7 +95,7 @@ providers:
         context_length: 1048576
       glm-5.3-flash:
         context_length: 1048576
-      kimi-k2.6:
+      kimi-k2.7-code:
         context_length: 262144
       "gemma4:31b":
         context_length: 262144
@@ -422,17 +422,20 @@ delegation:
   #   Tier C (arch/senior, deepseek-v4-pro:0813)    — was glm-5.3 (most
   #     expensive ollama model on every axis, esp. ~12x pro's cached-input
   #     rate); pm/sparc-orchestrator fallback dropped to sonnet (output-heavy)
-  #   Tier C adversarial (kimi-k2.6)                — reviewer,
+  #   Tier C adversarial (kimi-k2.7-code)     — reviewer,
   #     security-architect, security-architect-aidefence, security-auditor,
   #     injection-analyst: different model family so they don't share
-  #     blind spots with the deepseek coder tier
+  #     blind spots with the deepseek coder tier. Coding-focused Kimi
+  #     variant (2026-09-12 correction — initial pick was the general
+  #     kimi-k2.6, same price as k2.7-code but k2.7-code is explicitly
+  #     tuned for long-horizon repo review work, strictly the better fit).
   #   jr-coder -> glm-5.3-flash (was gemma4:31b; flat pricing, different
   #     family from mid-coder, verified tool-calling capable)
   #   consultant -> deepseek-v4-pro:0813, fallback opus-5 (was glm-5.3 /
   #     fable-5-1 — Fable-priced fallback for a persona role was unjustified)
   model_by_role:
     reviewer:
-      model: kimi-k2.6
+      model: kimi-k2.7-code
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
@@ -750,19 +753,19 @@ delegation:
         model: claude-opus-5
         provider: anthropic
     security-architect:
-      model: kimi-k2.6
+      model: kimi-k2.7-code
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     security-architect-aidefence:
-      model: kimi-k2.6
+      model: kimi-k2.7-code
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     security-auditor:
-      model: kimi-k2.6
+      model: kimi-k2.7-code
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
@@ -786,7 +789,7 @@ delegation:
         model: claude-sonnet-5
         provider: anthropic
     injection-analyst:
-      model: kimi-k2.6
+      model: kimi-k2.7-code
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
