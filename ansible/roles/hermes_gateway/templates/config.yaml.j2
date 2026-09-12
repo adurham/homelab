@@ -28,9 +28,11 @@
 #     free local vision inference when main=exo would be a regression, not
 #     a mirror.
 #   - delegate_task personas -> delegation.model_by_role below, same
-#     ollama-cloud-primary/anthropic-fallback pattern, mirrored from the
-#     MacBook's delegation.model_by_role (2026-09-04 sync, unchanged by the
-#     2026-09-07 pass — already byte-identical to the MacBook).
+#     ollama-cloud-primary/anthropic-fallback pattern. Re-tiered 2026-09-12
+#     (cost-vs-capability review): Tier C arch/security roles moved off
+#     glm-5.3 (most expensive ollama model) onto deepseek-v4-pro:0813, with
+#     adversarial/audit roles on kimi-k2.6 for a different model family; see
+#     the model_by_role comment block for the full mapping.
 ---
 {% if hermes_gateway_main_provider == 'anthropic' %}
 model:
@@ -82,9 +84,21 @@ providers:
     discover_models: false
     models:
       deepseek-v4-flash:
-        context_length: 163840
+        context_length: 1048576
+      deepseek-v4-flash:0731:
+        context_length: 1048576
+      deepseek-v4-pro:
+        context_length: 1048576
+      deepseek-v4-pro:0813:
+        context_length: 1048576
+      glm-5.3:
+        context_length: 1048576
+      glm-5.3-flash:
+        context_length: 1048576
+      kimi-k2.6:
+        context_length: 262144
       "gemma4:31b":
-        context_length: 131072
+        context_length: 262144
 # anthropic needs no providers.anthropic block — it's a built-in
 # provider that resolves its own OAuth credentials
 # (vault_hermes_gw_claude_code_oauth_token in env.j2 / .claude/.credentials.json).
@@ -370,42 +384,61 @@ delegation:
   # is a bad commit on a feature branch you'd reject in review anyway.
   subagent_auto_approve: true
   ruflo_path: ''
-  # Per-provider subagent routing (mirrored verbatim from the MacBook's
-  # ~/.hermes/config.yaml delegation.by_provider, 2026-09-07 sync). This is
-  # the mechanism tools/delegate_tool.py._resolve_delegation_credentials
-  # actually consults first (before the Jinja-conditioned scalar provider/
-  # model pair above): it matches the ACTIVE main provider against these
-  # keys, so unlike the old binary if/else this explicitly covers all three
+  # Per-provider subagent routing. This is the mechanism
+  # tools/delegate_tool.py._resolve_delegation_credentials actually consults
+  # first (before the Jinja-conditioned scalar provider/model pair above):
+  # it matches the ACTIVE main provider against these keys, so unlike the
+  # old binary if/else this explicitly covers all three
   # hermes_gateway_main_provider values with the same intent as the exo
   # branch above — subagents run a lighter/cheaper model than the parent's
-  # main thread (gemma4:31b on ollama-cloud) except on anthropic, where the
-  # MacBook pins the SAME model as main (claude-sonnet-5) since there's no
-  # cheaper Anthropic tier worth routing to here.
+  # main thread. 2026-09-12 fix: the anthropic entry previously pinned
+  # claude-sonnet-5 (== main), so any unpinned delegate_task subagent on an
+  # anthropic-main session silently ran Sonnet as PRIMARY, violating the
+  # ollama-first policy. Both anthropic and ollama-cloud now route generic
+  # subagents to deepseek-v4-flash:0731 on ollama-cloud (cross-provider
+  # primary is supported here — _resolve_delegation_credentials resolves
+  # the block's own provider/model pair, not the parent's).
   by_provider:
     anthropic:
-      model: claude-sonnet-5
-      provider: anthropic
+      model: deepseek-v4-flash:0731
+      provider: ollama-cloud
     ollama-cloud:
-      model: gemma4:31b
+      model: deepseek-v4-flash:0731
       provider: ollama-cloud
     exo:
       model: mlx-community/Qwen3.6-35B-A3B-8bit
       provider: exo
   # Per-role model routing for delegate_task's ruflo agent_type personas.
-  # Mirrored verbatim from the MacBook's ~/.hermes/config.yaml
-  # delegation.model_by_role (2026-09-04 sync) — ollama-cloud primary,
-  # anthropic fallback, same pattern as the auxiliary pins above. Kept in
-  # sync manually; re-copy both blocks together if the MacBook's role
-  # roster or model choices change.
+  # ollama-cloud primary, anthropic fallback, same pattern as the auxiliary
+  # pins above. Re-tiered 2026-09-12 (cost-vs-capability review, no longer a
+  # verbatim MacBook mirror — re-sync both blocks together if the MacBook's
+  # role roster changes):
+  #   Tier A (admin/light, gemma4:31b / haiku)      — unchanged
+  #   Tier B (general dev, deepseek-v4-flash:0731)  — unchanged, except the
+  #     judgment sub-tier below promoted to pro
+  #   Tier B+ (judgment gates, deepseek-v4-pro:0813) — planner,
+  #     production-validator, test-architect, database-specialist,
+  #     goal-planner, code-goal-planner (was flash)
+  #   Tier C (arch/senior, deepseek-v4-pro:0813)    — was glm-5.3 (most
+  #     expensive ollama model on every axis, esp. ~12x pro's cached-input
+  #     rate); pm/sparc-orchestrator fallback dropped to sonnet (output-heavy)
+  #   Tier C adversarial (kimi-k2.6)                — reviewer,
+  #     security-architect, security-architect-aidefence, security-auditor,
+  #     injection-analyst: different model family so they don't share
+  #     blind spots with the deepseek coder tier
+  #   jr-coder -> glm-5.3-flash (was gemma4:31b; flat pricing, different
+  #     family from mid-coder, verified tool-calling capable)
+  #   consultant -> deepseek-v4-pro:0813, fallback opus-5 (was glm-5.3 /
+  #     fable-5-1 — Fable-priced fallback for a persona role was unjustified)
   model_by_role:
     reviewer:
-      model: glm-5.3
+      model: kimi-k2.6
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     jr-coder:
-      model: gemma4:31b
+      model: glm-5.3-flash
       provider: ollama-cloud
       fallback:
         model: claude-haiku-4-5-20251001
@@ -417,13 +450,13 @@ delegation:
         model: claude-sonnet-5
         provider: anthropic
     pm:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
-        model: claude-opus-5
+        model: claude-sonnet-5
         provider: anthropic
     sr-coder:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
@@ -435,10 +468,10 @@ delegation:
         model: claude-sonnet-5
         provider: anthropic
     consultant:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
-        model: claude-fable-5-1
+        model: claude-opus-5
         provider: anthropic
     pii-detector:
       model: gemma4:31b
@@ -501,16 +534,16 @@ delegation:
         model: claude-haiku-4-5-20251001
         provider: anthropic
     aidefence-guardian:
-      model: gemma4:31b
+      model: deepseek-v4-flash:0731
       provider: ollama-cloud
       fallback:
-        model: claude-haiku-4-5-20251001
+        model: claude-sonnet-5
         provider: anthropic
     claims-authorizer:
-      model: gemma4:31b
+      model: deepseek-v4-flash:0731
       provider: ollama-cloud
       fallback:
-        model: claude-haiku-4-5-20251001
+        model: claude-sonnet-5
         provider: anthropic
     researcher:
       model: deepseek-v4-flash:0731
@@ -555,7 +588,7 @@ delegation:
         model: claude-sonnet-5
         provider: anthropic
     planner:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-sonnet-5
@@ -597,13 +630,13 @@ delegation:
         model: claude-sonnet-5
         provider: anthropic
     production-validator:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-sonnet-5
         provider: anthropic
     test-architect:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-sonnet-5
@@ -621,7 +654,7 @@ delegation:
         model: claude-sonnet-5
         provider: anthropic
     database-specialist:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-sonnet-5
@@ -681,13 +714,13 @@ delegation:
         model: claude-sonnet-5
         provider: anthropic
     goal-planner:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-sonnet-5
         provider: anthropic
     code-goal-planner:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-sonnet-5
@@ -699,73 +732,73 @@ delegation:
         model: claude-sonnet-5
         provider: anthropic
     arch-system-design:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     architecture:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     adr-architect:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     security-architect:
-      model: glm-5.3
+      model: kimi-k2.6
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     security-architect-aidefence:
-      model: glm-5.3
+      model: kimi-k2.6
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     security-auditor:
-      model: glm-5.3
+      model: kimi-k2.6
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     ddd-domain-expert:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     performance-engineer:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     sparc-orchestrator:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
-        model: claude-opus-5
+        model: claude-sonnet-5
         provider: anthropic
     injection-analyst:
-      model: glm-5.3
+      model: kimi-k2.6
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     repo-architect:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
         provider: anthropic
     reasoningbank-learner:
-      model: glm-5.3
+      model: deepseek-v4-pro:0813
       provider: ollama-cloud
       fallback:
         model: claude-opus-5
@@ -1004,7 +1037,7 @@ auxiliary:
         model: glm-5.3
         provider: ollama-cloud
       reasoning_effort: max
-      timeout: 180
+      timeout: 300
     tts_audio_tags:
       model: gemma4:31b
       provider: ollama-cloud
