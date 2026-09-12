@@ -695,8 +695,25 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    location /outpost.goauthentik.io {
-        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
+    # Caching ONLY applies to the actual /auth/nginx subrequest check (the
+    # thing that gets hit hundreds of times per page load and needed the
+    # caching in the first place). FIXED 2026-09-12: this used to be a
+    # single `location /outpost.goauthentik.io` prefix match covering BOTH
+    # the auth/nginx subrequest AND the user-facing /start + /callback
+    # login-flow requests. Since the cache key is $cookie_authentik_proxy_*
+    # (empty for every unauthenticated visitor), every unauthenticated
+    # visitor's /start and /callback responses collapsed onto the SAME
+    # cache bucket as their (and everyone else's) auth/nginx 401 checks --
+    # a real user reported login just spinning forever / getting a raw
+    # "unauthorized request" 401 instead of the login page. Reproduced
+    # 100% via curl: hitting `/` then immediately `/outpost.goauthentik.io/
+    # start` within the 5s proxy_cache_valid window for 401s returned the
+    # STALE cached 401 instead of following through to the real login flow.
+    # Splitting the two locations so caching can ONLY ever apply to the
+    # exact-match auth-check path fixes this at the root, rather than
+    # tuning cache timing (which would just narrow the race, not close it).
+    location = /outpost.goauthentik.io/auth/nginx {
+        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io/auth/nginx;
         proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
         proxy_set_header X-Real-IP $remote_addr;
@@ -725,6 +742,23 @@ server {
         proxy_connect_timeout 5s;
         proxy_read_timeout 12s;
         proxy_next_upstream off;
+    }
+
+    # Everything else under /outpost.goauthentik.io (/start, /callback,
+    # /sign_out, etc.) — the actual browser-facing login-flow redirect
+    # chain. Must NEVER be cached; each hit needs a fresh answer from
+    # Authentik (new OAuth state, session creation, etc.).
+    location /outpost.goauthentik.io {
+        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
+        proxy_set_header Host auth.chi.lab.amd-e.com;
+        proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
     }
 
     location @goauthentik_proxy_signin {
