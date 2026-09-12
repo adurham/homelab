@@ -40,7 +40,7 @@ model:
   provider: anthropic
 {% elif hermes_gateway_main_provider == 'ollama-cloud' %}
 model:
-  default: deepseek-v4-flash
+  default: deepseek-v4.1-flash
   provider: ollama-cloud
 {% else %}
 model:
@@ -92,13 +92,17 @@ providers:
 # MacBook's top-level fallback_providers (2026-09-07 sync) — when the
 # active main provider returns 429/5xx/auth-failure/connection-drop mid
 # turn, Hermes swaps in ollama-cloud and keeps the conversation going.
-# Dated model id (deepseek-v4-flash:0731) matches the MacBook exactly;
-# the dashboard profile deliberately uses the floating `deepseek-v4-flash`
-# alias instead (see dashboard_profile_config.yaml.j2) since availability
-# there matters more than pinning an exact checkpoint.
+# 2026-09-12: retired deepseek-v4-flash:0731 -> deepseek-v4.1-flash (cheaper
+# AND equal-or-better on most published benchmarks; see model_routing.yml
+# header + docs/2026-09-12-dsv41-flash-swap.md for the full rationale).
+# deepseek-v4.1-flash has no dated-checkpoint tag yet (released 2026-09-10,
+# only the floating alias exists on ollama.com as of this edit) -- both this
+# config and the dashboard profile use the bare id for now. Re-pin to a
+# dated tag once Ollama publishes one, to stop an unannounced upstream
+# checkpoint swap from silently changing this fallback's behavior.
 fallback_providers:
   - provider: ollama-cloud
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
 
 # Web search/extract backends, mirrored from the MacBook's ~/.hermes/config.yaml
 # web block (2026-09-07 sync). brave-free is the primary backend
@@ -222,8 +226,7 @@ agent:
   strip_cache_on_overload: true
   reasoning_effort_by_model:
     claude-sonnet-5: max
-    deepseek-v4-flash: xhigh
-    deepseek-v4-flash:0731: xhigh
+    deepseek-v4.1-flash: xhigh
     deepseek-ai/DeepSeek-V4-Flash-Vision-Exp: xhigh
 
 # Anthropic server-side tool_search. With the CC-mimicry layer in
@@ -385,7 +388,7 @@ delegation:
   # claude-sonnet-5 (== main), so any unpinned delegate_task subagent on an
   # anthropic-main session silently ran Sonnet as PRIMARY, violating the
   # ollama-first policy. Both anthropic and ollama-cloud now route generic
-  # subagents to deepseek-v4-flash:0731 on ollama-cloud (cross-provider
+  # subagents to deepseek-v4.1-flash on ollama-cloud (cross-provider
   # primary is supported here — _resolve_delegation_credentials resolves
   # the block's own provider/model pair, not the parent's).
   by_provider:
@@ -396,7 +399,7 @@ delegation:
   # verbatim MacBook mirror — re-sync both blocks together if the MacBook's
   # role roster changes):
   #   Tier A (admin/light, gemma4:31b / haiku)      — unchanged
-  #   Tier B (general dev, deepseek-v4-flash:0731)  — unchanged, except the
+  #   Tier B (general dev, deepseek-v4.1-flash)  — retired 0731 2026-09-12
   #     judgment sub-tier below promoted to pro
   #   Tier B+ (judgment gates, deepseek-v4-pro:0813) — planner,
   #     production-validator, test-architect, database-specialist,
@@ -531,7 +534,7 @@ auxiliary:
       model: gemma4:31b
       provider: ollama-cloud
     approval:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4.1-flash
       provider: ollama-cloud
     mcp:
       model: gemma4:31b
@@ -546,28 +549,28 @@ auxiliary:
       model: gemma4:31b
       provider: ollama-cloud
     kanban_decomposer:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4.1-flash
       provider: ollama-cloud
     profile_describer:
       model: gemma4:31b
       provider: ollama-cloud
     curator:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4.1-flash
       provider: ollama-cloud
     monitor:
       model: gemma4:31b
       provider: ollama-cloud
     memory_extraction:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4.1-flash
       provider: ollama-cloud
     background_review:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4.1-flash
       provider: ollama-cloud
     consult:
       model: deepseek-v4-pro
       provider: ollama-cloud
     goal_judge:
-      model: deepseek-v4-flash:0731
+      model: deepseek-v4.1-flash
       provider: ollama-cloud
     memory_query_rewrite:
       model: gemma4:31b

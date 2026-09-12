@@ -1,4 +1,3 @@
----
 # ============================================================================
 # SHARED MODEL-ROUTING SOURCE OF TRUTH
 # ============================================================================
@@ -76,7 +75,7 @@ hermes_routing_model_by_role:
       model: claude-haiku-4-5-20251001
       provider: anthropic
   mid-coder:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
@@ -94,7 +93,7 @@ hermes_routing_model_by_role:
       model: claude-opus-5
       provider: anthropic
   coder:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
@@ -166,55 +165,55 @@ hermes_routing_model_by_role:
       model: claude-haiku-4-5-20251001
       provider: anthropic
   aidefence-guardian:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   claims-authorizer:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   researcher:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   scout-explorer:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   code-analyzer:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   analyze-code-quality:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   issue-tracker:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   pr-manager:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   tester:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
@@ -226,37 +225,37 @@ hermes_routing_model_by_role:
       model: claude-sonnet-5
       provider: anthropic
   github-modes:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   dev-backend-api:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   data-ml-model:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   ops-cicd-github:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   docs-api-openapi:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   spec-mobile-react-native:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
@@ -274,13 +273,13 @@ hermes_routing_model_by_role:
       model: claude-sonnet-5
       provider: anthropic
   python-specialist:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   typescript-specialist:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
@@ -292,55 +291,55 @@ hermes_routing_model_by_role:
       model: claude-sonnet-5
       provider: anthropic
   project-coordinator:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   topology-optimizer:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   benchmark-suite:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   performance-benchmarker:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   specification:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   pseudocode:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   refinement:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   memory-specialist:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
       provider: anthropic
   agent:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
@@ -358,7 +357,7 @@ hermes_routing_model_by_role:
       model: claude-sonnet-5
       provider: anthropic
   performance-optimizer:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
@@ -437,10 +436,10 @@ hermes_routing_model_by_role:
       provider: anthropic
 hermes_routing_delegation_by_provider:
   anthropic:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
   ollama-cloud:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
   exo:
     model: mlx-community/Qwen3.6-35B-A3B-8bit
@@ -489,7 +488,7 @@ hermes_routing_auxiliary_anthropic_tasks:
       model: claude-sonnet-5
       provider: anthropic
   curator:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
@@ -594,7 +593,7 @@ hermes_routing_auxiliary_ollama_cloud_tasks:
   web_extract: gemma4:31b
   mcp: gemma4:31b
   monitor: gemma4:31b
-  curator: deepseek-v4-flash:0731
+  curator: deepseek-v4.1-flash
   background_review: deepseek-v4-pro:0813
   goal_judge: deepseek-v4-pro:0813
   kanban_decomposer: deepseek-v4-pro:0813
@@ -609,6 +608,8 @@ hermes_routing_ollama_cloud_models:
   deepseek-v4-flash:
     context_length: 1048576
   deepseek-v4-flash:0731:
+    context_length: 1048576
+  deepseek-v4.1-flash:
     context_length: 1048576
   deepseek-v4-pro:
     context_length: 1048576
