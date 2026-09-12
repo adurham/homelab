@@ -370,16 +370,26 @@ def merge_folder(meta, from_folder, to_folder, list_originals_fn, move_fn, delet
       meta: parsed folder_meta dict ({folder: {cover, chat_ids}, "redirects": {...}})
       from_folder / to_folder: sanitized, non-equal folder names
       list_originals_fn(folder) -> list[str] of LEAF filenames in by-chat/<folder>
-                                  (stems derived via splitext; [] if absent)
-      move_fn(from_folder, to_folder, leaf)   — relocate one original + its thumb
-      delete_fn(from_folder, leaf)            — delete one original (a dupe of to)
+                                  (stems derived via splitext; [] if absent,
+                                  None if the listing itself failed)
+      move_fn(from_folder, to_folder, leaf)   — relocate one original + its
+                                  thumb; returns False on failure
+      delete_fn(from_folder, leaf)            — delete one original (a dupe of
+                                  to); returns False on failure
       purge_fn(folder)                        — purge by-chat/<folder> originals + thumbs
+
+    Safety: the source folder is purged ONLY when every per-file op succeeded
+    AND a fresh re-list confirms it is exactly empty. A failed move, a
+    transient listing error, or a file arriving mid-merge all leave the folder
+    intact — the merge is idempotent, so re-running finishes the job; a
+    purged non-empty folder would be data loss. When the source cannot be
+    listed at all (unknown state), no file is touched and nothing is purged.
 
     Idempotent: if by-chat/from doesn't exist, no files move/delete, but the
     redirects + chat_ids are still registered and the meta entry removed, so a
     re-run collapses to just the redirect bookkeeping. Returns
-    (new_meta, moved, removed_dupes, chat_ids). `meta` is NOT mutated (a copy
-    is returned)."""
+    (new_meta, moved, removed_dupes, chat_ids, purged, failed). `meta` is NOT
+    mutated (a copy is returned)."""
     meta = dict(meta or {})
     redirects = dict(meta.get("redirects", {}))
 
@@ -388,7 +398,10 @@ def merge_folder(meta, from_folder, to_folder, list_originals_fn, move_fn, delet
     entry_from = meta.get(from_folder, {})
     if entry_from.get("cover"):
         cover_stems = [str(entry_from["cover"])]
-    from_leaves = list_originals_fn(from_folder)  # [] if folder absent
+    from_leaves = list_originals_fn(from_folder)  # [] absent; None = listing failed
+    enum_failed = from_leaves is None
+    if enum_failed:
+        from_leaves = []  # unknown source state -> touch nothing, never purge
     stem_from = [os.path.splitext(l)[0] for l in from_leaves]
     chat_ids = set(entry_from.get("chat_ids") or [])
     chat_ids |= set(folder_redirect.extract_chat_ids(cover_stems + stem_from))
@@ -404,19 +417,41 @@ def merge_folder(meta, from_folder, to_folder, list_originals_fn, move_fn, delet
     meta[to_folder] = entry_to
     meta.pop(from_folder, None)
 
-    # per-file: same stem already in to -> dupe (delete), else move
-    to_leaves = set(os.path.splitext(l)[0] for l in list_originals_fn(to_folder))
+    # per-file: same stem already in to -> dupe (delete), else move. A callback
+    # returning False (or raising) marks that ONE file failed — the merge
+    # continues with the rest, and failed files are never purged.
+    to_leaves = set(os.path.splitext(l)[0] for l in (list_originals_fn(to_folder) or []))
     moved = removed_dupes = 0
+    failed = []
     for leaf in from_leaves:
-        if os.path.splitext(leaf)[0] in to_leaves:
-            delete_fn(from_folder, leaf)
-            removed_dupes += 1
-        else:
-            move_fn(from_folder, to_folder, leaf)
-            moved += 1
-    # always purge (idempotent even if the folder is already gone)
-    purge_fn(from_folder)
-    return meta, moved, removed_dupes, chat_ids
+        try:
+            if os.path.splitext(leaf)[0] in to_leaves:
+                ok = delete_fn(from_folder, leaf)
+                if ok is False:
+                    failed.append(leaf)
+                else:
+                    removed_dupes += 1
+            else:
+                ok = move_fn(from_folder, to_folder, leaf)
+                if ok is False:
+                    failed.append(leaf)
+                else:
+                    moved += 1
+        except Exception:  # noqa: BLE001 — a raising callback is a failed file
+            failed.append(leaf)
+    # Purge the source ONLY on positive confirmation that nothing remains:
+    # (a) the source was enumerable, (b) no per-file op failed, and (c) a
+    # fresh error-checked re-list comes back exactly empty. Anything else —
+    # a transient listing error, one failed move, or a file that arrived
+    # mid-merge — leaves the folder in place; the merge is idempotent and
+    # re-runnable, so a surviving folder is safe. Skipped purge -> thumbs kept.
+    purged = False
+    if not enum_failed and not failed:
+        remaining = list_originals_fn(from_folder)
+        if remaining == []:
+            purge_fn(from_folder)
+            purged = True
+    return meta, moved, removed_dupes, chat_ids, purged, failed
 
 
 
@@ -567,6 +602,8 @@ class Handler(BaseHTTPRequestHandler):
         <to> (the authoritative backstop at ingest time re-applies the same
         resolve). Idempotent: if <from> no longer exists, redirects + chat_ids
         are still merged/removed and a rebuild is armed — safe to re-run.
+        Safety: <from> is purged only after every file op succeeded AND a
+        fresh re-list confirms it is empty; any failure leaves it intact.
         """
         parts = [s for s in raw.split("/") if s]
         if len(parts) != 2:
@@ -582,23 +619,39 @@ class Handler(BaseHTTPRequestHandler):
             meta = load_folder_meta()
 
             def _list_originals(folder):
+                """Leaf filenames in by-chat/<folder>; [] when the folder is
+                absent (idempotent re-run) and None when the listing itself
+                failed (UNKNOWN state — merge_folder must then touch nothing)."""
                 ls = rclone("lsf", f"{SRC}/{folder}/")
                 if ls.returncode != 0:
-                    return []  # folder absent -> idempotent
+                    if "directory not found" in (ls.stderr or "").lower():
+                        return []
+                    print(f"[merge] list {folder} failed: {ls.stderr[:200]}", flush=True)
+                    return None
                 return [l.strip() for l in ls.stdout.splitlines() if l.strip()]
 
             def _move(from_f, to_f, leaf):
                 rclone("mkdir", f"{SRC}/{to_f}")
-                rclone("moveto", f"{SRC}/{from_f}/{leaf}", f"{SRC}/{to_f}/{leaf}",
-                       "--retries", "5", "--low-level-retries", "10")
+                r = rclone("moveto", f"{SRC}/{from_f}/{leaf}", f"{SRC}/{to_f}/{leaf}",
+                           "--retries", "5", "--low-level-retries", "10")
+                if r.returncode != 0:
+                    print(f"[merge] move {from_f}/{leaf} failed: {r.stderr[:200]}", flush=True)
+                    return False
                 stem = os.path.splitext(leaf)[0]
+                # thumbs are best-effort: a missing thumb is regenerated on
+                # first view by thumb_service.py, so it never fails a merge
                 rclone("move", f"{REMOTE}thumbs/{from_f}", f"{REMOTE}thumbs/{to_f}",
                        "--include", f"{stem}.jpg", "--retries", "3",
                        "--low-level-retries", "5")
+                return True
 
             def _delete(from_f, leaf):
-                rclone("delete", f"{SRC}/{from_f}/{leaf}",
-                       "--retries", "5", "--low-level-retries", "10")
+                r = rclone("delete", f"{SRC}/{from_f}/{leaf}",
+                           "--retries", "5", "--low-level-retries", "10")
+                if r.returncode != 0:
+                    print(f"[merge] delete dupe {from_f}/{leaf} failed: {r.stderr[:200]}", flush=True)
+                    return False
+                return True
 
             def _purge(folder):
                 r = rclone("purge", f"{SRC}/{folder}")
@@ -607,7 +660,7 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"[merge] purge {folder} originals failed: {r.stderr[:200]}", flush=True)
                 rclone("purge", f"{REMOTE}thumbs/{folder}")
 
-            new_meta, moved, removed_dupes, chat_ids = merge_folder(
+            new_meta, moved, removed_dupes, chat_ids, purged, failed = merge_folder(
                 meta, from_folder, to_folder,
                 _list_originals, _move, _delete, _purge)
             save_folder_meta(new_meta)
@@ -618,6 +671,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {
             "merged": from_folder, "into": to_folder,
             "moved": moved, "removed_dupes": removed_dupes,
+            "purged": purged, "failed": failed,
             "chat_ids": chat_ids, "redirects": redirects})
 
 
