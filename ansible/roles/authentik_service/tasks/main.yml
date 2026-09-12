@@ -135,3 +135,67 @@
     project_src: /opt/authentik
     state: present
   register: authentik_service_compose_result
+
+# -------------------------------------------------------------------------
+# Branding image files (2026-09-12 fix)
+#
+# Previously the AMD-Enterprises logo/favicon/flow-background were pushed
+# via manage_authentik.yml (authentik_provider role) as raw data: URIs
+# PATCHed straight onto the brand's branding_logo/branding_favicon/
+# branding_default_flow_background fields — Authentik's own docs confirmed
+# at the time (2026-08-04) that no separate file-upload API endpoint
+# existed, so this was the only API-only way to set an image value.
+#
+# That broke silently after this session's 2025.8.1->2026.8.0 upgrade:
+# upstream changed how those fields resolve to URLs, and now ALWAYS
+# prepends /files/media/public/ to whatever string is stored, even when
+# that string is a full data: URI, producing a garbage URL like
+# /files/media/public/data:image/svg+xml;base64,....  (matches upstream
+# goauthentik/authentik#19541 and #19573 — known regression, not our
+# config's fault). Real user impact: broken "authentik Logo" box on the
+# login page.
+#
+# Root-cause fix: stop using data: URIs entirely. Copy the actual SVG
+# files into Authentik's own /media/public/brand/ directory (the file
+# picker's real, supported storage location per docs.goauthentik.io/
+# customize/files/), then have authentik_provider/tasks/branding.yml
+# PATCH the brand with plain relative paths (brand/logo.svg etc) instead
+# of data URIs. Relative paths under /media/public/ correctly resolve via
+# /files/media/public/<path>?token=... regardless of this upstream bug,
+# because the bug is specifically in the data:-URI branch of that
+# resolution logic, not the plain-relative-path branch. Verified live
+# 2026-09-12: this exact pattern returns a real 200 image/svg+xml.
+# -------------------------------------------------------------------------
+
+- name: Ensure branding media directory exists inside the container
+  ansible.builtin.command:
+    cmd: >-
+      docker compose exec -T server
+      mkdir -p /media/public/brand
+    chdir: /opt/authentik
+  changed_when: false
+
+- name: Copy AMD-Enterprises branding SVGs into the container
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/roles/authentik_provider/files/{{ item.src }}"
+    dest: "/tmp/authentik_branding_{{ item.dest }}"
+    mode: '0644'
+  loop:
+    - { src: "amd_enterprises_logo.svg", dest: "logo.svg" }
+    - { src: "amd_enterprises_favicon.svg", dest: "favicon.svg" }
+    - { src: "amd_enterprises_flow_bg.svg", dest: "flow_bg.svg" }
+  register: authentik_branding_staged
+
+- name: Push staged branding SVGs into the running container's media volume
+  ansible.builtin.shell: |
+    set -e
+    CID=$(docker compose ps -q server)
+    docker cp /tmp/authentik_branding_{{ item.item.dest }} "$CID":/media/public/brand/{{ item.item.dest }}
+  args:
+    chdir: /opt/authentik
+  loop: "{{ authentik_branding_staged.results }}"
+  changed_when: true
+  when: item.changed
+  # Files rarely change once set; only re-push when the source SVG's
+  # checksum actually differs from what's already on disk in /tmp, which
+  # the copy task above already determined via authentik_branding_staged.

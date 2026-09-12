@@ -4,7 +4,21 @@
 # See `.github/renovate.json`.
 
 authentik_image: "ghcr.io/goauthentik/server"
-authentik_tag: "2025.8.1"
+# 2026-09-12: this default was stale at 2025.8.1 (vulnerable to a critical
+# RCE CVE) despite the live host having been manually upgraded to 2026.8.0
+# via 6 sequential hops on 2026-09-10. Ansible's own AUTHENTIK_TAG had
+# never been updated to match, so the very next deploy_authentik.yml /
+# manage_authentik.yml run silently downgraded the live container back to
+# 2025.8.1 and broke redis in the process (RDB format v15, written by the
+# newer redis paired with 2026.8.0, is incompatible with the older redis
+# image implicitly paired with this stale tag's original deploy — see
+# authentik_redis_tag below, which was NOT the actual cause since it was
+# never bumped either; the real trigger was AUTHENTIK_TAG regressing).
+# This var is now the single source of truth for the deployed version —
+# bump it here (and re-run deploy_authentik.yml) for every future
+# Authentik upgrade, sequential-hop or otherwise, so the live version and
+# this repo can never silently diverge again.
+authentik_tag: "2026.8.0"
 
 # Postgres major version is coupled to Authentik's supported range; bump
 # the major only after confirming Authentik release notes support it.
