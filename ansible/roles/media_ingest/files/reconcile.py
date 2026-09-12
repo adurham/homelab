@@ -68,6 +68,41 @@ def sanitize(name: str) -> str:
     return keep.replace(" ", "-") or "unknown"
 
 
+# ─── Durable-merge redirect resolution (SEMANTIC COPY of
+#     roles/media_gallery/files/folder_redirect.py — the canonical module; it
+#     cannot be imported here because this host is a different box with its own
+#     non-overlapping module tree). Keep these byte-for-byte in sync with the
+#     canonical source; roles/media_gallery/tests/test_merge_redirect.py asserts
+#     the copies produce identical output.
+def resolve_redirect(redirects, key, max_hops=10):
+    seen = set()
+    cur = key
+    for _ in range(max_hops):
+        if cur not in redirects:
+            return None
+        if cur in seen:
+            return cur
+        seen.add(cur)
+        cur = redirects[cur]
+        if cur not in redirects:
+            return cur
+    return None
+
+
+def resolve_folder(redirects, folder, chat_id=None):
+    if chat_id is not None:
+        r = resolve_redirect(redirects, "chat:%s" % chat_id)
+        if r is not None:
+            return r
+    r = resolve_redirect(redirects, "name:%s" % folder)
+    if r is not None:
+        return r
+    r = resolve_redirect(redirects, "user:%s" % folder)
+    if r is not None:
+        return r
+    return folder
+
+
 def media_kind(msg):
     """Identical classification to collector.py: photo/video/media-doc or None."""
     if getattr(msg, "sticker", None):
@@ -85,17 +120,24 @@ def media_kind(msg):
 
 
 def build_folder_map():
-    """chat_id -> folder from the gallery's folder_meta (rename-safe routing)."""
+    """chat_id -> folder from the gallery's folder_meta (rename-safe routing),
+    with durable-merge redirects folded in (a chat redirect wins over the
+    chat_ids map — the authoritative post-merge routing)."""
     try:
         meta = store_client.get_folder_meta() or {}
     except Exception as e:  # noqa: BLE001
         log.warning("folder_meta fetch failed (%s); using sanitized titles only", e)
-        return {}
+        return {}, {}
     m = {}
     for folder, entry in meta.items():
         for cid in (entry.get("chat_ids") or []):
             m[str(cid)] = folder
-    return m
+    redirects = dict(meta.get("redirects") or {})
+    # chat redirects fold into the map so per-dialog routing stays one lookup
+    for k, v in redirects.items():
+        if k.startswith("chat:") and v:
+            m[k[len("chat:"):]] = v
+    return m, redirects
 
 
 def _ensure_session_copy():
@@ -127,7 +169,7 @@ async def run(lookback, dialog_filters, dry_run):
     if not await client.is_user_authorized():
         log.error("SESSION NOT AUTHORIZED — collector login required.")
         sys.exit(2)
-    dynmap = build_folder_map()
+    dynmap, redirects = build_folder_map()
     try:
         excluded = store_client.get_excluded()
     except Exception as e:  # noqa: BLE001
@@ -145,7 +187,9 @@ async def run(lookback, dialog_filters, dry_run):
         if dialog_filters and not any(s.lower() in (d.name or "").lower() for s in dialog_filters):
             continue
         cid = str(d.id)
-        folder = dynmap.get(cid) or sanitize(d.name)
+        # chat redirect (already folded into dynmap) > chat_ids > name redirect
+        # on what we'd sanitize to > sanitized title
+        folder = dynmap.get(cid) or resolve_redirect(redirects, "name:%s" % sanitize(d.name)) or sanitize(d.name)
         async for msg in client.iter_messages(d.entity, limit=lookback):
             if getattr(msg, "out", False):
                 continue

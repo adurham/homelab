@@ -178,6 +178,18 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+# Library imported by upload_service.py (the /merge endpoint + ingest-time
+# redirect resolve). Must sit in the same dir as upload_service.py so the bare
+# `import folder_redirect` resolves. NOT a standalone binary -> no unit/handler.
+- name: Deploy Durable Folder-Merge Redirect Library (folder_redirect.py)
+  ansible.builtin.copy:
+    src: folder_redirect.py
+    dest: "{{ media_gallery_dir }}/folder_redirect.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+  notify: Restart Upload
+
 # Deployed but deliberately NOT wired into any timer/service — this is a
 # manual, run-when-you-want-it tool (see its own module docstring for why:
 # it's a real, throttled, potentially multi-day bandwidth/API cost to

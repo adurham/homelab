@@ -65,6 +65,40 @@ logging.basicConfig(level=logging.INFO,
                     handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler(sys.stdout)])
 log = logging.getLogger("media-ingest-02")
 
+# ─── Durable-merge redirect resolution (SEMANTIC COPY of
+#     roles/media_gallery/files/folder_redirect.py — the canonical module; it
+#     cannot be imported here because this host is a different box with its own
+#     non-overlapping module tree). Keep these byte-for-byte in sync with the
+#     canonical source; roles/media_gallery/tests/test_merge_redirect.py asserts
+#     the copies produce identical output.
+def resolve_redirect(redirects, key, max_hops=10):
+    seen = set()
+    cur = key
+    for _ in range(max_hops):
+        if cur not in redirects:
+            return None
+        if cur in seen:
+            return cur
+        seen.add(cur)
+        cur = redirects[cur]
+        if cur not in redirects:
+            return cur
+    return None
+
+
+def resolve_folder(redirects, folder, chat_id=None):
+    if chat_id is not None:
+        r = resolve_redirect(redirects, "chat:%s" % chat_id)
+        if r is not None:
+            return r
+    r = resolve_redirect(redirects, "name:%s" % folder)
+    if r is not None:
+        return r
+    r = resolve_redirect(redirects, "user:%s" % folder)
+    if r is not None:
+        return r
+    return folder
+
 # Like pass configuration
 LIKE_ENABLED = os.environ.get("M02_LIKES_ENABLED", "").lower() in ("1", "true", "yes")
 LIKE_DAILY_CAP = int(os.environ.get("M02_LIKES_DAILY_CAP", "500"))
@@ -450,10 +484,17 @@ def _walk_and_push():
     pushed = failed = skipped = 0
     if not STAGING.exists():
         return 0, 0, 0
+    # Fetch the durable-merge redirect map once per run (best-effort; on any
+    # failure we proceed with raw usernames, matching the pre-redirect behavior).
+    redirects = {}
+    try:
+        redirects = dict((store_client.get_folder_meta() or {}).get("redirects") or {})
+    except Exception as e:  # noqa: BLE001
+        log.warning("folder_meta fetch failed (%s); using raw usernames", e)
     for model_dir in sorted(STAGING.iterdir()):
         if not model_dir.is_dir():
             continue
-        folder = model_dir.name
+        folder = resolve_folder(redirects, model_dir.name)
         for fpath in sorted(model_dir.iterdir()):
             if not fpath.is_file():
                 continue

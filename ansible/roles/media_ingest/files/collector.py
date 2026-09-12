@@ -96,6 +96,9 @@ def _seed_static_chat_ids():
 
 # Cached chat-id -> folder map fetched from the gallery's folder_meta.json.
 _dyn_map = {}
+# Cached durable-merge redirect map (folder_meta.json "redirects" key) — see
+# resolve_folder above. Refreshed on the same TTL as the chat map.
+_dyn_redirects = {}
 _dyn_map_ts = 0.0
 _DYN_TTL = 60.0  # refresh at most once a minute
 
@@ -103,19 +106,20 @@ _DYN_TTL = 60.0  # refresh at most once a minute
 def _refresh_dynamic_map():
     """Pull folder_meta from the gallery and build chat_id -> folder. Best-effort;
     on any failure we keep the last good map (or empty -> static fallback)."""
-    global _dyn_map, _dyn_map_ts
+    global _dyn_map, _dyn_redirects, _dyn_map_ts
     import time as _t
     if _t.time() - _dyn_map_ts < _DYN_TTL:
         return
     _dyn_map_ts = _t.time()
     try:
         import store_client
-        meta = store_client.get_folder_meta()  # {folder: {chat_ids:[...]}}
+        meta = store_client.get_folder_meta()  # {folder: {chat_ids:[...], cover}}
         m = {}
         for folder, entry in (meta or {}).items():
             for cid in (entry.get("chat_ids") or []):
                 m[str(cid)] = folder
         _dyn_map = m
+        _dyn_redirects = dict((meta or {}).get("redirects") or {})
     except Exception as e:  # noqa: BLE001
         log.debug("folder_meta refresh failed: %s", e)
 
@@ -133,16 +137,62 @@ def sanitize(name: str) -> str:
     return keep.replace(" ", "-") or "unknown"
 
 
+# ─── Durable-merge redirect resolution (SEMANTIC COPY of
+#     roles/media_gallery/files/folder_redirect.py — the canonical module; it
+#     cannot be imported here because this host is a different box with its own
+#     non-overlapping module tree). Keep these byte-for-byte in sync with the
+#     canonical source; roles/media_gallery/tests/test_merge_redirect.py asserts
+#     the copies produce identical output.
+def resolve_redirect(redirects, key, max_hops=10):
+    seen = set()
+    cur = key
+    for _ in range(max_hops):
+        if cur not in redirects:
+            return None
+        if cur in seen:
+            return cur
+        seen.add(cur)
+        cur = redirects[cur]
+        if cur not in redirects:
+            return cur
+    return None
+
+
+def resolve_folder(redirects, folder, chat_id=None):
+    if chat_id is not None:
+        r = resolve_redirect(redirects, "chat:%s" % chat_id)
+        if r is not None:
+            return r
+    r = resolve_redirect(redirects, "name:%s" % folder)
+    if r is not None:
+        return r
+    r = resolve_redirect(redirects, "user:%s" % folder)
+    if r is not None:
+        return r
+    return folder
+
+
 def folder_for(chat_id, name):
-    # 1) dynamic UI map (rename-safe, user-controlled) wins
+    # 1) durable merge redirect on the chat-id wins (authoritative; reflects a
+    #    folder merge even before chat_ids is re-keyed, and even when a stale
+    #    chat_ids map would otherwise route wrong)
     _refresh_dynamic_map()
     cid = str(chat_id)
+    r = resolve_redirect(_dyn_redirects, "chat:%s" % cid)
+    if r is not None:
+        return r
+    # 2) dynamic UI map (rename-safe, user-controlled)
     if cid in _dyn_map:
         return _dyn_map[cid]
-    # 2) static fallback map
+    # 3) name redirect on what we WOULD sanitize to (catches folder merges that
+    #    rename the display name when no chat_ids mapping exists)
+    r = resolve_redirect(_dyn_redirects, "name:%s" % sanitize(name))
+    if r is not None:
+        return r
+    # 4) static fallback map
     if cid in CHAT_NAMES:
         return CHAT_NAMES[cid]
-    # 3) sanitized chat title (or 'unknown')
+    # 5) sanitized chat title (or 'unknown')
     return sanitize(name)
 
 
