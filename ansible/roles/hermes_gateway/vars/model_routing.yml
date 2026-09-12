@@ -43,7 +43,7 @@
 
 hermes_routing_model_by_role:
   reviewer:
-    model: kimi-k2.6
+    model: kimi-k2.7-code
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
@@ -361,19 +361,19 @@ hermes_routing_model_by_role:
       model: claude-opus-5
       provider: anthropic
   security-architect:
-    model: kimi-k2.6
+    model: kimi-k2.7-code
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
       provider: anthropic
   security-architect-aidefence:
-    model: kimi-k2.6
+    model: kimi-k2.7-code
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
       provider: anthropic
   security-auditor:
-    model: kimi-k2.6
+    model: kimi-k2.7-code
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
@@ -397,7 +397,7 @@ hermes_routing_model_by_role:
       model: claude-sonnet-5
       provider: anthropic
   injection-analyst:
-    model: kimi-k2.6
+    model: kimi-k2.7-code
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
@@ -597,7 +597,7 @@ hermes_routing_ollama_cloud_models:
     context_length: 1048576
   glm-5.3-flash:
     context_length: 1048576
-  kimi-k2.6:
+  kimi-k2.7-code:
     context_length: 262144
   gemma4:31b:
     context_length: 262144
