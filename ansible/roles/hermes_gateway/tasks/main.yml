@@ -835,7 +835,20 @@
     owner: hermes
     group: hermes
     mode: '0600'
-  notify: Restart Hermes Serve
+  # Two DIFFERENT services read this exact file: hermes-serve.service (the
+  # web dashboard UI, `hermes -p dashboard dashboard --isolated`) AND
+  # hermes-gateway-dashboard.service (the `hermes peer dm` api_server,
+  # `hermes -p dashboard gateway run`, tcp/8643) -- both are the SAME
+  # `dashboard` HERMES_HOME, just different entrypoints against the same
+  # config.yaml. This task only notified the first one until 2026-09-12,
+  # so a routing/model change here landed on disk but
+  # hermes-gateway-dashboard.service kept running with the OLD config in
+  # memory until its next unrelated restart (found live: config rewritten
+  # at 21:03:26 during the DSv4.1-Flash routing swap, service last started
+  # 18:28:16 -- 2.5h stale). Notify both.
+  notify:
+    - Restart Hermes Serve
+    - Restart Hermes Gateway Dashboard
 
 - name: Render Dashboard Profile .env
   ansible.builtin.template:
