@@ -5,6 +5,19 @@
 # render config + drop creds -> register hermes-gateway.service via the
 # built-in `hermes gateway install --system` flow.
 
+# Load the delegate_task/auxiliary model-routing source of truth (see
+# vars/model_routing.yml's own header comment for the full rationale) so
+# BOTH config.yaml.j2 (Render Hermes config.yaml, below) AND
+# dashboard_profile_config.yaml.j2 (Render Dashboard Profile config.yaml)
+# can render their delegation.model_by_role / delegation.by_provider /
+# auxiliary.* blocks from ONE place instead of three hand-maintained
+# hardcoded copies. Roles auto-load vars/main.yml but NOT arbitrarily-named
+# files in vars/, so this needs an explicit include_vars -- bare filename
+# resolves against this role's own vars/ dir, not the playbook's cwd.
+- name: Load Model-Routing Source of Truth
+  ansible.builtin.include_vars:
+    file: model_routing.yml
+
 - name: Install Base OS Packages
   ansible.builtin.apt:
     name:
