@@ -4,7 +4,15 @@
 # comment on pve01's pve_backup_job_id for the history of why this role
 # exists (frigate-01 + bwt-dhcp silently missing from backup for months
 # because the jobs were hand-configured outside ansible, 2026-09-11).
-pve_backup_storage: local
+#
+# 2026-09-12: was 'local' (the small root-disk-backed storage), which
+# caused pve01's root LVM disk to hit 94% full when vzdump-lxc-170
+# (frigate-01, ~13GB/night) + everything else accumulated with
+# keep-last=3. Moved to vzdump-nvme, a ZFS-pool-backed dir storage
+# created by roles/proxmox_storage (hundreds of GB free on every node
+# vs ~6-16GB free on the root disks). See that role's tasks/main.yml
+# for why a plain zfspool storage can't hold backup content directly.
+pve_backup_storage: vzdump-nvme
 pve_backup_compress: zstd
 pve_backup_mode: snapshot
 pve_backup_keep_last: 3

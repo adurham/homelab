@@ -66,3 +66,48 @@
     state: started
     daemon_reload: true
 
+# Incident 2026-09-12: pve01's root LVM disk (94G, shared with the OS,
+# apt cache, journal, etc.) hit 94% because vzdump backups were landing
+# on the default 'local' storage (path /var/lib/vz, backed by the small
+# root disk) via proxmox_backup_jobs' pve_backup_storage: local default.
+# The obvious fix -- point backups at the ZFS pool instead, which has
+# hundreds of GB free on every node -- can't be done by just changing
+# pve_backup_storage to the existing 'nvme-data' zfspool storage:
+# zfspool-type storage in Proxmox only supports content type
+# images,rootdir (VM/CT disks), NOT backup (`pvesm set nvme-data
+# --content ...,backup` fails with "storage does not support content
+# type 'backup'" -- confirmed live). A zfspool storage stores each
+# volume as its own dataset/zvol, which doesn't match vzdump's
+# flat-file archive model. The fix is a 'dir' storage type pointed at a
+# path INSIDE the ZFS pool (a plain directory on a ZFS-backed
+# filesystem, not a zfspool-managed dataset-per-volume) -- 'dir'
+# storage does support backup content, and files landing in it benefit
+# from ZFS compression/checksums like everything else in the pool.
+- name: Create a ZFS dataset to hold vzdump backup files (per-node local dataset, same pattern as 'local')
+  ansible.builtin.command: "zfs create {{ zfs_pool_name }}/vzdump-backups"
+  register: zfs_vzdump_dataset_check
+  failed_when:
+    - zfs_vzdump_dataset_check.rc != 0
+    - "'dataset already exists' not in zfs_vzdump_dataset_check.stderr"
+  changed_when: zfs_vzdump_dataset_check.rc == 0
+
+- name: Check whether the vzdump-nvme dir storage is already registered
+  ansible.builtin.command: "pvesm status -storage {{ pve_backup_zfs_storage_id }}"
+  register: pvesm_vzdump_check
+  ignore_errors: true
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+
+# Cluster-wide dir storage, non-shared -- each node has its own local
+# dataset at the same path, same convention as the 'local' storage.
+- name: Register the ZFS-backed dir storage for vzdump backups
+  ansible.builtin.command: >
+    pvesm add dir {{ pve_backup_zfs_storage_id }}
+    --path /{{ zfs_pool_name }}/vzdump-backups
+    --content backup
+    --shared 0
+  when:
+    - pvesm_vzdump_check.rc != 0
+  run_once: true
+  delegate_to: "{{ groups['proxmox_nodes'][0] }}"
