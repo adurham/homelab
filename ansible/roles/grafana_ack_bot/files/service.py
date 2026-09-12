@@ -282,6 +282,61 @@ async def _add_reaction_with_retry(
         log.error("Giving up adding reaction %s to message %s after %d attempts", emoji, message_id, max_attempts)
 
 
+async def _clear_reactions_with_retry(
+    session: aiohttp.ClientSession, message_id: int, max_attempts: int = 4
+) -> None:
+    """Remove EVERY reaction from a message (bot's own priming reactions
+    AND whatever the human clicked) in one call. Used once an alert has
+    actually been acked or silenced -- per explicit direction, a message
+    that's already been acted on shouldn't keep showing clickable
+    reactions until the underlying condition changes (resolves, or a
+    timed silence expires and the alert is still firing -- see
+    _watch_for_silence_expiry, which re-adds the initial reactions
+    to the SAME message when that happens).
+
+    This is the bot-API bulk-clear endpoint (DELETE .../reactions, no
+    emoji in the path), NOT the webhook-authored-message edit/delete
+    endpoints used elsewhere in this file -- clearing reactions is not
+    gated by message authorship the way editing/deleting a
+    webhook-posted message is, but it DOES require the bot to hold
+    MANAGE_MESSAGES in this channel. Without that permission every call
+    here 403s (logged, not fatal) -- if reactions stop disappearing
+    after ack/silence, check the bot's channel permissions first.
+    """
+    async with _reaction_lock:
+        for attempt in range(1, max_attempts + 1):
+            async with session.delete(
+                f"https://discord.com/api/v10/channels/{DISCORD_CHANNEL_ID}"
+                f"/messages/{message_id}/reactions",
+                headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}"},
+            ) as resp:
+                if resp.status < 300 or resp.status == 404:
+                    return
+                if resp.status == 429:
+                    try:
+                        body = await resp.json()
+                        retry_after = float(body.get("retry_after", 1.0))
+                    except Exception:
+                        retry_after = 1.0
+                    log.warning(
+                        "Clear-reactions rate-limited for message %s (attempt %d/%d), retrying in %.2fs",
+                        message_id, attempt, max_attempts, retry_after,
+                    )
+                    await asyncio.sleep(retry_after + 0.1)
+                    continue
+                body_text = await resp.text()
+                if resp.status == 403:
+                    log.warning(
+                        "Cannot clear reactions on message %s (403 -- bot is missing MANAGE_MESSAGES "
+                        "in this channel): %s",
+                        message_id, body_text,
+                    )
+                else:
+                    log.warning("Failed to clear reactions on message %s: %s %s", message_id, resp.status, body_text)
+                return
+        log.error("Giving up clearing reactions on message %s after %d attempts", message_id, max_attempts)
+
+
 async def _post_history_event(session: aiohttp.ClientSession, text: str) -> None:
     """Fire-and-forget post to the passive history channel. Never edited,
     never deleted -- this is the append-only record of every alert
@@ -647,6 +702,128 @@ async def _watch_for_resolution(
         )
 
 
+# Tasks watching for a timed silence's expiry, keyed by message_id --
+# same "hold a strong reference + de-dup on resume" reasoning as
+# _ack_watchers above.
+_silence_watchers: dict[int, asyncio.Task] = {}
+
+
+def _spawn_silence_expiry_watcher(message_id: int, fingerprint: str, duration: timedelta) -> None:
+    existing = _silence_watchers.get(message_id)
+    if existing is not None and not existing.done():
+        return
+    task = asyncio.create_task(_watch_for_silence_expiry(message_id, fingerprint, duration))
+    _silence_watchers[message_id] = task
+
+
+async def _watch_for_silence_expiry(message_id: int, fingerprint: str, duration: timedelta) -> None:
+    """Background task: sleep out a timed silence's duration, then check
+    whether the underlying alert is still firing. If it is, re-open the
+    SAME Discord message for action (re-add the ack/silence-menu
+    reactions) instead of waiting for a brand new message to show up.
+
+    Why this watcher has to exist at all: an ACTIVE Alertmanager silence
+    suppresses notification delivery outright (not just Discord-side
+    dedup), so Grafana's repeat_interval re-notification does not fire
+    while the silence is up -- there is no webhook to react to when it
+    expires. And even once the silence lifts, if/when a repeat
+    notification eventually does arrive, this service's OWN dedup (see
+    _post_alert_message) would skip posting a second message for a
+    fingerprint that still has a live (silenced) _pending entry. Net
+    effect without this watcher: a silenced-then-still-firing alert's
+    message would go permanently dark -- no reactions, no new message,
+    nothing left to click -- until the underlying problem eventually
+    resolves on its own days or weeks later.
+
+    Runs the "still active" check up to twice, ~30s apart, and reopens
+    if EITHER check says still-active (never requires both to agree --
+    biased toward not silently losing visibility of a real ongoing
+    problem, mirroring _alert_still_active's own fail-open-on-API-error
+    stance). Only concludes "resolved, leave it closed" if every check
+    agrees the fingerprint is absent from Grafana's active-alerts list.
+    """
+    await asyncio.sleep(max(duration.total_seconds(), 0) + 30)  # buffer past the silence's own end time
+    async with aiohttp.ClientSession() as session:
+        still_active = False
+        for attempt in range(2):
+            try:
+                if await _alert_still_active(session, fingerprint):
+                    still_active = True
+                    break
+            except Exception:
+                log.exception(
+                    "Error checking active-alerts for expired silence on message %s, assuming still active",
+                    message_id,
+                )
+                still_active = True
+                break
+            if attempt == 0:
+                await asyncio.sleep(30)
+
+        _silence_watchers.pop(message_id, None)
+        pending = _pending.get(message_id)
+        if pending is None or pending.get("resolved") or pending.get("acked"):
+            # Already cleaned up by the resolved-webhook path, or acked
+            # in the meantime (e.g. via a manually re-added reaction) --
+            # nothing left for this watcher to do.
+            return
+
+        if not still_active:
+            log.info(
+                "Silence for message %s expired and the alert is no longer active; "
+                "leaving it for the resolved-webhook/reconcile path to clean up",
+                message_id,
+            )
+            return
+
+        log.info(
+            "Silence for message %s expired but alert %s is STILL firing -- reopening for action",
+            message_id, pending.get("alertname"),
+        )
+        pending["silenced"] = False
+        pending["menu_open"] = False
+        pending.pop("silence_expires_at", None)
+        pending["content"] = pending["content"] + "\n\N{ALARM CLOCK} Silence expired — still firing, reopened for action:"
+        _save_pending()
+        await _edit_via_webhook(session, message_id, pending["content"])
+        for emoji in INITIAL_REACTION_EMOJI:
+            await _add_reaction_with_retry(session, message_id, emoji)
+
+
+def _resume_silence_watchers() -> None:
+    """Re-spawn silence-expiry watcher tasks for any alert whose timed
+    silence hasn't been confirmed-expired-and-handled yet. Mirrors
+    _resume_ack_watchers -- without this, a service restart during an
+    active timed silence permanently loses the "reopen if still firing"
+    check for that alert once its silence expires.
+
+    Recomputes the watcher's sleep duration from the REMAINING time
+    until the persisted expiry timestamp, not the original full
+    duration -- if the service was down for part of the silence window,
+    the watcher should fire at the alert's ORIGINAL intended expiry
+    time, not restart a fresh full-length countdown from scratch.
+    """
+    resumed = 0
+    now = datetime.now(timezone.utc)
+    for message_id, pending in _pending.items():
+        expires_at_str = pending.get("silence_expires_at")
+        if not expires_at_str or pending.get("resolved") or pending.get("acked"):
+            continue
+        fingerprint = pending.get("fingerprint")
+        if not fingerprint:
+            continue
+        try:
+            expires_at = datetime.fromisoformat(expires_at_str)
+        except ValueError:
+            log.warning("Skipping malformed silence_expires_at on message %s: %r", message_id, expires_at_str)
+            continue
+        remaining = timedelta(seconds=max((expires_at - now).total_seconds(), 0))
+        _spawn_silence_expiry_watcher(message_id, fingerprint, remaining)
+        resumed += 1
+    if resumed:
+        log.info("Resumed %d silence-expiry watcher(s) after restart", resumed)
+
+
 async def _create_ack_annotation(session: aiohttp.ClientSession, alertname: str, labels: dict, discord_user_id: int) -> int | None:
     """Record a plain ack as a Grafana annotation -- visible in Grafana's
     UI/API, tagged for querying, but does NOT touch alert notification
@@ -822,6 +999,7 @@ class AckBotClient(discord.Client):
     async def on_ready(self) -> None:
         log.info("Reaction listener ready as %s", self.user)
         _resume_ack_watchers()
+        _resume_silence_watchers()
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         if payload.channel_id != DISCORD_CHANNEL_ID:
@@ -877,6 +1055,14 @@ class AckBotClient(discord.Client):
                 pending["content"] = pending["content"] + ack_line
                 _save_pending()
             await self._edit(payload.message_id, pending["content"])
+            # Ack is a terminal state until resolution (or the 30-day
+            # ceiling) -- nothing left to click, so pull every reaction
+            # (ours + the human's) off the message. If the silence
+            # itself failed, deliberately leave the reactions in place
+            # so the user can retry instead of losing the ability to
+            # act on this alert at all.
+            if silence_id:
+                await _clear_reactions_with_retry(self._http_session, payload.message_id)
             return
 
         if emoji_str == SILENCE_MENU_EMOJI:
@@ -921,6 +1107,21 @@ class AckBotClient(discord.Client):
         pending["content"] = pending["content"] + line
         _save_pending()
         await self._edit(payload.message_id, pending["content"])
+        if silence_id:
+            # Same reasoning as the ack branch above: while silenced,
+            # there is nothing meaningful to react with, so clear the
+            # board. Unlike an ack, a timed silence is NOT terminal --
+            # if it expires while the alert is still firing, Grafana's
+            # own repeat-notification (or, once dedup above stops that,
+            # the silence-expiry watcher below) needs to re-open this
+            # message for action. Store the silence's own end time so
+            # that watcher knows when to check back.
+            pending["silence_expires_at"] = (
+                datetime.now(timezone.utc) + duration
+            ).isoformat()
+            _save_pending()
+            await _clear_reactions_with_retry(self._http_session, payload.message_id)
+            _spawn_silence_expiry_watcher(payload.message_id, pending["fingerprint"], duration)
 
     async def _edit(self, message_id: int, new_content: str) -> None:
         assert self._http_session is not None
