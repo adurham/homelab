@@ -335,6 +335,145 @@ threaded broker in place:
   (`drwxr-xr-x root root`), the tmpfiles.d file, the deployed shim's hash
   matching the local source, and `streamlocalbindmask 0111`.
 
+## Layer 3: ansible-playbook with zero on-disk secrets
+
+Added 2026-09-13, on top of the same broker/socket/shim as Layers 1-2 — not
+a new bridge, a new *consumer* of the existing `op` forwarding path.
+
+### Why it exists
+
+Fleet key coverage had a real gap: `id_ansible`'s pubkey was authorized on
+some hosts but missing on 5 (proxy-01, frigate-01, gallery-01,
+media-ingest-01/02) because the CT-provisioning mechanism (`pct exec`
+piping a PVE host's own `authorized_keys` into new containers) had never
+actually had `id_ansible` authorized on the PVE hosts themselves for two of
+the three nodes at various points in the fleet's history. Fixed by
+appending the key (never overwriting) to `/root/.ssh/authorized_keys` on
+pve01/02/03 (cluster-replicated via `/etc/pve`, confirmed: one append
+propagated to all 3) and via `pct exec` into the 5 gap containers, each
+verified with a REAL ssh auth attempt (not just grepping the file) both
+from the Mac and from hermes-gw-01.
+
+Separately, hermes-gw-01 had accumulated two real secrets at rest from
+earlier, less careful manual setup: a private copy of `id_ansible` at
+`~hermes/.ssh/id_ansible` and a plaintext `ansible/.vault_pass`
+(`M95b21D08!`) — both defeating the box's own "nothing secret on disk"
+design goal. This layer replaces both with per-call 1Password sourcing and
+the on-disk copies were removed (shredded, not just deleted).
+
+### How it works
+
+Three new files in `ansible/scripts/`:
+
+- **`op-vault-pass.sh`** — Ansible natively supports pointing
+  `--vault-password-file` (or `ANSIBLE_VAULT_PASSWORD_FILE`) at an
+  EXECUTABLE: if the target has the exec bit set, Ansible runs it and
+  reads stdout as the password, instead of reading file content directly.
+  This script is that executable: `exec op read
+  "op://Personal/6x2qdqloldso6yx75oba3t74qq/password"`. Requires
+  `OP_BROKER_SOCK` (i.e. a live hlxc session) — refuses clearly otherwise.
+- **`hlxc-ansible-playbook.sh`** / **`hlxc-ansible.sh`** — thin wrappers
+  around `ansible-playbook` / `ansible` that additionally source the fleet
+  SSH private key from 1Password into an EPHEMERAL agent for the
+  duration of one run, never writing it to disk. Both delegate the actual
+  work to `_hlxc_ansible_inner.sh`.
+- **`_hlxc_ansible_inner.sh`** — the ssh-agent child process. Reads its
+  config from environment variables the wrapper exported — deliberately
+  NOT from string-interpolated shell fragments. This session hit two
+  separate quoting bugs building this feature (SSH does not preserve
+  argv quoting across a remote command line — a pubkey containing spaces
+  got split into positional params and silently produced both a
+  false-positive "already present" check AND garbage written into 5
+  containers' `authorized_keys`; separately, a nested `bash -c '...'`
+  string broke on a literal apostrophe) before landing on "real script
+  file, env vars only, zero interpolation" as the only pattern that
+  survived testing end to end.
+
+Key mechanics, each empirically verified (not assumed) on 2026-09-13:
+
+- **SSH key delivery:** `ssh-agent -t <ttl> <command>` execs `<command>`
+  as its own real child and — this is standard OpenSSH behavior, not a
+  guess — exits (removing its socket) when that child exits by ANY means,
+  because the agent `wait()`s on that specific child PID. No trap/eval
+  bookkeeping that a hard kill could skip. Inside, `op read <item> |
+  ssh-add -t <ttl> -` pipes the key bytes directly into the agent via
+  stdin; they never touch a file.
+- **Identity selection — the part that looked simple and wasn't:**
+  `ansible_ssh_private_key_file` is pointed DIRECTLY at
+  `~/.ssh/id_ansible.pub` (the `.pub` file itself, no private key of that
+  name existing anywhere on the box). This is what actually makes OpenSSH
+  ask the agent for that one specific identity — confirmed via `-vvv`
+  showing `identity file ...id_ansible.pub type 3` / `Offering public
+  key: ...id_ansible.pub ... agent` / `Server accepts key`, reproduced
+  both via raw `ssh` and via Ansible's own connection plugin (`ansible -m
+  ping` → `SUCCESS` against frigate-01 and all 3 PVE nodes). A bare
+  non-`.pub` path was tried FIRST and looked like it worked — until a
+  negative-control test (decoy key loaded first in the agent, plus moving
+  hermes-gw-01's own default identity out of the way) revealed the
+  "success" was actually authenticating via a completely different,
+  independently-authorized identity (see below), not the one under test.
+  **Do not simplify this back to a bare path without re-running that
+  negative control.**
+- **Vault password:** `ANSIBLE_VAULT_PASSWORD_FILE` points at
+  `op-vault-pass.sh` instead of `ansible.cfg`'s Mac-only plaintext
+  `.vault_pass`.
+- **`ControlPersist=no`:** the repo's default `ssh_args` keeps an
+  authenticated multiplexed connection alive 60s after a run, reusable by
+  any same-UID process with zero further auth — not acceptable for a
+  bridge explicitly aiming for no standing access after the run ends, so
+  it's disabled for these invocations only (Mac-side interactive usage
+  keeps `ControlPersist=60s` for speed, unchanged).
+- **`ANSIBLE_LOCAL_TEMP` on tmpfs (`/dev/shm`):** Ansible's default
+  `local_tmp` lives under `~/.ansible/tmp` on the box's real disk and can
+  transiently hold rendered content — including vaulted variables —
+  during `template`/`copy` actions. Redirected to tmpfs so that content
+  never touches a real block device even momentarily. Confirmed live
+  during the end-to-end test below (`/dev/shm/hermes-ansible-local-tmp/...`
+  appeared in the real diff output).
+- **`ulimit -c 0`:** a crashed `ssh-agent` or `ansible-playbook` must not
+  leave key material in a core dump.
+
+### An unrelated finding surfaced during testing
+
+hermes-gw-01's own SSH identity (`~/.ssh/id_ed25519`, generated for its
+git/GitHub use and its `hermes_gateway_ssh_targets` role) turns out to
+already be independently authorized as root on all 3 PVE hosts —
+triplicated in each host's `authorized_keys`, most likely from `pmxcfs`
+replication during separate provisioning runs at some point in the
+fleet's history. This predates this session's work, is unrelated to the
+1Password-sourced-secrets design, and was not introduced or removed by
+it — flagged here because it's exactly the kind of standing access this
+document should not let readers assume doesn't exist, and because it's
+what caused the false-positive during identity-selection testing above.
+Not fixed as part of this change; worth a deliberate decision later on
+whether that access is intended.
+
+### Verification (2026-09-13)
+
+- **Key-coverage gap:** all 8 previously-unreachable hosts (pve01/02/03
+  directly, plus proxy-01, frigate-01, gallery-01, media-ingest-01,
+  media-ingest-02) now pass a REAL `ssh ... hostname` auth check with
+  `id_ansible`, tested from both the Mac and from hermes-gw-01.
+- **Negative controls:** wrapper refuses with a clear message when
+  `OP_BROKER_SOCK` is unset (no hlxc session) and when a private key file
+  reappears at `~/.ssh/id_ansible` (guards against regressing the
+  no-secrets-on-disk property). A decoy SSH key loaded into the agent
+  ahead of the real one is never offered when a specific `.pub` identity
+  is requested with `IdentitiesOnly=yes`.
+- **Real end-to-end run:** `hlxc-ansible-playbook.sh deploy_loadbalancer.yml
+  --limit loadbalancer --check --diff`, run as the `hermes` user inside a
+  genuine hlxc-forwarded socket (not simulated), against the real lb-01
+  container: `PLAY RECAP: lb-01 ok=21 changed=2 unreachable=0 failed=0`.
+  The diffed task (`Deploy Nginx Configuration`) renders a
+  vault-decrypted variable, proving the vault-password path; the
+  connection itself proves the SSH-key path; the temp file path in the
+  diff output proves the tmpfs redirect.
+- **Cleanup verified:** no `ssh-agent` process, no `id_ansible` private
+  key, and no `ansible/.vault_pass` remain on hermes-gw-01 after the run.
+- **Stray secrets removed:** the pre-existing on-disk `id_ansible`
+  private key and plaintext `ansible/.vault_pass` (`M95b21D08!`) were
+  shredded, not just deleted.
+
 ## Open decision — migrating the bot's own runtime secrets
 
 The stated end goal is 1Password as the single source of truth, but the
