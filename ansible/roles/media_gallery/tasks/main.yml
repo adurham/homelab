@@ -168,6 +168,33 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+# Deployed but deliberately NOT wired into any timer/service — a one-shot
+# READ-ONLY audit tool (see its own module docstring), run by hand or via
+# the systemd oneshot unit below when convenient. Never merges/hides/moves
+# anything; only writes a report for a human to review, since the folder
+# name to KEEP when merging duplicates is a real judgment call the first 5
+# merges needed (e.g. Viper->litenrevv kept the smaller name per explicit
+# user instruction, not a size/date heuristic) — this script surfaces
+# candidates, it does not decide for the user. Run by hand:
+#   ssh gallery-01, then as the media_gallery_user:
+#   /opt/media-gallery/venv/bin/python /opt/media-gallery/folder_dupe_audit.py
+# or: systemctl start media-gallery-folder-dupe-audit.service
+# Report lands at /var/lib/media-gallery/folder_dupe_audit.{json,txt}.
+- name: Deploy Folder Duplicate Audit Tool (manual-run only, see its docstring)
+  ansible.builtin.copy:
+    src: folder_dupe_audit.py
+    dest: "{{ media_gallery_dir }}/folder_dupe_audit.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Deploy Folder Duplicate Audit systemd Unit (manual-trigger oneshot)
+  ansible.builtin.template:
+    src: media-gallery-folder-dupe-audit.service.j2
+    dest: /etc/systemd/system/media-gallery-folder-dupe-audit.service
+    mode: '0644'
+  notify: Reload Systemd
+
 # Library imported by upload_service.py at ingest time — NOT a standalone
 # binary, so it has no systemd unit or handler.
 - name: Deploy Ingest-Time Duplicate Checker (dedup_live.py)
