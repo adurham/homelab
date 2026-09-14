@@ -429,6 +429,17 @@ delegation:
       standard: coder
       deep: arch-system-design
 
+# Compaction threshold. hermes-agent's built-in default is 0.50 (compact at
+# 50% of context) when this block is absent entirely, which this template
+# never set explicitly before 2026-09-14 — raised to 0.75 to mirror the
+# MacBook's local ~/.hermes/config.yaml (`hermes config set
+# compression.threshold 0.75`). Deliberately a single-key block: the config
+# loader deep-merges per-key against DEFAULT_CONFIG, so every other
+# compression.* default (target_ratio, protect_last_n, etc.) still applies
+# unchanged.
+compression:
+  threshold: 0.75
+
 auxiliary:
   # PROVIDER-FIRST schema (top-level keys: defaults / exo / anthropic /
   # ollama-cloud), copied verbatim from the MacBook's ~/.hermes/config.yaml
