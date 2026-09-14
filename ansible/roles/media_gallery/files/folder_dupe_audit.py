@@ -174,9 +174,22 @@ def signal_hash_overlap(folder_stems: dict, skip: set, min_ratio: float, cache: 
     LSH-banded matcher — zero new hashing, just aggregation of its output by
     folder membership instead of by item union-find.
 
+    Counts DISTINCT matched items per folder side, not raw candidate pairs:
+    one item in a small folder that happens to closely resemble several
+    items in a large folder (a real, common shape — near-duplicate burst
+    shots, similar reposted content) would otherwise inflate a naive pair
+    count past the smaller folder's total size, producing a nonsensical
+    >100% "overlap ratio". Found live on the first real run against
+    production data (e.g. a raw-pair-count version reported 239% overlap
+    for one real folder pair) — fixed here before treating any ratio as
+    trustworthy. `ratio_vs_smaller` is now a true coverage fraction, always
+    in [0, 1]: what fraction of the SMALLER folder's items have at least
+    one near-duplicate somewhere in the other folder.
+
     `cache` injectable for testing (stem -> int hash); omitted => production
     dedup_scan.py hash cache (already computed/refreshed by the live
-    ingest-time + hourly dedup pipeline)."""
+    ingest-time + hourly dedup pipeline).
+    """
     if cache is None:
         cache = load_hash_cache()
     stem_to_folder = {}
@@ -191,20 +204,37 @@ def signal_hash_overlap(folder_stems: dict, skip: set, min_ratio: float, cache: 
         return {}
     hash_list = [cache[s] for s in relevant_stems]
 
-    overlap_counts = defaultdict(int)
+    # matched_sides[(folder_lo, folder_hi)] = (set of folder_lo stems with a
+    # cross match, set of folder_hi stems with a cross match) — folder_lo/hi
+    # per Python's sort of the pair, NOT by size (size ordering is resolved
+    # separately below once we know which side is actually smaller).
+    matched_sides = defaultdict(lambda: (set(), set()))
     for a, b in find_duplicate_pairs(relevant_stems, hash_list):
         fa, fb = stem_to_folder[a], stem_to_folder[b]
         if fa == fb:
             continue
-        key = tuple(sorted((fa, fb)))
-        overlap_counts[key] += 1
+        folder_lo, folder_hi = tuple(sorted((fa, fb)))
+        lo_set, hi_set = matched_sides[(folder_lo, folder_hi)]
+        if fa == folder_lo:
+            lo_set.add(a)
+            hi_set.add(b)
+        else:
+            lo_set.add(b)
+            hi_set.add(a)
 
     results = {}
-    for (fa, fb), count in overlap_counts.items():
-        smaller = min(len(folder_stems[fa]), len(folder_stems[fb]))
-        ratio = count / smaller if smaller else 0
+    for (folder_lo, folder_hi), (lo_matched, hi_matched) in matched_sides.items():
+        n_lo, n_hi = len(folder_stems[folder_lo]), len(folder_stems[folder_hi])
+        if n_lo <= n_hi:
+            smaller_matched, smaller_total = len(lo_matched), n_lo
+        else:
+            smaller_matched, smaller_total = len(hi_matched), n_hi
+        ratio = smaller_matched / smaller_total if smaller_total else 0
         if ratio >= min_ratio:
-            results[(fa, fb)] = {"overlap_items": count, "ratio_vs_smaller": round(ratio, 3)}
+            results[(folder_lo, folder_hi)] = {
+                "overlap_items": smaller_matched,
+                "ratio_vs_smaller": round(ratio, 3),
+            }
     return results
 
 

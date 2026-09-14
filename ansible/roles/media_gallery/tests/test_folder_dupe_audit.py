@@ -97,6 +97,35 @@ def test_hash_overlap_same_folder_pairs_ignored():
     check("same-folder hash collisions produce no cross-folder pair", results == {})
 
 
+def test_hash_overlap_ratio_never_exceeds_one():
+    # Regression test for a real bug found on the FIRST live production run
+    # (2026-09-14): counting raw candidate PAIRS instead of distinct matched
+    # ITEMS let one small-folder item that closely resembles several
+    # large-folder items count multiple times, producing ratios >100% (e.g.
+    # 239% on real data). Here: folder A has 1 item that matches THREE
+    # different items in folder B -> 3 raw pairs, but only 1 distinct A-side
+    # item and the ratio must be computed against A's true size (1), giving
+    # exactly 1.0 — never 3.0.
+    folder_stems = {"A": {"a1"}, "B": {"b1", "b2", "b3", "b4"}}
+    cache = {
+        "a1": 0,
+        "b1": 0,  # hamming 0 vs a1
+        "b2": 1,  # hamming 1 vs a1
+        "b3": 2,  # hamming 1 vs a1 (bit 1, not bit 0 -- still <=6)
+        "b4": 0b11111111 << 40,  # far away, no match
+    }
+    results = fda.signal_hash_overlap(folder_stems, skip=set(), min_ratio=0.01, cache=cache)
+    key = ("A", "B")
+    check("A/B flagged despite A having only 1 item", key in results)
+    if key in results:
+        check("ratio is exactly 1.0, not 3.0 (a1 matched 3 B items but A only has 1 item total)",
+              results[key]["ratio_vs_smaller"] == 1.0)
+        check("overlap_items counts DISTINCT smaller-side items (1), not raw pairs (3)",
+              results[key]["overlap_items"] == 1)
+    for r in results.values():
+        check("no ratio ever exceeds 1.0", r["ratio_vs_smaller"] <= 1.0)
+
+
 def test_hash_overlap_below_threshold_excluded():
     # A real 64-bit hash and a genuinely far one (popcount(XOR) > HAMMING=6):
     # flip alternating bits for a large Hamming distance, not just a numeric
