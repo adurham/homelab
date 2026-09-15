@@ -331,6 +331,65 @@ def safe_ext(filename: str) -> str:
     return ext if ext in (IMAGE_EXT | VIDEO_EXT) else ".bin"
 
 
+def sniff_media_ext(path: Path):
+    """Best-effort real-content fallback for files safe_ext() couldn't resolve
+    from the filename (fell back to .bin). Checks magic bytes directly against
+    the actual staged file -- stdlib only, no new dependency.
+
+    WHY THIS EXISTS (2026-09-15): found live, 8568 files fleet-wide staged as
+    <stem>.bin because the collector/scraper's source filename carried no
+    (or an unrecognized) extension. Two compounding, previously-unnoticed
+    effects: (1) build_manifest.py only recognizes IMAGE_EXT|VIDEO_EXT, so
+    every .bin item is silently excluded from the gallery manifest --
+    invisible in the UI, not merely un-hashed; (2) dedup_live.py's ingest
+    hasher decides "is this a video, skip it" purely from the extension, so a
+    .bin video was WRONGLY handed to dhash() as if it were a photo, which
+    threw UnidentifiedImageError on every ingest (the log flood that led to
+    finding this). Root cause of the .bin files themselves: media_ingest_02's
+    scraper_wrapper.py names some downloads "..._tempaudio_..."/"..._tempvid_..."
+    with no real suffix, and other sources sometimes deliver no extension at
+    all -- content-sniffing after the bytes are already on disk is the fix
+    that works regardless of which upstream naming quirk caused it.
+
+    Deliberately conservative: only returns a value for signatures we can
+    identify with certainty from the first few bytes; anything else (a
+    genuine audio-only file, e.g.) returns None and stays .bin exactly as
+    before -- this must never MISidentify something, only recover the cases
+    that were previously guaranteed-wrong.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(16)
+    except OSError:
+        return None
+    if len(head) < 12:
+        return None
+    if head[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if head[:4] == b"RIFF":
+        if head[8:12] == b"WEBP":
+            return ".webp"
+        if head[8:12] == b"AVI ":
+            return ".avi"
+        return None
+    if head[4:8] == b"ftyp":
+        # ISO-base-media container (MP4/MOV/M4V/3GP family). The only brand
+        # that means "audio, not video" is Apple's M4A; every other brand
+        # observed live (isom/iso2/mp41/mp42/avc1/qt /3gp...) was confirmed
+        # against real staged files to be actual playable video -- treat
+        # those as video rather than leave them permanently mis-filed.
+        if head[8:12] in (b"M4A ", b"M4B "):
+            return None
+        return ".mp4"
+    if head[:4] == b"\x1aE\xdf\xa3":
+        return ".webm"
+    return None
+
+
 def exif_date(path: Path):
     try:
         with Image.open(path) as im:
@@ -1095,7 +1154,6 @@ class Handler(BaseHTTPRequestHandler):
             # honor a provided stem (single-file collector push); else generate
             stem = stem_override if (stem_override and len(items) == 1) else new_stem()
             tmp = pdir / f"{stem}{ext}.tmp"
-            dest = pdir / f"{stem}{ext}"
             try:
                 # chunked stream copy — never load whole file in RAM
                 with open(tmp, "wb") as out:
@@ -1109,6 +1167,17 @@ class Handler(BaseHTTPRequestHandler):
                     errors.append(f"{item.filename}: too large")
                     tmp.unlink()
                     continue
+                # Content-sniff fallback: the source filename didn't carry a
+                # recognized extension (safe_ext already gave up -> .bin), but
+                # now that the real bytes are on disk we can often recover the
+                # true type from its magic header. See sniff_media_ext's
+                # docstring for why this matters (manifest visibility +
+                # correct video/image classification), not just cosmetics.
+                if ext == ".bin":
+                    sniffed = sniff_media_ext(tmp)
+                    if sniffed:
+                        ext = sniffed
+                dest = pdir / f"{stem}{ext}"
                 date = date_override or exif_date(tmp) or \
                     dt.datetime.fromtimestamp(tmp.stat().st_mtime).isoformat()
                 os.replace(tmp, dest)  # atomic; now visible to the pusher
