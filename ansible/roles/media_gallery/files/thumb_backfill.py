@@ -4,6 +4,34 @@ One-time (or run-as-needed), THROTTLED backfill: generate thumbnails for
 manifest items that have never been viewed in the gallery UI, and so have
 never had a thumbnail created at all.
 
+PERFORMANCE FIX (2026-09-15): originally this hit thumb_service.py's live
+HTTP endpoint per item (see the module's own prior docs, and the Usage
+section below for the still-supported --http-fallback flag). Measured live:
+that was taking ~26s/item against large backlogged folders, not the ~2.5s
+this tool's docs assumed -- root cause is thumb_service.py's find_original()
+doing a FULL `rclone lsf` of the entire chat folder to locate the original's
+exact filename by prefix-matching the stem (correct for its real job: a live
+page-view request that only has {chat, stem}, not the full leaf filename).
+For a 7249-item folder that single listing call took 23s, confirmed via a
+direct timing test, and it's paid on EVERY item, not once per folder.
+
+This script doesn't have that excuse: it already downloaded the full
+manifest, which carries each item's leaf filename directly, so it can call
+thumb_service.make_thumb() locally and skip find_original() (and the whole
+HTTP round-trip) entirely for images -- the manifest already told us
+exactly which file to open. This does NOT touch thumb_service.py's live
+serving path or its request-time correctness/space-reservation logic in any
+way; it only changes how THIS offline batch tool resolves originals. (The
+live per-view stall itself is a separate, real finding worth its own fix in
+thumb_service.py -- flagged, not fixed here, since it wasn't in scope for
+"run the backfill.")
+
+Video posters (--include-video, opt-in and not the default) still go
+through the HTTP path unchanged -- thumb_service.py's video-poster
+generation has real space-reservation and prefix-streaming logic for
+multi-GB files that isn't worth re-implementing here for a rarely-used
+flag; the fast local path below only covers images.
+
 WHY THIS EXISTS (2026-09-12): dedup_scan.py's duplicate detector can only
 hash items that already have a thumbnail in gcrypt:thumbs/ (thumbnails are
 normally generated lazily, on first view, by thumb_service.py). Found live:
@@ -67,6 +95,7 @@ from pathlib import Path
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "")
 GALLERY = REMOTE + "gallery"
+SRC = REMOTE + "by-chat"
 THUMBS = REMOTE + "thumbs"
 THUMB_SERVICE_URL = os.environ.get("THUMB_SERVICE_URL", "http://172.16.0.46:8090")
 
@@ -82,6 +111,48 @@ def rclone(*args):
     return subprocess.run(cmd + list(args), capture_output=True, text=True)
 
 
+def generate_thumb_local(chat, leaf, stem, work_dir):
+    """Fast path for images (see the module's PERFORMANCE FIX docstring):
+    download the original directly using the EXACT leaf filename the
+    manifest already gave us (no find_original() folder listing needed),
+    generate the thumbnail in-process via thumb_service.make_thumb() (same
+    Pillow resize/quality settings the live service uses, imported directly
+    so output is byte-for-byte consistent with what a real page-view would
+    produce), and upload it to the encrypted Drive thumbs cache.
+
+    Returns (ok: bool, bytes_downloaded: int, error: str | None).
+    """
+    import thumb_service  # local import: only needed on this path, and
+    # importing it triggers a `from PIL import Image` + a LOCAL_CACHE mkdir
+    # at module level -- fine for the real deploy (same venv/user as the
+    # live thumb service) but no reason to pay that cost for --include-video
+    # -only or --http-fallback runs that never call this function.
+    tmp_src = work_dir / f"_src_{stem}_{leaf}"
+    tmp_dst = work_dir / f"_dst_{stem}.jpg"
+    try:
+        r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
+        if r.returncode != 0:
+            return False, 0, f"download failed: {r.stderr[:200]}"
+        size = tmp_src.stat().st_size
+        if size == 0:
+            return False, 0, "downloaded original is empty"
+        thumb_service.make_thumb(tmp_src, tmp_dst, False)
+        if not tmp_dst.exists() or tmp_dst.stat().st_size == 0:
+            return False, size, "make_thumb produced no output"
+        r = rclone("copyto", str(tmp_dst), f"{THUMBS}/{chat}/{stem}.jpg")
+        if r.returncode != 0:
+            return False, size, f"thumb upload failed: {r.stderr[:200]}"
+        return True, size, None
+    except Exception as e:  # noqa: BLE001
+        return False, 0, f"{type(e).__name__}: {e}"
+    finally:
+        for p in (tmp_src, tmp_dst):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--budget", type=int, default=None,
@@ -91,6 +162,13 @@ def main():
     ap.add_argument("--include-video", action="store_true",
                      help="also backfill video posters (default: images only, "
                           "since video posters cost far more bandwidth/time per item)")
+    ap.add_argument("--http-fallback", action="store_true",
+                     help="force every item through thumb_service.py's live HTTP "
+                          "endpoint (the original, slower implementation) instead "
+                          "of the direct local generation path for images. Videos "
+                          "always use this path regardless of this flag -- see the "
+                          "PERFORMANCE FIX docstring for why. Use this only if the "
+                          "fast local path is ever suspected of producing bad output.")
     args = ap.parse_args()
 
     work = Path(tempfile.mkdtemp(prefix="thumb_backfill_"))
@@ -131,19 +209,35 @@ def main():
     for i, it in enumerate(missing):
         chat = it.get("chat") or ""
         stem = it["stem"]
-        url = f"{THUMB_SERVICE_URL}/thumb/{chat}/{stem}.jpg"
-        try:
-            with urllib.request.urlopen(url, timeout=60) as resp:
-                data = resp.read()
-                bytes_seen += len(data)
-                if resp.status == 200:
+        is_video = it.get("type") == "video"
+        use_http = is_video or args.http_fallback
+        if use_http:
+            url = f"{THUMB_SERVICE_URL}/thumb/{chat}/{stem}.jpg"
+            try:
+                with urllib.request.urlopen(url, timeout=60) as resp:  # noqa: S310 — THUMB_SERVICE_URL is our own trusted internal http:// endpoint, not user input
+                    data = resp.read()
+                    bytes_seen += len(data)
+                    if resp.status == 200:
+                        done += 1
+                    else:
+                        failed += 1
+                        log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: HTTP {resp.status}")
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: {type(e).__name__}: {e}")
+        else:
+            leaf = os.path.basename(it.get("file") or "")
+            if not leaf:
+                failed += 1
+                log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: no 'file' field in manifest item")
+            else:
+                ok, size, err = generate_thumb_local(chat, leaf, stem, work)
+                bytes_seen += size
+                if ok:
                     done += 1
                 else:
                     failed += 1
-                    log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: HTTP {resp.status}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: {type(e).__name__}: {e}")
+                    log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: {err}")
 
         if (i + 1) % 25 == 0 or (i + 1) == len(missing):
             elapsed = time.time() - t0
