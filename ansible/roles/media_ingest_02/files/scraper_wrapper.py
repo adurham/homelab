@@ -480,7 +480,25 @@ def _run_scraper_pinned_parallel():
 
 def _walk_and_push():
     """Walk the staging tree (flat per-model: <model_username>/<file>) and push
-    each file to the gallery. Returns (pushed, failed, skipped)."""
+    each file to the gallery. Returns (pushed, failed, skipped).
+
+    STABILITY GATE (2026-09-15): the scraper writes each file directly into its
+    final staging path while downloading it -- there's no separate .part/.tmp
+    name -- so a file can exist and be non-empty while still being actively
+    written. Found live: _background_push polls every 5s with no way to tell
+    "exists" from "finished", so a single multi-MB video got pushed 2-3 times
+    while it was still growing -- each attempt uploaded a truncated read of a
+    real video, mis-flagged as an image by upload_service.py's safe_ext()
+    fallback (that .bin misclassification is a separate bug, fixed alongside
+    this one), and upload_service.py's ingest-time dhash() then choked on the
+    garbage/incomplete bytes (the "UnidentifiedImageError" flood in the
+    gallery log). Fix: skip anything whose mtime is within STABLE_GRACE_SEC of
+    now -- a file still being written keeps advancing its mtime, so this
+    reliably defers it. Nothing is lost: a skipped file is retried on the next
+    5s tick, or by the guaranteed post-sweep _walk_and_push() call in main()
+    that runs only after the scraper subprocess has already exited (so it
+    never faces this race)."""
+    STABLE_GRACE_SEC = float(os.environ.get("M02_STABLE_GRACE_SEC", "3"))
     pushed = failed = skipped = 0
     if not STAGING.exists():
         return 0, 0, 0
@@ -491,12 +509,19 @@ def _walk_and_push():
         redirects = dict((store_client.get_folder_meta() or {}).get("redirects") or {})
     except Exception as e:  # noqa: BLE001
         log.warning("folder_meta fetch failed (%s); using raw usernames", e)
+    now = dt.datetime.now().timestamp()
     for model_dir in sorted(STAGING.iterdir()):
         if not model_dir.is_dir():
             continue
         folder = resolve_folder(redirects, model_dir.name)
         for fpath in sorted(model_dir.iterdir()):
             if not fpath.is_file():
+                continue
+            try:
+                if now - fpath.stat().st_mtime < STABLE_GRACE_SEC:
+                    skipped += 1
+                    continue
+            except OSError:
                 continue
             raw_stem = f"{folder}_{fpath.stem}"
             stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in raw_stem).strip("-") or "unknown"
