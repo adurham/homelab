@@ -20,10 +20,12 @@ no auth (gated by Authentik at lb-01 like the rest).
 Env: RCLONE_CONFIG, TG_RCLONE_REMOTE (default gcrypt:), THUMB_PORT (default 8090),
      THUMB_LOCAL_CACHE (default /var/lib/media-gallery/thumbcache).
 """
+import json
 import os
 import shutil
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
@@ -40,6 +42,7 @@ BIND = os.environ.get("THUMB_BIND", "172.16.0.46")
 LOCAL_CACHE = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))
 SRC = REMOTE + "by-chat"
 THUMBS = REMOTE + "thumbs"
+GALLERY = REMOTE + "gallery"
 THUMB_PX = 400
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".gif"}
 # Bytes of a video to stream for a poster frame (header + first frames) instead
@@ -51,6 +54,83 @@ VIDEO_FULL_MAX = int(os.environ.get("THUMB_VIDEO_FULL_MAX_MB", "300")) * 1024 * 
 LOCAL_CACHE.mkdir(parents=True, exist_ok=True)
 _locks = {}
 _locks_guard = threading.Lock()
+
+# ─── manifest-backed filename index (see find_original's docstring) ────────
+# Avoids the expensive per-request full-folder `rclone lsf` by reusing the
+# leaf filename build_manifest.py already recorded for every item. Refreshed
+# lazily (max once per MANIFEST_INDEX_TTL_SEC) rather than on every request,
+# so a burst of requests for the same still-warm index costs nothing extra;
+# refreshed from build_manifest.py's OWN output cadence (hourly refresh), so
+# TTL only needs to be "don't refetch a 60+ MB file on every single request",
+# not "must be perfectly real-time" -- a small staleness window here just
+# means occasionally falling through to the (correct, just slower) full
+# listing for a handful of very recently ingested items, never wrong data.
+MANIFEST_INDEX_TTL_SEC = int(os.environ.get("THUMB_MANIFEST_INDEX_TTL_SEC", "300"))
+_manifest_index_cache = {"index": {}, "built_at": 0.0}
+_manifest_index_lock = threading.Lock()
+
+
+def _build_manifest_index():
+    """Fetch manifest.json fresh and return (index, ok) where index is
+    {"<chat>/<stem>": leaf_filename} and ok is False only on a genuine fetch/
+    parse failure (never on a successfully-fetched-but-empty manifest, which
+    is a real possible state and must still update built_at so a stream of
+    misses doesn't refetch on every single request within the TTL window).
+    Best-effort: returns ({}, False) on any failure so callers always fall
+    through to the real folder listing rather than ever raising out of a
+    live request path."""
+    tmp = LOCAL_CACHE / "_manifest_index_fetch.json"
+    try:
+        r = rclone("copyto", f"{GALLERY}/manifest.json", str(tmp))
+        if r.returncode != 0:
+            print(f"[thumb] manifest fetch for index failed: {r.stderr[:200]!r}", flush=True)
+            return {}, False
+        manifest = json.loads(tmp.read_text())
+        index = {}
+        for it in manifest:
+            chat = it.get("chat") or ""
+            stem = it.get("stem")
+            fpath = it.get("file") or ""
+            if not stem or not fpath:
+                continue
+            index[f"{chat}/{stem}"] = os.path.basename(fpath)
+        return index, True
+    except Exception as e:  # noqa: BLE001 — index building must never crash the service
+        print(f"[thumb] manifest index build failed: {type(e).__name__}: {e}", flush=True)
+        return {}, False
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _manifest_index() -> dict:
+    """Return the cached {"<chat>/<stem>": leaf} index, rebuilding it if
+    older than MANIFEST_INDEX_TTL_SEC. Thread-safe; a rebuild-in-progress
+    briefly serves the previous (still-correct, just slightly stale) index
+    to any other thread rather than blocking every concurrent request on
+    the same fetch."""
+    now = time.time()
+    with _manifest_index_lock:
+        stale = (now - _manifest_index_cache["built_at"]) > MANIFEST_INDEX_TTL_SEC
+        building_now = stale and not _manifest_index_cache.get("_building")
+        if building_now:
+            _manifest_index_cache["_building"] = True
+    if building_now:
+        try:
+            fresh, ok = _build_manifest_index()
+            with _manifest_index_lock:
+                if ok:  # only a genuine fetch failure skips the update; an
+                    # empty-but-successfully-fetched manifest is a real state
+                    # and must still refresh built_at (see docstring above).
+                    _manifest_index_cache["index"] = fresh
+                    _manifest_index_cache["built_at"] = now
+        finally:
+            with _manifest_index_lock:
+                _manifest_index_cache["_building"] = False
+    return _manifest_index_cache["index"]
+
 
 # ─── Space-aware admission for original downloads ──────────────────────────
 # To thumbnail a VIDEO we download the full original into the (RAM tmpfs) cache,
@@ -143,12 +223,45 @@ def remote_size(chat, leaf):
 
 
 def find_original(chat, stem):
-    """Return the leaf filename of the original for chat/stem, or None."""
+    """Return the leaf filename of the original for chat/stem, or None.
+
+    PERFORMANCE FIX (2026-09-15): this used to ALWAYS do a full `rclone lsf`
+    of the entire chat folder to find one filename by prefix-matching the
+    stem. Measured live against gallery-01's real Drive-backed crypt remote:
+    23s for a 7249-item folder, and worse, a TARGETED single-file `rclone
+    size`/`lsf` on the exact same file was JUST AS SLOW (~16s) -- Google
+    Drive's API needs a directory-level query either way here, so there is
+    no cheap per-file existence check available on this remote. That means
+    this cost was being paid on every live page-view that hit an uncached
+    thumbnail for ANY item in a large folder, not just during the batch
+    backfill (thumb_backfill.py, fixed separately, has its own fast path
+    that bypasses find_original entirely using the manifest's exact leaf
+    filename -- see that file's PERFORMANCE FIX docstring).
+
+    Since a real per-request check is exactly as expensive as the thing
+    it's supposedly avoiding, the only way to make this fast is to NOT ask
+    Drive at request time at all: build_manifest.py already lists every
+    chat folder once per hourly refresh and records each item's real leaf
+    filename in manifest.json's "file" field. This looks that up locally
+    (an in-memory index cache, refreshed lazily -- see _manifest_index())
+    and only falls through to the old full-listing behavior if the index has
+    no entry (item not yet in the last-built manifest) OR ensure_thumb's
+    caller finds the indexed filename doesn't actually exist on Drive
+    (index stale -- e.g. a merge/rename happened since the last manifest
+    build). That fallback path is the ONLY place the original full-listing
+    cost can still occur, and only for the rare item that's either brand
+    new or was just renamed -- not on every request the way it was before.
+    """
+    leaf = _manifest_index().get(f"{chat}/{stem}")
+    if leaf is not None:
+        return leaf
+    # Fallback: not in the manifest index (too new, or a stale/never-refreshed
+    # index) -- do the real (expensive) folder listing, exactly as before.
     r = rclone("lsf", f"{SRC}/{chat}/")
     for line in r.stdout.splitlines():
-        leaf = line.strip()
-        if leaf.startswith(stem + "."):
-            return leaf
+        candidate = line.strip()
+        if candidate.startswith(stem + "."):
+            return candidate
     return None
 
 
@@ -248,6 +361,23 @@ def ensure_thumb(chat, stem) -> Path | None:
                 return None
             try:
                 r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
+                if r.returncode != 0 and "directory not found" in (r.stderr or ""):
+                    # The manifest-index leaf doesn't actually exist on Drive
+                    # anymore (stale index -- e.g. a folder merge/rename since
+                    # the last manifest build; see find_original's docstring).
+                    # Retry ONCE with the authoritative full listing before
+                    # giving up -- this is the deliberate, rare-path fallback
+                    # cost, not something paid on every request.
+                    fresh_r = rclone("lsf", f"{SRC}/{chat}/")
+                    fresh_leaf = next(
+                        (c.strip() for c in fresh_r.stdout.splitlines()
+                         if c.strip().startswith(stem + ".")), None)
+                    if fresh_leaf and fresh_leaf != leaf:
+                        print(f"[thumb] stale manifest-index entry for {chat}/{stem} "
+                              f"({leaf!r} -> {fresh_leaf!r}), retrying with real listing",
+                              flush=True)
+                        leaf = fresh_leaf
+                        r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
                 if r.returncode != 0:
                     print(f"[thumb] download original failed {chat}/{leaf}: "
                           f"rc={r.returncode} stderr={r.stderr[:300]!r}", flush=True)
