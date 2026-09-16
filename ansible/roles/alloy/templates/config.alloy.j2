@@ -12,11 +12,23 @@
 // *.scope units (e.g. session-750.scope, seen going stale/failed
 // harmlessly on pve02 the same audit) and *.mount/*.socket units,
 // which aren't meaningful alert targets here.
+// textfile collector added 2026-09-16 (smartctl_exporter role): reads
+// /var/lib/node_exporter/textfile_collector/*.prom, currently just
+// SMART attribute dumps for pve02/pve03's aging boot HDDs. Gated on
+// smartctl_exporter_enabled (set per-host in inventory/proxmox.yml)
+// so hosts without that role installed don't get an exporter block
+// scanning a directory that doesn't exist -- prometheus.exporter.unix
+// logs a scrape error (not fatal, but noisy) if the directory is missing.
 prometheus.exporter.unix "host" {
-    enable_collectors = ["systemd"]
+    enable_collectors = ["systemd"{% if smartctl_exporter_enabled | default(false) %}, "textfile"{% endif %}]
     systemd {
         unit_include = ".+\\.service"
     }
+{% if smartctl_exporter_enabled | default(false) %}
+    textfile {
+        directory = "{{ smartctl_exporter_textfile_dir | default('/var/lib/node_exporter/textfile_collector') }}"
+    }
+{% endif %}
 }
 
 // Override the exporter's default `job="integrations/unix"` with
@@ -58,7 +70,7 @@ prometheus.remote_write "vm" {
 // working post-cutover.
 {% if alloy_ship_logs | default(true) %}
 loki.relabel "journal" {
-    forward_to = []
+    forward_to = [loki.relabel.self_logs.receiver]
     rule {
         source_labels = ["__journal__systemd_unit"]
         target_label  = "unit"
@@ -73,6 +85,51 @@ loki.relabel "journal" {
     }
 }
 
+// Drop loki.service's and alloy.service's OWN journal entries before they
+// leave this box (2026-09-15). Root-caused a recurring "Loki rejecting
+// writes" alert: Loki logs every query it executes at info level
+// (query-frontend/querier "executing query" lines, one pair per alert-rule
+// evaluation), and on vm-01 -- where loki.service actually runs -- Alloy
+// was re-ingesting that self-generated volume right back into Loki,
+// creating a feedback loop. Measured live: loki.service alone produced
+// 6,781 journal lines/hour on vm-01, ~6x any other host in the fleet
+// (next highest ~1,100) -- easily enough on its own to blow through the
+// 4 MB/s ingestion_rate_mb limit (limits_config in roles/loki) during a
+// burst of concurrent alert-rule queries, which is exactly what the
+// repeated ResourceExhausted/"ingestion rate limit exceeded" errors in
+// loki.service's own log showed. alloy.service's own self-logging
+// (421-664 lines/hour, fleet-wide) is smaller but the same class of
+// noise, dropped here too.
+//
+// This mirrors the FOUR existing alert rules in
+// roles/grafana/templates/alerting_rules.yml.j2 that already exclude
+// `unit!~"grafana-server.service|loki.service|alloy.service"` from their
+// own queries -- those rules only stopped THEMSELVES from matching this
+// noise; they never stopped it from being shipped/ingested/counted
+// against the rate limit in the first place. This drop rule fixes the
+// actual source instead of filtering after the fact, same architecture
+// as the alloy_log_unit_allowlist mechanism below. grafana-server.service
+// is deliberately NOT dropped here -- it's real, valuable signal (auth
+// failures, alert state changes) with no feedback-loop mechanism, unlike
+// loki.service/alloy.service which loop back into what they themselves
+// generate.
+//
+// Applied fleet-wide (both the allowlist and plain branches below) even
+// though the vm-01 feedback loop that triggered this only directly hits
+// the plain branch: it's a pure no-op on allowlist hosts (media_ingest*/
+// media_gallery) since loki.service/alloy.service were never in those
+// hosts' alloy_log_unit_allowlist regex to begin with, so keeping the
+// drop rule here for every host is simpler than reasoning about which
+// branch needs it and matches the fleet-wide framing in this comment.
+loki.relabel "self_logs" {
+    forward_to = [loki.write.vm.receiver]
+    rule {
+        action        = "drop"
+        source_labels = ["unit"]
+        regex         = `^(loki|alloy)\.service$`
+    }
+}
+
 {% if alloy_log_unit_allowlist | default('') %}
 // Unit allowlist (alloy_log_unit_allowlist set on this host -- see
 // roles/alloy/README.md "Metrics-only hosts / unit allowlist"). Only
@@ -82,7 +139,7 @@ loki.relabel "journal" {
 // inside Alloy, before ever leaving this box -- not filtered
 // server-side after the fact.
 loki.relabel "unit_filter" {
-    forward_to = [loki.write.vm.receiver]
+    forward_to = [loki.relabel.self_logs.receiver]
     rule {
         action        = "keep"
         source_labels = ["unit"]
@@ -111,7 +168,7 @@ loki.source.journal "system" {
         host = constants.hostname,
         job  = "systemd-journal",
     }
-    forward_to    = [loki.write.vm.receiver]
+    forward_to    = [loki.relabel.self_logs.receiver]
     relabel_rules = loki.relabel.journal.rules
 }
 {% endif %}

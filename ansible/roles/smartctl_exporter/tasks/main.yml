@@ -1,0 +1,55 @@
+---
+# smartctl_exporter — periodic SMART attribute dump to a Prometheus
+# textfile for Alloy's node_exporter-style textfile collector. See
+# roles/smartctl_exporter/README.md for why this exists.
+
+- name: Ensure textfile collector directory exists
+  ansible.builtin.file:
+    path: "{{ smartctl_exporter_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Render SMART textfile dump script
+  ansible.builtin.template:
+    src: smartctl-textfile.sh.j2
+    dest: /usr/local/bin/smartctl-textfile.sh
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart smartctl-textfile timer
+
+- name: Render smartctl-textfile systemd service
+  ansible.builtin.template:
+    src: smartctl-textfile.service.j2
+    dest: /etc/systemd/system/smartctl-textfile.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart smartctl-textfile timer
+
+- name: Render smartctl-textfile systemd timer
+  ansible.builtin.template:
+    src: smartctl-textfile.timer.j2
+    dest: /etc/systemd/system/smartctl-textfile.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart smartctl-textfile timer
+
+- name: Flush handlers so the timer picks up a fresh script/unit before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Start and enable smartctl-textfile timer
+  ansible.builtin.systemd:
+    name: smartctl-textfile.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Run one dump immediately so the textfile exists before Alloy's first scrape
+  ansible.builtin.systemd:
+    name: smartctl-textfile.service
+    state: started
+  changed_when: false

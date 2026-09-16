@@ -1909,3 +1909,122 @@ groups:
         labels:
           severity: critical
         isPaused: false
+
+      # Added 2026-09-16 with roles/smartctl_exporter -- pve02/pve03's
+      # aging SATA boot HDDs have no spare to replace them with, so
+      # this is the actual "keep them alive as long as possible" early
+      # warning: catch a NEW pending sector before it corrupts
+      # something (the 2026-09-10 pve03 EXT4/pve-cluster incident
+      # happened without any prior Grafana visibility at all -- the
+      # only record was smartd's local root mail, unread). Both rules
+      # query smartctl_device_attribute, sourced from
+      # /var/lib/node_exporter/textfile_collector/smartctl.prom
+      # (smartctl-textfile.timer, every 5min) via Alloy's textfile
+      # collector.
+      - uid: sata_boot_disk_pending_sector_nonzero
+        title: SATA boot disk has a pending sector
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: smartctl_device_attribute{attribute="current_pending_sector"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "{{ '{{' }} $labels.instance {{ '}}' }} disk {{ '{{' }} $labels.disk {{ '}}' }} has a pending sector"
+          description: "Current_Pending_Sector on {{ '{{' }} $labels.instance {{ '}}' }}'s {{ '{{' }} $labels.disk {{ '}}' }} is nonzero -- the drive has found a sector it can't read and is waiting to reallocate it on next write. This is the specific condition the Level1Techs write-to-LBA fix (2026-09-16 investigation) targets, but do NOT run that raw write against a live mounted root disk -- drain the node's CTs and do it from an unmounted/rescue context. See smartctl-textfile role notes and homelab warm memory 2233 for the full writeup and what's already been tried."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: sata_boot_disk_reallocated_sectors_climbing
+        title: SATA boot disk reallocated sector count increased
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 90000
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: increase(smartctl_device_attribute{attribute="reallocated_sector_ct"}[24h])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "{{ '{{' }} $labels.instance {{ '}}' }} disk {{ '{{' }} $labels.disk {{ '}}' }} reallocated new sectors in the last 24h"
+          description: "Reallocated_Sector_Ct on {{ '{{' }} $labels.instance {{ '}}' }}'s {{ '{{' }} $labels.disk {{ '}}' }} rose in the last 24h -- new wear, worth a look even though a slowly climbing count on these known-aging drives isn't itself an emergency (pve02 was at 40, pve03 at 112 as of 2026-09-16). A sudden jump, or this firing repeatedly, is the actual signal to worry about."
+        labels:
+          severity: warning
+        isPaused: false
