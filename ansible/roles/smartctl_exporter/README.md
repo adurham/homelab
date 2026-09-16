@@ -46,6 +46,30 @@ week-over-week) rather than a one-shot local mail nobody reads.
   temperature_celsius (194), reallocated_event_count (196),
   current_pending_sector (197), offline_uncorrectable (198),
   udma_crc_error_count (199).
+  IMPORTANT: `smartctl -j`'s `raw.value` field is packed with extra
+  vendor data for some attributes (seen live: Power_On_Hours
+  raw.value=261692357380596 while raw.string="35316 (238 2 0)" — same
+  packing on 190/194/196). The script parses the leading integer out
+  of `raw.string` instead, which is correct for both packed and plain
+  attributes (verified raw.value == int(raw.string) exactly for 5,
+  184, 187, 188, 197, 198, 199).
+- Renders `/etc/udev/rules.d/60-sata-error-recovery-timeout.rules`,
+  raising the kernel SCSI command timeout for each device in
+  `smartctl_exporter_devices` from the 30s default to
+  `smartctl_exporter_scsi_timeout` (default 180s), applied immediately
+  via `udevadm trigger` (not just on next reboot). Root cause
+  (2026-09-16): pve02/pve03's boot HDDs don't support SCT Error
+  Recovery Control, so a slow internal error-recovery attempt exceeds
+  the kernel's 30s timeout and the SATA link gets reset mid-recovery,
+  failing every in-flight command — this is what corrupted
+  pve-cluster's config.db on pve03 on 2026-09-10. This is the real fix
+  for that failure class (give the drive the time it needs), not a
+  retry/backoff mitigation.
+- Renders `/etc/systemd/journald.conf.d/99-volatile-hdd-wear.conf`,
+  switching journald to RAM-backed (`Storage=volatile`) storage.
+  Alloy already ships this host's journal to Loki in real time, so
+  there's no observability loss — this removes a continuous small-
+  write+fsync load from the disk being kept alive as long as possible.
 
 ## Key variables (`defaults/main.yml`)
 
