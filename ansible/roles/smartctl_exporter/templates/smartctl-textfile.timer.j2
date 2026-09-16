@@ -1,0 +1,11 @@
+# Managed by ansible — see roles/smartctl_exporter/tasks/main.yml.
+[Unit]
+Description=Periodic SMART textfile dump
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ smartctl_exporter_interval }}
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

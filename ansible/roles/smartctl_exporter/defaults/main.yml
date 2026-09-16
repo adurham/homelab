@@ -1,0 +1,20 @@
+---
+# smartctl_exporter — periodic SMART attribute dump to a Prometheus
+# textfile, read by Alloy's prometheus.exporter.unix textfile collector
+# (see roles/alloy). Exists because smartd's own alerting only reaches
+# root's local mailbox (/usr/bin/mail via proxmox-mail-forward,
+# unverified to reach anyone) which is disconnected from the real
+# alert pipeline (Grafana -> grafana-ack-bot -> Discord) every other
+# host in the fleet uses. Root cause found 2026-09-16: pve02/pve03
+# boot HDDs need real reallocated/pending sector trend visibility in
+# Grafana, not a mail spool nobody reads.
+
+smartctl_exporter_textfile_dir: /var/lib/node_exporter/textfile_collector
+
+# Which block devices to poll. Override per-host in inventory if a
+# host has a different disk layout worth tracking (defaults to just
+# the boot disk, which is the actual pain point on pve02/pve03).
+smartctl_exporter_devices:
+  - /dev/sda
+
+smartctl_exporter_interval: "5min"
