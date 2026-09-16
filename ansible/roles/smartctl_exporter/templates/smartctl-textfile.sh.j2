@@ -26,6 +26,10 @@ mkdir -p "$OUTDIR"
   echo "# TYPE smartctl_device_health_passed gauge"
   echo "# HELP smartctl_device_scrape_success 1 if smartctl ran successfully against this device."
   echo "# TYPE smartctl_device_scrape_success gauge"
+  echo "# HELP smartctl_device_last_selftest_passed Most recent smartd-scheduled self-test result: 1 passed, 0 failed, -1 interrupted or unknown."
+  echo "# TYPE smartctl_device_last_selftest_passed gauge"
+  echo "# HELP smartctl_device_last_selftest_lba_error 1 if the most recent self-test reported a failing LBA."
+  echo "# TYPE smartctl_device_last_selftest_lba_error gauge"
 
   for dev in {{ smartctl_exporter_devices | join(' ') }}; do
     disk="$(basename "$dev")"
@@ -82,6 +86,29 @@ for attr in d.get("ata_smart_attributes", {}).get("table", []):
         m = re.match(r"\s*(\d+)", raw_str)
         if m:
             print("smartctl_device_attribute{disk=\"" + disk + "\",attribute=\"" + wanted[aid] + "\",id=\"" + str(aid) + "\"} " + m.group(1))
+' "$disk" 2>/dev/null || true
+
+    # Most recent self-test result (smartd already schedules short-daily
+    # and long-weekly via /etc/smartd.conf, added before this exporter
+    # existed). Table entries are newest-first. "passed" is true/false
+    # for a completed test, JSON null for an interrupted one -- mapped
+    # to -1 (unknown) rather than treated as a pass or a fail, since
+    # "interrupted (host reset)" was itself the exact signature of the
+    # 2026-09-16-investigated corruption incident and should stand out
+    # in Grafana as its own state, not get folded into passed=1 or
+    # passed=0.
+    echo "$json" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+disk = sys.argv[1]
+table = d.get("ata_smart_self_test_log", {}).get("standard", {}).get("table", [])
+if table:
+    latest = table[0]
+    p = latest.get("status", {}).get("passed")
+    val = 1 if p is True else (0 if p is False else -1)
+    print("smartctl_device_last_selftest_passed{disk=\"" + disk + "\"} " + str(val))
+    lba_present = 1 if "lba_of_first_error" in latest else 0
+    print("smartctl_device_last_selftest_lba_error{disk=\"" + disk + "\"} " + str(lba_present))
 ' "$disk" 2>/dev/null || true
   done
 } > "$TMP"

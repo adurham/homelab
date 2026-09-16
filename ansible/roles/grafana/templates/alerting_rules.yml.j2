@@ -2028,3 +2028,67 @@ groups:
         labels:
           severity: warning
         isPaused: false
+
+      # Added 2026-09-16: surfaces smartd's existing self-test schedule
+      # (short daily 2am, long weekly Sat 3am -- see /etc/smartd.conf,
+      # predates this exporter) in Grafana instead of leaving results
+      # sitting unwatched in the self-test log. This is the actual
+      # trigger condition for the Level1Techs write-to-LBA fix
+      # (2026-09-16 investigation, see homelab warm memory 2233/2236):
+      # neither drive currently has a pending sector or a failed
+      # self-test, so there's nothing to act on today, but if a future
+      # scheduled test DOES fail with a real LBA, this is what notices
+      # it instead of someone needing to remember to check by hand.
+      - uid: sata_boot_disk_selftest_failed
+        title: SATA boot disk self-test failed or interrupted
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: smartctl_device_last_selftest_passed
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "{{ '{{' }} $labels.instance {{ '}}' }} disk {{ '{{' }} $labels.disk {{ '}}' }} most recent self-test did not pass cleanly"
+          description: "smartctl_device_last_selftest_passed on {{ '{{' }} $labels.instance {{ '}}' }}'s {{ '{{' }} $labels.disk {{ '}}' }} is 0 (failed) or -1 (interrupted/unknown) -- smartd's scheduled short/long self-test did not complete cleanly. Check smartctl_device_last_selftest_lba_error: if 1, run `smartctl -a` to get the failing LBA, then follow the write-to-LBA procedure (drain the node, unmount/rescue context, never on the live mounted root fs -- see homelab warm memory 2233/2236 for the full writeup and exact commands from the Level1Techs forum post)."
+        labels:
+          severity: warning
+        isPaused: false
