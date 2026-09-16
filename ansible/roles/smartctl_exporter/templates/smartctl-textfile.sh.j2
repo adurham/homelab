@@ -51,20 +51,30 @@ wanted = {
     188: "command_timeout",
     190: "airflow_temperature_cel",
     194: "temperature_celsius",
-    196: "reallocated_event_count",
     197: "current_pending_sector",
     198: "offline_uncorrectable",
     199: "udma_crc_error_count",
 }
 # smartctl packs extra vendor data into raw.value for some attributes
 # (seen live 2026-09-16: Power_On_Hours raw.value=261692357380596 while
-# raw.string="35316 (238 2 0)" -- same packing on 190/194/196, temp
-# history and reallocation-event timestamps folded into the 48-bit raw
-# field). raw.string always leads with the real human-meaningful number
-# for both packed and unpacked attributes (verified: attributes 5, 184,
-# 187, 188, 197, 198, 199 have raw.value == int(raw.string) exactly), so
-# parse the leading integer out of raw.string instead of trusting
-# raw.value blindly.
+# raw.string="35316 (238 2 0)" -- same packing on 190/194, temp
+# history folded into the 48-bit raw field). raw.string leads with the
+# real human-meaningful number for THESE attributes (verified: raw
+# value == int(raw.string) exactly for 5, 184, 187, 188, 197, 198,
+# 199), so parse the leading integer out of raw.string instead of
+# trusting raw.value blindly.
+#
+# id 196 (Reallocated_Event_Count) deliberately excluded (found
+# 2026-09-16 on pve03): its raw.string leading number (17703) matched
+# this drive Power_On_Hours exactly -- this firmware packs the hours
+# timestamp of the LAST reallocation event into the same leading-int
+# position other attributes use for their true value, not an actual
+# event count. No reliable way to extract the real count from this
+# field without vendor-specific docs this firmware does not expose,
+# and no alert rule depends on it -- reallocated_sector_ct (id 5,
+# clean, verified accurate) is the authoritative reallocation signal.
+# Better to omit than publish a number that looks plausible but is
+# wrong.
 for attr in d.get("ata_smart_attributes", {}).get("table", []):
     aid = attr.get("id")
     if aid in wanted:
