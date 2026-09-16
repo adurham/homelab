@@ -1,0 +1,14 @@
+# Managed by ansible — see roles/smartctl_exporter/tasks/main.yml.
+#
+# Journald switched to RAM-backed (volatile) storage on this host
+# (2026-09-16): its boot disk is an aging SATA HDD with no spare
+# available (see roles/smartctl_exporter/README.md), and journald was
+# previously writing + fsyncing continuously to that disk. Alloy
+# already ships this host's journal to Loki in real time (30-day
+# retention there -- see roles/alloy), so there is zero observability
+# loss from dropping local persistent storage: this removes a
+# continuous small-write load from the disk we're trying to keep
+# alive as long as possible, for free.
+[Journal]
+Storage=volatile
+RuntimeMaxUse={{ smartctl_exporter_journald_runtime_max_use }}

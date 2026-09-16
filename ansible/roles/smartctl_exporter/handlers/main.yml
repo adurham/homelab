@@ -4,3 +4,8 @@
     name: smartctl-textfile.timer
     state: restarted
     daemon_reload: true
+
+- name: Restart journald (smartctl_exporter)
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted

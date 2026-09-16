@@ -18,3 +18,16 @@ smartctl_exporter_devices:
   - /dev/sda
 
 smartctl_exporter_interval: "5min"
+
+# SCSI command timeout (seconds) applied to smartctl_exporter_devices
+# via udev rule. Default kernel timeout is 30s; these drives don't
+# support SCT ERC (checked directly on pve02/pve03: "not supported"),
+# so a slow internal error-recovery attempt exceeds 30s and the kernel
+# resets the SATA link instead of waiting -- root cause of the
+# 2026-09-10 pve03 corruption incident. See the udev rule template's
+# comment for the full writeup.
+smartctl_exporter_scsi_timeout: 180
+
+# Journald RuntimeMaxUse when switched to volatile (RAM-backed)
+# storage -- see the journald conf template's comment for why.
+smartctl_exporter_journald_runtime_max_use: "300M"
