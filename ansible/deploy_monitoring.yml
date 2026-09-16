@@ -47,6 +47,23 @@
   roles:
     - pve_metrics_export
 
+- name: Install SMART textfile exporter on pve boot disks
+  # Only touches hosts with smartctl_exporter_enabled: true set in
+  # inventory/proxmox.yml (currently pve02/pve03 -- see
+  # roles/smartctl_exporter/README.md for why). Must run BEFORE
+  # "Install Telemetry Agents" below: the textfile directory + first
+  # .prom dump need to exist before Alloy's config.alloy.j2 renders
+  # with the textfile collector enabled and restarts, so Alloy's very
+  # first scrape after this deploy finds real data instead of an
+  # empty/missing directory.
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Install smartctl_exporter
+      ansible.builtin.include_role:
+        name: smartctl_exporter
+      when: smartctl_exporter_enabled | default(false)
+
 - name: Install Telemetry Agents
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster:!bwt_lab
   gather_facts: true

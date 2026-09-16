@@ -1,0 +1,79 @@
+#!/bin/bash
+# Managed by ansible — see roles/smartctl_exporter/tasks/main.yml.
+#
+# Dumps key SMART attributes for {{ smartctl_exporter_devices | join(', ') }}
+# as Prometheus textfile-collector metrics, so reallocated/pending sector
+# counts and self-test health are visible in Grafana (VictoriaMetrics)
+# instead of only in smartd's local mail (/usr/bin/mail via
+# proxmox-mail-forward), which is disconnected from the fleet's real
+# alert pipeline (Grafana -> grafana-ack-bot -> Discord). Written
+# atomically (tmp file + mv) since node_exporter's textfile collector
+# scans this directory on every scrape and a partial write would be
+# parsed as corrupt/truncated metrics.
+set -euo pipefail
+
+SMARTCTL=/usr/sbin/smartctl
+OUTDIR="{{ smartctl_exporter_textfile_dir }}"
+OUT="${OUTDIR}/smartctl.prom"
+TMP="${OUT}.$$.tmp"
+
+mkdir -p "$OUTDIR"
+
+{
+  echo "# HELP smartctl_device_attribute SMART attribute raw value."
+  echo "# TYPE smartctl_device_attribute gauge"
+  echo "# HELP smartctl_device_health_passed 1 if SMART overall-health self-assessment is PASSED, else 0."
+  echo "# TYPE smartctl_device_health_passed gauge"
+  echo "# HELP smartctl_device_scrape_success 1 if smartctl ran successfully against this device."
+  echo "# TYPE smartctl_device_scrape_success gauge"
+
+  for dev in {{ smartctl_exporter_devices | join(' ') }}; do
+    disk="$(basename "$dev")"
+    json="$("$SMARTCTL" -a -j "$dev" 2>/dev/null || true)"
+    if [ -z "$json" ]; then
+      echo "smartctl_device_scrape_success{disk=\"${disk}\"} 0"
+      continue
+    fi
+    echo "smartctl_device_scrape_success{disk=\"${disk}\"} 1"
+
+    passed=$(echo "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(1 if d.get("smart_status",{}).get("passed") else 0)' 2>/dev/null || echo -1)
+    echo "smartctl_device_health_passed{disk=\"${disk}\"} ${passed}"
+
+    echo "$json" | python3 -c '
+import json, re, sys
+d = json.load(sys.stdin)
+disk = sys.argv[1]
+wanted = {
+    5: "reallocated_sector_ct",
+    9: "power_on_hours",
+    184: "end_to_end_error",
+    187: "reported_uncorrect",
+    188: "command_timeout",
+    190: "airflow_temperature_cel",
+    194: "temperature_celsius",
+    196: "reallocated_event_count",
+    197: "current_pending_sector",
+    198: "offline_uncorrectable",
+    199: "udma_crc_error_count",
+}
+# smartctl packs extra vendor data into raw.value for some attributes
+# (seen live 2026-09-16: Power_On_Hours raw.value=261692357380596 while
+# raw.string="35316 (238 2 0)" -- same packing on 190/194/196, temp
+# history and reallocation-event timestamps folded into the 48-bit raw
+# field). raw.string always leads with the real human-meaningful number
+# for both packed and unpacked attributes (verified: attributes 5, 184,
+# 187, 188, 197, 198, 199 have raw.value == int(raw.string) exactly), so
+# parse the leading integer out of raw.string instead of trusting
+# raw.value blindly.
+for attr in d.get("ata_smart_attributes", {}).get("table", []):
+    aid = attr.get("id")
+    if aid in wanted:
+        raw_str = attr.get("raw", {}).get("string", "")
+        m = re.match(r"\s*(\d+)", raw_str)
+        if m:
+            print("smartctl_device_attribute{disk=\"" + disk + "\",attribute=\"" + wanted[aid] + "\",id=\"" + str(aid) + "\"} " + m.group(1))
+' "$disk" 2>/dev/null || true
+  done
+} > "$TMP"
+
+mv "$TMP" "$OUT"
