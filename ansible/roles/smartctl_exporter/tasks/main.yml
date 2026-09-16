@@ -53,3 +53,53 @@
     name: smartctl-textfile.service
     state: started
   changed_when: false
+
+# ----- SATA error-recovery timeout -----
+# See templates/60-sata-error-recovery-timeout.rules.j2 for the full
+# root-cause writeup (2026-09-16 pve03 corruption incident). Applied
+# live via udev trigger in the same task run, not just on next reboot
+# -- this is the actual fix for an active problem, not a
+# reboot-pending config.
+- name: Render SATA error-recovery timeout udev rule
+  ansible.builtin.template:
+    src: 60-sata-error-recovery-timeout.rules.j2
+    dest: /etc/udev/rules.d/60-sata-error-recovery-timeout.rules
+    owner: root
+    group: root
+    mode: '0644'
+  register: sata_timeout_rule
+
+- name: Reload udev rules and apply timeout immediately
+  ansible.builtin.shell: |
+    set -euo pipefail
+    udevadm control --reload-rules
+    udevadm trigger --name-match={{ item.split('/')[-1] }}
+  loop: "{{ smartctl_exporter_devices }}"
+  when: sata_timeout_rule.changed
+  changed_when: true
+
+- name: Verify SCSI command timeout applied
+  ansible.builtin.command: cat /sys/block/{{ item.split('/')[-1] }}/device/timeout
+  loop: "{{ smartctl_exporter_devices }}"
+  register: scsi_timeout_check
+  changed_when: false
+  failed_when: scsi_timeout_check.stdout | trim | int != smartctl_exporter_scsi_timeout
+
+# ----- Journald volatile storage -----
+# See templates/99-volatile-hdd-wear.conf.j2 for why. Uses its own
+# drop-in filename distinct from roles/alloy's
+# 10-alloy-shipped-retention.conf so both apply without conflict
+# (systemd merges all *.conf files in journald.conf.d/, last matching
+# key per-section wins if they overlap -- they don't here: alloy's
+# sets MaxRetentionSec/SystemMaxUse for persistent storage, this one
+# switches Storage itself to volatile, which makes the persistent-
+# storage settings moot on hosts running both roles rather than
+# conflicting with them).
+- name: Render journald volatile-storage drop-in
+  ansible.builtin.template:
+    src: 99-volatile-hdd-wear.conf.j2
+    dest: /etc/systemd/journald.conf.d/99-volatile-hdd-wear.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart journald (smartctl_exporter)

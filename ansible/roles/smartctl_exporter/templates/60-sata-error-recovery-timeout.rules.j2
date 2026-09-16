@@ -1,0 +1,21 @@
+# Managed by ansible — see roles/smartctl_exporter/tasks/main.yml.
+#
+# Raises the kernel SCSI command timeout for this host's tracked boot
+# disk(s) from the 30s default to {{ smartctl_exporter_scsi_timeout }}s.
+# Root cause (2026-09-16): neither of pve02/pve03's boot HDDs supports
+# SCT Error Recovery Control (checked: `smartctl -l scterc` reports
+# "not supported" on both), which means when the drive hits a
+# marginal/slow sector it attempts its own internal error recovery,
+# which can run well past 30s. The kernel's default 30s command
+# timeout doesn't wait for that -- it resets the SATA link and fails
+# every in-flight command, which is what actually corrupted
+# pve-cluster's config.db on pve03 on 2026-09-10 (write errors landed
+# at the exact timestamp of a self-test in progress). Enterprise/NAS
+# drives ship with TLER (fail fast, expected by RAID controllers) --
+# these consumer laptop HDDs don't have that, so the host needs to
+# give them the extra recovery time instead of yanking the link
+# mid-recovery. This is the real fix for that incident class, not a
+# retry/backoff mitigation.
+{% for dev in smartctl_exporter_devices %}
+ACTION=="add|change", KERNEL=="{{ dev.split('/')[-1] }}", SUBSYSTEM=="block", ATTR{device/timeout}="{{ smartctl_exporter_scsi_timeout }}"
+{% endfor %}
