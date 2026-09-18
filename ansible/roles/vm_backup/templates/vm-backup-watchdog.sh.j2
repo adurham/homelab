@@ -15,8 +15,8 @@ if [ ! -f "$STATE_FILE" ]; then
 fi
 AGE=$((NOW - $(cat "$STATE_FILE")))
 if [ "$AGE" -ge "$THRESHOLD_S" ]; then
-  echo "[$(date -Is)] CRITICAL: last VM backup was $((AGE/3600))h ago (> ${THRESHOLD_S/3600}h threshold)" >&2
-  logger -t "$LOG_TAG" -p user.err "CRITICAL: last VM backup $((AGE/3600))h ago (threshold ${THRESHOLD_S/3600}h)"
+  echo "[$(date -Is)] CRITICAL: last VM backup was $((AGE/3600))h ago (> $((THRESHOLD_S/3600))h threshold)" >&2
+  logger -t "$LOG_TAG" -p user.err "CRITICAL: last VM backup $((AGE/3600))h ago (threshold $((THRESHOLD_S/3600))h)"
   exit 1
 fi
 logger -t "$LOG_TAG" "OK: last VM backup $((AGE/3600))h ago"
