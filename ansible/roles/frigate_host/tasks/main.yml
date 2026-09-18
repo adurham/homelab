@@ -20,6 +20,7 @@
   register: ct_check
   failed_when: false
   changed_when: false
+  tags: [frigate_net0_fix]
 
 - name: Download Template
   ansible.builtin.command: pveam download local {{ template }}
@@ -60,6 +61,7 @@
   register: ct_owner
   changed_when: false
   when: ct_check.rc == 0
+  tags: [frigate_net0_fix]
 
 - name: Ensure CT uses internal DNS resolver
   ansible.builtin.shell: |
@@ -87,6 +89,99 @@
     executable: /bin/bash
   changed_when: false
   when: ct_check.rc == 0 and ct_owner.stdout | length > 0
+
+# eth0 was DHCP (ip=dhcp in the pct create above) even though
+# frigate_lan_ip (192.168.86.85) is hardcoded as a fixed address in THREE
+# separate consumers that all assume it never changes: HA's Frigate-API
+# reachability sensor (homeassistant/sensors.yaml), go2rtc's WebRTC
+# candidate binding (needed so Google's SDM API can reach it -- see
+# docker-compose.yml.j2), and the mailbox-vehicle snapshot automation
+# (mailbox_truck.yaml). This is the EXACT SAME failure class already hit
+# and fixed for CT 101 on 2026-09-10 (see roles/tailscale_gw_host's net0
+# task comment) -- a DHCP lease silently drifting breaks every hardcoded
+# consumer with no CT-level symptom (Frigate itself stays fully healthy
+# the whole time; only external reachability at the old IP breaks).
+# CONFIRMED HIT 2026-09-18: the whole cluster rebooted, eth0 came back as
+# .45 instead of .85, and HA's "Frigate NVR API down" alert fired even
+# though `docker ps` showed frigate healthy the entire time. Converted to
+# a static IP here, same idempotent pvesh-hotplug pattern as CT 101.
+- name: Read current Frigate CT net0 config (cluster-API, node-agnostic)
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /nodes/{{ ct_owner.stdout }}/lxc/{{ vmid }}/config --output-format json |
+      python3 -c 'import json,sys; print(json.load(sys.stdin).get("net0",""))'
+  register: frigate_net0
+  changed_when: false
+  when: ct_check.rc == 0 and ct_owner.stdout | length > 0
+  tags: [frigate_net0_fix]
+
+- name: Extract current net0 hwaddr (preserve MAC, avoid veth recreate)
+  # Omitting hwaddr= from the -net0 replace below would make PVE generate
+  # a NEW random MAC, forcing a full veth teardown/recreate (new "device"
+  # to the router/Google Home, any router-side DHCP reservation orphaned)
+  # instead of a same-link address change. Reference model consult
+  # (2026-09-18) flagged this as the biggest risk in this task, distinct
+  # from the ip= change itself.
+  ansible.builtin.set_fact:
+    frigate_net0_hwaddr: "{{ frigate_net0.stdout | regex_search('hwaddr=([0-9A-Fa-f:]+)', '\\1') | first }}"
+  when:
+    - ct_check.rc == 0
+    - ct_owner.stdout | length > 0
+    - "'ip=dhcp' in frigate_net0.stdout"
+  tags: [frigate_net0_fix]
+
+- name: Convert Frigate CT's net0 to a static LAN IP (was DHCP)
+  # `pvesh set ... -netN` issues a hotplug -- no restart required (same
+  # verified-live-2026-09-10 behavior as CT 101's identical conversion).
+  # hwaddr= is carried forward explicitly (see task above).
+  ansible.builtin.command: >
+    pvesh set /nodes/{{ ct_owner.stdout }}/lxc/{{ vmid }}/config
+    -net0 name=eth0,bridge=vmbr0,hwaddr={{ frigate_net0_hwaddr }},ip={{ frigate_lan_ip }}/24,gw={{ net_lan_gateway }},type=veth
+  when:
+    - ct_check.rc == 0
+    - ct_owner.stdout | length > 0
+    - "'ip=dhcp' in frigate_net0.stdout"
+  tags: [frigate_net0_fix]
+
+# The running dhclient inside the guest survives the veth swap (PVE
+# rewrites /etc/network/interfaces but doesn't stop it) — at its next
+# lease-renewal/expiry it would run dhclient-script EXPIRE, which flushes
+# ALL IPv4 addresses on eth0 including the static IP just set above. That
+# would silently take Frigate off the LAN hours later looking unrelated
+# to this change. Kill it with SIGKILL specifically (not the default
+# SIGTERM, which triggers dhclient's own STOP/RELEASE hook -- same flush,
+# just immediate instead of delayed). ifupdown's /etc/network/interfaces
+# was already rewritten to `iface eth0 inet static` by the pvesh call
+# above so nothing will restart dhclient for eth0 on next boot.
+- name: Kill stale dhclient inside Frigate CT (was managing now-static eth0)
+  # -f (substring-match full cmdline, not -x/exact) is deliberate here --
+  # dhclient's real invocation has many flags before the trailing "eth0"
+  # arg (see the current-state check above), and an exact-whole-line
+  # match is unnecessarily fragile against that.
+  ansible.builtin.command: >
+    ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }}
+    pct exec {{ vmid }} -- pkill -9 -f "dhclient.*eth0"
+  register: frigate_dhclient_kill
+  failed_when: frigate_dhclient_kill.rc not in [0, 1]  # 1 = no matching process, already clean
+  changed_when: frigate_dhclient_kill.rc == 0
+  when:
+    - ct_check.rc == 0
+    - ct_owner.stdout | length > 0
+    - "'ip=dhcp' in frigate_net0.stdout"
+  tags: [frigate_net0_fix]
+
+- name: Verify Frigate CT eth0 shows exactly the static IP (no leftover DHCP address)
+  ansible.builtin.command: >
+    ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }}
+    pct exec {{ vmid }} -- ip -4 -br addr show eth0
+  register: frigate_eth0_verify
+  changed_when: false
+  failed_when: frigate_lan_ip not in frigate_eth0_verify.stdout
+  when:
+    - ct_check.rc == 0
+    - ct_owner.stdout | length > 0
+    - "'ip=dhcp' in frigate_net0.stdout"
+  tags: [frigate_net0_fix]
 
 # Only start right after creation. After that, HA owns the running-state of
 # managed CTs — calling `pct start` from a non-owning node would fail anyway.
