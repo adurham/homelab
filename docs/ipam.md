@@ -33,6 +33,7 @@ Current static allocations in the safe-outside-DHCP range:
 | `192.168.86.12` | `pve02` | |
 | `192.168.86.13` | `pve03` | |
 | `192.168.86.16` | `tailscale-gw` | eth0/vmbr0 -- was DHCP until 2026-09-10 (see Service CTs table below for why) |
+| `192.168.86.85` | `frigate-01` | eth0/vmbr0 -- was DHCP until 2026-09-18 (lease drifted to .45 after a cluster-wide reboot, breaking every hardcoded consumer of this IP; same failure class as tailscale-gw above). NOTE: this address is INSIDE the Nest router's DHCP pool (.20-.250), unlike the other static entries here -- accepted precedent already exists (lb-01 at .86, immediately adjacent) but if .85 ever gets DHCP-assigned to another device first, this will conflict. Consider migrating to a reservation or an out-of-pool IP if that ever happens. |
 
 `.14`/`.15` also showed as live in the same nmap sweep — identity not
 confirmed, left alone. `.17`-`.19` still free if another static
