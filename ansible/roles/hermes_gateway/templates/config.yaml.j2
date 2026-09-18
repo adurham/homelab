@@ -22,7 +22,7 @@
 #     provider at runtime; no Jinja branching needed for that selection).
 #     ONE deliberate non-mirror: auxiliary.exo.vision keeps this gateway's
 #     own LOCAL exo-cluster vision endpoint (custom:exo / Qwen3.6 on
-#     192.168.86.201) instead of the MacBook's auxiliary.exo.vision (which
+#     macstudio-m4-1's Tailscale IP) instead of the MacBook's auxiliary.exo.vision (which
 #     routes to ollama-cloud/gemma4:31b) — the MacBook has no local
 #     vision-capable endpoint to mirror, but this gateway does, and losing
 #     free local vision inference when main=exo would be a regression, not
@@ -54,7 +54,7 @@ model:
 # subagents and auxiliary tasks regardless of which one is main.
 providers:
   exo:
-    base_url: http://192.168.86.201:52415/v1
+    base_url: {{ hermes_gateway_exo_base_url }}
     api_key: not-needed
     api_mode: chat_completions
     discover_models: false
@@ -528,7 +528,7 @@ auxiliary:
     vision:
       provider: custom:exo
       model: mlx-community/Qwen3.6-35B-A3B-8bit
-      base_url: http://192.168.86.201:52415/v1
+      base_url: {{ hermes_gateway_exo_base_url }}
       api_key: not-needed
       api_mode: chat_completions
       timeout: 120

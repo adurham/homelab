@@ -47,11 +47,15 @@ hermes_gateway_git_user_email: "amdnative@gmail.com"
 #     ~/.ssh/authorized_keys"
 hermes_gateway_ssh_targets:
   - host: macstudio-m4-1
-    hostname: 192.168.86.201
+    hostname: 100.91.246.26  # Tailscale IP -- the LAN IP (was 192.168.86.201)
+                             # drifted off DHCP lease 2026-09-16/18; Tailscale
+                             # IP is stable (assigned at tailnet join, doesn't
+                             # follow the LAN DHCP lease) so it's the correct
+                             # long-term address here, not a workaround.
     user: adam.durham
     description: "M4 Ultra Mac Studio — exo cluster node 1 (coordinator role; see exo/docs/minimax-rdma-moe-validation-2026-04-24.md)"
   - host: macstudio-m4-2
-    hostname: 192.168.86.202
+    hostname: 100.66.38.13  # Tailscale IP -- see macstudio-m4-1 comment above
     user: adam.durham
     description: "M4 Ultra Mac Studio — exo cluster node 2"
   - host: work-macbook-m4
@@ -62,7 +66,7 @@ hermes_gateway_ssh_targets:
 # Main model provider for the gateway's primary reasoning thread. One of:
 #   exo           - local Mac Studio cluster (DeepSeek-V4-Flash), free/private,
 #                    but only reachable while the exo cluster is up and the
-#                    LXC has network path to 192.168.86.201:52415.
+#                    LXC has network path to hermes_gateway_exo_base_url.
 #   anthropic     - Claude (claude-sonnet-5) via the CLAUDE_CODE_OAUTH_TOKEN
 #                    already deployed to this box (vault_hermes_gw_claude_code_oauth_token).
 #   ollama-cloud  - Ollama Cloud (deepseek-v4-flash), via OLLAMA_API_KEY.
@@ -82,3 +86,13 @@ hermes_gateway_ssh_targets:
 # hermes-serve.service automatically (template change triggers the
 # notify handlers) — no manual SSH/systemctl needed.
 hermes_gateway_main_provider: anthropic
+
+# exo cluster's OpenAI-compatible API endpoint (used by both the `exo`
+# provider block and the vision auxiliary, regardless of which provider
+# is main -- see config.yaml.j2's header comment). Tailscale IP of
+# macstudio-m4-1 (the coordinator node) -- NOT the LAN IP, which has
+# drifted off its DHCP lease twice (2026-08-08 -> .201, again
+# 2026-09-16/18 -> .48); the Tailscale IP is assigned at tailnet join
+# and doesn't follow LAN DHCP, so it's stable across LAN reboots/lease
+# renewals in a way the LAN IP isn't.
+hermes_gateway_exo_base_url: "http://100.91.246.26:52415/v1"

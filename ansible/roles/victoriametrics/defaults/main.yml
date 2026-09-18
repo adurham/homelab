@@ -28,13 +28,30 @@ blackbox_iframe_self_targets:
 
 # exo inference cluster nodes (2x Mac Studio M4) scraped on :52415 for the
 # Prometheus /metrics endpoint. Both nodes are listed so master re-election
-# never gaps per-generation metrics. Override at inventory level if the
-# studios' LAN IPs change.
+# never gaps per-generation metrics.
+#
+# Using Tailscale IPs, not the LAN IPs (was 192.168.86.201/.202) -- the LAN
+# IPs are DHCP-leased and have drifted twice (2026-08-08, then again
+# 2026-09-16/18 after a cluster-wide reboot), each time silently breaking
+# this scrape with no in-cluster symptom (the exo process itself stayed
+# healthy the whole time). Tailscale IPs are assigned at tailnet join and
+# don't follow LAN DHCP, so they're stable across LAN reboots/renewals.
+#
+# CAVEAT (unresolved as of 2026-09-18): vm-01 (this scraper's host) has NO
+# Tailscale client installed and no other route into the 100.x tailnet
+# range (tailscale-gw only offers exit-node, doesn't advertise a subnet
+# route back into the LAN) -- these targets will NOT actually be reachable
+# from vm-01 until either (a) tailscale is installed+joined on vm-01, or
+# (b) tailscale-gw is reconfigured to advertise a subnet route for the
+# tailnet CGNAT range into the LAN side. Left as Tailscale IPs anyway
+# (matching hermes_gateway's same fix, which DOES have a working tailnet
+# path) so this is correct the moment either prerequisite lands, rather
+# than needing a second edit. Override at inventory level if needed.
 exo_scrape_targets:
   - name: macstudio-m4-1
-    address: 192.168.86.201:52415
+    address: 100.91.246.26:52415
   - name: macstudio-m4-2
-    address: 192.168.86.202:52415
+    address: 100.66.38.13:52415
 
 # In-guest windows_exporter targets (roles/windows_exporter, port 9182).
 # Empty by default -- win-sql-01/win-ts-01/win-tms-01/win-tzs-01 are
