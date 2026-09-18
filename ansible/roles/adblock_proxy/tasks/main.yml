@@ -170,6 +170,55 @@
     enabled: true
     daemon_reload: true
 
+# ─── Split-tunnel PAC file (added 2026-08-21) ──────────────────────────────
+# Tailscale exit nodes are all-or-nothing at the OS routing level (RouteAll
+# swaps a device's ENTIRE default route) — there's no per-domain exit-node
+# routing built into Tailscale. Measured live: full-tunnel exit-node mode
+# adds a hop + real latency to 100% of a device's traffic just to filter
+# two apps. This PAC file gets true split tunneling: a device configures
+# "Automatic Proxy Configuration" pointing at this URL (Tailscale stays
+# connected but NOT set as exit node) and only Discord/Reddit hostnames get
+# routed through the explicit mitmproxy listener above (:8080) — everything
+# else returns DIRECT, using the device's own normal default route with
+# zero added latency. See proxy.pac.j2's own header comment for the full
+# design rationale and the domain-list sync requirement with ad_block.py.
+- name: Deploy Split-Tunnel PAC File
+  ansible.builtin.template:
+    src: proxy.pac.j2
+    dest: /opt/adblock-proxy/proxy.pac
+    owner: mitmproxy
+    group: mitmproxy
+    mode: '0644'
+  vars:
+    adblock_proxy_listen_host: "{{ adblock_proxy_ts_ip.stdout | trim }}"
+
+- name: Deploy PAC File Server Script
+  ansible.builtin.template:
+    src: pac_server.py.j2
+    dest: /opt/adblock-proxy/pac_server.py
+    owner: mitmproxy
+    group: mitmproxy
+    mode: '0750'
+  vars:
+    adblock_proxy_listen_host: "{{ adblock_proxy_ts_ip.stdout | trim }}"
+  notify: Restart Adblock Proxy PAC Server
+
+- name: Install Adblock Proxy PAC Systemd Unit
+  ansible.builtin.template:
+    src: adblock-proxy-pac.service.j2
+    dest: /etc/systemd/system/adblock-proxy-pac.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Adblock Proxy PAC Server
+
+- name: Enable & Start Adblock Proxy PAC Server
+  ansible.builtin.systemd:
+    name: adblock-proxy-pac
+    state: started
+    enabled: true
+    daemon_reload: true
+
 # ─── Transparent mode (exit-node path) ─────────────────────────────────────
 # Devices that route through this host as a Tailscale exit node (phone,
 # WiFi + cellular) never set a proxy explicitly — their HTTPS traffic just
