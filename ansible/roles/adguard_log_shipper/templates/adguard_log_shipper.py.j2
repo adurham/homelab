@@ -51,6 +51,7 @@ STATE_FILE = Path("/var/lib/adguard-log-shipper/state.json")
 TOKEN_FILE = Path("/etc/adguard-log-shipper/hass_token")
 MAX_PAGES_PER_RUN = 30  # 30 * 500 = 15k entries backfill ceiling per run
 PAGE_LIMIT = 500
+LOKI_PUSH_CHUNK_SIZE = 500  # see main()'s chunked-push comment for why
 
 
 async def get_ingress_session(token: str) -> str:
@@ -186,9 +187,36 @@ async def main() -> None:
     # AdGuard returns newest-first; ship oldest-first so Loki's stream
     # timestamps stay monotonically increasing.
     all_new.reverse()
-    push_to_loki(all_new)
-    save_state({"last_shipped_time": all_new[-1]["time"]})
-    print(f"shipped {len(all_new)} entries")
+
+    # Push in bounded-size chunks, checkpointing after EACH chunk
+    # succeeds, instead of one unbounded push + a single end-of-run
+    # checkpoint. ROOT CAUSE this fixes (2026-09-18 incident): a large
+    # backlog (e.g. after any shipper downtime) can accumulate up to
+    # MAX_PAGES_PER_RUN * PAGE_LIMIT = 15,000 entries in a single run,
+    # and a one-shot push of that many entries can exceed Loki's
+    # default 4MiB gRPC message limit (observed: ~15k entries -> 5.5MB
+    # -> "ResourceExhausted ... received message larger than max").
+    # Because save_state() previously only ran AFTER a successful push,
+    # that single oversized push failed on EVERY run forever -- it kept
+    # re-fetching and re-failing on the same backlog without ever
+    # making progress (caught 2026-09-18: last_shipped_time was stuck
+    # 2+ days in the past, 178 consecutive failures since just that
+    # day's reboot), and every failed push still cost Loki a full
+    # 5.5MB decode+reject, hammering /loki/api/v1/push hard enough to
+    # 500 OTHER shippers' unrelated pushes too. Chunking bounds each
+    # push to a small, predictable size regardless of backlog depth,
+    # and per-chunk checkpointing means a failure partway through a
+    # large backfill keeps everything shipped so far instead of
+    # retrying the whole backlog from scratch next run.
+    shipped_total = 0
+    num_chunks = (len(all_new) + LOKI_PUSH_CHUNK_SIZE - 1) // LOKI_PUSH_CHUNK_SIZE
+    for i in range(0, len(all_new), LOKI_PUSH_CHUNK_SIZE):
+        chunk = all_new[i : i + LOKI_PUSH_CHUNK_SIZE]
+        push_to_loki(chunk)
+        save_state({"last_shipped_time": chunk[-1]["time"]})
+        shipped_total += len(chunk)
+
+    print(f"shipped {shipped_total} entries in {num_chunks} chunk(s)")
 
 
 if __name__ == "__main__":
