@@ -19,6 +19,13 @@
     - name: Deploy Frigate host
       ansible.builtin.include_role:
         name: frigate_host
+      # Tag on the include statement itself is required for dynamic
+      # includes (include_role/include_tasks) -- Ansible decides whether
+      # to process the include AT ALL based on tags on the include task,
+      # before it can see tags on anything inside. Without this, --tags
+      # on the command line skips the whole include (and everything in
+      # it) regardless of what's tagged inside frigate_host's tasks.
+      tags: [frigate_net0_fix]
       vars:
         net_private_ip: "{{ hostvars['frigate-01']['net_private_ip'] }}"
         vmid: "{{ hostvars['frigate-01']['vmid'] }}"
