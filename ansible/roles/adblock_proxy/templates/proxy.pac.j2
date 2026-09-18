@@ -1,0 +1,59 @@
+// Split-tunnel PAC file for adblock-proxy-01 (added 2026-08-21).
+//
+// WHY THIS EXISTS: Tailscale exit nodes are all-or-nothing at the OS
+// routing level (RouteAll: true swaps the device's ENTIRE default
+// route) -- there is no per-domain exit-node routing built into
+// Tailscale itself. Measured live 2026-08-21: full-tunnel exit-node
+// mode adds real latency/hops to 100% of a device's traffic just to
+// get ad-filtering on two apps. This PAC file gets true split
+// tunneling instead: devices configure "Automatic Proxy Configuration"
+// pointing here (NOT the exit-node toggle), and only Discord/Reddit
+// hostnames get routed through the explicit mitmproxy listener
+// (:8080, same ad_block.py filtering already used by the exit-node
+// path) -- everything else returns DIRECT, bypassing Tailscale
+// entirely for that connection, with zero added latency vs the
+// device's normal internet path.
+//
+// REQUIRES: the device must still have Tailscale CONNECTED (any state
+// -- NOT set as exit node) so it can reach {{ adblock_proxy_listen_host }}
+// on the tailnet for both this PAC file (port {{ adblock_proxy_pac_port }})
+// and the proxy connection itself (port 8080). Non-Discord/Reddit
+// traffic never touches Tailscale's routing at all since PAC's DIRECT
+// return means the OS's normal default route handles it -- this is
+// the actual mechanism that avoids "slowing down the rest of the
+// internet," not a Tailscale feature.
+//
+// DOMAIN LIST: must stay in sync with ad_block.py's DISCORD_HOSTS /
+// DISCORD_HOST_SUFFIXES / REDDIT_CONTENT_HOSTS / REDDIT_CONTENT_SUFFIXES
+// / REDDIT_TRACKING_HOSTS (see that file's module docstring for the
+// live-verified endpoint list, most recently confirmed 2026-08-21
+// against real Discord app + Reddit app traffic from an iPhone,
+// including gql-fed.reddit.com, the modern Reddit app's GraphQL API).
+// A domain routed here but NOT recognized by ad_block.py just passes
+// through mitmproxy unfiltered (harmless, wasted hop); a domain NOT
+// routed here bypasses filtering entirely (the actual failure mode to
+// watch for when either app adds new hostnames).
+function FindProxyForURL(url, host) {
+    host = host.toLowerCase();
+
+    // Discord
+    if (host === "discord.com" || host === "discordapp.com" ||
+        shExpMatch(host, "*.discord.com") ||
+        shExpMatch(host, "*.discordapp.com") ||
+        shExpMatch(host, "*.discordapp.net") ||
+        shExpMatch(host, "*.discord.gg") ||
+        shExpMatch(host, "*.discord.media")) {
+        return "PROXY {{ adblock_proxy_listen_host }}:8080; DIRECT";
+    }
+
+    // Reddit (content + tracking hosts both route here; ad_block.py's
+    // request() hook decides block-vs-pass per host, this PAC file only
+    // decides proxy-vs-direct)
+    if (host === "reddit.com" ||
+        shExpMatch(host, "*.reddit.com") ||
+        shExpMatch(host, "*.redditmedia.com")) {
+        return "PROXY {{ adblock_proxy_listen_host }}:8080; DIRECT";
+    }
+
+    return "DIRECT";
+}

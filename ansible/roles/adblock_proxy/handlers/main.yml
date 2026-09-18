@@ -9,6 +9,11 @@
     name: adblock-proxy-transparent
     state: restarted
 
+- name: Restart Adblock Proxy PAC Server
+  ansible.builtin.systemd:
+    name: adblock-proxy-pac
+    state: restarted
+
 - name: Apply Transparent-Redirect iptables Rules
   ansible.builtin.command: iptables-restore /etc/iptables/rules.v4
   changed_when: true

@@ -1,0 +1,23 @@
+[Unit]
+Description=Adblock Proxy PAC File Server (split-tunnel routing config)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+Requires=tailscaled.service
+
+[Service]
+Type=simple
+User=mitmproxy
+Group=mitmproxy
+WorkingDirectory=/opt/adblock-proxy
+# Binds ONLY to the tailscale0 interface IP, same trust boundary as the
+# explicit mitmproxy listener (port 8080) it complements -- a device
+# must already be on the tailnet to fetch the PAC file at all.
+ExecStart=/opt/adblock-proxy/venv/bin/python3 /opt/adblock-proxy/pac_server.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/mitmproxy /opt/adblock-proxy
+
+[Install]
+WantedBy=multi-user.target
