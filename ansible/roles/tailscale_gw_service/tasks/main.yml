@@ -52,6 +52,38 @@
   ansible.builtin.command: netfilter-persistent save
   changed_when: false
 
+# Reverse direction of the two MASQUERADE rules above: private-SDN hosts
+# reaching OUT to tailnet peers (e.g. vm-01's VictoriaMetrics scraping the
+# exo Mac Studios' Tailscale IPs), not tailnet peers reaching IN to the
+# private SDN. Needed because Tailscale peers only accept traffic from
+# sources that are actually in their WireGuard cryptokey-routing table
+# (their own tailnet IP, or a subnet they've explicitly turned on
+# accept-routes for) -- a private-SDN host's real 172.16.0.x source IP is
+# neither, so packets forwarded through this gateway un-NATted reach the
+# peer's tailscale0 interface and are silently dropped with zero
+# response, even though routing/forwarding up to that point is completely
+# healthy (confirmed 2026-09-19: tcpdump on this CT's own tailscale0
+# showed vm-01's SYNs leaving cleanly toward a Mac Studio, zero SYN-ACKs
+# ever returned). Masquerading here makes the private-SDN host's traffic
+# arrive with THIS gateway's tailnet source IP instead, which every peer
+# already accepts unconditionally (it's tailscale-gw's own /32). Doesn't
+# touch inbound tailnet->172.16 traffic or its NoSNAT setting below --
+# that's a completely different direction/purpose (auditability of WHO on
+# the tailnet is reaching into the SDN, not covered by this at all).
+- name: Configure NAT (Masquerade private-SDN egress via tailscale0)
+  ansible.builtin.iptables:
+    table: nat
+    chain: POSTROUTING
+    source: "{{ net_private_range }}"
+    out_interface: tailscale0
+    jump: MASQUERADE
+    action: append
+  notify: Save IPTables
+
+- name: Save IPTables (post tailscale0 masquerade)
+  ansible.builtin.command: netfilter-persistent save
+  changed_when: false
+
 # Disable subnet-route SNAT so hosts on 172.16.0.0/24 see the original
 # Tailnet source IPs (100.x) instead of this router's IP (172.16.0.1).
 # With SNAT on (Tailscale's default), anything routed in from Tailnet
@@ -70,6 +102,8 @@
   ansible.builtin.shell: |
     set -o pipefail
     tailscale debug prefs | python3 -c 'import json,sys; print(json.load(sys.stdin).get("NoSNAT", False))'
+  args:
+    executable: /bin/bash
   register: tailscale_snat_check
   changed_when: false
 
