@@ -31,7 +31,19 @@ groups:
               # check the machine), so exo gets its own rule below
               # (exo_server_down) with accurate wording instead of being
               # silently folded into the generic host-down check.
-              expr: up{job!="exo"}
+              #
+              # instance!~"tc-.*" excludes the tanium_clients test fleet
+              # (tc-ubuntu22/24, tc-rocky8/9, tc-debian11/12, tc-oracle8/9,
+              # tc-alma8/9, tc-suse15, tc-rhel8/9) -- these are disposable
+              # Tanium-client test boxes (rebuilt/rebooted/left off at will
+              # for cross-distro client-install testing), not infrastructure.
+              # Confirmed 2026-09-20: tc-rocky9 alone had generated 2 stale
+              # "systemd unit failed" silences already sitting in
+              # Alertmanager from routine test churn. Root-cause fix (not a
+              # silence): stop these hosts from ever being alertable,
+              # matching the existing tanium_cluster exclusion pattern
+              # (deploy_logrotate.yml) for the TanOS appliances themselves.
+              expr: up{job!="exo", instance!~"tc-.*"}
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -1036,8 +1048,11 @@ groups:
               datasource:
                 type: prometheus
                 uid: victoriametrics
+              # instance!~"tc-.*" excludes the disposable tanium_clients
+              # test fleet -- see the matching exclusion + rationale on the
+              # host_down rule above.
               editorMode: code
-              expr: 100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs"} * 100)
+              expr: 100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", instance!~"tc-.*"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", instance!~"tc-.*"} * 100)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -1224,7 +1239,10 @@ groups:
               # Range queries route through a different conversion path
               # that keeps labels intact (verified empirically against
               # this Loki 3.7.1 + Grafana 11.x pairing 2026-08-09).
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "Out of memory|invoked oom-killer" [5m]))'
+              # host!~"tc-.*" excludes the disposable tanium_clients test
+              # fleet -- see the matching exclusion + rationale on the
+              # host_down rule earlier in this file.
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "Out of memory|invoked oom-killer" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -1286,7 +1304,11 @@ groups:
               # See the "Range query (NOT instant)" comment on log_oom_kill
               # above for why this can't be instant:true with multiple
               # simultaneous (host, unit) series.
-              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
+              #
+              # host!~"tc-.*" excludes the disposable tanium_clients test
+              # fleet -- see the matching exclusion + rationale on the
+              # host_down rule earlier in this file.
+              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -1343,7 +1365,14 @@ groups:
               # See the "Range query (NOT instant)" comment on log_oom_kill
               # for why this can't be instant:true with multiple
               # simultaneous host series.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit="ssh.service"} |~ "Failed password|Invalid user" [10m]))'
+              #
+              # host!~"tc-.*" excludes the disposable tanium_clients test
+              # fleet -- see the matching exclusion + rationale on the
+              # host_down rule earlier in this file. SSH brute-force
+              # detection is intentionally still active on these hosts'
+              # actual reachability; this only stops the ALERT from paging,
+              # same policy as every other tc-* exclusion here.
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit="ssh.service", host!~"tc-.*"} |~ "Failed password|Invalid user" [10m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -1400,7 +1429,11 @@ groups:
               # See the "Range query (NOT instant)" comment on log_oom_kill
               # for why this can't be instant:true with multiple
               # simultaneous host series.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "I/O error|EXT4-fs error|Buffer I/O error|Medium error|blk_update_request" [5m]))'
+              #
+              # host!~"tc-.*" excludes the disposable tanium_clients test
+              # fleet -- see the matching exclusion + rationale on the
+              # host_down rule earlier in this file.
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "I/O error|EXT4-fs error|Buffer I/O error|Medium error|blk_update_request" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -1689,8 +1722,15 @@ groups:
               # roles/tailscale_gw_host's own comment on this), so this
               # will fail on every boot forever -- exclude rather than
               # let it page every ~10min indefinitely.
+              #
+              # instance!~"tc-.*" added 2026-09-20: excludes the disposable
+              # tanium_clients test fleet -- see the matching exclusion +
+              # rationale on the host_down rule earlier in this file.
+              # tc-rocky9 alone had 2 stale silences sitting in
+              # Alertmanager from routine rebuild/reboot churn on these
+              # test boxes before this exclusion existed.
               editorMode: code
-              expr: node_systemd_unit_state{state="failed", name!~"ifupdown-wait-online.service|networking.service|nvmf-autoconnect.service|openipmi.service|apparmor.service"} == 1
+              expr: node_systemd_unit_state{state="failed", name!~"ifupdown-wait-online.service|networking.service|nvmf-autoconnect.service|openipmi.service|apparmor.service", instance!~"tc-.*"} == 1
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
