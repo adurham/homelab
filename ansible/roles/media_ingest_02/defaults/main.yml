@@ -83,10 +83,24 @@ media_ingest_02_likes_per_model_cap: 50
 media_ingest_02_likes_per_model_timeout: 900  # 15 min in seconds
 
 # Defense-in-depth cap (bytes) on a single media item's size, wired into
-# config.json's content_filter_options.file_size_max. The scraper checks this
-# BEFORE writing any bytes (both the plain and DASH/DRM download paths) and,
-# if exceeded, permanently marks the item Forced_skipped in its own dupe-check
-# DB (not retried every sweep) instead of downloading it at all.
+# config.json's download_options.file_size_limit. ofscraper checks this in
+# _check_forced_skip() immediately AFTER the response opens but BEFORE any
+# body bytes are read (it only needs the Content-Length header), on both the
+# plain and DASH/DRM download paths, so an oversized item is never written to
+# the tmpfs staging dir at all — no orphaned partial, no 2x-heap push.
+#
+# ACCURACY NOTE (verified by reading the pinned ofscraper 3.14.7 source, not
+# assumed): the skip is NOT persisted. When _check_forced_skip trips on size
+# it sets ele.mediatype="Forced_skipped" and returns 0, and the caller's
+# `if ele.mediatype.capitalize() != "Forced_skipped": await self._force_download(...)`
+# branch then deliberately does NOT run — so the item is never marked
+# downloaded in the dupe-check DB and will be re-evaluated (headers-only, no
+# bytes) on every subsequent sweep. That per-sweep cost is one HTTP response
+# header read, which is the intent of the upstream design: raising this cap
+# later should make previously-skipped items eligible again without a DB
+# migration. Do not "optimize" this by force-marking items downloaded unless
+# you also accept that a future cap increase would need a manual reset.
+#
 # Root-cause incident, 2026-09-21: a free-tier model's ~9.3GB video hit the
 # per-model 15min download timeout on every sweep (always restarting from 0 —
 # a separate, currently-accepted limitation, see auto_resume in config.json.j2),
@@ -114,4 +128,9 @@ media_ingest_02_likes_per_model_timeout: 900  # 15 min in seconds
 # ~273MB, and the largest CONFIRMED-legitimate successful downloads ever seen
 # top out at 5.88GB. 8GiB gives real content comfortable margin while sitting
 # well under the 14G tmpfs staging ceiling.
+#
+# CAVEAT: the cap can only act when the server reports a Content-Length. If a
+# response has no Content-Length the check can't run (ofscraper reads that
+# header directly) and the download proceeds — which is precisely why the
+# streaming push fix, not this cap, is the primary defense.
 media_ingest_02_file_size_max_bytes: 8589934592  # 8 GiB
