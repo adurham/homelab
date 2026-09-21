@@ -62,15 +62,70 @@ def mkdir(folder: str) -> dict:
     return r.json()
 
 
+class _SizeBoundedReader:
+    """File-like wrapper that snapshots a file's size at construction and will
+    never read past that many bytes, even if the underlying file keeps
+    growing while a (potentially many-minutes-long, multi-GB) upload is in
+    flight. `.len` is a LIVE property (bytes remaining) -- MultipartEncoder's
+    write loop polls it every iteration expecting it to shrink toward zero; a
+    static `.len` hangs the loop forever (caught in local testing before
+    deploy). Same fix as media_ingest_02's store_client.py -- see that copy's
+    push_media docstring for the full incident writeup (2026-09-21 OOM
+    root-cause) and this class's docstring for why `.len` must be live."""
+
+    def __init__(self, fh, size):
+        self._fh = fh
+        self._remaining = size
+
+    @property
+    def len(self):
+        return self._remaining
+
+    def read(self, n=-1):
+        if self._remaining <= 0:
+            return b""
+        if n is None or n < 0:
+            n = self._remaining
+        n = min(n, self._remaining)
+        data = self._fh.read(n)
+        self._remaining -= len(data)
+        return data
+
+
 def push_media(folder: str, path: str, stem: str, date_iso: str, is_out: bool) -> dict:
-    """Upload one media file with source metadata to the gallery."""
+    """Upload one media file with source metadata to the gallery.
+
+    STREAMS the body (requests_toolbelt.MultipartEncoder) instead of using
+    requests' files= kwarg, which double-buffers the entire file in process
+    heap (fp.read() in requests, then a second copy in urllib3's joined
+    BytesIO) — confirmed via a live OOM on media-ingest-02's identical copy
+    of this function pushing a ~9.3GB video (2026-09-21; see that role's
+    store_client.py for the full incident writeup). This CT currently runs
+    with only 1GB of memory and smaller typical capture sizes, so the bug was
+    latent here, but the code path is identical — fixed proactively rather
+    than waiting for this box to hit the same wall.
+    """
+    from requests_toolbelt.multipart.encoder import MultipartEncoder
+
     fname = os.path.basename(path)
+    size = os.stat(path).st_size
     with open(path, "rb") as fh:
-        files = {"files": (fname, fh)}
-        data = {"stem": stem, "date": date_iso or "", "out": "1" if is_out else "0"}
+        reader = _SizeBoundedReader(fh, size)
+        m = MultipartEncoder(fields={
+            "stem": stem,
+            "date": date_iso or "",
+            "out": "1" if is_out else "0",
+            "files": (fname, reader, "application/octet-stream"),
+        })
         r = requests.post(f"{GALLERY_BASE}/ingest/upload/{folder}",
-                          headers=_auth_headers(), files=files, data=data,
-                          timeout=TIMEOUT)
+                          headers={**_auth_headers(), "Content-Type": m.content_type},
+                          data=m, timeout=TIMEOUT, allow_redirects=False)
+    if 300 <= r.status_code < 400:
+        raise RuntimeError(
+            f"push_media got redirect {r.status_code} for {stem} -- streamed "
+            f"body can't be replayed; check GALLERY_BASE/ingest path for a "
+            f"trailing-slash mismatch rather than retrying"
+        )
     r.raise_for_status()
     return r.json()
 
