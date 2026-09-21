@@ -97,9 +97,21 @@ media_ingest_02_likes_per_model_timeout: 900  # 15 min in seconds
 # for the push_media() streaming fix, which is the primary fix). This cap is
 # the belt-and-suspenders backstop so a future oversized asset (or a
 # regression in the streaming fix) fails clean instead of OOM-looping the
-# whole service. Sized from actual history: scanned every model's own SQLite
-# metadata (`size` column, 227k+ media rows across 420 models) — p99.9 of
-# real content is ~273MB, and the largest CONFIRMED-legitimate successful
-# downloads ever seen top out at 5.88GB. 8GiB gives real content comfortable
-# margin while sitting well under the 14G tmpfs staging ceiling.
+# whole service.
+#
+# SAFETY-CRITICAL BOUND — READ BEFORE BUMPING. This number is only "safe"
+# together with the streaming push in store_client.py. Sizing arithmetic for
+# this CT (24 GiB cgroup, 14 GiB tmpfs staging), worst case = biggest allowed
+# file resident in tmpfs + its heap cost at push time:
+#   OLD (buffering) code, 9.3GB file: 9.3 tmpfs + ~18.6 heap  = ~27.9 GiB -> OOM
+#   NEW (streaming)  code, 9.3GB file: 9.3 tmpfs + ~0.025 heap = ~9.3 GiB -> fine
+#   NEW code + streaming REGRESSION, 8GiB file: 8 tmpfs + ~16 heap = ~24 GiB -> AT THE EDGE
+# i.e. if the streaming fix is ever reverted/broken, this cap is just barely
+# survivable; raising it materially (or shrinking the cgroup) re-creates the
+# original OOM with no other change. Change one, re-check the other.
+# Sized from actual history: scanned every model's own SQLite metadata (`size`
+# column, 227k+ media rows across 420 models) — p99.9 of real content is
+# ~273MB, and the largest CONFIRMED-legitimate successful downloads ever seen
+# top out at 5.88GB. 8GiB gives real content comfortable margin while sitting
+# well under the 14G tmpfs staging ceiling.
 media_ingest_02_file_size_max_bytes: 8589934592  # 8 GiB
