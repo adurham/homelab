@@ -93,6 +93,7 @@
     name:
       - "telethon=={{ media_ingest_telethon_version }}"
       - requests
+      - requests-toolbelt  # streaming multipart upload — see store_client.py push_media()
     virtualenv: "{{ media_ingest_dir }}/venv"
   become: true
   become_user: "{{ media_ingest_user }}"
