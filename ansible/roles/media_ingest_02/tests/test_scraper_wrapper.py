@@ -164,6 +164,42 @@ def test_seen_sizes_cleared_after_push_no_leak_on_reused_path():
             raise AssertionError(f"expected first sighting of the NEW file to be skipped, got pushed={p} skipped={skipped}")
 
 
+def test_part_suffix_never_pushed_even_if_size_stable():
+    """2026-09-21 root-cause incident: the size-comparison gate alone is not
+    sufficient — a genuine mid-download stall (slow segment, throttled
+    connection) can present the SAME byte count across two consecutive 5s
+    polls despite the file being nowhere near finished. ofscraper writes to
+    a `<name>.part` path for the full duration of the download (both the
+    plain and DASH/DRM code paths) and only renames it away once complete and
+    integrity-checked. A `.part` file must never be pushed, no matter how
+    many ticks its size stays unchanged."""
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        mod, pushed = _import_module_fresh(td)
+        model_dir = td / "somemodel"
+        model_dir.mkdir()
+        f = model_dir / "big_video_12345.part"
+        f.write_bytes(b"a" * 1000)  # size is irrelevant to this test; the .part suffix alone must gate it
+
+        # Three ticks with an UNCHANGED size (the exact condition that would
+        # satisfy the old gate) must still never push a .part file.
+        for _ in range(3):
+            p, failed, skipped = mod._walk_and_push()
+            if pushed:
+                raise AssertionError(f".part file must never be pushed, got {pushed!r}")
+            if p != 0:
+                raise AssertionError(f"expected pushed=0 for .part file, got {p}")
+
+        # Once ofscraper renames it away (simulating download completion),
+        # normal stability-gate behavior resumes: one skip tick, then pushed.
+        final = model_dir / "big_video_12345.mp4"
+        f.rename(final)
+        mod._walk_and_push()  # first sighting of the renamed file
+        mod._walk_and_push()  # stable -> pushed
+        if len(pushed) != 1:
+            raise AssertionError(f"expected exactly 1 push after rename away from .part, got {pushed!r}")
+
+
 def main():
     print("test_scraper_wrapper: running")
     check("growing file is never pushed mid-download (the core regression)",
@@ -172,6 +208,8 @@ def main():
           test_stable_file_pushed_exactly_once_not_repeatedly)
     check("_SEEN_SIZES cleared after push (no stale-state leak)",
           test_seen_sizes_cleared_after_push_no_leak_on_reused_path)
+    check(".part files are never pushed even with a stable size",
+          test_part_suffix_never_pushed_even_if_size_stable)
     print(f"test_scraper_wrapper: ALL {PASS} TESTS PASSED")
     print("PASS")
     sys.exit(0)

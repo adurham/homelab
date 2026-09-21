@@ -518,7 +518,28 @@ def _walk_and_push():
     before its first push, since it has no prior recorded size yet -- this is
     a bounded delay, not lost data, same "retried next tick" guarantee as
     before via the same caller pattern (_background_push's loop + the
-    guaranteed post-sweep call in main() after the scraper has exited)."""
+    guaranteed post-sweep call in main() after the scraper has exited).
+
+    .part EXCLUSION (2026-09-21, added alongside the OOM root-cause fix in
+    store_client.py): the module docstring above says "there's no separate
+    .part/.tmp name", which was true when written but is STALE for the
+    currently-pinned ofscraper version (3.14.7) -- verified live during the
+    2026-09-21 incident: the actual stuck/oversized file sat in this exact
+    STAGING tree as `<...>.part` (both the plain main_download.py path and
+    the DASH/DRM alt_download.py path write into a `<name>.part` temp file
+    via tempFilePlaceholder, using the SAME save_location/staging root as the
+    final destination -- confirmed by reading ofscraper's placeholder.py --
+    and only rename away the suffix after _size_checker/verify_media_integrity
+    pass). The size-comparison gate above reduces but does not ELIMINATE the
+    truncated-push race it was built to close: two consecutive 5s polls can
+    land in a genuine mid-download stall (slow segment, throttled connection)
+    with byte count unchanged, satisfying the gate on a file that is not
+    actually finished. A `.part` suffix is a stronger, orthogonal signal that
+    costs nothing extra: the file is *never* complete while so named, by
+    construction of both download paths, so skipping it here cannot lose data
+    -- same bounded-delay "retried next tick" guarantee as everything else in
+    this function, and it naturally clears once ofscraper's own rename lands.
+    """
     pushed = failed = skipped = 0
     if not STAGING.exists():
         return 0, 0, 0
@@ -535,6 +556,11 @@ def _walk_and_push():
         folder = resolve_folder(redirects, model_dir.name)
         for fpath in sorted(model_dir.iterdir()):
             if not fpath.is_file():
+                continue
+            if fpath.suffix == ".part":
+                # Still being written by ofscraper (or orphaned pending
+                # _clear_stale_staging) -- never push, never count as seen,
+                # so it gets a fresh size baseline once it's renamed away.
                 continue
             key = str(fpath)
             try:

@@ -62,15 +62,94 @@ def mkdir(folder: str) -> dict:
     return r.json()
 
 
+class _SizeBoundedReader:
+    """File-like wrapper that snapshots a file's size at construction and will
+    never read past that many bytes, even if the underlying file keeps
+    growing while a (potentially many-minutes-long, multi-GB) upload is in
+    flight. `.len` is a LIVE property (bytes remaining), mirroring
+    requests_toolbelt's own FileWrapper.len — MultipartEncoder's write loop
+    (Part.write_to) polls total_len(body) on every iteration expecting it to
+    shrink toward zero as bytes are consumed; a static `.len` that never
+    changes makes that loop spin forever (caught in local testing before
+    deploy: a 100-byte test file hung indefinitely). The one-time-total used
+    for the overall Content-Length calculation is captured separately and
+    correctly by MultipartEncoder itself (Part.__init__ snapshots
+    total_len(body) once, at construction, before any reads happen) — this
+    property only needs to satisfy the write loop's PROGRESS check, not
+    restate the original total.
+
+    Preventing a live file from growing past its snapshotted size also
+    protects against desyncing the promised Content-Length vs. actual bytes
+    sent, e.g. if the caller's stability-gate race (see scraper_wrapper.py's
+    _walk_and_push .part-suffix exclusion, added alongside this fix for the
+    same underlying scenario) ever let a still-being-written file through.
+    """
+
+    def __init__(self, fh, size):
+        self._fh = fh
+        self._remaining = size
+
+    @property
+    def len(self):
+        return self._remaining
+
+    def read(self, n=-1):
+        if self._remaining <= 0:
+            return b""
+        if n is None or n < 0:
+            n = self._remaining
+        n = min(n, self._remaining)
+        data = self._fh.read(n)
+        self._remaining -= len(data)
+        return data
+
+
 def push_media(folder: str, path: str, stem: str, date_iso: str, is_out: bool) -> dict:
-    """Upload one media file with source metadata to the gallery."""
+    """Upload one media file with source metadata to the gallery.
+
+    STREAMS the body (requests_toolbelt.MultipartEncoder) instead of using
+    requests' files= kwarg. Root-caused 2026-09-21: requests' own multipart
+    path (RequestEncodingMixin._encode_files) does fdata = fp.read() — reads
+    the ENTIRE file into one bytes blob — then urllib3's
+    encode_multipart_formdata() copies it AGAIN into a joined BytesIO before
+    the request is sent. For a multi-GB video that's ~2x the file size in
+    transient process heap on top of the file already resident in the (tmpfs)
+    staging dir. Confirmed via the Proxmox host's own kernel OOM report for
+    this exact failure (`journalctl -k`, not just the guest's systemd log):
+    the killed task was this wrapper's own "python" PID with
+    anon-rss ~15.7-16GB / shmem-rss:0 (i.e. process HEAP, not the tmpfs file)
+    at the moment a ~9.3GB video was being pushed, and the cgroup's own
+    memory.stat showed shmem (~8.4GB, the tmpfs file) + anon (~16GB, this
+    double-buffered copy) together exactly exhausting the 24GB memory.max —
+    both contributors, stacking. MultipartEncoder computes Content-Length via
+    fstat and streams .read() in bounded chunks, so process RSS stays flat
+    regardless of file size. allow_redirects=False because a streamed body
+    can't be replayed on a redirect (requests would silently send an empty
+    body on 307/308 or drop to GET on 301/302) — a redirect here means
+    GALLERY_BASE or the ingest path is misconfigured and should fail loudly,
+    not silently corrupt an upload.
+    """
+    from requests_toolbelt.multipart.encoder import MultipartEncoder
+
     fname = os.path.basename(path)
+    size = os.stat(path).st_size
     with open(path, "rb") as fh:
-        files = {"files": (fname, fh)}
-        data = {"stem": stem, "date": date_iso or "", "out": "1" if is_out else "0"}
+        reader = _SizeBoundedReader(fh, size)
+        m = MultipartEncoder(fields={
+            "stem": stem,
+            "date": date_iso or "",
+            "out": "1" if is_out else "0",
+            "files": (fname, reader, "application/octet-stream"),
+        })
         r = requests.post(f"{GALLERY_BASE}/ingest/upload/{folder}",
-                          headers=_auth_headers(), files=files, data=data,
-                          timeout=TIMEOUT)
+                          headers={**_auth_headers(), "Content-Type": m.content_type},
+                          data=m, timeout=TIMEOUT, allow_redirects=False)
+    if 300 <= r.status_code < 400:
+        raise RuntimeError(
+            f"push_media got redirect {r.status_code} for {stem} -- streamed "
+            f"body can't be replayed; check GALLERY_BASE/ingest path for a "
+            f"trailing-slash mismatch rather than retrying"
+        )
     r.raise_for_status()
     return r.json()
 
