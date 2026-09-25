@@ -45,11 +45,29 @@ Physical topology upstream of pve01/02/03 and the exo cluster Mac Studios:
 
 ```
 AT&T BGW (IP Passthrough)
-  -> Google Nest Wifi Pro (main unit)
-       -> NETGEAR GS108Ev4 (GS108E-400NAS, 8-port managed) — see below
-            -> TP-Link 8-port switch (unmanaged)
-                 -> TP-Link 5-port switch (unmanaged)
+  -> Google Nest Wifi Pro (main unit, living room)
+       -> TP-Link TL-SG105E (5-port managed, .15) — first hop off the Nest
+            -> 8-port basement "trunk" switch (unmanaged) — branch hub
+                 -> Nest Wifi Pro pods (wired backhaul)
+                 -> under-work-desk switch (unmanaged)
+                      -> NETGEAR GS108Ev4 (lab switch, .51) -> PVE nodes + Mac Studios
+                 -> game-room switch (unmanaged)
 ```
+
+(Chain + leaf ordering per user description, 2026-09-25; port-level
+interconnects below the trunk are not individually verified.)
+
+**Loop-prevention state across the chain (2026-09-25):**
+
+| Switch | Type | Loop prevention |
+| :--- | :--- | :--- |
+| NETGEAR GS108Ev4 (.51) | managed | **OFF** (user, 2026-09-25) — its LED "both LEDs blink at constant speed" report had been seen; disabling caused no storm (verified host-side) |
+| TP-Link TL-SG105E (.15) | managed | ON — and demonstrably NOT blocking: backbone ports 1/5 forwarding ~2.8k pkt/s each (measured 2026-09-25). No action needed. |
+| Basement trunk (8-port) | unmanaged | DIP OFF (user) |
+| Game-room / under-work-desk | unmanaged | physical DIPs, if present — per-switch basic detection only; leave as-is. These toggles are NOT a fix for anything; they only decide whether that switch auto-blocks a port when it detects a loop. |
+
+Managed switches keep their loop prevention under DIAGNOSTICS → LOOP
+PREVENTION; the TL-SG105E exposes `lpEn` on `/LoopPreventionRpm.htm`.
 
 | Device | Model | LAN IP | Notes |
 | :--- | :--- | :--- | :--- |
