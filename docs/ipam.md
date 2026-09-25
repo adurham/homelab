@@ -48,7 +48,10 @@ AT&T BGW (IP Passthrough)
   -> Google Nest Wifi Pro (main unit, living room)
        -> TP-Link TL-SG105E (5-port managed, .15) — first hop off the Nest
             -> 8-port basement "trunk" switch (unmanaged) — branch hub
-                 -> Nest Wifi Pro pods (wired backhaul)
+                 -> Nest Wifi Pro pods (wired backhaul — all pods confirmed
+                    showing Wired in Google Home, 2026-09-25, which closes
+                    the earlier open item of the game-room pod running on
+                    wireless backhaul)
                  -> under-work-desk switch (unmanaged)
                       -> NETGEAR GS108Ev4 (lab switch, .51) -> PVE nodes + Mac Studios
                  -> game-room switch (unmanaged)
@@ -68,6 +71,30 @@ interconnects below the trunk are not individually verified.)
 
 Managed switches keep their loop prevention under DIAGNOSTICS → LOOP
 PREVENTION; the TL-SG105E exposes `lpEn` on `/LoopPreventionRpm.htm`.
+
+**Storm re-check + two real LAN blackouts (2026-09-25 ~15:00, re-verified on
+user challenge).** No storm in any measured window: multi-vantage byte/packet
+rates at every layer normal, zero CRC/error counters, no duplicate-source
+traffic. The `SUSPECT-STORM` lines in the studios' `/tmp/netwatch24.log`
+(13:42 and ~15:00) coincide with the port-mapping bulk transfers run by the
+earlier session — the 15:00 one is byte-verified (pve02 `tap200i0`/VM200 rx
+peak 14.42 MB/s = the 400 MB download) — and the watcher's ~1,000 pkt/s
+threshold is far too low: **treat any future `SUSPECT-STORM` line as needing
+a byte-rate check before it is called a storm.**
+
+Separately, TWO real transient segment blackouts were found that had not
+been recorded: **12:28:29–12:28:58** (all three pve NIC links dropped
+simultaneously ~30 s; corosync lost quorum, recovered) and
+**~14:48:59–14:53** (gateway unreachable from MacBook + studios; at ~14:50
+all three pve nodes hard-reset uncleanly — `last` shows "crash", fsck ran at
+boot — back up 14:54–14:56). House power stayed up through the window (HA
+whole-home power sensors kept reporting). A storm floods; these were
+blackouts (loss + LOW counters). Cause NOT yet identified. Watch items: this
+is the same simultaneous-3-node reboot class as 2026-09-20 (power-event
+precedent); pve03's boot HDD (ata1) threw SATA link resets again at 15:06;
+Netgear port 5 (documented = pve01) reads `100M full` while pve01's own NIC
+reports 1000 Mb/s — verify mapping/renegotiation. Loss-triggered watchers
+armed on both studios (`/tmp/netwatch_power.log`).
 
 | Device | Model | LAN IP | Notes |
 | :--- | :--- | :--- | :--- |
