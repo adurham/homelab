@@ -4,10 +4,16 @@
 # config is via CGI form POSTs served by a React SPA (see
 # files/gs108ev4_client.py for the reverse-engineered login flow).
 #
-# STATUS (2026-08-04): intentionally a NO-OP. Config is managed MANUALLY
-# via the switch's web UI (http://192.168.86.62, password in 1Password
-# under "NETGEAR GS108Ev4" -- rotated off the factory default 2026-08-04,
-# deliberately not stored in this repo/vault).
+# STATUS (2026-09-25): intentionally a NO-OP, still managed MANUALLY via
+# the switch's web UI. CURRENT address is http://192.168.86.51 (older
+# notes said .62 / .14 -- both stale; it DHCPs and moves, so find it by
+# hostname `gs108ev4.lan` or MAC 28:94:01:77:1d:80, not by remembered IP).
+#
+# PASSWORD WARNING (2026-09-25): the switch currently accepts the FACTORY
+# DEFAULT password printed on its label. The 1Password item "Netgear
+# GS108Ev4" is STALE (rejected). Rotate via the UI and re-store before
+# treating this device as trustworthy -- it is one of only two switches in
+# the house that can be reconfigured over the network.
 #
 # Why manual instead of automated:
 #   1. The switch only allows 4 concurrent HTTP sessions with a 5-min
