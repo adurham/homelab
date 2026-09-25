@@ -9,11 +9,12 @@
 # notes said .62 / .14 -- both stale; it DHCPs and moves, so find it by
 # hostname `gs108ev4.lan` or MAC 28:94:01:77:1d:80, not by remembered IP).
 #
-# PASSWORD WARNING (2026-09-25): the switch currently accepts the FACTORY
-# DEFAULT password printed on its label. The 1Password item "Netgear
-# GS108Ev4" is STALE (rejected). Rotate via the UI and re-store before
-# treating this device as trustworthy -- it is one of only two switches in
-# the house that can be reconfigured over the network.
+# PASSWORD (2026-09-25): rotated off the factory default; the current
+# password is in 1Password under "Netgear GS108Ev4" (verified working for
+# a scripted read-only login). Keep scripted logins to ONE per session --
+# this switch allows ~3 concurrent HTTP sessions, each held until timeout,
+# and hammering the login endpoint WEDGES it (recovery = physical power
+# cycle). Check /login.cgi for "maximum number of sessions" first.
 #
 # Why manual instead of automated:
 #   1. The switch only allows 4 concurrent HTTP sessions with a 5-min

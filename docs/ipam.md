@@ -73,17 +73,21 @@ PREVENTION; the TL-SG105E exposes `lpEn` on `/LoopPreventionRpm.htm`.
 | :--- | :--- | :--- | :--- |
 | `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | `192.168.86.51` (verified live 2026-09-25; resolves as `gs108ev4.lan`) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
 
-**Password state (2026-09-25):** the switch accepted the factory-default
-password printed on its label; the 1Password item `Netgear GS108Ev4` is
-STALE and gets rejected. Rotate it through the UI and re-store.
+**Password state (2026-09-25):** the factory-default label password is
+REJECTED — the user rotated it. The 1Password item `Netgear GS108Ev4`
+holds the CURRENT password (verified working for a scripted read-only
+login 2026-09-25). Caveat from experience: this switch allows only a few
+concurrent HTTP sessions, each held until timeout — keep scripted logins
+to ONE per investigation, and check `/login.cgi` for "maximum number of
+sessions" BEFORE attempting a login.
 
-**Loop prevention: DISABLED by user 2026-09-25** (was enabled; port LEDs
-showed the documented "both LEDs blink at constant speed" loop report).
-Post-disable measurements from a wired host on this switch
-(macstudio-m4-1) showed no storm — normal packet rates, 0% loss, ~2 ms
-to the gateway. Re-enable from DIAGNOSTICS → LOOP PREVENTION if loop
-reports recur. Storm control (broadcast filtering) remains the flood
-backstop.
+**Loop prevention: OFF (user, 2026-09-25; re-verified OFF via the API).**
+It had been reporting what the manual documents as a loop detect ("both
+LEDs of a port blink at a constant speed"). Disabling it produced no
+storm — verified host-side from macstudio-m4-1 (normal packet rates, 0%
+loss, ~2 ms to gateway) and at the BGW (0 Tx/Rx errors, only port 2
+live). Re-enable from DIAGNOSTICS → LOOP PREVENTION only if loop reports
+recur.
 
 **Status (2026-08-04):** switch reachable at `192.168.86.62` via a DHCP
 reservation (added directly in AdGuard, not yet mirrored into the Ansible
