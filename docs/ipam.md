@@ -101,12 +101,11 @@ drop the real link and are trustworthy for this test):
 
 | Port | Device | Confirmed via |
 | :--- | :--- | :--- |
+| 8 | **Uplink toward the under-desk switch** (i.e. every host on this switch's other branches reaches the house through here) | Traffic test 2026-09-25: downloads to BOTH Mac Studios in turn (served from the MacBook on the desk branch) both produced by far the largest counter deltas on port 8, while no single other port carried a studio's whole flow. Matches user's recollection that 8 is the upstream to the under-work-desk switch. Also the port whose LEDs were seen blinking — a loop report landing on the uplink is the expected place for it. |
 | 3 | `pve03` (192.168.86.13) | `ip link set nic0 down`, kernel dmesg `NIC Link is Down`, 2x clean repeat |
 | 4 | `pve02` (192.168.86.12) | same method, 1x clean |
 | 5 | `pve01` (192.168.86.11) | same method, 2x clean (1st attempt had a false negative from too-coarse SSH polling — use ≥1.5s poll interval and a ≥10s down window) |
-| 7 | `macstudio-m4-2` (192.168.86.202) | confirmed by physically unplugging the cable — port showed "AVAILABLE" (down) and .202 stopped responding to ping |
-| 8 | `macstudio-m4-1` (192.168.86.201) | same, physical unplug — port "AVAILABLE" and .201 stopped responding |
-| 1, 2, 6 | unknown (likely uplink + 1-2 spares) | — |
+| — | **Ports 6 and 7 are DARK (no link) as of 2026-09-25.** Port 7 previously held a Mac Studio; no studio is directly attached there now — the studios' traffic reaches this switch via port 8 / the desk branch. Do not assume the older 7/8 = two-studios mapping still holds. | dashboard + counter sampling 2026-09-25 |
 
 **IMPORTANT CORRECTION:** an earlier version of this doc (same day) claimed
 both Mac Studios were confirmed NOT on this switch, based on
