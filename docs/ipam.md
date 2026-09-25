@@ -53,7 +53,19 @@ AT&T BGW (IP Passthrough)
 
 | Device | Model | LAN IP | Notes |
 | :--- | :--- | :--- | :--- |
-| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | `192.168.86.62` (DHCP reservation) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only (login password: see label / vault). Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. MAC `28:94:01:77:1d:80`. |
+| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | `192.168.86.51` (verified live 2026-09-25; resolves as `gs108ev4.lan`) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
+
+**Password state (2026-09-25):** the switch accepted the factory-default
+password printed on its label; the 1Password item `Netgear GS108Ev4` is
+STALE and gets rejected. Rotate it through the UI and re-store.
+
+**Loop prevention: DISABLED by user 2026-09-25** (was enabled; port LEDs
+showed the documented "both LEDs blink at constant speed" loop report).
+Post-disable measurements from a wired host on this switch
+(macstudio-m4-1) showed no storm — normal packet rates, 0% loss, ~2 ms
+to the gateway. Re-enable from DIAGNOSTICS → LOOP PREVENTION if loop
+reports recur. Storm control (broadcast filtering) remains the flood
+backstop.
 
 **Status (2026-08-04):** switch reachable at `192.168.86.62` via a DHCP
 reservation (added directly in AdGuard, not yet mirrored into the Ansible

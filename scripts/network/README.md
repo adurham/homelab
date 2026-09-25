@@ -6,7 +6,7 @@ nothing is stored on disk or in this repo.
 
 | Script | Switch | IP | Notes |
 |---|---|---|---|
-| `query_netgear.py` | NETGEAR GS108Ev4 (8-port) | 192.168.86.14 | homelab switch (PVE nodes + Mac Studios) |
+| `query_netgear.py` | NETGEAR GS108Ev4 (8-port) | 192.168.86.51 | homelab switch (PVE nodes + Mac Studios). IP verified live 2026-09-25 (older notes said .14/.62 — stale). |
 | `query_tplink.py`  | TP-Link TL-SG105E (5-port) | 192.168.86.15 | living-room switch, first hop off the Nest router |
 
 Unmanaged switches (basement, upstairs game room) have no management plane

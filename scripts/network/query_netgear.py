@@ -32,7 +32,7 @@ import urllib.parse
 import urllib.request
 import gzip
 
-HOST = "192.168.86.14"
+HOST = "192.168.86.51"
 OP_ITEM = "Netgear GS108Ev4"
 
 # page -> {checkbox id: human label}
