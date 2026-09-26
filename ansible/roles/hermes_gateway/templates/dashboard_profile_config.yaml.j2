@@ -161,6 +161,7 @@ agent:
   gateway_notify_interval: 600
   gateway_auto_continue_freshness: 3600
   image_input_mode: auto
+  # PROVIDER MIGRATION cont'd (2026-09-26): disabled_toolsets unchanged.
   disabled_toolsets:
     - feishu_doc
     - feishu_drive
@@ -173,7 +174,13 @@ agent:
     - browser-cdp
     - hermes-yuanbao
     - image_gen
-  system_prompt_mode: compact
+  # system_prompt_mode flipped compact -> normal, 2026-09-26: `compact`
+  # existed only to satisfy the `anthropic` provider's direct-HTTP
+  # disguise-layer billing classifier (config.yaml.j2's comment has the
+  # full rationale). This profile is now permanently pinned to
+  # claude-subscription-directsdk-experimental (real claude CLI, no
+  # classifier), so there is no reason to pay the compact-prompt cost.
+  system_prompt_mode: normal
   adaptive_sampling:
     cold_start_turns: 2
     ema_alpha: 0.5
@@ -446,4 +453,9 @@ curator:
     keep: 5
 
 skills:
-  lazy_listing: true
+  # lazy_listing flipped true -> false, 2026-09-26: same reasoning as
+  # system_prompt_mode above -- this existed only for the anthropic
+  # provider's billing classifier, which no longer applies here. Full
+  # eager skill listing is strictly more capable and costs nothing on
+  # claude-subscription-directsdk-experimental.
+  lazy_listing: false
