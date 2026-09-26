@@ -202,15 +202,46 @@ agent:
     deepseek-v4.1-flash: xhigh
     deepseek-ai/DeepSeek-V4-Flash-Vision-Exp: xhigh
 
-# tool_search: same deferral setup as the machine-root/Discord config (see
-# templates/config.yaml.j2's tool_search comment for the rationale). Unlike
-# the machine-root config, this one is NOT provider-conditional: this
-# profile is permanently pinned to claude-subscription-directsdk-
-# experimental and never runs the `anthropic` provider's billing-classifier
-# route, so the deferral here is a pure capability/context-efficiency
-# choice now, not a classifier workaround. Left enabled deliberately (it
-# keeps the eager tool payload small, which the MacBook-parity intent
-# still wants); this comment exists only to correct the record on WHY.
+# NESTED tools.tool_search — the UNIVERSAL deferral subsystem
+# (tools/tool_search.py::load_config → assemble_tool_defs; ALL providers),
+# distinct from the top-level tool_search: block below, which is the FORK's
+# client-side deferral and is inert on this profile (see that block's
+# comment). This profile had NO nested block at all until 2026-09-26 — a
+# pre-existing parity gap vs the machine-root config, not introduced by the
+# DirectSDK migration (it was absent from the original 2026-09-07 mirror
+# commit too, and from the deployed config before that migration). Found
+# while retiring the billing-classifier config tax; verified by rendering
+# the profile's real tool surface rather than by reading the diff.
+#
+# WHY IT MATTERS HERE: without the nested key the profile inherits
+# DEFAULT_CONFIG's enabled:"auto", which the FORK keeps thresholded
+# (tools/tool_search.py::_should_activate_tool_search) — activation only
+# when the deferrable schemas reach threshold_pct of context. This profile
+# has no mcp_servers, so the entire deferral surface is upstream's curated
+# 17-name default set (session_search, todo_list, process_manage,
+# cronjob_manage, image_generate, + desktop GUI tools), and several of
+# those are live on this surface (session_search is in the dashboard's
+# delegation/model_by_role + tool_search lists). Pinning "on" matches the
+# machine-root profile and makes activation deterministic instead of
+# silently context-size-dependent.
+# (Quote the value: bare `on` is YAML bool True.)
+tools:
+  tool_search:
+    enabled: "on"
+    threshold_pct: 10
+    search_default_limit: 5
+    max_search_limit: 20
+
+# tool_search: the FORK's client-side deferral — same setup as the
+# machine-root/Discord config (see templates/config.yaml.j2's comment for
+# the rationale and for why this block is inert on chat_completions
+# routes). NOTE (corrected 2026-09-26): this is NOT the subsystem that
+# handles MCP-tool deferral on this profile despite what this comment used
+# to claim — that is the nested tools.tool_search block above. Kept enabled
+# deliberately (it is the only path that defers a tool's full schema on the
+# anthropic_messages wire, and the profile is anthropic-family regardless of
+# which provider serves it); this comment exists to correct the record on
+# WHICH subsystem does what.
 tool_search:
   enabled: true
   mode: client_side

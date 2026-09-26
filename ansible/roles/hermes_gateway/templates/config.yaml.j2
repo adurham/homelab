@@ -264,13 +264,26 @@ agent:
 #     session), then uses it normally.
 # NESTED tools.tool_search — read by tools/tool_search.py load_config(),
 # which drives the UNIVERSAL assemble_tool_defs (ALL providers incl. exo),
-# distinct from the top-level tool_search: block below (anthropic path only).
-# hermes-agent's DEFAULT_CONFIG seeds this nested key to "auto", and at
-# DSv4's 1,048,576-token context the 10%-of-context auto threshold (~105K)
-# sits ABOVE the ~85K MCP catalog, so deferral silently NEVER fires and every
-# turn ships the full tool catalog (~100K-token prefix, ~minutes of prefill).
-# Pin "on" so MCP-tool deferral activates unconditionally. (Quote the value:
-# bare `on` is YAML bool True.)
+# distinct from the top-level tool_search: block below (the FORK's
+# client-side deferral, consumed only by
+# agent/fork/tool_search_lazy.build_tool_search_config → _apply_tool_search
+# on the anthropic_messages wire — so it is inert on chat_completions
+# routes like exo/ollama-cloud/DirectSDK).
+#
+# "on" vs "auto" (corrected 2026-09-26): upstream collapsed "auto" into an
+# alias of "on"; the FORK keeps "auto" thresholded
+# (tools/tool_search.py::_should_activate_tool_search). The original reason
+# recorded here for pinning "on" was that DSv4's 10%-of-context auto
+# threshold (~105K at 1M) sits above the ~85K MCP catalog, so deferral
+# would never fire. That reasoning was right about the mechanism but named
+# the wrong consequence: pinning "on" is what makes deferral activate for
+# ANY deferrable payload, not just a large MCP catalog. On this box the
+# gateway has NO mcp_servers configured, so the curated 17-name default set
+# (session_search, todo_list, process_manage, cronjob_manage, image_generate,
+# desktop GUI tools) is the entire deferral surface — and several of those
+# ARE live Discord toolsets. Do not flip this to "auto" expecting a
+# no-op: it reintroduces the context-proportional gate.
+# (Quote the value: bare `on` is YAML bool True.)
 tools:
   tool_search:
     enabled: "on"
