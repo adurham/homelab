@@ -2127,7 +2127,7 @@ class SmartVentController(hass.Hass):
         now = self.datetime()
         for zone_name, zone in ZONES.items():
             occupied = False
-            for room_name, sensors in zone["rooms"].items():
+            for _room_name, sensors in zone["rooms"].items():
                 occ = sensors.get("occupancy")
                 if not occ:
                     continue
@@ -3236,8 +3236,8 @@ class SmartVentController(hass.Hass):
         regardless of whether the room is one of the two pre-cool targets.
         Rooms with unreadable temps or that are not occupied are skipped.
         """
-        for zone_name, zone in ZONES.items():
-            for room_name, sensors in zone["rooms"].items():
+        for _zone_name, zone in ZONES.items():
+            for _room_name, sensors in zone["rooms"].items():
                 occ_entity = sensors.get("occupancy")
                 if not occ_entity:
                     continue
