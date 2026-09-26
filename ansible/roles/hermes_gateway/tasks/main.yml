@@ -939,33 +939,32 @@
     mode: '0440'
     validate: 'visudo -cf %s'
 
-# Periodic usage tracker — systemd timer fires the bot's local
-# scripts/hermes_usage_tracker.py every 5 minutes. Logs token spend
-# (5h / 24h / total) to /home/hermes/.hermes/usage.csv.
-- name: Render Hermes Usage Tracker Service Unit
-  ansible.builtin.template:
-    src: usage_tracker.service.j2
-    dest: /etc/systemd/system/hermes-usage-tracker.service
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Reload Systemd
-
-- name: Render Hermes Usage Tracker Timer Unit
-  ansible.builtin.template:
-    src: usage_tracker.timer.j2
-    dest: /etc/systemd/system/hermes-usage-tracker.timer
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Reload Systemd
-
-- name: Enable & Start Hermes Usage Tracker Timer
+# ─── Retired: usage tracker (fork-side script removed 2026-09-22) ────────────
+# The fork's scripts/hermes_usage_tracker.py was retired when its source data
+# disappeared upstream (_save_session_log deleted; superseded by `hermes insights`
+# + agent/account_usage.py — the hermes-agent FORK.md records the retirement).
+# These units kept firing that dead path every 5 minutes and failed every time,
+# leaving `systemctl --failed` perpetually red on hermes-gw-01.
+#
+# Kept as an idempotent teardown rather than a plain deletion so hosts that
+# already have the units get them removed; a fresh host no-ops (failed_when:
+# false covers the not-yet-existent timer). ~/.hermes/usage.csv is historical
+# data and is deliberately left in place.
+- name: Retire the hermes-usage-tracker timer (superseded 2026-09-22)
   ansible.builtin.systemd:
     name: hermes-usage-tracker.timer
-    enabled: true
-    state: started
-    daemon_reload: true
+    state: stopped
+    enabled: false
+  failed_when: false  # the unit legitimately does not exist on a fresh host
+
+- name: Remove the retired hermes-usage-tracker unit files
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}"
+    state: absent
+  loop:
+    - hermes-usage-tracker.timer
+    - hermes-usage-tracker.service
+  notify: Reload Systemd
 
 # Daily check on the OAuth setup-token's expiry. Surfaces via
 # `systemctl --failed` when the token has <30 days remaining; without
