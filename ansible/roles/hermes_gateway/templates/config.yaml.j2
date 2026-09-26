@@ -209,11 +209,20 @@ agent:
   # `system` matching real Claude Code's shape. Anthropic's billing
   # classifier on personal Max plans rejects requests with a non-CC-shaped
   # system prompt — without this every gateway turn 400s with "out of
-  # extra usage". Behavior unchanged; placement only. (The MacBook uses
-  # `normal` here since it isn't behind the same OAuth billing classifier
-  # gate — this is a deliberate, documented per-profile delta, not a
-  # missed mirror.)
+  # extra usage". Behavior unchanged; placement only. Provider-conditional
+  # as of 2026-09-26: this constraint is specific to the built-in
+  # `anthropic` provider's direct-HTTP disguise layer
+  # (agent/anthropic_adapter.py) — the claude-subscription-directsdk
+  # plugin drives the real `claude` CLI, so there is no billing classifier
+  # to satisfy and no reason to pay the compact-prompt cost on that route.
+  # (The MacBook uses `normal` unconditionally since it isn't behind the
+  # same OAuth billing classifier gate — this mirrors that for every
+  # provider except the one still exercising the disguise layer.)
+{% if hermes_gateway_main_provider == 'anthropic' %}
   system_prompt_mode: compact
+{% else %}
+  system_prompt_mode: normal
+{% endif %}
   # Adaptive sampling + reasoning settings mirrored verbatim from the
   # MacBook (2026-09-07 sync). reasoning_effort xhigh applies to whichever
   # model is actually running the main thread; reasoning_effort_by_model
@@ -720,8 +729,18 @@ skills:
   # Max plan rejects the resulting payload as "non-Claude-Code" — every
   # gateway request 400s with "out of extra usage". Lazy-loading drops the
   # system prompt below the classifier threshold; same just-in-time pattern
-  # tool_search uses for tools.
+  # tool_search uses for tools. Provider-conditional as of 2026-09-26, same
+  # reasoning as agent.system_prompt_mode above: the classifier only exists
+  # on the `anthropic` provider's direct-HTTP disguise route, not on
+  # claude-subscription-directsdk-experimental (the real CLI has no such
+  # ceiling) — full eager skill listing is strictly more capable and costs
+  # nothing there, so there is no reason to pay the lazy-loading tax
+  # outside the one provider that still needs it.
+{% if hermes_gateway_main_provider == 'anthropic' %}
   lazy_listing: true
+{% else %}
+  lazy_listing: false
+{% endif %}
 
 # Per-platform toolset overrides. Curated to fit under Anthropic's billing
 # classifier ceiling on personal Max accounts via the OAuth path. Bisected
