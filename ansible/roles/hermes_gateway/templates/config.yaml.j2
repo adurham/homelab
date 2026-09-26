@@ -630,6 +630,33 @@ memory:
   # on a headless gateway; auto_commit_session_end stays false (above) so
   # extracted entries land in proposals only, never silently committed.
   auto_extract: true
+  # PARITY WITH THE MACBOOK (2026-09-25): trust auto-updates on recalled facts.
+  # NOTE — with memory.provider set, the model-facing warm-tier recall that
+  # feeds this is withdrawn, so it fires only for internal warm-tier reads
+  # (extraction committer, hot-tier audit). Kept on for parity + so the
+  # behavior returns the moment the provider is unset.
+  auto_feedback: true
+
+# Curator — PARITY WITH THE MACBOOK (2026-09-25). The gateway DOES run this:
+# gateway/run.py::_housekeeping_curator ticks every 60s and calls
+# maybe_run_curator(), gated by curator.enabled + interval_hours. Left unset it
+# would fall back to defaults (consolidate/prune_builtins OFF), so the bot's
+# skills tree and hot tier would never be curated — unlike the MacBook's.
+curator:
+  enabled: true
+  interval_hours: 168
+  min_idle_hours: 2
+  stale_after_days: 14
+  archive_after_days: 30
+  consolidate: true
+  prune_builtins: true
+  # hot_tier_audit: heuristic stale-path detection on MEMORY.md/USER.md;
+  # dry_run false = it actually demotes/prunes (MacBook's setting).
+  hot_tier_audit: true
+  hot_tier_audit_dry_run: false
+  backup:
+    enabled: true
+    keep: 5
 
 # Persistent remote backend (`hermes serve`, systemd unit
 # hermes-serve.service) — gates GUI/Desktop access behind Authentik SSO
