@@ -48,17 +48,68 @@ AT&T BGW (IP Passthrough)
   -> Google Nest Wifi Pro (main unit, living room)
        -> TP-Link TL-SG105E (5-port managed, .15) — first hop off the Nest
             -> 8-port basement "trunk" switch (unmanaged) — branch hub
-                 -> Nest Wifi Pro pods (wired backhaul — all pods confirmed
-                    showing Wired in Google Home, 2026-09-25, which closes
-                    the earlier open item of the game-room pod running on
-                    wireless backhaul)
-                 -> under-work-desk switch (unmanaged)
-                      -> NETGEAR GS108Ev4 (lab switch, .51) -> PVE nodes + Mac Studios
-                 -> game-room switch (unmanaged)
+                 -> Nest Wifi Pro basement pod — INLINE, NOT a leaf (see
+                    incident below) — WAN port fed from the trunk switch,
+                    LAN port continues on to the under-desk switch. This is
+                    the SOLE path to everything below it.
+                      -> 5-port under-work-desk switch (unmanaged)
+                           -> NETGEAR GS108Ev4 (lab switch, .51) -> PVE
+                              nodes + Mac Studios
+                 -> game-room switch (unmanaged) — pod currently UNPLUGGED
+                    (user reset it 2026-09-25, not yet redeployed)
 ```
 
-(Chain + leaf ordering per user description, 2026-09-25; port-level
+(Corrected 2026-09-25 evening, superseding the leaf-topology diagram this
+doc carried earlier the same day — that version was wrong for the basement
+pod specifically. Chain + ordering per user description; port-level
 interconnects below the trunk are not individually verified.)
+
+### INCIDENT 2026-09-25 evening: basement pod inline = whole-homelab SPOF (CONFIRMED)
+
+User had been trying to force the basement pod onto wired backhaul, couldn't,
+and removed it from the mesh via the Google Home app (not a power-cycle).
+Within minutes, pve01/02/03, both Mac Studios, and (transiently) the SG105E/
+HA/frigate/lb-01 all went unreachable — a live re-run of the same
+"unexplained blackout" fingerprint logged twice earlier that day, but this
+time root-caused in real time by a Hermes session.
+
+**Confirmed root cause:** the pod, being wired INLINE between the basement
+trunk switch and the under-desk switch (see corrected diagram above) rather
+than as a leaf, stopped bridging its WAN<->LAN ports entirely once pulled
+from the mesh — a known Nest pod failure mode when de-meshed via software
+instead of power-cycled. That silently cut the ONLY path to the under-desk
+switch, the Netgear homelab switch, all 3 PVE nodes, and both Mac Studios,
+while leaving WiFi clients, the Nest's own WAN, and anything not behind the
+pod (HA, frigate, lb-01, tailscale-gw, SG105E) only transiently affected by
+initial mesh-reconfig churn (self-recovered within ~10 min).
+
+**Proof it was a pure path cut, not a power/host event (verified via SSH the
+moment the path came back):** all three PVE nodes' `uptime` traced back to
+the EARLIER same-day 14:53 boot (the previously-logged 14:48-14:53 crash
+event) — none of them rebooted during this incident. `pvecm status` showed
+`Quorate: Yes, Nodes: 3` throughout on recheck, and no new NIC link-down
+events appeared in any node's dmesg. This makes sense structurally: corosync
+traffic between the 3 PVE nodes flows through the Netgear switch, which sits
+entirely DOWNSTREAM of the dead pod alongside the nodes themselves, so
+inter-node cluster traffic never had to cross the broken link at all — only
+reachability FROM outside the pod (this laptop, upstream generally) was cut.
+
+**Fix applied (temporary):** user re-added the pod to the mesh (~19:34-19:41
+CDT); forwarding resumed and the whole path stabilized by ~19:45, confirmed
+clean for 6+ continuous minutes plus live SSH/pvecm checks after.
+
+**Fix NOT yet applied (the actual root-cause fix, still open):** physically
+run a direct cable from the basement trunk switch to the under-desk switch,
+bypassing the pod entirely, so the PVE cluster + both Mac Studios are no
+longer structurally dependent on any Nest pod's mesh membership/backhaul
+state. This also resolves the original "can't force wired backhaul"
+complaint for free — once the pod carries no structural traffic, there's
+nothing that needs forcing; it can stay on wireless backhaul (or unplugged)
+as pure WiFi coverage with zero blast radius if it acts up again. Given this
+network has already burned through 2 confirmed-degraded pod units (fact
+1650/1649) that showed exactly this kind of "won't behave" symptom before
+failing outright, treat this pod's original wired-backhaul refusal as a
+possible early warning sign worth revisiting, not just user error.
 
 **Loop-prevention state across the chain (2026-09-25):**
 
