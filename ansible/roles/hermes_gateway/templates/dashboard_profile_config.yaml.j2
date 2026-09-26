@@ -25,12 +25,17 @@
 # claude-subscription-directsdk-experimental -m claude-sonnet-5`) — plugin
 # installed + enabled via `hermes -p dashboard plugins install/enable
 # claude-subscription-directsdk` (now also automated, see tasks/main.yml).
-# The CC-mimicry-specific tuning below (system_prompt_mode: compact, the
-# tool_search eager/deferred split, skills.lazy_listing) is harmless-but-
-# unnecessary on the new path and left in place deliberately — retiring it
-# is a separate follow-up, not bundled with the provider swap (see the
-# hermes-agent skill's claude-subscription-plugin-route.md notes on the
-# fork's disguise layer for the retire/keep/port table).
+# PROVIDER-MIGRATION-ERA tuning (2026-09-26): the CC-mimicry /
+# billing-classifier workarounds this profile used to carry
+# (system_prompt_mode: compact, the tool_search eager/deferred payload
+# split, skills.lazy_listing) are retired here — this profile is
+# permanently pinned to a provider with no billing classifier to satisfy.
+# See the individual blocks below for what each was and why it is gone.
+# (Historical note: the fork-side disguise CODE these compensated for —
+# cc_aliases, the x-anthropic-billing-header block, the metadata.user_id
+# identity blob — was already deleted upstream-of-this-config by de-fork
+# commit 06b24bbbeb, 2026-09-25; this commit retires the config-side tax
+# that outlived it.)
 #
 # CONFIG-PARITY SYNC (2026-09-07): auxiliary/delegation/web/agent/tool_search
 # below are mirrored from the MacBook's ~/.hermes/config.yaml the same way
@@ -197,10 +202,15 @@ agent:
     deepseek-v4.1-flash: xhigh
     deepseek-ai/DeepSeek-V4-Flash-Vision-Exp: xhigh
 
-# tool_search: same CC-mimicry deferral setup as the machine-root/Discord
-# config (see templates/config.yaml.j2's tool_search comment for the full
-# rationale) — this profile runs the same OAuth path and needs the same
-# billing-classifier-safe deferral behavior.
+# tool_search: same deferral setup as the machine-root/Discord config (see
+# templates/config.yaml.j2's tool_search comment for the rationale). Unlike
+# the machine-root config, this one is NOT provider-conditional: this
+# profile is permanently pinned to claude-subscription-directsdk-
+# experimental and never runs the `anthropic` provider's billing-classifier
+# route, so the deferral here is a pure capability/context-efficiency
+# choice now, not a classifier workaround. Left enabled deliberately (it
+# keeps the eager tool payload small, which the MacBook-parity intent
+# still wants); this comment exists only to correct the record on WHY.
 tool_search:
   enabled: true
   mode: client_side
