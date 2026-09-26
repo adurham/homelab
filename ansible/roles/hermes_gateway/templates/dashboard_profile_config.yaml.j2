@@ -8,25 +8,41 @@
 # WHY A SEPARATE PROFILE (2026-09-01): the Discord bot (hermes-gateway.service)
 # and the web dashboard used to share ONE config.yaml/model, both tracking
 # hermes_gateway_main_provider. The user wants the dashboard permanently on
-# Anthropic Claude Sonnet 5 regardless of what the Discord bot's main
-# provider is set to (anthropic by default as of 2026-09-07, previously
-# exo — see defaults/main.yml) — there's no per-platform model
-# override in hermes-agent, so a separate profile (separate HERMES_HOME,
-# separate config.yaml/.env) is the supported isolation mechanism instead.
-# The Discord bot keeps using the machine-root config.yaml
-# (templates/config.yaml.j2) untouched.
+# Claude Sonnet 5 regardless of what the Discord bot's main provider is set
+# to — there's no per-platform model override in hermes-agent, so a separate
+# profile (separate HERMES_HOME, separate config.yaml/.env) is the supported
+# isolation mechanism instead. The Discord bot keeps using the machine-root
+# config.yaml (templates/config.yaml.j2) untouched.
+#
+# PROVIDER MIGRATION (2026-09-26): pin flipped from the built-in `anthropic`
+# provider (ambient CLAUDE_CODE_OAUTH_TOKEN + the fork's CC-mimicry disguise
+# layer, agent/anthropic_adapter.py) to the official
+# `claude-subscription-directsdk-experimental` plugin, which drives the real
+# `claude` CLI as a subprocess instead of impersonating it — same
+# subscription, same CLAUDE_CODE_OAUTH_TOKEN credential, no billing-
+# classifier disguise needed. Live-verified end-to-end on this profile before
+# the switch (`hermes -p dashboard chat -q "..." --provider
+# claude-subscription-directsdk-experimental -m claude-sonnet-5`) — plugin
+# installed + enabled via `hermes -p dashboard plugins install/enable
+# claude-subscription-directsdk` (now also automated, see tasks/main.yml).
+# The CC-mimicry-specific tuning below (system_prompt_mode: compact, the
+# tool_search eager/deferred split, skills.lazy_listing) is harmless-but-
+# unnecessary on the new path and left in place deliberately — retiring it
+# is a separate follow-up, not bundled with the provider swap (see the
+# hermes-agent skill's claude-subscription-plugin-route.md notes on the
+# fork's disguise layer for the retire/keep/port table).
 #
 # CONFIG-PARITY SYNC (2026-09-07): auxiliary/delegation/web/agent/tool_search
 # below are mirrored from the MacBook's ~/.hermes/config.yaml the same way
 # templates/config.yaml.j2 is (see that file's header comment for the full
 # provider-first-auxiliary-schema rationale) — this profile just ALSO keeps
-# its model: pin permanently on anthropic/claude-sonnet-5 rather than
-# tracking hermes_gateway_main_provider, and keeps its own dashboard.oauth /
+# its model: pin permanently on claude-sonnet-5 rather than tracking
+# hermes_gateway_main_provider, and keeps its own dashboard.oauth /
 # public_url / fallback_providers blocks (dashboard-specific, unrelated to
 # the parity sync) exactly as they were.
 model:
   default: claude-sonnet-5
-  provider: anthropic
+  provider: claude-subscription-directsdk-experimental
 
 # Ollama Cloud (ollama.com) — backs the fallback_providers chain below AND
 # the auxiliary ollama-cloud provider block (ollama-cloud-primary task
@@ -93,11 +109,13 @@ dashboard:
 # bot and the interactive default profile — it deserves the same tuned
 # reasoning/tool-search/delegation/web settings, not silent defaults.
 #
-# web: mirrored verbatim. anthropic_native_search / by_provider.anthropic
-# (claude-code backend) apply directly since this profile's main provider
-# is always anthropic; by_provider.ollama-cloud/exo entries are inert here
-# (never selected — main never runs on those providers on this profile)
-# but kept for consistency with the other two profiles' identical block.
+# web: mirrored verbatim. anthropic_native_search / by_provider's
+# claude-subscription-directsdk-experimental entry (claude-code backend)
+# apply directly since this profile's main provider is always
+# claude-subscription-directsdk-experimental; by_provider.ollama-cloud/exo/
+# anthropic entries are inert here (never selected — main never runs on
+# those providers on this profile) but kept for consistency with the other
+# two profiles' identical block.
 web:
   backend: brave-free
   search_backend: brave-free
@@ -111,7 +129,7 @@ web:
     ollama-cloud:
       search_backend: brave-free
       extract_backend: trafilatura
-    anthropic:
+    claude-subscription-directsdk-experimental:
       search_backend: claude-code
       extract_backend: claude-code
     exo:
@@ -208,9 +226,10 @@ tool_search:
 # delegation: mirrored verbatim from the MacBook (2026-09-07 sync), same
 # as templates/config.yaml.j2's delegation block, EXCEPT provider/model
 # stay empty (no Jinja branching needed — this profile's main provider is
-# always anthropic, never exo, so subagents simply inherit the parent as
-# they would on the machine-root config's main=anthropic/ollama-cloud
-# branch) and max_concurrent_children keeps this profile's existing
+# always claude-subscription-directsdk-experimental, never exo, so
+# subagents simply inherit the parent as they would on the machine-root
+# config's main=anthropic/ollama-cloud branch) and max_concurrent_children
+# keeps this profile's existing
 # lighter footprint (a phone-chat/peer-messaging surface doesn't need the
 # same subagent headroom as the coding-agency Discord bot).
 # child_timeout_seconds is 0 (no wall-clock cap) everywhere, matching the
@@ -264,8 +283,9 @@ compression:
 # auxiliary: PROVIDER-FIRST schema, copied verbatim from the MacBook's
 # ~/.hermes/config.yaml auxiliary block (2026-09-07 sync), same as
 # templates/config.yaml.j2. Unlike that file, this profile needs NO local-
-# exo-vision override — main provider here is permanently anthropic, so
-# the exo/ollama-cloud provider blocks below are only ever consulted for
+# exo-vision override — main provider here is permanently
+# claude-subscription-directsdk-experimental, so the exo/ollama-cloud/
+# anthropic provider blocks below are only ever consulted for
 # an explicitly-pinned cross-provider task, never for vision by default;
 # mirroring the MacBook's auxiliary.exo.vision (ollama-cloud/gemma4:31b)
 # verbatim is correct here since there's no local-endpoint delta to
@@ -383,9 +403,9 @@ auxiliary:
     pet_dialogue:
       model: gemma4:31b
       provider: ollama-cloud
-  anthropic:
+  claude-subscription-directsdk-experimental:
     default: claude-haiku-4-5-20251001
-    provider: anthropic
+    provider: claude-subscription-directsdk-experimental
 {{ hermes_routing_auxiliary_anthropic_tasks | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
   ollama-cloud:
 {{ hermes_routing_auxiliary_ollama_cloud_tasks | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}

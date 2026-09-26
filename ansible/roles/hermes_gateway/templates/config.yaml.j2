@@ -38,6 +38,10 @@
 model:
   default: claude-sonnet-5
   provider: anthropic
+{% elif hermes_gateway_main_provider == 'claude-subscription-directsdk-experimental' %}
+model:
+  default: claude-sonnet-5
+  provider: claude-subscription-directsdk-experimental
 {% elif hermes_gateway_main_provider == 'ollama-cloud' %}
 model:
   default: deepseek-v4.1-flash
@@ -132,6 +136,9 @@ web:
       search_backend: brave-free
       extract_backend: trafilatura
     anthropic:
+      search_backend: claude-code
+      extract_backend: claude-code
+    claude-subscription-directsdk-experimental:
       search_backend: claude-code
       extract_backend: claude-code
     exo:
@@ -598,6 +605,10 @@ auxiliary:
   anthropic:
     default: claude-haiku-4-5-20251001
     provider: anthropic
+{{ hermes_routing_auxiliary_anthropic_tasks | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
+  claude-subscription-directsdk-experimental:
+    default: claude-haiku-4-5-20251001
+    provider: claude-subscription-directsdk-experimental
 {{ hermes_routing_auxiliary_anthropic_tasks | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
   ollama-cloud:
 {{ hermes_routing_auxiliary_ollama_cloud_tasks | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}

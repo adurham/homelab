@@ -637,6 +637,37 @@
     mode: '0600'
   notify: Restart Hermes Gateway
 
+# Backs hermes_gateway_main_provider: claude-subscription-directsdk-experimental
+# (defaults/main.yml, default as of 2026-09-26) — installs the official
+# plugin (github.com/NousResearch/hermes-plugin-claude-subscription-directsdk)
+# into the machine-root profile's OWN plugin registry. Plugins are
+# per-HERMES_HOME, not shared across profiles, so the dashboard profile
+# needs its own copy too (see "Install/Enable Claude Subscription DirectSDK
+# Plugin (dashboard profile)" below) — installing here does NOT cover it.
+# `creates:` makes the install idempotent; a re-run after the plugin is
+# already cloned is a no-op. No restart needed either way — the plugin's
+# own enable output says so ("nothing of this plugin needs a session or
+# restart"), and it only takes effect once hermes_gateway_main_provider
+# actually selects it.
+- name: Install Claude Subscription DirectSDK Plugin (machine-root profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes plugins install claude-subscription-directsdk
+    creates: /home/hermes/.hermes/plugins/claude-subscription-directsdk-experimental
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+
+- name: Enable Claude Subscription DirectSDK Plugin (machine-root profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes plugins enable claude-subscription-directsdk-experimental
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  register: hermes_directsdk_enable_root
+  changed_when: false
+
 # Seed DISCORD_HOME_CHANNEL with the vaulted default ONLY if no line
 # beginning with that key exists yet. The default lands OUTSIDE the
 # Ansible-managed block so /sethome runtime updates (via
@@ -861,6 +892,32 @@
   notify:
     - Restart Hermes Serve
     - Restart Hermes Gateway Dashboard
+
+# This profile's model.provider is hardcoded to
+# claude-subscription-directsdk-experimental in
+# dashboard_profile_config.yaml.j2 (see that file's PROVIDER MIGRATION
+# comment) — plugins are per-HERMES_HOME, so this profile needs its OWN
+# install of the plugin the machine-root task above already handled for
+# /home/hermes/.hermes. `creates:` makes the install idempotent. No restart
+# needed (same reasoning as the machine-root task above).
+- name: Install Claude Subscription DirectSDK Plugin (dashboard profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes -p dashboard plugins install claude-subscription-directsdk
+    creates: /home/hermes/.hermes/profiles/dashboard/plugins/claude-subscription-directsdk-experimental
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+
+- name: Enable Claude Subscription DirectSDK Plugin (dashboard profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes -p dashboard plugins enable claude-subscription-directsdk-experimental
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  register: hermes_directsdk_enable_dashboard
+  changed_when: false
 
 # ─── hermes-gateway-dashboard.service — api_server for the dashboard profile ──
 #
