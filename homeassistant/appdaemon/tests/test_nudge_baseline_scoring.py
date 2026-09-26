@@ -115,8 +115,8 @@ class FakeHA(svc.SmartVentController):
         self._live_cool = 72.0
         self._live_heat = 60.0
         # Populate every room: neutral temp 71.0, occupancy "off".
-        for zn, zone in svc.ZONES.items():
-            for rn, s in zone["rooms"].items():
+        for _zn, zone in svc.ZONES.items():
+            for _rn, s in zone["rooms"].items():
                 self.states[s["temp"]] = 71.0
                 if s.get("occupancy"):
                     self.states[s["occupancy"]] = "off"
@@ -429,7 +429,7 @@ check("T7 heating-nudge: _active_nudge_baseline returns (74.0, 68.0)",
 # A warm room at 70.0 (already above the heat baseline 68): baseline => need < 0.
 ha.set_room("upstairs", "Game Room", 70.0, True)
 for zn, zone in svc.ZONES.items():
-    for rn, s in zone["rooms"].items():
+    for rn, _s in zone["rooms"].items():
         if rn == "Game Room":
             continue
         ha.set_room_temp(zn, rn, 72.0)
@@ -502,7 +502,7 @@ check("T9 release frame: vent scoring still uses baseline 72 via the helper",
 ha2 = build_nudged_house(action="cooling")
 ha2.set_room("upstairs", "Game Room", 70.0, True)
 for zn, zone in svc.ZONES.items():
-    for rn, s in zone["rooms"].items():
+    for rn, _s in zone["rooms"].items():
         if rn == "Game Room":
             continue
         ha2.set_room_temp(zn, rn, 71.0)

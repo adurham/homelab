@@ -67,16 +67,7 @@
     owner: root
     group: root
     mode: '0644'
-  register: sata_timeout_rule
-
-- name: Reload udev rules and apply timeout immediately
-  ansible.builtin.shell: |
-    set -euo pipefail
-    udevadm control --reload-rules
-    udevadm trigger --name-match={{ item.split('/')[-1] }}
-  loop: "{{ smartctl_exporter_devices }}"
-  when: sata_timeout_rule.changed
-  changed_when: true
+  notify: Reload udev rules and apply SATA timeout
 
 - name: Verify SCSI command timeout applied
   ansible.builtin.command: cat /sys/block/{{ item.split('/')[-1] }}/device/timeout

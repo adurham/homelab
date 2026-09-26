@@ -121,8 +121,8 @@ class FakeHA(svc.SmartVentController):
         # comfort's worst_excess stays 0.0 unless a test deliberately heats a
         # room -- including Hallway/Kitchen, which have no occupancy sensor and
         # therefore always count as occupied.
-        for zn, zone in svc.ZONES.items():
-            for rn, s in zone["rooms"].items():
+        for _zn, zone in svc.ZONES.items():
+            for _rn, s in zone["rooms"].items():
                 self.states[s["temp"]] = 68.0
                 if s.get("occupancy"):
                     self.states[s["occupancy"]] = "off"
