@@ -111,6 +111,22 @@ network has already burned through 2 confirmed-degraded pod units (fact
 failing outright, treat this pod's original wired-backhaul refusal as a
 possible early warning sign worth revisiting, not just user error.
 
+**Post-incident verification (~20:00-20:05, same evening):** user confirmed
+via the Google Home app's Device settings screen that the basement pod
+(LAN IP **192.168.86.40**, model G6ZUC) now shows **Connection type: Wired**
+— the re-add did restore wired backhaul, not just mesh membership. Cross-
+checked locally: `.40` pings tight (avg 9ms, stddev 4ms — matches the
+documented wired-pod ping-jitter signature) and returns a plain HTTP 404
+rather than a refused connection (unlike real pod hardware, which refuses
+every port — worth noting as a device-type distinction if `.40` gets probed
+again later). Main/living-room unit confirmed LAN IP 192.168.86.1, WAN IP
+108.88.208.88, model G6ZUC also. The two net_a1_6e76/net_a1_c76a mDNS names
+at .218/.220 seen earlier in this incident are NOT the basement pod (that
+guess was wrong) — likely the game-room pod (reported unplugged/reset
+earlier the same day) in some transient state, or stale entries; not
+resolved on a later targeted re-check, not chased further since they're
+outside what was actually being verified.
+
 **Loop-prevention state across the chain (2026-09-25):**
 
 | Switch | Type | Loop prevention |
