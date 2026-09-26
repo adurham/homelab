@@ -165,7 +165,7 @@ for room, room_temp in (("Cat Room", 74.8), ("Guest Bathroom", 75.0)):
 # =============================================================================
 ha = fresh()
 KEEP = {"Game Room", "Cat Room", "Guest Bathroom"}
-for zn, zone in svc.ZONES.items():
+for _zn, zone in svc.ZONES.items():
     for rn, s in zone["rooms"].items():
         if rn not in KEEP:
             ha.states[s["temp"]] = 76.0

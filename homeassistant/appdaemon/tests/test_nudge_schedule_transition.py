@@ -37,7 +37,10 @@ or any exception, resolves to False -- 'never fight a human' stays absolute.
 No pytest / appdaemon needed: same stub pattern as
 tests/test_nudge_cloud_truth_readback.py.
 """
+import json
+import os
 import sys
+import tempfile
 import types
 from datetime import datetime, timedelta, timezone
 
@@ -98,8 +101,8 @@ class FakeHA(svc.SmartVentController):
         self._hvac_action = hvac_action
         self._sp_cool = sp_cool if sp_cool is not None else None
         self._sp_heat = sp_heat if sp_heat is not None else None
-        for zn, zone in svc.ZONES.items():
-            for rn, s in zone["rooms"].items():
+        for _zn, zone in svc.ZONES.items():
+            for _rn, s in zone["rooms"].items():
                 self.states[s["temp"]] = 68.0
                 if s.get("occupancy"):
                     self.states[s["occupancy"]] = "off"
@@ -457,9 +460,6 @@ check("A9b heating axis: desired_heat stale -> carve-out does NOT fire",
 # 10. PERSISTENCE: after a schedule-driven relinquish the persisted record has
 #     owned=False, override_cooldown_until null/absent, and version == 1.
 # =============================================================================
-import json
-import os
-import tempfile
 
 ha = make_owned_cooling_ha()
 ha._nudge_persist_disable = False  # enable real file I/O for this assertion

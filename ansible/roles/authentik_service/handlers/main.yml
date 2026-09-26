@@ -4,3 +4,17 @@
     name: nginx
     state: restarted
     enabled: true
+
+# Pushes a staged branding SVG into the running container's media volume. Fired by
+# the "Copy AMD-Enterprises branding SVGs" task via notify, once per changed item
+# (ansible runs a handler for each item that notified it, with `item` bound to that
+# item's result) — which is what the previous register+loop+when pair did by hand.
+# Files rarely change once set, so this normally does not fire at all.
+- name: Push staged branding SVG into the running container's media volume
+  ansible.builtin.shell: |
+    set -e
+    CID=$(docker compose ps -q server)
+    docker cp /tmp/authentik_branding_{{ item.item.dest }} "$CID":/media/public/brand/{{ item.item.dest }}
+  args:
+    chdir: /opt/authentik
+  changed_when: true

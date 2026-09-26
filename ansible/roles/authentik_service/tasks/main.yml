@@ -184,18 +184,8 @@
     - { src: "amd_enterprises_logo.svg", dest: "logo.svg" }
     - { src: "amd_enterprises_favicon.svg", dest: "favicon.svg" }
     - { src: "amd_enterprises_flow_bg.svg", dest: "flow_bg.svg" }
-  register: authentik_branding_staged
-
-- name: Push staged branding SVGs into the running container's media volume
-  ansible.builtin.shell: |
-    set -e
-    CID=$(docker compose ps -q server)
-    docker cp /tmp/authentik_branding_{{ item.item.dest }} "$CID":/media/public/brand/{{ item.item.dest }}
-  args:
-    chdir: /opt/authentik
-  loop: "{{ authentik_branding_staged.results }}"
-  changed_when: true
-  when: item.changed
-  # Files rarely change once set; only re-push when the source SVG's
-  # checksum actually differs from what's already on disk in /tmp, which
-  # the copy task above already determined via authentik_branding_staged.
+  # Notifies per CHANGED item only (a handler fires once per notifying item, with
+  # that item's result bound to `item`), which is what the previous
+  # register + loop over .results + when: item.changed did by hand. Files rarely
+  # change once set; only re-push when the source SVG's checksum actually differs.
+  notify: Push staged branding SVG into the running container's media volume
