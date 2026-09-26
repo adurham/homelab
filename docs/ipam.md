@@ -96,6 +96,33 @@ Netgear port 5 (documented = pve01) reads `100M full` while pve01's own NIC
 reports 1000 Mb/s — verify mapping/renegotiation. Loss-triggered watchers
 armed on both studios (`/tmp/netwatch_power.log`).
 
+**THIRD occurrence, live during this same day's later session (~19:07-19:26+
+CDT), observed by a Hermes session responding to a "network still running
+like shit" report — NOT caused by that session's pod-removal action, since
+this fingerprint predates it by hours (same as the two blackouts above).**
+Timeline: ~19:07-19:18 pve01/02/03, both Mac Studios (.47=m4-2, .48=m4-1),
+HA (.2), frigate (.85), lb-01 (.86), and even the SG105E (.15) all went dark
+(ICMP 100% loss, TCP timeouts) simultaneously; tailscale's WireGuard reached
+macstudio-m4-2 mid-window only after 1.8-5s (vs normal <50ms) — severe loss,
+not a clean media disconnect for that host. ~19:20: SG105E, Netgear (.51),
+HA, frigate, lb-01, and tailscale-gw all recovered to clean 0% loss, but
+pve01/02/03 and both Studios stayed dark. ~19:24-19:26: the Netgear switch's
+OWN management IP (.51) went dark again too — the blast radius widened back
+out rather than narrowing to "just the downstream hosts". No SSH access was
+obtained to any pve node or Studio during the whole window, so no
+dmesg/`last`/pvecm read for this occurrence (unlike the ~14:50 event's clean
+"crash"+fsck evidence). The Nest main unit's own uptime counter ticked
+monotonically the entire time (two API reads ~9 min apart) — the Nest itself
+never rebooted, ruling it out as the origin. **Leading candidates, still
+unconfirmed:** (a) a shared power source (strip/UPS) for the
+Netgear+PVE+Studios corner browning out/cycling — consistent with the
+switch's OWN mgmt plane going dark, which a pure switch-port/NIC fault
+wouldn't explain; (b) the already-flagged Netgear port 5 / pve01 100M-vs-
+1000Mb negotiation mismatch, if it's actually flapping the whole port group
+under some trigger. Next occurrence: physically check that corner's power
+strip/UPS indicator and the switch's link LEDs, and grab host telemetry the
+moment SSH access returns.
+
 | Device | Model | LAN IP | Notes |
 | :--- | :--- | :--- | :--- |
 | `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | `192.168.86.51` (verified live 2026-09-25; resolves as `gs108ev4.lan`) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
