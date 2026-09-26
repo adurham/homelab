@@ -53,7 +53,17 @@ Environment="VIRTUAL_ENV=/opt/hermes-agent/venv"
 Environment="HERMES_HOME=/home/hermes/.hermes/profiles/dashboard"
 # `gateway run`, NOT `dashboard --isolated` (that's hermes-serve.service).
 # No --replace: this process must never signal another gateway's PID.
-ExecStart=/opt/hermes-agent/venv/bin/hermes -p dashboard gateway run
+# --force added 2026-09-26 (live incident): this profile and the
+# machine-root profile (hermes-gateway.service) are two DELIBERATE,
+# independent gateway processes on the same host — see the WHY comment
+# above. A hermes-agent version added a single-owner-per-host safety
+# check that lets whichever process starts FIRST claim exclusive
+# ownership and refuses the other; without --force this profile's
+# survival on a coordinated restart depends on winning that race
+# (it did once, by luck, while hermes-gateway.service crash-looped).
+# --force is the documented escape hatch for this exact
+# deliberately-multi-process deployment shape.
+ExecStart=/opt/hermes-agent/venv/bin/hermes -p dashboard gateway run --force
 Restart=always
 RestartSec=10
 # Mirrors the exit-code contract in the upstream-generated
