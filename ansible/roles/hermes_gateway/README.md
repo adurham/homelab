@@ -71,13 +71,22 @@ this role only handles the application layer.
 ## Switching the main model provider
 
 `hermes_gateway_main_provider` (defaults/main.yml) selects the
-gateway's primary reasoning-thread provider: `exo` (default — local Mac
-Studio cluster, free/private but requires the cluster to be reachable),
-`anthropic` (Claude via the CLAUDE_CODE_OAUTH_TOKEN already deployed),
-or `ollama-cloud` (cloud-hosted open models via OLLAMA_API_KEY). All
-three providers' credentials and `providers:` blocks are always
-rendered into config.yaml/.env regardless of the active selection, so
-switching is just:
+gateway's primary reasoning-thread provider — one of `exo` (local Mac
+Studio cluster, free/private but requires the cluster to be
+reachable), `anthropic` (Claude via the built-in provider, which
+resolves the CLAUDE_CODE_OAUTH_TOKEN already deployed and disguises
+the request as Claude Code to pass Anthropic's billing classifier —
+see `agent/anthropic_adapter.py`'s CC-mimicry layer),
+`claude-subscription-directsdk-experimental` (**default as of
+2026-09-26** — same CLAUDE_CODE_OAUTH_TOKEN/subscription as
+`anthropic`, but via the official `claude-subscription-directsdk`
+plugin, which drives the real `claude` CLI as a subprocess instead of
+impersonating it, so no billing-classifier disguise is needed), or
+`ollama-cloud` (cloud-hosted open models via OLLAMA_API_KEY). All four
+providers' credentials and `providers:`/`auxiliary:`/`web.by_provider`/
+`delegation.by_provider` blocks are always rendered into
+config.yaml/.env regardless of the active selection, so switching is
+just:
 
 ```
 ansible-playbook deploy_hermes_gateway.yml --limit hermes_gateway \
@@ -88,10 +97,27 @@ ansible-playbook deploy_hermes_gateway.yml --limit hermes_gateway \
 The template change triggers the `Restart Hermes Gateway` and
 `Restart Hermes Serve` handlers automatically — no manual SSH needed.
 `delegation.*` and `auxiliary.vision` are provider-conditional in the
-template: exo gets the cheap-Qwen3.6-subagent routing, anthropic/
-ollama-cloud leave `delegation.provider`/`model` empty so subagents
-inherit the parent model/credentials instead of being force-routed to
-a (possibly-down) exo cluster.
+template: exo gets the cheap-Qwen3.6-subagent routing, the other three
+leave `delegation.provider`/`model` empty so subagents inherit the
+parent model/credentials instead of being force-routed to a
+(possibly-down) exo cluster.
+
+**`claude-subscription-directsdk-experimental` needs the plugin
+installed + enabled for whichever HERMES_HOME will actually select it**
+(plugins are per-profile, not shared) — `tasks/main.yml`'s "Install/
+Enable Claude Subscription DirectSDK Plugin" tasks do this
+automatically for both the machine-root profile and the `dashboard`
+profile on every deploy (idempotent via `creates:`). The dashboard
+profile made this same switch — hardcoded, not
+`hermes_gateway_main_provider`-conditional — in
+`templates/dashboard_profile_config.yaml.j2`; see that file's PROVIDER
+MIGRATION comment for the full rationale, including why the fork's
+CC-mimicry-specific tuning (`system_prompt_mode: compact`, the
+`tool_search` eager/deferred split, `skills.lazy_listing`) is left in
+place rather than retired in the same change (harmless-but-unnecessary
+on the new path; retiring it is a separate, larger follow-up per the
+hermes-agent skill's `claude-subscription-plugin-route.md` retire/
+keep/port table).
 
 ## Updating hermes-agent's code (all 3 services run the same checkout)
 

@@ -67,375 +67,378 @@ hermes_routing_model_by_role:
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   jr-coder:
     model: glm-5.3-flash
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   mid-coder:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   pm:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   sr-coder:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   coder:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   consultant:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   pii-detector:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   project-board-sync:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   sync-coordinator:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   performance-monitor:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   resource-allocator:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   base-template-generator:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   release-manager:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   workflow-automation:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   load-balancer:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   test-long-runner:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   aidefence-guardian:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   claims-authorizer:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   researcher:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   scout-explorer:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   code-analyzer:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   analyze-code-quality:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   issue-tracker:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   pr-manager:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   tester:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   planner:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   github-modes:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   dev-backend-api:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   data-ml-model:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   ops-cicd-github:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   docs-api-openapi:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   spec-mobile-react-native:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   production-validator:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   test-architect:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   python-specialist:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   typescript-specialist:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   database-specialist:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   project-coordinator:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   topology-optimizer:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   benchmark-suite:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   performance-benchmarker:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   specification:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   pseudocode:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   refinement:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   memory-specialist:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   agent:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   goal-planner:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   code-goal-planner:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   performance-optimizer:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   arch-system-design:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   architecture:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   adr-architect:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   security-architect:
     model: kimi-k2.7-code
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   security-architect-aidefence:
     model: kimi-k2.7-code
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   security-auditor:
     model: kimi-k2.7-code
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   ddd-domain-expert:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   performance-engineer:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   sparc-orchestrator:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   injection-analyst:
     model: kimi-k2.7-code
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   repo-architect:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   reasoningbank-learner:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
 hermes_routing_delegation_by_provider:
   anthropic:
+    model: deepseek-v4.1-flash
+    provider: ollama-cloud
+  claude-subscription-directsdk-experimental:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
   ollama-cloud:
@@ -450,67 +453,67 @@ hermes_routing_auxiliary_anthropic_tasks:
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   monitor:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   title_generation:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   web_extract:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   skills_hub:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   mcp:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   approval:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   curator:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   compression:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   vision:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   consult:
-    model: claude-fable-5-1
-    provider: anthropic
+    model: glm-5.3
+    provider: ollama-cloud
     fallback:
-      model: glm-5.3
-      provider: ollama-cloud
+      model: claude-fable-5-1
+      provider: claude-subscription-directsdk-experimental
     reasoning_effort: max
     timeout: 300
   tts_audio_tags:
@@ -518,67 +521,67 @@ hermes_routing_auxiliary_anthropic_tasks:
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   triage_specifier:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   profile_describer:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   moa_aggregator:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   moa_reference:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   pet_dialogue:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   memory_query_rewrite:
     model: gemma4:31b
     provider: ollama-cloud
     fallback:
       model: claude-haiku-4-5-20251001
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   background_review:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   goal_judge:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   kanban_decomposer:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
   delegation_router:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-sonnet-5
-      provider: anthropic
+      provider: claude-subscription-directsdk-experimental
 hermes_routing_auxiliary_ollama_cloud_tasks:
   default: gemma4:31b
   title_generation: gemma4:31b
