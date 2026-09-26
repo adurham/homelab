@@ -658,6 +658,22 @@ curator:
     enabled: true
     keep: 5
 
+# Plugins — PARITY WITH THE MACBOOK (2026-09-25). This file is rendered whole by
+# ansible, so `hermes plugins enable` cannot persist here: it edits config.yaml,
+# which the next deploy overwrites. Declared here instead.
+#   disk-cleanup       — tracks + removes ephemeral files (test scripts, temp
+#                        outputs, cron logs) via post_tool_call/on_session_end
+#                        hooks, no agent action needed.
+#   security-guidance  — appends a warning to file-write results when the new
+#                        content matches known-dangerous patterns (pickle.load,
+#                        yaml.load, eval(, os.system, verify=False, ...).
+#                        Non-blocking: the write lands, the model self-corrects.
+plugins:
+  enabled:
+    - disk-cleanup
+    - security-guidance
+  disabled: []
+
 # Persistent remote backend (`hermes serve`, systemd unit
 # hermes-serve.service) — gates GUI/Desktop access behind Authentik SSO
 # via Hermes's own bundled self-hosted OIDC dashboard-auth provider
