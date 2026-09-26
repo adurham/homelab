@@ -404,6 +404,26 @@ memory:
   # one memory instead.
   provider: 'holographic'
   auto_extract: true
+  # Parity with the machine-root config + the MacBook (see config.yaml.j2's
+  # memory block for the auto-feedback caveat under a memory provider).
+  auto_feedback: true
+
+# Curator — parity with the machine-root config (see config.yaml.j2 for why
+# this matters: the gateway ticks maybe_run_curator() every 60s, and without
+# this block the profile inherits defaults with consolidate/prune_builtins OFF).
+curator:
+  enabled: true
+  interval_hours: 168
+  min_idle_hours: 2
+  stale_after_days: 14
+  archive_after_days: 30
+  consolidate: true
+  prune_builtins: true
+  hot_tier_audit: true
+  hot_tier_audit_dry_run: false
+  backup:
+    enabled: true
+    keep: 5
 
 skills:
   lazy_listing: true
