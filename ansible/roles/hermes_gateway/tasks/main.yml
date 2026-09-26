@@ -774,13 +774,34 @@
     group: root
     mode: '0755'
 
-- name: Override Hermes Gateway WorkingDirectory
+# ExecStart override added 2026-09-26 (live incident during the DirectSDK
+# provider deploy): this box legitimately runs TWO independent `gateway run`
+# processes for two different profiles (this one for `default`, plus
+# hermes-gateway-dashboard.service for `dashboard`) — the deliberate,
+# accepted design documented in dashboard_profile_env.j2's WHY comment.
+# The hermes-agent version pulled by this same deploy (via "Clone Hermes
+# Agent Repository" above) added a single-owner-per-host gateway safety
+# check that neither of these two profiles' plain ExecStart lines
+# anticipated: whichever profile's process starts first claims exclusive
+# host ownership, and the other refuses to start at all ("A gateway
+# already owns this host and will not serve profile 'default' ... Or
+# start one anyway: hermes gateway run --force") — a real outage during
+# this exact deploy (hermes-gateway.service crash-looped until this fix;
+# hermes-gateway-dashboard.service only survived by winning a lucky
+# restart-order race, so it needs the same flag for the same reason,
+# see its own template). `--force` is the documented escape hatch for
+# a deliberately-multi-process-per-host deployment; ExecStart= (empty)
+# clears the original before setting the replacement, per systemd's
+# drop-in semantics for list-valued directives.
+- name: Override Hermes Gateway WorkingDirectory + ExecStart (--force)
   ansible.builtin.copy:
     content: |
       # Managed by Ansible — do not edit by hand.
       # Source: roles/hermes_gateway/tasks/main.yml
       [Service]
       WorkingDirectory=/home/hermes
+      ExecStart=
+      ExecStart=/opt/hermes-agent/venv/bin/python -m hermes_cli.main gateway run --replace --force
     dest: /etc/systemd/system/hermes-gateway.service.d/override.conf
     owner: root
     group: root
