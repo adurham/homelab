@@ -607,7 +607,22 @@ memory:
   user_profile_enabled: true
   memory_char_limit: 4500
   user_char_limit: 5200
-  provider: ''
+  # Holographic memory provider (2026-09-25). Empty ('') = the fork's built-in
+  # warm-tier surface: the agent reaches the fact store only through an explicit
+  # memory(tier="warm") recall. Setting the provider name instead serves the SAME
+  # rows of the same $HERMES_HOME/memory_store.db through the provider's own
+  # front door (fact_store / fact_feedback) and, more importantly for a chat
+  # surface, adds automatic per-query prefetch — relevant facts are injected
+  # without the model having to ask. The fork's mutual-exclusion guard withdraws
+  # the warm-tier surfaces once the provider is set, so there is never two names
+  # for one memory; internal plumbing (extraction, hot-tier demote, auto-feedback)
+  # bypasses that gate and keeps working unchanged.
+  #
+  # Config for the provider itself lives under plugins.hermes-memory-store
+  # (db_path defaults to $HERMES_HOME/memory_store.db — the existing store, no
+  # data migration). Its auto_extract defaults to false, so the fork's
+  # memory.auto_extract below stays the single extractor and cannot double-write.
+  provider: 'holographic'
   nudge_interval: 10
   flush_min_turns: 6
   # Phase 2 auto-extraction: watch turns + compression + session-end and

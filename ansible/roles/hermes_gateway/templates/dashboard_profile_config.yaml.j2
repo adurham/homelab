@@ -395,6 +395,14 @@ memory:
   user_profile_enabled: true
   memory_char_limit: 4500
   user_char_limit: 5200
+  # Holographic memory provider — same treatment as the machine-root config
+  # (see config.yaml.j2's memory block for the full rationale). This profile
+  # keeps its OWN store ($HERMES_HOME/memory_store.db under the dashboard
+  # profile home), so the phone/web surface accumulates its own facts rather
+  # than sharing the Discord bot's. Point plugins.hermes-memory-store.db_path
+  # at /home/hermes/.hermes/memory_store.db if the two surfaces should share
+  # one memory instead.
+  provider: 'holographic'
   auto_extract: true
 
 skills:
