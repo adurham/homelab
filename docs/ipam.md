@@ -123,6 +123,29 @@ under some trigger. Next occurrence: physically check that corner's power
 strip/UPS indicator and the switch's link LEDs, and grab host telemetry the
 moment SSH access returns.
 
+**LEADING THEORY as of ~19:31, user-supplied, NOT yet physically confirmed:**
+the basement pod may be wired INLINE (WAN-in from the trunk switch, LAN-out
+continuing to the under-work-desk switch branch) rather than as a leaf —
+contradicting this doc's "pods hang off the trunk switch as leaves" diagram
+above, which may be wrong for this specific pod. If so, a pod pulled from
+the mesh via the Google Home app (not power-cycled) very plausibly stops
+bridging its WAN<->LAN ports entirely, which would explain the sustained
+(25+ min, non-recovering) blackout of everything behind it as a clean
+single-point-of-failure — matches the documented "never place a pod inline"
+pitfall exactly. Gap in this theory: at ~19:31 the SG105E (.15) itself — the
+first hop directly off the Nest, upstream of where the basement pod is
+believed to sit — also went dark, which a pod inline only between the trunk
+and under-desk switches should NOT cause. Either the pod is physically
+positioned closer to the Nest than believed (between the Nest and the
+SG105E), or the Nest's own wired LAN port is separately flapping since the
+topology change. Verification step (physical, cheap): count the ethernet
+cables plugged into the basement pod — 2 (both WAN and LAN populated) all
+but confirms inline-bridge; 1 means it's a normal leaf and not the cause.
+Fix if confirmed: unplug both cables from the dead pod and run one cable
+directly between whatever was upstream and whatever was downstream of it,
+removing the pod from the physical path entirely (leave it unplugged/idle
+afterward, don't re-add as a leaf without deciding on backhaul first).
+
 | Device | Model | LAN IP | Notes |
 | :--- | :--- | :--- | :--- |
 | `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | `192.168.86.51` (verified live 2026-09-25; resolves as `gs108ev4.lan`) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
