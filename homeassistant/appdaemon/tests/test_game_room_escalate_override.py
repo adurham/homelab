@@ -7,7 +7,7 @@ No pytest / appdaemon needed: same stub pattern as test_delivery_penalty.py.
 """
 import sys
 import types
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ---- stub appdaemon module BEFORE importing the controller -------------------
 hassapi = types.ModuleType("appdaemon.plugins.hass.hassapi")

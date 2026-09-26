@@ -133,8 +133,8 @@ class FakeHA(svc.SmartVentController):
         self._sp_cool = sp_cool
         self._sp_heat = sp_heat
         # Every room neutral at 68.0 and unoccupied (below every active axis).
-        for zn, zone in svc.ZONES.items():
-            for rn, s in zone["rooms"].items():
+        for _zn, zone in svc.ZONES.items():
+            for _rn, s in zone["rooms"].items():
                 self.states[s["temp"]] = 68.0
                 if s.get("occupancy"):
                     self.states[s["occupancy"]] = "off"

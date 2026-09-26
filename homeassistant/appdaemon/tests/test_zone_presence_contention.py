@@ -174,7 +174,7 @@ for rn, t in [("Dining Room", 73.0), ("Laundry Room", 73.0),
         ha.states[s["occupancy"]] = "off"
 # Keep every other room comfortably below setpoint / demotable so the empty
 # downstairs rooms are the donors that actually get throttled (cap = 8).
-for zn, zone in svc.ZONES.items():
+for _zn, zone in svc.ZONES.items():
     for rn, s in zone["rooms"].items():
         if rn in ("Game Room", "Dining Room", "Laundry Room", "Hallway", "Kitchen"):
             continue
@@ -213,7 +213,7 @@ ha.states[gr["temp"]] = 77.0
 ds = svc.ZONES["downstairs"]["rooms"]["Dining Room"]
 ha.states[ds["occupancy"]] = "off"
 ha.states[ds["temp"]] = SP + 7.0  # above the ceiling
-for zn, zone in svc.ZONES.items():
+for _zn, zone in svc.ZONES.items():
     for rn, s in zone["rooms"].items():
         if rn in ("Game Room", "Dining Room"):
             continue
@@ -241,7 +241,7 @@ ha.states[lr["temp"]] = 65.0  # 5F below heat setpoint
 gb1 = svc.ZONES["upstairs"]["rooms"]["Guest Bedroom 1"]
 ha.states[gb1["occupancy"]] = "off"
 ha.states[gb1["temp"]] = 66.5  # 3.5F below heat setpoint
-for zn, zone in svc.ZONES.items():
+for _zn, zone in svc.ZONES.items():
     for rn, s in zone["rooms"].items():
         if rn in ("Living Room", "Guest Bedroom 1"):
             continue
@@ -306,7 +306,7 @@ ha.states[gr["occupancy"]] = "on"
 ha.states[gr["temp"]] = 77.0   # contention 1.0 -> raised = OVER + BONUS = 6.0
 d_s = svc.ZONES["downstairs"]["rooms"]["Dining Room"]
 ha.states[d_s["occupancy"]] = "off"
-for zn, zone in svc.ZONES.items():
+for _zn, zone in svc.ZONES.items():
     for rn, s in zone["rooms"].items():
         if rn in ("Game Room", "Dining Room"):
             continue
@@ -321,7 +321,7 @@ assert raised == 6.0, raised
 # Keep the OTHER rooms HOTTER than the Game Room (77) so they are NOT donor-
 # eligible (a donor must be cooler than its beneficiary) — Dining Room is then
 # the only donor, so the 8-donor cap can't push it out of the throttled set.
-for znx, zx in svc.ZONES.items():
+for _znx, zx in svc.ZONES.items():
     for rnx, sx in zx["rooms"].items():
         if rnx in ("Game Room", "Dining Room"):
             continue
@@ -358,7 +358,7 @@ def build_idle_scene():
     h.states[gr["temp"]] = 77.0
     h.states[d_s["occupancy"]] = "off"
     h.states[d_s["temp"]] = SP + 3.0      # off 3.0 -> demoted in vacant zone
-    for zn, zone in svc.ZONES.items():
+    for _zn, zone in svc.ZONES.items():
         for rn, s in zone["rooms"].items():
             if rn in ("Game Room", "Dining Room"):
                 continue
@@ -436,7 +436,7 @@ def build_two_occupied():
     dr_s = svc.ZONES["downstairs"]["rooms"]["Dining Room"]
     h.states[dr_s["occupancy"]] = "off"
     h.states[dr_s["temp"]] = 71.0
-    for zn, zone in svc.ZONES.items():
+    for _zn, zone in svc.ZONES.items():
         for rn, s in zone["rooms"].items():
             if rn in ("Game Room", "Living Room"):
                 continue
@@ -478,7 +478,7 @@ set_thermostat(ha8c, action="cooling")
 gr8c = svc.ZONES["upstairs"]["rooms"]["Game Room"]
 ha8c.states[gr8c["occupancy"]] = "on"
 ha8c.states[gr8c["temp"]] = 77.0
-for zn, zone in svc.ZONES.items():
+for _zn, zone in svc.ZONES.items():
     for rn, s in zone["rooms"].items():
         if rn == "Game Room":
             continue

@@ -64,3 +64,10 @@ ignore = [
     "S310",  # urlopen against hardcoded LAN http endpoints (go2rtc/VLM/HA)
     "S311",  # random.random() for negative-sample selection, not crypto
 ]
+# media_gallery's merge/redirect test is a semantic-equality harness: it ast-extracts
+# resolve_redirect/resolve_folder from the canonical module and from each ingest-role
+# copy, execs them into isolated namespaces, and asserts the copies behave identically.
+# The exec runs source that is in THIS repo and is asserted on immediately after, so
+# it is not the "exec of untrusted input" S102 targets, and the functions have no
+# importable form to call instead (the copies live inside files that are not modules).
+"ansible/roles/media_gallery/tests/test_merge_redirect.py" = ["S102"]

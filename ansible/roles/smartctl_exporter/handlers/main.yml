@@ -9,3 +9,14 @@
   ansible.builtin.systemd:
     name: systemd-journald
     state: restarted
+
+# Reload udev and apply the new SATA error-recovery timeout to a device
+# immediately (the rule alone would only take effect on next reboot — this is the
+# fix for the active problem). Fired by the "Render SATA error-recovery timeout
+# udev rule" task via notify, once per device, with `item` bound to the device path.
+- name: Reload udev rules and apply SATA timeout
+  ansible.builtin.shell: |
+    set -euo pipefail
+    udevadm control --reload-rules
+    udevadm trigger --name-match={{ item.split('/')[-1] }}
+  changed_when: true

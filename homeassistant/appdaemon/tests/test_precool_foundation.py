@@ -10,7 +10,7 @@ No pytest / appdaemon needed: same stub pattern as the other suites.
 import re
 import sys
 import types
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ---- stub appdaemon BEFORE importing the controller --------------------------
 hassapi = types.ModuleType("appdaemon.plugins.hass.hassapi")

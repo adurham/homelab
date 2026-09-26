@@ -87,8 +87,8 @@ class FakeHA(svc.SmartVentController):
         # setpoint (70), and under the heating PIR override (off < 3.0 vs heat
         # setpoint 70). After a nudge to cool 67.5 a room at 68 reads off 0.5
         # -> comfortably under OCCUPANCY_OVERRIDE_OVER, so it stays silent.
-        for zn, zone in svc.ZONES.items():
-            for rn, s in zone["rooms"].items():
+        for _zn, zone in svc.ZONES.items():
+            for _rn, s in zone["rooms"].items():
                 self.states[s["temp"]] = 68.0
                 if s.get("occupancy"):
                     self.states[s["occupancy"]] = "off"

@@ -89,8 +89,8 @@ class FakeHA(svc.SmartVentController):
         self._hvac_action = hvac_action
         self._sp_cool = sp_cool if sp_cool is not None else None
         self._sp_heat = sp_heat if sp_heat is not None else None
-        for zn, zone in svc.ZONES.items():
-            for rn, s in zone["rooms"].items():
+        for _zn, zone in svc.ZONES.items():
+            for _rn, s in zone["rooms"].items():
                 self.states[s["temp"]] = 68.0
                 if s.get("occupancy"):
                     self.states[s["occupancy"]] = "off"
