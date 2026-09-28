@@ -271,3 +271,41 @@
            is_state('binary_sensor.guest_bathroom_occupancy', 'on') or
            is_state('binary_sensor.nest_protect_living_room_occupancy', 'on') or
            is_state('binary_sensor.nest_protect_foyer_occupancy', 'on') }}
+
+    # --- Ookla speedtest breakout sensors -------------------------------------
+    # The command_line sensor (see command_line.yaml) can only expose ONE
+    # numeric state, so upload/ping/jitter/packet_loss ride along as JSON
+    # attributes and are unpacked here into real sensors. That matters for
+    # Grafana: HA's prometheus exporter turns each sensor's *state* into its
+    # own gauge, but attributes get no gauge at all, so the Internet Speed
+    # dashboard cannot read them until they are broken out like this.
+    #
+    # These were originally hand-added on the HA host and never committed,
+    # so the same deploy that dropped the command_line: include (2026-09-28)
+    # took them with it. Now repo-managed.
+    - name: "Ookla Speedtest Upload"
+      unique_id: ookla_speedtest_upload
+      unit_of_measurement: "Mbit/s"
+      device_class: data_rate
+      state_class: measurement
+      state: "{{ state_attr('sensor.ookla_speedtest', 'upload_mbps') | float(0) }}"
+
+    - name: "Ookla Speedtest Ping"
+      unique_id: ookla_speedtest_ping
+      unit_of_measurement: "ms"
+      device_class: duration
+      state_class: measurement
+      state: "{{ state_attr('sensor.ookla_speedtest', 'ping_ms') | float(0) }}"
+
+    - name: "Ookla Speedtest Jitter"
+      unique_id: ookla_speedtest_jitter
+      unit_of_measurement: "ms"
+      device_class: duration
+      state_class: measurement
+      state: "{{ state_attr('sensor.ookla_speedtest', 'jitter_ms') | float(0) }}"
+
+    - name: "Ookla Speedtest Packet Loss"
+      unique_id: ookla_speedtest_packet_loss
+      unit_of_measurement: "%"
+      state_class: measurement
+      state: "{{ state_attr('sensor.ookla_speedtest', 'packet_loss') | float(0) }}"

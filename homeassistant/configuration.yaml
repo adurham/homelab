@@ -57,6 +57,9 @@ homeassistant:
 
 template: !include templates.yaml
 sensor: !include sensors.yaml
+# Ookla speedtest sensor (command_line integration). The binary/wrapper it
+# calls live only on the HA host (/config/bin/) -- see command_line.yaml.
+command_line: !include command_line.yaml
 automation: !include automations.yaml
 script: !include scripts.yaml
 script custom: !include_dir_merge_list scripts/
