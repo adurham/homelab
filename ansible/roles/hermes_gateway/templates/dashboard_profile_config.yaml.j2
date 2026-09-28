@@ -319,14 +319,20 @@ delegation:
 
 # Compaction threshold. hermes-agent's built-in default is 0.50 (compact at
 # 50% of context) when this block is absent entirely, which this template
-# never set explicitly before 2026-09-14 — raised to 0.75 to mirror the
-# MacBook's local ~/.hermes/config.yaml (`hermes config set
-# compression.threshold 0.75`). Deliberately a single-key block: the config
-# loader deep-merges per-key against DEFAULT_CONFIG, so every other
-# compression.* default (target_ratio, protect_last_n, etc.) still applies
-# unchanged.
+# never set explicitly before 2026-09-14 — raised to 0.75, then to 0.8 on
+# 2026-09-28, to mirror the MacBook's local ~/.hermes/config.yaml
+# (`hermes config set compression.threshold 0.8`). The config loader
+# deep-merges per-key against DEFAULT_CONFIG, so every other compression.*
+# default (target_ratio, protect_last_n, etc.) still applies unchanged.
+#
+# threshold_tokens MUST be explicit `null` here, not omitted: DEFAULT_CONFIG
+# ships an absolute 256_000-token cap (upstream 489cb74630) that silently
+# wins over any HIGHER ratio (min(ratio*window, cap)) when the key is
+# merely absent from this file. See hermes-agent skill
+# references/compression-threshold-defaults.md.
 compression:
-  threshold: 0.75
+  threshold: 0.8
+  threshold_tokens: null
 
 # auxiliary: PROVIDER-FIRST schema, copied verbatim from the MacBook's
 # ~/.hermes/config.yaml auxiliary block (2026-09-07 sync), same as

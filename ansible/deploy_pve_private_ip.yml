@@ -1,0 +1,21 @@
+---
+# Re-apply JUST the pve_private_ip role to the Proxmox nodes.
+#
+# Exists because deploy_monitoring.yml is too broad for a single-role fix
+# (it also re-runs pve_metrics_export / smartctl_exporter / alloy across
+# the fleet). This playbook touches only the private-bridge IP + the
+# PRIVATE-MONITORING-IN hardening chain.
+#
+# Run from the personal MacBook (the inventory's default ProxyCommand
+# points at that machine's own Tailscale IP 100.66.19.20, which loops back
+# to itself when executing from there -- override via hermes-gw-01):
+#
+#   ansible-playbook ansible/deploy_pve_private_ip.yml \
+#     --vault-password-file .vault_pass \
+#     -e 'ansible_ssh_common_args="-o ProxyCommand=\"ssh -W %h:%p -q root@100.119.249.49\" -o StrictHostKeyChecking=accept-new"'
+#
+- name: Configure pve hosts for monitoring egress (private bridge + hardening)
+  hosts: proxmox_nodes
+  gather_facts: false
+  roles:
+    - pve_private_ip

@@ -466,8 +466,16 @@ delegation:
 # loader deep-merges per-key against DEFAULT_CONFIG, so every other
 # compression.* default (target_ratio, protect_last_n, etc.) still applies
 # unchanged.
+#
+# threshold_tokens MUST be explicit `null` here, not omitted: DEFAULT_CONFIG
+# ships an absolute 256_000-token cap (upstream 489cb74630) that silently
+# wins over any HIGHER ratio (min(ratio*window, cap)) when the key is
+# merely absent from this file. See hermes-agent skill
+# references/compression-threshold-defaults.md. Raised 0.75 -> 0.8 2026-09-28
+# to match the MacBook's local ~/.hermes/config.yaml.
 compression:
-  threshold: 0.75
+  threshold: 0.8
+  threshold_tokens: null
 
 auxiliary:
   # PROVIDER-FIRST schema (top-level keys: defaults / exo / anthropic /

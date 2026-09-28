@@ -1845,14 +1845,25 @@ groups:
                 type: loki
                 uid: loki
               # corosync logs membership / quorum changes via [QUORUM] and
-              # [KNET]. "Cluster is not quorate" is the canonical "we're
-              # read-only now" signal; "host: X has no active links" means
-              # a peer dropped — single-node-loss is benign, but stack two
-              # of those and you've lost quorum.
+              # [KNET]. The canonical actual-quorum-loss signals are
+              # "non-primary component" (this node is no longer in the
+              # majority partition) and "received write while not quorate".
               # See the "Range query (NOT instant)" comment on log_oom_kill
               # for why this can't be instant:true with multiple
               # simultaneous host series.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+", unit="corosync.service"} |~ "(?i)not quorate|cluster is not quorate|quorum lost|no active links" [5m]))'
+              #
+              # REMOVED 2026-09-28: "no active links" -- that string is a
+              # per-peer KNET link timeout, not a quorum signal. A single
+              # peer's LAN ring flapping for ~2s (e.g. from the known
+              # intermittent L2 duplicate-frame bursts on this segment)
+              # emits "host: N has no active links" while all 3 nodes stay
+              # quorate, so this rule false-fired 5x between 2026-09-25 and
+              # 2026-09-27 ("pve cluster quorum lost" for events where
+              # `pvecm status` stayed Quorate:Yes throughout). Quorum-lost
+              # itself is emitted as "non-primary component ... will NOT
+              # provide any services" / "received write while not quorate"
+              # -- those remain matched here.
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+"} |~ "(?i)not quorate|non-primary component|quorum lost" [5m]))'
               instant: false
               range: true
               intervalMs: 1000

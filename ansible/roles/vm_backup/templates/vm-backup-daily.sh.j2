@@ -66,11 +66,44 @@ else
   log "WARN: could not delete local snapshot $SNAP_NAME (disk will accumulate)"
 fi
 
-# --- 5. Prune GDrive daily/ older than RETENTION_DAYS ---
-log "Pruning GDrive daily/ snapshots older than $RETENTION_DAYS days"
-$RCLONE --config "$RCLONE_CONF" delete "$REMOTE_DAILY" \
-  --min-age "${RETENTION_DAYS}d" --rmdirs 2>&1 | logger -t "$LOG_TAG" || true
-
-# --- 6. Touch state file for healthcheck ---
+# --- 5. Mark success for the watchdog ---
+# Written HERE (immediately after the verified upload), not at the end:
+# the success signal must not depend on the janitorial prune below.
+# 2026-09-28 incident: the prune's full-tree walk grew past the unit's
+# TimeoutStartSec=3600 while everything else had already succeeded, so
+# last_success stopped updating and the backup watchdog false-fired
+# CRITICAL every 6h.
 date -u +%s > "$STATE_DIR/last_success"
+
+# --- 6. Prune GDrive daily/ older than RETENTION_DAYS ---
+# Name-based: snapshot dirs are named <YYYYMMDDTHHMMSSZ> (fixed-width UTC),
+# so lexicographic order == chronological order. The previous
+# `rclone delete --min-age` walked EVERY object under daily/ (127k objects
+# / 1.6 TiB as of 2026-09-28) and took 42+ min — eventually exceeding the
+# 3600s unit timeout and wedging the service into an hourly fail-restart
+# loop that uploaded a fresh snapshot every cycle. Listing dirs + purging
+# by name is O(#snapshots) — seconds, not hours.
+CUTOFF=$(date -u -d "-${RETENTION_DAYS} days" +%Y%m%dT%H%M%SZ)
+log "Pruning GDrive daily/ dirs older than $CUTOFF"
+PRUNE_LIST=$(mktemp)
+if $RCLONE --config "$RCLONE_CONF" lsf "$REMOTE_DAILY" --dirs-only > "$PRUNE_LIST" 2>/dev/null; then
+  while IFS= read -r d; do
+    n="${d%/}"
+    case "$n" in
+      [0-9]*T[0-9]*Z)
+        if [ "$n" \< "$CUTOFF" ]; then
+          log "Prune: purging $REMOTE_DAILY/$n"
+          if $RCLONE --config "$RCLONE_CONF" purge "$REMOTE_DAILY/$n" >>/dev/null 2>&1; then
+            log "Prune: purged $n"
+          else
+            log "WARN: purge failed for $n (will retry next run)"
+          fi
+        fi
+        ;;
+    esac
+  done < "$PRUNE_LIST"
+else
+  log "WARN: could not list $REMOTE_DAILY for pruning (will retry next run)"
+fi
+rm -f "$PRUNE_LIST"
 log "Backup complete: $DEST"

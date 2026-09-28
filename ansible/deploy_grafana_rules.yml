@@ -1,0 +1,23 @@
+---
+# Re-apply JUST the grafana role to graf-01 (provisioning templates).
+#
+# Exists because deploy_monitoring.yml is too broad for a single-role fix:
+# its first play (monitoring_host) recreates the monitoring CTs. This
+# playbook only re-renders the provisioning files (contact points, policies,
+# dashboards, alert rules) and restarts grafana if anything changed.
+#
+# Run from the personal MacBook (the inventory's default ProxyCommand
+# points at that machine's own Tailscale IP 100.66.19.20, which loops back
+# to itself when executing from there -- override via hermes-gw-01):
+#
+#   ansible-playbook ansible/deploy_grafana_rules.yml \
+#     --vault-password-file .vault_pass \
+#     -e 'ansible_ssh_common_args="-o ProxyCommand=\"ssh -W %h:%p -q root@100.119.249.49\" -o StrictHostKeyChecking=accept-new"'
+#
+- name: Configure Grafana (provisioning templates)
+  hosts: grafana
+  gather_facts: true
+  tasks:
+    - name: Install grafana
+      ansible.builtin.include_role:
+        name: grafana
