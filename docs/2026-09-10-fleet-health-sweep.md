@@ -350,3 +350,54 @@ authoritative DNS, and (for the ip_hash outage and the
 metrics-pipeline dead-man's-switch) actual live-fire reproduction --
 i.e., breaking the real thing on purpose and watching the fix catch
 it, then restoring it and confirming recovery.
+
+## Addendum 2026-09-28: HA orphaned-entity cleanup (60 registry rows)
+
+Follow-on to §15's "HA integration not loaded" item and to the water-heater
+drift investigation the same day. Live HA was carrying **275** entities in
+`restored` + `unavailable` state. Two distinct populations, only one of which
+was safe to prune:
+
+- **214 integration-backed** (`flair`, `ibeacon`, `cast`, `august`, `esphome`)
+  — these have a `config_entry_id`; the entities are unavailable only because
+  the device is currently out of range/offline. They return when the device
+  does. **NOT touched.**
+- **60 YAML-defined** with `config_entry_id: None` — definitions deleted from
+  the repo at some point but whose registry rows were left behind. HA
+  re-creates them as ghosts on every restart. **These were removed.**
+
+Root cause of the largest block: commit `a5667d3` (2025-11-24) deleted the
+water-heater pump automation system (12 automations + helper blocks in
+`configuration.yaml`); `25a824d` (2026-01-12) later removed the deploy role
+that held the last copy. The entity-registry rows survived every subsequent
+deploy, so HA kept restoring them. The 2026-09-11 deploy overwrote the config
+dir with repo HEAD but did not clear the registry.
+
+Removal was done via HA's WebSocket `config/entity_registry/remove` (the
+REST API cannot mutate the registry and `homeassistant.remove_entity` does
+not exist on 2026.9.3). Every target was re-verified immediately before
+removal (`config_entry_id is None` AND `restored: true`) and the run aborts
+wholesale if any target fails that check. Registry: 3013 → 2953 entries;
+unavailable states 452 → 392. A `.storage` copy was taken first at
+`/config/backups/core.entity_registry.bak-*` on the HA host.
+
+**Nothing was lost.** The deleted definitions remain recoverable from three
+places: `git show a5667d3^:<path>`, the on-host stash
+`/config/backups/manual_backup_20251123_235600/`, and every config backup
+since 2025-11-23. They were deliberately removed and superseded by the
+current `smart_circulation` / `hot_water_recovery` system — do not restore
+them without deciding what supersedes what.
+
+**Open, unresolved (needs the user, not a measurement):**
+`automation.smart_hot_water_circulation` — the CURRENT circulation system —
+is OFF and last triggered 2026-02-21. Its `input_datetime.smart_circulation_last_stopped`
+is frozen at that same time. The pump's Shelly switch is healthy. Whether
+this was deliberately disabled in February or got turned off and forgotten
+is not determinable from data.
+
+Also flagged, not pruned: the 5 `sensor.ookla_speedtest*` entities are
+referenced by `ansible/roles/grafana/files/internet_speed.json` (a live
+dashboard) even though the ookla integration is gone — those panels are
+already blank. Removed anyway since the entities were dead, but the dashboard
+now references nonexistent series and should be either repointed at a working
+speed test or retired.
