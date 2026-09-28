@@ -8,8 +8,29 @@
 # All also stored in macOS keychain as VMBackupGDrive* / VMBackupCrypt* for out-of-band recovery.
 
 # GDrive folder layout (under the OAuth user's Drive root):
-#   vm-backup/daily/<timestamp>      — daily snapshots, 90d retention
+#   vm-backup/daily/<timestamp>      — daily snapshots, see retention below
 #   vm-backup/archive-yearly/<year>  — yearly full-dataset archives, kept indefinitely
 vm_backup_gdrive_folder: "vm-backup"
-vm_backup_daily_retention_days: 90
+
+# Daily snapshot retention. TRIMMED 90 -> 14 on 2026-09-28.
+#
+# Why: each snapshot is ~21.7 GiB, so 90 days = ~1.9 TiB, which was 37% of
+# the account's 5 TB Google One quota and the single largest consumer (the
+# media gallery is ~1 TB). 90 days of a *monitoring* backup is far more
+# history than its purpose needs -- this exists to restore VictoriaMetrics
+# after disk/CT loss, and the meaningful recovery window for that is days,
+# not months. 14 days still gives ~300 GiB / ~14 restore points while
+# cutting ~1.6 TiB.
+#
+# The long-horizon tiers are unaffected: annual archives live in
+# archive-yearly/ (kept indefinitely), and the 2y queryable window is the
+# live VM storage itself.
+#
+# NOTE: the hourly-restart-loop that produced up to 23 snapshots in a single
+# day is fixed separately (the prune step no longer walks the whole tree past
+# the unit timeout -- see vm-backup-daily.sh.j2). This value only controls
+# the age cutoff; the loop was creating SAME-DAY duplicates that no age-based
+# retention would ever collect.
+vm_backup_daily_retention_days: 14
+
 vm_backup_state_dir: "/var/lib/vm-backup"
