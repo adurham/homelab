@@ -17,19 +17,24 @@ CHAIN=PRIVATE-MONITORING-IN
 IFACE={{ pve_private_iface }}
 
 apply() {
-    /usr/sbin/iptables -N "$CHAIN" 2>/dev/null || true
-    /usr/sbin/iptables -F "$CHAIN"
-    /usr/sbin/iptables -A "$CHAIN" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-    /usr/sbin/iptables -A "$CHAIN" -j DROP
-    if ! /usr/sbin/iptables -C INPUT -i "$IFACE" -j "$CHAIN" 2>/dev/null; then
-        /usr/sbin/iptables -I INPUT 1 -i "$IFACE" -j "$CHAIN"
+    # -w 30: wait up to 30s for the xtables lock. Without it this races
+    # pve-firewall's boot-time load (and its periodic reloads) and dies
+    # with "Another app is currently holding the xtables lock" (exit 4) --
+    # observed live on pve02/pve03 at the 2026-09-25 19:54 boot, leaving
+    # the hardening chain empty and the unit failed for days.
+    /usr/sbin/iptables -w 30 -N "$CHAIN" 2>/dev/null || true
+    /usr/sbin/iptables -w 30 -F "$CHAIN"
+    /usr/sbin/iptables -w 30 -A "$CHAIN" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    /usr/sbin/iptables -w 30 -A "$CHAIN" -j DROP
+    if ! /usr/sbin/iptables -w 30 -C INPUT -i "$IFACE" -j "$CHAIN" 2>/dev/null; then
+        /usr/sbin/iptables -w 30 -I INPUT 1 -i "$IFACE" -j "$CHAIN"
     fi
 }
 
 remove() {
-    /usr/sbin/iptables -D INPUT -i "$IFACE" -j "$CHAIN" 2>/dev/null || true
-    /usr/sbin/iptables -F "$CHAIN" 2>/dev/null || true
-    /usr/sbin/iptables -X "$CHAIN" 2>/dev/null || true
+    /usr/sbin/iptables -w 30 -D INPUT -i "$IFACE" -j "$CHAIN" 2>/dev/null || true
+    /usr/sbin/iptables -w 30 -F "$CHAIN" 2>/dev/null || true
+    /usr/sbin/iptables -w 30 -X "$CHAIN" 2>/dev/null || true
 }
 
 case "${1:-}" in

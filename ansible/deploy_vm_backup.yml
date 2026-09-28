@@ -1,0 +1,23 @@
+---
+# Re-apply JUST the vm_backup role to vm-01.
+#
+# Exists because deploy_monitoring.yml is too broad for a single-role fix
+# (it also re-installs victoriametrics / loki / alloy and restarts them).
+# This playbook re-renders the backup scripts + units and re-enables the
+# timers; it does not touch the monitoring services themselves.
+#
+# Run from the personal MacBook (the inventory's default ProxyCommand
+# points at that machine's own Tailscale IP 100.66.19.20, which loops back
+# to itself when executing from there -- override via hermes-gw-01):
+#
+#   ansible-playbook ansible/deploy_vm_backup.yml \
+#     --vault-password-file .vault_pass \
+#     -e 'ansible_ssh_common_args="-o ProxyCommand=\"ssh -W %h:%p -q root@100.119.249.49\" -o StrictHostKeyChecking=accept-new"'
+#
+- name: Install VM GDrive backup (vm-01)
+  hosts: victoriametrics
+  gather_facts: true
+  tasks:
+    - name: Install VM GDrive backup
+      ansible.builtin.include_role:
+        name: vm_backup
