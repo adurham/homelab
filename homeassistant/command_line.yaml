@@ -1,0 +1,45 @@
+# Official Ookla Speedtest CLI (native aarch64 binary at /config/bin/speedtest,
+# wrapper /config/bin/run_speedtest.sh -- BOTH live only on the HA host and are
+# NOT in this repo; they are rebuilt by hand if the host is ever restored from
+# backup).
+#
+# History: replaced the Cloudflare-based cloudflare_speed_test integration
+# (hard rate-limits with HTTP 429 under any real concurrent load, so it could
+# not measure a gigabit connection) AND HA-core speedtestdotnet (its legacy
+# Python speedtest-cli server-discovery API returned only Canadian servers for
+# this connection). The official Ookla Go binary has neither problem. Verified
+# 2026-08-08: 887-894 Mbps down / 891-929 Mbps up, matching the native macOS
+# Speedtest app (883/866) within run-to-run variance.
+#
+# `command_line:` is the modern top-level integration key. The legacy
+# `- platform: command_line` list-style under `sensor:` is silently ignored by
+# current HA Core (config validates "valid", entity never appears).
+#
+# REGRESSION NOTE (2026-09-28): this file was never added to the repo, and
+# `configuration.yaml` (which IS repo-managed) had no `command_line:` include
+# -- so the first deploy that overwrote configuration.yaml dropped the include
+# and the sensor silently disappeared, taking the Internet Speed dashboard's
+# data source with it. The include now lives in the repo's configuration.yaml
+# and this file is deployed with the rest of the config surface.
+- sensor:
+    name: "Ookla Speedtest"
+    unique_id: ookla_speedtest
+    command: "/config/bin/run_speedtest.sh"
+    scan_interval: 3600
+    command_timeout: 60
+    value_template: "{{ value_json.download_mbps }}"
+    unit_of_measurement: "Mbit/s"
+    device_class: data_rate
+    state_class: measurement
+    json_attributes:
+      - download_mbps
+      - upload_mbps
+      - ping_ms
+      - jitter_ms
+      - packet_loss
+      - isp
+      - server_name
+      - server_location
+      - external_ip
+      - result_url
+      - timestamp

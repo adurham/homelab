@@ -37,6 +37,7 @@
       - templates.yaml
       - sensors.yaml
       - configuration.yaml
+      - command_line.yaml
       - scripts.yaml
       - input_datetime.yaml
       - input_number.yaml
