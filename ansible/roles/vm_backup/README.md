@@ -46,7 +46,7 @@ to a scratch VM (see Restore).
 
 | Unit | Schedule | Purpose |
 |------|----------|---------|
-| `victoriametrics-backup.timer` | daily 03:00 CT | snapshot + upload to `daily/`, 90d retention |
+| `victoriametrics-backup.timer` | daily 03:00 CT | snapshot + upload to `daily/`, 14d retention |
 | `victoriametrics-archive-yearly.timer` | Jan 1 04:00 CT | full-dataset upload to `archive-yearly/<year>` |
 | `victoriametrics-backup-watchdog.timer` | every 6h | alert if no successful backup in 36h (journal) |
 
