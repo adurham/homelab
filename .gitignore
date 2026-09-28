@@ -59,6 +59,12 @@ venv.bak/
 *.swo
 *~
 
+# Encrypted vault backup copies (rotated-secret rollback leftovers, e.g.
+# vault.yml.bak-<timestamp>). Encrypted, but they are stale snapshots of
+# live credentials and should never be committed.
+ansible/group_vars/all/vault.yml.bak-*
+ansible/group_vars/all/vault.yml.bak
+
 # =============================================================================
 # LOGS AND TEMPORARY FILES
 # =============================================================================
