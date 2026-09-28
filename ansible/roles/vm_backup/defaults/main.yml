@@ -12,25 +12,28 @@
 #   vm-backup/archive-yearly/<year>  — yearly full-dataset archives, kept indefinitely
 vm_backup_gdrive_folder: "vm-backup"
 
-# Daily snapshot retention. TRIMMED 90 -> 14 on 2026-09-28.
+# Daily snapshot retention. REWRITTEN 2026-09-28: age-based -> generation +
+# hard-cap. See the header of vm-backup-daily.sh.j2 for the full model.
 #
-# Why: each snapshot is ~21.7 GiB, so 90 days = ~1.9 TiB, which was 37% of
-# the account's 5 TB Google One quota and the single largest consumer (the
-# media gallery is ~1 TB). 90 days of a *monitoring* backup is far more
-# history than its purpose needs -- this exists to restore VictoriaMetrics
-# after disk/CT loss, and the meaningful recovery window for that is days,
-# not months. 14 days still gives ~300 GiB / ~14 restore points while
-# cutting ~1.6 TiB.
+# Why the rewrite: "keep everything younger than N days" has NO ceiling.
+# Snapshot size tracks the live dataset, which grows ~0.4-0.6 GB/day, so
+# 90d x 21.7 GiB = ~1.9 TiB and still climbing -- that was 37% of the 5 TB
+# Google One quota and the single largest consumer (media gallery ~1 TB).
+# A fixed day-count cannot bound that; a byte cap can.
 #
-# The long-horizon tiers are unaffected: annual archives live in
-# archive-yearly/ (kept indefinitely), and the 2y queryable window is the
-# live VM storage itself.
+# Model now:
+#   - at most ONE snapshot per calendar day (kills the duplicate class the
+#     old hourly restart-loop produced, which no age rule collects)
+#   - keep every day for vm_backup_daily_keep_days
+#   - then newest-per-ISO-week for vm_backup_weekly_keep_weeks
+#   - then enforce vm_backup_max_total_gb, dropping oldest first but never
+#     below vm_backup_always_keep (floor, so a tiny cap can't wipe history)
 #
-# NOTE: the hourly-restart-loop that produced up to 23 snapshots in a single
-# day is fixed separately (the prune step no longer walks the whole tree past
-# the unit timeout -- see vm-backup-daily.sh.j2). This value only controls
-# the age cutoff; the loop was creating SAME-DAY duplicates that no age-based
-# retention would ever collect.
-vm_backup_daily_retention_days: 14
+# Long-horizon tiers are unaffected: archive-yearly/ is kept indefinitely,
+# and the 2y queryable window is the live VM storage itself.
+vm_backup_daily_keep_days: 14
+vm_backup_weekly_keep_weeks: 12     # ~3 months of weekly points beyond the daily window
+vm_backup_max_total_gb: 200         # hard ceiling for the ENTIRE daily/ tree
+vm_backup_always_keep: 7            # never prune below this many snapshots
 
 vm_backup_state_dir: "/var/lib/vm-backup"
