@@ -8,13 +8,31 @@
 #      (-L dereferences symlinks: VM snapshots use symlinks for data/big,
 #       data/small, data/indexdb pointing back into the live data dir;
 #       without -L rclone silently skips them and you get an 8-byte useless backup.)
-#   3. On success: DELETE local snapshot, prune GDrive daily/ to 90 days
+#   3. On success: record size, DELETE local snapshot, apply retention
 #   4. On failure: leave local snapshot, log to stderr + journal, exit non-zero
 #
 # Tiering: data older than 2y rolls off local VM per -retentionPeriod=2y.
 # A SEPARATE yearly job (victoriametrics-archive-yearly.service) snapshots the
 # full local dataset to vmbackup_crypt:archive-yearly/ before that rolloff.
 # That is the cold tier the user can restore from.
+#
+# RETENTION (rewritten 2026-09-28) — generation-aware + hard size cap.
+# The old model was "keep everything younger than N days", which has no
+# ceiling: snapshot size tracks the live dataset, which grows ~0.4-0.6
+# GB/day, so an age-based rule silently grows without bound (90d x 21.7GiB
+# = 1.9 TiB and climbing, which is what triggered this rewrite).
+# New model:
+#   - at most ONE snapshot per calendar day (newest wins) -- this alone
+#     kills the duplicate class produced by the old hourly restart-loop,
+#     which no age-based rule could ever collect
+#   - keep every day younger than DAILY_KEEP_DAYS
+#   - beyond that, keep the newest snapshot of each ISO week for
+#     WEEKLY_KEEP_WEEKS back
+#   - then enforce MAX_TOTAL_GB: drop the OLDEST retained entries until the
+#     total is under the cap, but never drop below ALWAYS_KEEP newest
+#     (safety floor so a cap smaller than one snapshot can't wipe history)
+# The cap is the structural fix: it bounds the footprint no matter how much
+# the dataset grows.
 
 set -euo pipefail
 VM_URL="http://localhost:8428"
@@ -23,7 +41,10 @@ RCLONE_CONF="/root/.config/rclone/rclone.conf"
 REMOTE_DAILY="vmbackup_crypt:daily"
 STATE_DIR="{{ vm_backup_state_dir }}"
 LOG_TAG="vm-backup"
-RETENTION_DAYS={{ vm_backup_daily_retention_days }}
+DAILY_KEEP_DAYS={{ vm_backup_daily_keep_days }}
+WEEKLY_KEEP_WEEKS={{ vm_backup_weekly_keep_weeks }}
+MAX_TOTAL_GB={{ vm_backup_max_total_gb }}
+ALWAYS_KEEP={{ vm_backup_always_keep }}
 
 mkdir -p "$STATE_DIR"
 
@@ -44,7 +65,8 @@ log "Created snapshot: $SNAP_NAME"
 [ -d "$SNAP_PATH" ] || { log "ERROR: snapshot path $SNAP_PATH does not exist"; exit 1; }
 
 # --- 2. Upload to GDrive (encrypted, dereferencing symlinks) ---
-DEST="$REMOTE_DAILY/$(date -u +%Y%m%dT%H%M%SZ)"
+DEST_NAME="$(date -u +%Y%m%dT%H%M%SZ)"
+DEST="$REMOTE_DAILY/$DEST_NAME"
 log "Uploading $SNAP_PATH -> $DEST"
 if ! $RCLONE --config "$RCLONE_CONF" copy -L "$SNAP_PATH/" "$DEST/" --transfers 4 --stats=10s --stats-one-line 2>&1 | logger -t "$LOG_TAG"; then
   log "ERROR: rclone copy failed for $SNAP_NAME"
@@ -59,6 +81,16 @@ if ! $RCLONE --config "$RCLONE_CONF" lsd "$DEST" >/dev/null 2>&1; then
 fi
 log "Verified: $DEST exists on GDrive"
 
+# --- 3b. Record this snapshot's size for the cap math ---
+# Sizes are recorded at upload time (files are fresh/hot) so the prune step
+# never has to tree-walk every snapshot -- that walk is what made the old
+# prune slow enough to blow the unit timeout. Unknown sizes are tolerated
+# (recorded as 0) and simply don't count toward the cap.
+SIZE_BYTES=$($RCLONE --config "$RCLONE_CONF" size "$DEST" 2>/dev/null | sed -n 's/.*(\([0-9][0-9]*\) Byte).*/\1/p' || echo "")
+[ -n "$SIZE_BYTES" ] || SIZE_BYTES=0
+printf '%s %s\n' "$DEST_NAME" "$SIZE_BYTES" >> "$STATE_DIR/sizes.txt"
+log "Recorded size: $DEST_NAME = $((SIZE_BYTES / 1073741824)) GiB"
+
 # --- 4. Delete local snapshot ---
 if curl -fsS -X POST "$VM_URL/snapshot/delete?snapshot=$SNAP_NAME" >/dev/null; then
   log "Deleted local snapshot $SNAP_NAME"
@@ -67,43 +99,143 @@ else
 fi
 
 # --- 5. Mark success for the watchdog ---
-# Written HERE (immediately after the verified upload), not at the end:
-# the success signal must not depend on the janitorial prune below.
-# 2026-09-28 incident: the prune's full-tree walk grew past the unit's
-# TimeoutStartSec=3600 while everything else had already succeeded, so
-# last_success stopped updating and the backup watchdog false-fired
-# CRITICAL every 6h.
+# Written HERE (immediately after the verified upload), not at the end: the
+# success signal must not depend on the janitorial prune below. 2026-09-28:
+# the old prune's full-tree walk grew past TimeoutStartSec=3600 while the
+# upload had already succeeded, so last_success stopped updating and the
+# watchdog false-fired CRITICAL every 6h.
 date -u +%s > "$STATE_DIR/last_success"
 
-# --- 6. Prune GDrive daily/ older than RETENTION_DAYS ---
-# Name-based: snapshot dirs are named <YYYYMMDDTHHMMSSZ> (fixed-width UTC),
-# so lexicographic order == chronological order. The previous
-# `rclone delete --min-age` walked EVERY object under daily/ (127k objects
-# / 1.6 TiB as of 2026-09-28) and took 42+ min — eventually exceeding the
-# 3600s unit timeout and wedging the service into an hourly fail-restart
-# loop that uploaded a fresh snapshot every cycle. Listing dirs + purging
-# by name is O(#snapshots) — seconds, not hours.
-CUTOFF=$(date -u -d "-${RETENTION_DAYS} days" +%Y%m%dT%H%M%SZ)
-log "Pruning GDrive daily/ dirs older than $CUTOFF"
-PRUNE_LIST=$(mktemp)
-if $RCLONE --config "$RCLONE_CONF" lsf "$REMOTE_DAILY" --dirs-only > "$PRUNE_LIST" 2>/dev/null; then
-  while IFS= read -r d; do
-    n="${d%/}"
-    case "$n" in
-      [0-9]*T[0-9]*Z)
-        if [ "$n" \< "$CUTOFF" ]; then
-          log "Prune: purging $REMOTE_DAILY/$n"
-          if $RCLONE --config "$RCLONE_CONF" purge "$REMOTE_DAILY/$n" >>/dev/null 2>&1; then
-            log "Prune: purged $n"
-          else
-            log "WARN: purge failed for $n (will retry next run)"
-          fi
-        fi
-        ;;
-    esac
-  done < "$PRUNE_LIST"
-else
+# --- 6. Apply retention ---
+# Pure name/list math against the recorded sizes -- no tree walks, seconds
+# not hours. The listing and the keep/purge decision happen in one python
+# block for clarity; it emits the dirs to purge, which we then purge.
+LIST=$(mktemp)
+PURGE_LIST=$(mktemp)
+if ! $RCLONE --config "$RCLONE_CONF" lsf "$REMOTE_DAILY" --dirs-only 2>/dev/null | sed 's#/$##' > "$LIST"; then
   log "WARN: could not list $REMOTE_DAILY for pruning (will retry next run)"
+  rm -f "$LIST" "$PURGE_LIST"
+  log "Backup complete: $DEST"
+  exit 0
 fi
-rm -f "$PRUNE_LIST"
+
+python3 - "$LIST" "$STATE_DIR/sizes.txt" "$DAILY_KEEP_DAYS" "$WEEKLY_KEEP_WEEKS" \
+         "$MAX_TOTAL_GB" "$ALWAYS_KEEP" > "$PURGE_LIST" <<'PYEOF'
+import sys, datetime, re
+
+listing, sizes_path, daily_days, weekly_weeks, max_gb, always_keep = sys.argv[1:7]
+daily_days = int(daily_days); weekly_weeks = int(weekly_weeks)
+max_bytes = int(float(max_gb) * 1024**3); always_keep = int(always_keep)
+
+snap_re = re.compile(r'^(\d{8})T(\d{6})Z$')
+
+names = []
+for line in open(listing):
+    n = line.strip()
+    m = snap_re.match(n)
+    if m:
+        dt = datetime.datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+        names.append((dt, n))
+    elif n:
+        print(f"# skip non-standard entry: {n}", file=sys.stderr)
+names.sort()                      # oldest -> newest
+
+# recorded sizes (dir name -> bytes); tolerate missing
+sizes = {}
+try:
+    for line in open(sizes_path):
+        parts = line.split()
+        if len(parts) == 2:
+            try: sizes[parts[0]] = int(parts[1])
+            except ValueError: pass
+except FileNotFoundError:
+    pass
+
+now = datetime.datetime.utcnow()
+
+# --- rule 1: at most one per calendar day (newest wins) ---
+by_day = {}
+for dt, n in names:
+    by_day[dt.date()] = (dt, n)     # later entries overwrite -> newest
+deduped = sorted(by_day.values())
+
+# --- rules 2+3: daily window, then weekly window ---
+daily_cut = now - datetime.timedelta(days=daily_days)
+weekly_cut = now - datetime.timedelta(weeks=weekly_weeks)
+
+keep = set()
+for dt, n in deduped:
+    if dt >= daily_cut:
+        keep.add(n)                 # recent: keep every day
+
+# older than the daily window but inside the weekly window: newest per ISO week
+by_week = {}
+for dt, n in deduped:
+    if dt < daily_cut and dt >= weekly_cut:
+        wk = dt.isocalendar()[:2]   # (year, week)
+        if wk not in by_week or dt > by_week[wk][0]:
+            by_week[wk] = (dt, n)
+for wk, (dt, n) in by_week.items():
+    keep.add(n)
+
+# --- rule 4: hard size cap (drop oldest kept, never below the floor) ---
+#
+# The floor exists so a cap smaller than one snapshot can't wipe ALL history.
+# But a large fixed floor silently DEFEATS the cap as the dataset grows:
+# e.g. floor=7 with 180 GiB snapshots pins 1.26 TiB regardless of a 200 GiB
+# cap (caught by the offline test on 2026-09-28). So the floor is capped in
+# turn -- it never holds more than CAP_FLOOR_FRACTION of the budget, which
+# means the cap always wins eventually while still guaranteeing >=1 snapshot.
+CAP_FLOOR_FRACTION = 0.25
+ordered_kept = [n for _, n in deduped if n in keep]        # oldest -> newest
+total = sum(sizes.get(n, 0) for n in ordered_kept)
+
+# effective floor: the configured floor, but never more than a quarter of the
+# cap's worth of snapshots (at least 1, always).
+if ordered_kept:
+    avg = total / len(ordered_kept)
+    max_floor_by_cap = max(1, int((max_bytes * CAP_FLOOR_FRACTION) / avg)) if avg > 0 else always_keep
+    eff_floor = min(always_keep, max_floor_by_cap)
+else:
+    eff_floor = always_keep
+
+for n in list(ordered_kept):                # oldest first
+    if total <= max_bytes or len(ordered_kept) <= eff_floor:
+        break
+    ordered_kept.remove(n)
+    keep.discard(n)
+    total -= sizes.get(n, 0)
+
+# --- emit the purge list ---
+for dt, n in names:
+    if n not in keep:
+        print(n)
+
+print(f"# retained={len(keep)} purge_candidates={len(names)-len(keep)} "
+      f"retained_gib={total/1024**3:.1f} cap_gib={max_bytes/1024**3:.0f} "
+      f"eff_floor={eff_floor}",
+      file=sys.stderr)
+PYEOF
+
+PRUNE_COUNT=0
+while IFS= read -r n; do
+  case "$n" in ''|\#*) continue ;; esac
+  log "Prune: purging $REMOTE_DAILY/$n"
+  if $RCLONE --config "$RCLONE_CONF" purge "$REMOTE_DAILY/$n" >>/dev/null 2>&1; then
+    PRUNE_COUNT=$((PRUNE_COUNT + 1))
+  else
+    log "WARN: purge failed for $n (will retry next run)"
+  fi
+done < "$PURGE_LIST"
+log "Prune: purged $PRUNE_COUNT snapshot dir(s)"
+
+# Trim the size ledger to only snapshots that still exist (it would otherwise
+# grow forever).
+if [ -s "$LIST" ] && [ -f "$STATE_DIR/sizes.txt" ]; then
+  awk 'NR==FNR{keep[$0]=1; next} ($1 in keep)' "$LIST" "$STATE_DIR/sizes.txt" \
+    > "$STATE_DIR/sizes.txt.new" 2>/dev/null \
+    && mv "$STATE_DIR/sizes.txt.new" "$STATE_DIR/sizes.txt"
+fi
+
+rm -f "$LIST" "$PURGE_LIST"
 log "Backup complete: $DEST"
