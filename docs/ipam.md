@@ -163,6 +163,80 @@ Netgear port 5 (documented = pve01) reads `100M full` while pve01's own NIC
 reports 1000 Mb/s — verify mapping/renegotiation. Loss-triggered watchers
 armed on both studios (`/tmp/netwatch_power.log`).
 
+### INCIDENT CLASS B: recurring simultaneous 3-node hard resets (2026-09-28 analysis)
+
+Separate from the pod/SPOF outages above. Five events, all three pve nodes
+dead within seconds of each other, unclean (no shutdown sequence, no panic
+in pstore, no HA watchdog/fence log line), while house power stayed up on
+every circuit:
+
+| Boot time (UTC) | Notes |
+| :--- | :--- |
+| 2026-09-16 21:03 | journal stops mid-traffic, 68s gap before boot |
+| 2026-09-18 17:36 | pve02/03 journals already vacant (rotation) |
+| 2026-09-20 20:57 | 20+ min of silence before the boot on pve02/03 |
+| 2026-09-22 00:12 | stagger 00:10:38 / 00:11:08 / 00:11:13 |
+| 2026-09-25 19:53 | stagger 19:48:16 / 19:50:22 / 19:50:29 |
+
+Evidence gathered 2026-09-28 (VictoriaMetrics `node_boot_time_seconds`
+steps + Loki journals + HA per-circuit power):
+
+- **Whole-house CT shows no outage** at any of the five instants
+  (2-3 kW continuous, 1-min data) — but note a 1-min average cannot see a
+  sub-second mains sag, which is exactly the class that resets desktop PSUs
+  while smaller supplies ride through. So this is weak evidence, not proof.
+- **Circuit-level sensors stay live** through the events (checked all 20
+  power sensors; the only zeros are always-zero circuits like pool pump).
+- **No UPS/NUT on any pve node** — nothing on these nodes can ride out even
+  a brief interruption.
+- **softdog is active with a 10s timeout** on all three, but softdog's
+  timeout handler calls `emergency_restart()` which writes NO journal and
+  NO pstore entry by design — so the absence of a logged reason is the
+  EXPECTED signature of either a power event OR a softdog fire, and cannot
+  distinguish them. `efi_pstore` IS registered on pve02/pve03.
+- Simultaneity is the strongest signal: three independent hosts dying within
+  ~10s of each other with no shared software path (no shared storage stall,
+  no quorum loss, no lock-timeout) points at their common substrate — the
+  physical feed.
+- Not yet measured: the NETGEAR GS108Ev4's own uptime counter (would prove
+  whether it rode the events out). The switch's dashboard exposes no uptime
+  field via the CGI pages we can read; a scripted login burned the session
+  slots on 2026-09-28, so this needs either a browser visit to the UI or a
+  later attempt after slots expire. Do NOT retry logins in a loop — the
+  switch wedges (see the lan-device-identification skill).
+
+**Hardware note:** all three nodes are Dell OptiPlex desktops (pve01 7090,
+pve02/pve03 5080). pve01 carries stale Dell `BsodForensicDump` EFI vars from
+2025-04-18 (pre-dates this cluster's use) — not related to these events.
+
+**Instrumentation armed 2026-09-28** so the next occurrence is captured
+automatically:
+
+- `/tmp/netwatch_persistent.log` on both Mac Studios — loss/counter-reset
+  watcher (5s cadence, rotates at 5MB). Launcher `~/bin/start_netwatch.sh`;
+  re-run after a reboot (launchd's GUI domain is not reachable over plain
+  SSH on these Macs, so it is a nohup daemon, not a LaunchAgent).
+- `/tmp/labwatch.log` on both Mac Studios — per-host reachability TRANSITION
+  logger (TCP probes, correct for this LAN; see the ICMP note below).
+  Logs a line only on a state change, so the next event yields precise
+  per-host drop ordering: nodes-only vs switch+everything vs staggered.
+- netconsole is NOT usable on these nodes: the only NIC is a bridge slave
+  (`nic0` -> `vmbr0`) and netpoll refuses slave devices ("is a slave
+  device, aborting"); naming the bridge picks a random veth port that
+  netpoll also rejects. Confirmed and reverted 2026-09-28.
+
+**LAN gotcha (verified 2026-09-28):** ICMP is filtered/deprioritized on this
+LAN — the pve nodes, the TP-Link SG105E and even the gateway show 100% ping
+loss from both a studio and hermes-gw-01 while their TCP ports are open
+(pve01-03: icmp DOWN, tcp/8006 OPEN). Any future reachability watcher must
+probe TCP, not ping; a ping-based version of labwatch produced a wall of
+false DOWN lines before this was caught.
+
+**Next occurrence, first moves:** read `/tmp/labwatch.log` on both studios
+for the drop ordering, then `/tmp/netwatch_persistent.log` for packet-level
+detail, then `last -x` + `journalctl -b -1` on each node, and grab the
+Netgear's uptime from its UI by hand.
+
 **THIRD occurrence, live during this same day's later session (~19:07-19:26+
 CDT), observed by a Hermes session responding to a "network still running
 like shit" report — NOT caused by that session's pod-removal action, since
