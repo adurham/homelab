@@ -5,6 +5,7 @@ all:
         pve01:
           ansible_host: 192.168.86.11
           pve_sync_vlan_ip: "172.20.0.11"
+          pve_migrate_vlan_ip: "172.21.0.11"
           zfs_scrub_day_of_month: 1
           # Nightly vzdump job (roles/proxmox_backup_jobs). Existing job id
           # 41c3b19b-20ea-4ba0-b760-52a79d1cb83a was hand-configured in the
@@ -26,6 +27,7 @@ all:
         pve02:
           ansible_host: 192.168.86.12
           pve_sync_vlan_ip: "172.20.0.12"
+          pve_migrate_vlan_ip: "172.21.0.12"
           zfs_scrub_day_of_month: 8
           pve_backup_job_id: "08bcc363-a9bf-4de3-9c73-5c4581cc0b78"
           pve_backup_schedule: "Mon..Sun 02:30"
@@ -40,6 +42,7 @@ all:
         pve03:
           ansible_host: 192.168.86.13
           pve_sync_vlan_ip: "172.20.0.13"
+          pve_migrate_vlan_ip: "172.21.0.13"
           zfs_scrub_day_of_month: 15
           pve_backup_job_id: "52cb07d6-1400-4437-9591-568cad479879"
           pve_backup_schedule: "Mon..Sun 03:00"

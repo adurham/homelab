@@ -500,6 +500,56 @@ idle) while `link1.tx_data_bytes` grew by ~2.75MB in the same window.
 + connected to every peer. `pvecm status` confirmed `Quorate: Yes, Nodes: 3`
 before, during, and after the corosync.conf swap — zero disruption.
 
+## PVE Migrate network (VLAN 21, 172.21.0.0/24) — live migration, 2026-09-28
+
+Second isolated VLAN on the **same physical ports 3/4/5** as the sync network
+above, for live-migration traffic + its node-to-node SSH transport. Referenced
+by `/etc/pve/datacenter.cfg` (`migration: secure,network=172.21.0.0/24`) and
+allowed by the `pve_migrate_vlan` IPSET in `cluster.fw` (TCP 22 only).
+
+**History — a codification gap that silently broke HA for 17 days.** This was
+hand-configured on the nodes in Aug 2026 (memory fact 1174: "VLAN 21 … ALREADY
+configured and live on all 3 PVE nodes' vmbr0.21"), but unlike VLAN 20 it was
+never added to `roles/proxmox_network/templates/interfaces.j2` — `vmbr0.21`
+appears in **no** git commit. The datacenter.cfg + firewall half was codified
+(`73e52fb`), the interface half was not.
+
+On **2026-09-11 13:39:23** a `deploy_proxmox.yml` run re-rendered
+`/etc/network/interfaces` from that template on all three nodes (sub-second
+apart = one run; its stated purpose was the vzdump backup-job fix). Nothing
+warns on a template that omits a hand-added block, so `vmbr0.21` was deleted
+with no error. The Aug-4 backup file is byte-identical to the post-Sep-11
+file — that is the proof.
+
+**Symptom:** every HA auto-rebalance migration aborted in ~1s with
+`could not get migration ip: no IP address configured on local node for network
+'172.21.0.0/24'`. HA's fallback is **stop → failed migrate → start**, i.e. it
+restarts the guest on the same node anyway. Migrations succeeded through
+Sep 10 (last OK: `qmigrate:200` 2026-09-07 21:33, `vzmigrate:104` 2026-09-10
+18:10); from Sep 11 on, all failed — 24 on pve03, 16 on pve02. Guests bounced
+with no node failure involved: authentik 20×, vm-01 4×, plus 101/102/103/105/108.
+Confirmed live on 2026-09-28 21:41 for ct:106 (`auto rebalance - relocate ct:106
+to pve01` → `migration failed (exit code 1)` → `vzshutdown` → `vzstart`).
+
+**Fix (2026-09-28, deployed + verified):** codified the migrate VLAN in the
+repo so no future playbook run can drop it again —
+`net_pve_migrate_vlan_id: 21` + `net_pve_migrate_vlan_range` in
+`group_vars/all/vars.yml`, `pve_migrate_vlan_ip` per-node in
+`inventory/proxmox.yml`, and a `vmbr0.21` block (plus `21` on the required
+`bridge-vids` line) in `interfaces.j2`. Applied via `update_network.yml`;
+`vmbr0.21` up on all 3 nodes, `bridge vlan show dev nic0` lists 20 **and** 21,
+and the exact previously-failing `pvecm mtunnel … -get_migration_ip` call now
+returns the correct IP on all six node pairs.
+
+**Switch side (to confirm in the UI when convenient — the CLI has no VLAN
+read path):** VLAN 21 must be created and ports 3/4/5 set Tagged for it in the
+switch's Advanced 802.1Q mode, mirroring what VLAN 20 has. It is expected to be
+already present from the Aug work (the VLAN was live then), but it is the one
+layer this fix could not verify programmatically. Until it is confirmed, note
+that VLAN 21 traffic and VLAN 20 traffic share the **same** physical wires on
+ports 3/4/5, so a migration cannot add LAN-visible load — which is also why the
+failure above never disturbed VLAN 1 / the rest of the LAN.
+
 ## Proxmox nodes (dual-homed)
 
 pve hosts are on the LAN by default; `roles/pve_private_ip/` adds a static
