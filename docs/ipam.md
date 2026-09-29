@@ -541,14 +541,19 @@ repo so no future playbook run can drop it again —
 and the exact previously-failing `pvecm mtunnel … -get_migration_ip` call now
 returns the correct IP on all six node pairs.
 
-**Switch side (to confirm in the UI when convenient — the CLI has no VLAN
-read path):** VLAN 21 must be created and ports 3/4/5 set Tagged for it in the
-switch's Advanced 802.1Q mode, mirroring what VLAN 20 has. It is expected to be
-already present from the Aug work (the VLAN was live then), but it is the one
-layer this fix could not verify programmatically. Until it is confirmed, note
-that VLAN 21 traffic and VLAN 20 traffic share the **same** physical wires on
-ports 3/4/5, so a migration cannot add LAN-visible load — which is also why the
-failure above never disturbed VLAN 1 / the rest of the LAN.
+**Switch side — VERIFIED 2026-09-28.** VLAN 21 is present and ports 3/4/5 pass
+it: an SSH test bound to each node's `vmbr0.21` address reached both peers over
+`172.21.0.x` from all six node pairs, which is only possible if the switch is
+forwarding tagged VLAN 21 frames between ports 3/4/5. (The switch UI's VLAN page
+(`/vlan.cgi`) exposes no config in its HTML — it loads the PVID table over
+JS/XHR — so the CLI cannot read the VLAN mode; the traffic test is the stronger
+evidence anyway. `vlanMod value="0"` in the page source is the *uncommitted
+form default*, not the running mode: with `noVlan` actually active, no tagged
+VLAN would pass at all.)
+
+Note that VLAN 21 shares the **same** physical wires as VLAN 20 on ports 3/4/5,
+so a migration cannot add LAN-visible load — which is also why the failure above
+never disturbed VLAN 1 / the rest of the LAN.
 
 ## Proxmox nodes (dual-homed)
 
