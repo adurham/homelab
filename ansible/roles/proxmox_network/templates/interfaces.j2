@@ -12,7 +12,7 @@ iface vmbr0 inet static
 	bridge-stp off
 	bridge-fd 0
 	bridge-vlan-aware yes
-	bridge-vids {{ net_pve_sync_vlan_id }}
+	bridge-vids {{ net_pve_sync_vlan_id }} {{ net_pve_migrate_vlan_id }}
 
 source /etc/network/interfaces.d/*
 
@@ -27,4 +27,19 @@ source /etc/network/interfaces.d/*
 auto vmbr0.{{ net_pve_sync_vlan_id }}
 iface vmbr0.{{ net_pve_sync_vlan_id }} inet static
 	address {{ hostvars[inventory_hostname].pve_sync_vlan_ip }}/24
+{% endif %}
+{% if hostvars[inventory_hostname].pve_migrate_vlan_ip is defined %}
+# Isolated PVE Migrate VLAN ({{ net_pve_migrate_vlan_id }}) for live-migration
+# traffic (datacenter.cfg `migration: secure,network=`) + the node-to-node SSH
+# tunnel that transports it. Same topology as the sync VLAN above: no gateway,
+# firewall-allowed peer-to-peer only. Codified here AFTER a silent deletion:
+# this was hand-configured on the nodes but absent from this template, so the
+# 2026-09-11 deploy_proxmox.yml run re-rendered the file without it and broke
+# every HA live migration until 2026-09-28 (HA falls back to a failed migrate,
+# then stop+start -- restarting the guest). Do NOT drop this block; the
+# bridge-vids line above must keep listing {{ net_pve_migrate_vlan_id }} or
+# tagged frames never egress {{ physical_interface }}.
+auto vmbr0.{{ net_pve_migrate_vlan_id }}
+iface vmbr0.{{ net_pve_migrate_vlan_id }} inet static
+	address {{ hostvars[inventory_hostname].pve_migrate_vlan_ip }}/24
 {% endif %}

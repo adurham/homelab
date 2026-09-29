@@ -90,6 +90,22 @@ proxmox_cluster_peers: "192.168.86.11,192.168.86.12,192.168.86.13"
 net_pve_sync_vlan_id: 20
 net_pve_sync_vlan_range: "172.20.0.0/24"
 
+# PVE Migrate VLAN (802.1Q VLAN 21, same physical switch ports 3/4/5) —
+# dedicated L2 for live-migration traffic (datacenter.cfg
+# `migration: secure,network=172.21.0.0/24`), firewall-allowed for
+# node-to-node SSH only (see pve_host_hardening.yml pve_migrate_vlan_ips).
+# HISTORY: hand-configured on the nodes in Aug 2026 but never codified; the
+# 2026-09-11 deploy_proxmox.yml run (fixing backup jobs) re-rendered
+# interfaces.j2 without it and silently deleted vmbr0.21 — after which every
+# HA auto-rebalance migration failed ("could not get migration ip: no IP
+# address configured on local node for network '172.21.0.0/24'") and HA's
+# fallback stopped+started the guest, restarting CTs 100/101/103/105/106/108
+# repeatedly until 2026-09-28. Codified now so no future playbook run can
+# delete it again. Per-node IPs set as pve_migrate_vlan_ip host_vars in
+# inventory/proxmox.yml.
+net_pve_migrate_vlan_id: 21
+net_pve_migrate_vlan_range: "172.21.0.0/24"
+
 # BWT Lab (Bandwidth Throttle reproduction lab) — isolated SDN VNet
 # for reproducing Tanium platform bandwidth-throttle enforcement issues
 # (NEC 00271560 and similar). Disjoint from `private` so the main lab is
