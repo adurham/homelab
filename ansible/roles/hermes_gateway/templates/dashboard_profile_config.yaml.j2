@@ -291,11 +291,7 @@ delegation:
   max_iterations: 500
   reasoning_effort: max
   reasoning_effort_by_role:
-    orchestrator: max
-    reviewer: high
-    jr-coder: low
-    mid-coder: medium
-    sr-coder: high
+{{ hermes_routing_reasoning_effort_by_role | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
   provider: ''
   model: ''
   max_spawn_depth: 2
@@ -309,8 +305,7 @@ delegation:
   model_by_role:
 {{ hermes_routing_model_by_role | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
   max_iterations_by_role:
-    orchestrator: 500
-    leaf: 300
+{{ hermes_routing_max_iterations_by_role | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
   auto_route:
     tier_roles:
       light: researcher
@@ -440,8 +435,13 @@ auxiliary:
       model: deepseek-v4.1-flash
       provider: ollama-cloud
     consult:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
+      model: claude-fable-5-1
+      provider: claude-subscription-directsdk-experimental
+      fallback:
+        model: glm-5.3
+        provider: ollama-cloud
+      reasoning_effort: max
+      timeout: 300
     goal_judge:
       model: deepseek-v4.1-flash
       provider: ollama-cloud
