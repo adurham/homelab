@@ -1,0 +1,16 @@
+[Unit]
+Description=Lab reachability witness (all-3-node unclean reboot investigation)
+Documentation=file:/root/lab_witness.log
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /root/lab_witness.sh
+Restart=always
+RestartSec=5
+Nice=10
+IOWeight=50
+
+[Install]
+WantedBy=multi-user.target
