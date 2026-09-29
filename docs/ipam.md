@@ -204,6 +204,34 @@ steps + Loki journals + HA per-circuit power):
   slots on 2026-09-28, so this needs either a browser visit to the UI or a
   later attempt after slots expire. Do NOT retry logins in a loop — the
   switch wedges (see the lan-device-identification skill).
+- **The three nodes share ONE power strip (user, 2026-09-28).** This is the
+  first confirmed common physical substrate on the lab side, and it collapses
+  the "three independent hosts" framing above: they are not independent at the
+  feed. It is equally consistent with BOTH surviving hypotheses — a strip/branch
+  fault kills all three at once (mechanism a), and HA self-fencing reboots all
+  three at once after a shared connectivity loss (mechanism b). It does NOT by
+  itself prove power. Note the strip holds only the three nodes, not the
+  Netgear switch or the Mac Studios, so "did the switch ride it out?" remains a
+  valid discriminator.
+- **SMART power-loss counters are high on all three (read 2026-09-28):**
+  `Unsafe Shutdowns` = 117 (pve01, 174 power cycles), 119 (pve02, 135),
+  156 (pve03, 173). These are cumulative since the disks were installed and
+  include every earlier crash, so they corroborate that abrupt power removal is
+  this cluster's normal failure mode but do not date individual events.
+  They are the one counter that survives the event on the powered-off node.
+  The SMART textfile exporter (`roles/smartctl_exporter`, added 2026-09-16)
+  exposes `smartctl_device_attribute`, but as of 2026-09-28 only the
+  ata-*subset* attributes are exported — `unsafe_shutdowns` is not among them,
+  so it is not yet trendable in VictoriaMetrics. Extending that exporter to
+  include the nvme attributes is the cheap next step for dating each event.
+
+**Timeline note (2026-09-28):** all five events are *reboots*, and three land
+within seconds of a quarter-hour (Sep16 21:03, Sep18 17:36, Sep25 19:53 ≈
+:53:5x; Sep22 00:12). pve01 additionally shows an in-place journald restart at
+02:00:54 on 2026-09-28 with no boot, and pve02 at 22:53:03 the previous
+evening — so something also restarts userspace/journald without a reboot.
+Worth checking against cron/timer schedules on the branch before attributing
+every event to hardware.
 
 **Hardware note:** all three nodes are Dell OptiPlex desktops (pve01 7090,
 pve02/pve03 5080). pve01 carries stale Dell `BsodForensicDump` EFI vars from
