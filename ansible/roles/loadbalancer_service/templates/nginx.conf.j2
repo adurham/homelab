@@ -696,10 +696,15 @@ server {
     # an error_page internal redirect (the canonical upstream-failover
     # pattern); the SPA path additionally rewrites, because its incoming URI
     # (/ or /index.html) is not the path the Drive server serves.
+    # Cache-Control is repeated here on purpose: named-location responses do
+    # not inherit the calling location's add_header, and without it a
+    # fallback response would carry only Last-Modified, which browsers may
+    # cache heuristically and serve stale.
     location @gallery_drive_spa {
         internal;
         rewrite ^ /gallery/index.html break;
         proxy_pass http://{{ ip_media_gallery }}:8089;
+        add_header Cache-Control "no-cache, must-revalidate" always;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -709,6 +714,7 @@ server {
     location @gallery_drive_fallback {
         internal;
         proxy_pass http://{{ ip_media_gallery }}:8089;
+        add_header Cache-Control "no-cache, must-revalidate" always;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
