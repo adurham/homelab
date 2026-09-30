@@ -9,12 +9,9 @@ Type=oneshot
 User={{ media_gallery_user }}
 Group={{ media_gallery_user }}
 ExecStart={{ media_gallery_dir }}/refresh_gallery.sh
-# NO TimeoutStartSec: the prewarm step (bulk `rclone copy` of gcrypt:thumbs/)
-# is interrupt/resume-safe -- rclone skips files already matching at the
-# destination, so a run that gets killed mid-way just re-does less work next
-# time, never restarts from zero. A hard timeout here previously caused an
-# infinite retry-from-scratch loop after a reboot wiped the RAM tmpfs cache
-# (a cold rebuild via the old per-file HTTP prewarm never finished inside
-# 3600s, got killed every hour, forever -- see prewarm_thumbs.sh history
-# comment). Systemd's default (no TimeoutStartSec = infinite) is correct for
-# a oneshot whose worst case is "still making real progress, just slowly".
+# NO TimeoutStartSec: refresh itself (manifest rebuild + incremental dedup
+# scan) is minutes at most, and both steps are idempotent/resumable, so a
+# mid-way kill just re-does less work next time — never restarts from zero.
+# (The multi-hour thumbnail prewarm was split OUT of this chain on
+# 2026-09-30 into media-gallery-prewarm.service/.timer, so it can no longer
+# hold this unit's flock and starve the hourly refresh after a reboot.)

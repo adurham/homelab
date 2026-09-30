@@ -1,0 +1,35 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# Serves the LOCAL tmpfs mirror of the gallery metadata the SPA fetches
+# (manifest.json / folders.json / dedup.json / index.html) at :8093.
+#
+# WHY this exists next to media-gallery-gallery.service (:8089, which serves
+# the whole encrypted Drive remote): a page load previously fetched the ~85MB
+# manifest.json straight from Google Drive through :8089, costing ~10s of
+# WAN round-trip per load. Serving the same bytes from the RAM tmpfs costs
+# ~0.2s (measured 2026-09-30). Only metadata lives here — media originals and
+# thumbnails keep flowing through :8089/:8090, so large-video streaming is
+# unaffected. Auth is enforced upstream by Authentik forward-auth at lb-01
+# (same as every other port); this binds the CT's private IP only.
+#
+# The tmpfs does not survive a reboot — media-gallery-serve-seed.service
+# refills it at boot, and build_manifest.py/dedup_scan.py rewrite these files
+# in place on every rebuild, so freshness matches the Drive copy.
+[Unit]
+Description=media-gallery serve (local tmpfs metadata, fast SPA fetches)
+After=network-online.target var-lib-media\x2dgallery-serve.mount
+Wants=network-online.target
+Requires=var-lib-media\x2dgallery-serve.mount
+
+[Service]
+Type=simple
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+ExecStart=/usr/bin/rclone serve http {{ media_gallery_serve_dir }} \
+  --addr {{ ip_media_gallery }}:{{ media_gallery_serve_port }} \
+  --read-only \
+  --dir-cache-time 1s
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

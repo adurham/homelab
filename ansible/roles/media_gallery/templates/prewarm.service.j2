@@ -1,0 +1,29 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# One-shot thumbnail prewarm: bulk `rclone copy` of the encrypted Drive thumb
+# cache (gcrypt:thumbs/) into the RAM tmpfs thumbcache.
+#
+# 2026-09-30: split OUT of refresh_gallery.sh into its own service+timer. It
+# used to run inside the hourly refresh chain's flock, so after a reboot (or
+# any event that wipes the tmpfs — the box's hosts have rebooted repeatedly
+# from lab power events) the multi-hour refill held the lock and every
+# subsequent hourly refresh was SKIPPED ("another run already in progress"),
+# which also blocked new uploads from appearing in the gallery for hours.
+# Idempotent + resumable, so running it concurrently with the refresh chain
+# is safe (rclone skips files that already match at the destination).
+[Unit]
+Description=media-gallery thumbnail prewarm (tmpfs <- encrypted Drive cache)
+After=network-online.target var-lib-media\x2dgallery-thumbcache.mount
+Wants=network-online.target
+Requires=var-lib-media\x2dgallery-thumbcache.mount
+
+[Service]
+Type=oneshot
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+Environment=RCLONE_CONFIG=/home/{{ media_gallery_user }}/.config/rclone/rclone.conf
+Environment=TG_RCLONE_REMOTE={{ media_gallery_rclone_remote }}
+Environment=THUMB_LOCAL_CACHE={{ media_gallery_state }}/thumbcache
+Environment=PREWARM_TRANSFERS={{ media_gallery_prewarm_transfers | default(16) }}
+# No TimeoutStartSec: the bulk copy is interrupt/resume-safe — a run that gets
+# killed mid-way just re-does less work next time, never restarts from zero.
+ExecStart=/bin/bash {{ media_gallery_dir }}/prewarm_thumbs.sh

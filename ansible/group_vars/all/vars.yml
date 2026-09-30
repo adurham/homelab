@@ -54,6 +54,13 @@ ip_hermes_gateway: "172.16.0.50"
 ip_media_gallery: "172.16.0.46"
 ip_media_ingest: "172.16.0.47"
 ip_media_ingest_02: "172.16.0.48"
+# Local tmpfs metadata serve port on the gallery CT (media-gallery-serve.service,
+# role media_gallery). lb-01 routes the SPA's metadata fetches (/ and
+# /gallery/{index.html,manifest.json,folders.json,dedup.json}) here instead of
+# the Drive-backed :8089, with an automatic fallback to :8089 when a file is
+# absent (e.g. between a reboot and the boot seed). See that role's
+# serve.service.j2. Keep in sync with media_gallery_serve_port.
+media_gallery_serve_port: 8093
 # Personal-device MITM ad-stripping proxy (mitmproxy). Explicit-proxy only
 # (devices opt in via Wi-Fi proxy settings pointed at its Tailscale IP), not
 # transparent/network-wide. See roles/adblock_proxy{,_host}.

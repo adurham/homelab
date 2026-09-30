@@ -1,0 +1,23 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# One-shot at boot: refill the local tmpfs serve dir (media-gallery-serve.service
+# :8093) from the encrypted Drive copy, so the first page load after a reboot is
+# fast instead of racing the hourly refresh chain. Safe to re-run any time
+# (rclone copy skips matches); failure is non-fatal — lb-01's nginx falls back
+# to the Drive-backed :8089 for these paths automatically.
+[Unit]
+Description=media-gallery serve dir seed (tmpfs <- Drive metadata, one-shot)
+After=network-online.target var-lib-media\x2dgallery-serve.mount media-gallery-serve.service
+Wants=network-online.target
+Requires=var-lib-media\x2dgallery-serve.mount
+
+[Service]
+Type=oneshot
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+Environment=RCLONE_CONFIG=/home/{{ media_gallery_user }}/.config/rclone/rclone.conf
+Environment=TG_RCLONE_REMOTE={{ media_gallery_rclone_remote }}
+Environment=TG_SERVE_DIR={{ media_gallery_serve_dir }}
+ExecStart={{ media_gallery_dir }}/serve_seed.sh
+
+[Install]
+WantedBy=multi-user.target

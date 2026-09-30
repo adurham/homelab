@@ -9,6 +9,12 @@
     state: restarted
     daemon_reload: true
 
+- name: Restart Serve
+  ansible.builtin.systemd:
+    name: media-gallery-serve.service
+    state: restarted
+    daemon_reload: true
+
 - name: Restart Thumb
   ansible.builtin.systemd:
     name: media-gallery-thumb.service
@@ -44,6 +50,20 @@
       --config /home/{{ media_gallery_user }}/.config/rclone/rclone.conf
       copyto {{ media_gallery_dir }}/gallery_index.html
       {{ media_gallery_rclone_remote | default('gcrypt:') }}gallery/index.html
+  become: true
+  become_user: "{{ media_gallery_user }}"
+  changed_when: true
+
+- name: Publish Gallery SPA to local serve mirror
+  # Atomic + monotonic-mtime publish into the tmpfs serve dir (refuses to
+  # write when the tmpfs is not mounted — see serve_publish.py). Without this
+  # a SPA deploy would only reach the fast local path on the next boot seed
+  # or hourly rebuild.
+  ansible.builtin.command:
+    cmd: >-
+      {{ media_gallery_dir }}/venv/bin/python
+      {{ media_gallery_dir }}/serve_publish.py
+      {{ media_gallery_dir }}/gallery_index.html index.html
   become: true
   become_user: "{{ media_gallery_user }}"
   changed_when: true

@@ -1,0 +1,16 @@
+# Managed by Ansible — roles/media_gallery. tmpfs so the decrypted gallery
+# metadata the SPA fetches (manifest.json + folders.json + dedup.json +
+# index.html) is served from RAM and never persists to disk (hardening vs
+# offline-disk/backup leak — same posture as the thumbcache tmpfs).
+[Unit]
+Description=media-gallery serve dir (tmpfs - decrypted metadata RAM-only)
+Before=media-gallery-serve.service media-gallery-serve-seed.service
+
+[Mount]
+What=tmpfs
+Where={{ media_gallery_serve_dir }}
+Type=tmpfs
+Options=size={{ media_gallery_serve_tmpfs_size }},mode=0750,uid={{ media_gallery_user }},gid={{ media_gallery_user }},noexec,nosuid,nodev
+
+[Install]
+WantedBy=multi-user.target

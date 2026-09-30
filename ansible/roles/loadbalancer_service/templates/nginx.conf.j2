@@ -624,24 +624,31 @@ server {
 
     # Landing page = the single-page app (folder tiles, lightbox, rename/move),
     # NOT rclone's bare directory listing. The SPA lives at /gallery/index.html
-    # in the backend; serve it for the bare root and /index.html. Everything else
-    # (/gallery/manifest.json, /by-chat/<...> thumbs+originals) falls through to
-    # the catch-all location / below, which proxies to the rclone serve.
-    # The SPA (gallery_index.html) and the manifest/dedup JSON change on every
-    # deploy/op, but rclone serve only sends Last-Modified (no Cache-Control/ETag),
-    # so browsers (Safari especially) serve a STALE cached copy — you'd see an old
-    # build until a hard refresh. Force no-store on these so the browser always
-    # revalidates. Static media (/by-chat, /thumb) keeps normal caching below.
+    # in the backend; serve it for the bare root and /index.html. The metadata
+    # files (/gallery/manifest.json, folders.json, dedup.json) are served from
+    # the LOCAL tmpfs (media-gallery-serve.service on {{ media_gallery_serve_port }})
+    # which mirrors them out of RAM — measured 2026-09-30: ~10s per page load
+    # from the Drive-backed :8089 vs ~0.2s locally for the ~85MB manifest.
+    # If a file is missing locally (e.g. the window between a reboot and the
+    # boot-time seed), error_page falls back to the Drive-backed server
+    # automatically — slow but never broken. Media originals + thumbnails are
+    # NOT routed here: they keep streaming via :8089/:8090.
+    # Caching: no-cache = the browser MAY store the response but must
+    # revalidate it every time (rclone serve emits Last-Modified and answers
+    # If-Modified-Since with 304, verified). The old no-store forced a full
+    # re-download on every load; now an unchanged manifest costs a tiny 304.
+    # The SPA bundle is included in this: a republished build still lands
+    # immediately (mtime changes -> 200), just via a revalidation.
     location = / {
         auth_request /outpost.goauthentik.io/auth/nginx;
         error_page 401 = @goauthentik_proxy_signin;
         auth_request_set $auth_cookie $upstream_http_set_cookie;
         add_header Set-Cookie $auth_cookie;
 
-        proxy_pass http://{{ ip_media_gallery }}:8089/gallery/index.html;
-        proxy_hide_header Last-Modified;
-        proxy_hide_header ETag;
-        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        proxy_pass http://{{ ip_media_gallery }}:{{ media_gallery_serve_port }}/gallery/index.html;
+        proxy_intercept_errors on;
+        error_page 404 502 504 = @gallery_drive_spa;
+        add_header Cache-Control "no-cache, must-revalidate" always;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -654,28 +661,49 @@ server {
         auth_request_set $auth_cookie $upstream_http_set_cookie;
         add_header Set-Cookie $auth_cookie;
 
-        proxy_pass http://{{ ip_media_gallery }}:8089/gallery/index.html;
-        proxy_hide_header Last-Modified;
-        proxy_hide_header ETag;
-        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        proxy_pass http://{{ ip_media_gallery }}:{{ media_gallery_serve_port }}/gallery/index.html;
+        proxy_intercept_errors on;
+        error_page 404 502 504 = @gallery_drive_spa;
+        add_header Cache-Control "no-cache, must-revalidate" always;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # The SPA bundle + the data JSON, when fetched directly. no-store so a
-    # republished build / rebuilt manifest is picked up without a hard refresh.
+    # The data JSON, when fetched directly (the SPA reloads the manifest after
+    # every edit action). Local tmpfs first, Drive fallback, revalidatable.
     location ~ ^/gallery/(index\.html|manifest\.json|dedup\.json|folders\.json)$ {
         auth_request /outpost.goauthentik.io/auth/nginx;
         error_page 401 = @goauthentik_proxy_signin;
         auth_request_set $auth_cookie $upstream_http_set_cookie;
         add_header Set-Cookie $auth_cookie;
 
+        proxy_pass http://{{ ip_media_gallery }}:{{ media_gallery_serve_port }};
+        proxy_intercept_errors on;
+        error_page 404 502 504 = @gallery_drive_fallback;
+        add_header Cache-Control "no-cache, must-revalidate" always;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Fallbacks to the Drive-backed server (used only when the local tmpfs
+    # copy is absent or the local service is down). The SPA path needs its URI
+    # rewritten back to /gallery/index.html; the data path proxies as-is.
+    location @gallery_drive_spa {
+        internal;
+        proxy_pass http://{{ ip_media_gallery }}:8089/gallery/index.html;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location @gallery_drive_fallback {
+        internal;
         proxy_pass http://{{ ip_media_gallery }}:8089;
-        proxy_hide_header Last-Modified;
-        proxy_hide_header ETag;
-        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

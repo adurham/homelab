@@ -24,6 +24,8 @@ from pathlib import Path
 from telethon import TelegramClient as SourceClient
 from telethon.tl.types import InputMessagesFilterPhotoVideo
 
+from serve_publish import publish_local
+
 # API creds only needed for a full (non-fast) scan; don't hard-require them so
 # `--fast` rebuilds work with zero upstream source access.
 API_ID = int(os.environ.get("TG_API_ID", "0"))
@@ -35,6 +37,13 @@ EXCLUDE_FILE = os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/exclude
 HIDDEN_FILE = Path(os.environ.get("TG_HIDDEN_FILE", "/var/lib/media-gallery/hidden.json"))
 SRC = REMOTE + "by-chat"
 GALLERY = REMOTE + "gallery"
+# Local tmpfs mirror of the files the SPA fetches (this script publishes
+# manifest.json + folders.json). media-gallery-serve.service serves this dir
+# (rclone :local:, port 8093) and lb-01 routes the SPA's metadata fetches
+# here, so a page load no longer streams ~85MB from Google Drive. RAM-only:
+# decrypted metadata must not persist to disk (same posture as the thumbcache
+# tmpfs). Publishing is best-effort — the Drive copy stays the source of
+# truth and a boot-time seed (serve_seed.sh) restores this dir after a reboot.
 
 
 def load_excluded() -> set:
@@ -308,6 +317,7 @@ async def main():
     mp = work / "manifest.json"
     mp.write_text(json.dumps(manifest, separators=(",", ":")))
     rclone("copyto", str(mp), f"{GALLERY}/manifest.json")
+    publish_local(mp, "manifest.json")
     mp.unlink()
     log("manifest uploaded to gcrypt:gallery/manifest.json — DONE")
 
@@ -321,6 +331,7 @@ async def main():
         fp = work / "folders.json"
         fp.write_text(json.dumps(folders, separators=(",", ":")))
         rclone("copyto", str(fp), f"{GALLERY}/folders.json")
+        publish_local(fp, "folders.json")
         fp.unlink()
         log(f"folders.json uploaded ({len(folders)} folders incl. empty) — DONE")
     except Exception as e:  # noqa: BLE001

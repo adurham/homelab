@@ -65,6 +65,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from serve_publish import publish_local, stage_manifest
+
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "")
 GALLERY = REMOTE + "gallery"
@@ -267,9 +269,8 @@ def main():
     t0 = time.time()
     work = Path(tempfile.mkdtemp(prefix="dedup_"))
     mp = work / "manifest.json"
-    r = rclone("copyto", f"{GALLERY}/manifest.json", str(mp))
-    if r.returncode != 0:
-        log("cannot fetch manifest:", r.stderr[:200])
+    # Prefer the local tmpfs serve copy (instant); fall back to the Drive fetch.
+    if not stage_manifest(mp, RCLONE_CONF, REMOTE, log=log):
         sys.exit(1)
     manifest = json.loads(mp.read_text())
     items = {it["stem"]: it for it in manifest
@@ -463,6 +464,7 @@ def main():
     if r.returncode != 0:
         log("upload dedup.json failed:", r.stderr[:200])
         sys.exit(1)
+    publish_local(op, "dedup.json", log=log)
     log(f"dedup.json: {len(dup_groups)} groups, {out['dup_items']} items, "
         f"{time.time() - t0:.1f}s — DONE")
 
