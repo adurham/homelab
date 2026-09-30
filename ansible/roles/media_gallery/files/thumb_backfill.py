@@ -83,11 +83,13 @@ Env: RCLONE_CONFIG, TG_RCLONE_REMOTE (default gcrypt:),
      THUMB_SERVICE_URL (default http://172.16.0.46:8090).
 """
 import argparse
+import concurrent.futures
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -174,6 +176,14 @@ def main():
                           "always use this path regardless of this flag -- see the "
                           "PERFORMANCE FIX docstring for why. Use this only if the "
                           "fast local path is ever suspected of producing bad output.")
+    ap.add_argument("--workers", type=int, default=4,
+                     help="parallel HTTP workers for VIDEO posters (default: 4). "
+                          "Videos are I/O-bound HTTP range fetches against the "
+                          "local rclone serve; 4-way concurrency was measured "
+                          "safe on gallery-01 (2 vCPU / 8GB) and cuts the "
+                          "wall-clock of a video batch ~4x. Images keep their "
+                          "serial local path + delay, which is a real "
+                          "download/resize/upload round trip.")
     args = ap.parse_args()
 
     work = Path(tempfile.mkdtemp(prefix="thumb_backfill_"))
@@ -222,34 +232,88 @@ def main():
     done = failed = 0
     bytes_seen = 0
     t0 = time.time()
-    for i, it in enumerate(missing):
+
+    # ----- Phase 1: VIDEO posters, bounded parallel HTTP workers -----
+    # These are I/O-bound range fetches against the local rclone serve (see
+    # thumb_service.py), so N-way concurrency is the right shape and was
+    # measured safe on gallery-01 at 4 (2 vCPU / 8GB; load stays ~2.2). The
+    # service serializes per-stem work with its own locks and the tmpfs space
+    # reservation keeps concurrent video fetches from overflowing RAM.
+    video_items = [it for it in missing if it.get("type") == "video"]
+    image_items = [it for it in missing if it.get("type") != "video"]
+    counters = {"done": 0, "failed": 0, "bytes": 0}
+    ctr_lock = threading.Lock()
+    total = len(missing)
+    finished = [0]
+
+    def fetch_one(it):
         chat = it.get("chat") or ""
         stem = it["stem"]
-        is_video = it.get("type") == "video"
-        use_http = is_video or args.http_fallback
-        if use_http:
+        url = f"{THUMB_SERVICE_URL}/thumb/{chat}/{stem}.jpg"
+        err = None
+        nbytes = 0
+        try:
+            # 120s: a cold range read can be slow, and the old 60s cap
+            # recorded those as failures.
+            with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310 — THUMB_SERVICE_URL is our own trusted internal http:// endpoint, not user input
+                data = resp.read()
+                nbytes = len(data)
+                if resp.status != 200:
+                    err = f"HTTP {resp.status}"
+        except Exception as e:  # noqa: BLE001
+            err = f"{type(e).__name__}: {e}"
+        with ctr_lock:
+            finished[0] += 1
+            counters["bytes"] += nbytes
+            if err is None:
+                counters["done"] += 1
+            else:
+                counters["failed"] += 1
+                log(f"  [{finished[0]}/{total}] {chat}/{stem}: {err}")
+            if finished[0] % 25 == 0 or finished[0] == total:
+                elapsed = time.time() - t0
+                rate = finished[0] / elapsed if elapsed > 0 else 0
+                eta_min = (total - finished[0]) / rate / 60 if rate > 0 else 0
+                log(f"  progress: {finished[0]}/{total} "
+                    f"({counters['done']} ok, {counters['failed']} failed), "
+                    f"~{counters['bytes']/1024/1024:.0f} MB thumbnail data transferred, "
+                    f"{rate:.2f}/s, ETA {eta_min:.0f} min")
+
+    if video_items:
+        workers = max(1, args.workers)
+        log(f"phase 1: {len(video_items)} video poster(s), {workers} worker(s)")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(fetch_one, video_items))
+
+    # ----- Phase 2: images, serial local path with throttle -----
+    # Each image is a real download/resize/upload round trip through the shared
+    # thumb-service HTTP endpoint; keep this serial + delayed as before.
+    if image_items:
+        log(f"phase 2: {len(image_items)} image(s), serial")
+    for it in image_items:
+        chat = it.get("chat") or ""
+        stem = it["stem"]
+        if args.http_fallback:
+            # HTTP path for images too, but keep the serial + delay pacing and
+            # count into the image counters (not the video phase counters).
             url = f"{THUMB_SERVICE_URL}/thumb/{chat}/{stem}.jpg"
             try:
-                # 120s (not 60): a video poster is now generated server-side via
-                # ffmpeg HTTP-range reads (a few MB, a few seconds normally),
-                # but a cold/slow Drive moment can push the first range read
-                # past a minute; the old 60s cap recorded those as failures.
-                with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310 — THUMB_SERVICE_URL is our own trusted internal http:// endpoint, not user input
+                with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310
                     data = resp.read()
                     bytes_seen += len(data)
                     if resp.status == 200:
                         done += 1
                     else:
                         failed += 1
-                        log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: HTTP {resp.status}")
+                        log(f"  {chat}/{stem}: HTTP {resp.status}")
             except Exception as e:  # noqa: BLE001
                 failed += 1
-                log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: {type(e).__name__}: {e}")
+                log(f"  {chat}/{stem}: {type(e).__name__}: {e}")
         else:
             leaf = os.path.basename(it.get("file") or "")
             if not leaf:
                 failed += 1
-                log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: no 'file' field in manifest item")
+                log(f"  {chat}/{stem}: no 'file' field in manifest item")
             else:
                 ok, size, err = generate_thumb_local(chat, leaf, stem, work)
                 bytes_seen += size
@@ -257,20 +321,12 @@ def main():
                     done += 1
                 else:
                     failed += 1
-                    log(f"  [{i+1}/{len(missing)}] {chat}/{stem}: {err}")
+                    log(f"  {chat}/{stem}: {err}")
+        time.sleep(args.delay)
 
-        if (i + 1) % 25 == 0 or (i + 1) == len(missing):
-            elapsed = time.time() - t0
-            rate = (i + 1) / elapsed if elapsed > 0 else 0
-            eta_min = (len(missing) - i - 1) / rate / 60 if rate > 0 else 0
-            log(f"  progress: {i+1}/{len(missing)} ({done} ok, {failed} failed), "
-                f"~{bytes_seen/1024/1024:.0f} MB thumbnail data transferred, "
-                f"{rate:.2f}/s, ETA {eta_min:.0f} min")
-
-        # Videos make real HTTP range requests (several per item); a 1s pause
-        # is enough to keep the Drive API and the CT's single ffmpeg happy.
-        if not is_video:
-            time.sleep(args.delay)
+    done += counters["done"]
+    failed += counters["failed"]
+    bytes_seen += counters["bytes"]
 
     log(f"DONE: {done} generated, {failed} failed, "
         f"{time.time()-t0:.0f}s elapsed, {bytes_seen/1024/1024:.0f} MB")

@@ -170,16 +170,22 @@ def test_video_items_still_use_http_path_not_local():
     """Regression guard for the documented scope limit: the fast local path
     is images only. This doesn't spin up a real HTTP server -- it just
     verifies main()'s branch selection would route video items away from
-    generate_thumb_local (checked structurally: main() checks
-    it.get("type") == "video" before choosing the local path, and this test
-    would need a live server to test main() end-to-end, which is out of
-    scope for a unit test -- so this test instead locks in the CONTRACT via
-    a direct read of the source, catching an accidental removal of the
-    is_video branch in a future edit)."""
+    generate_thumb_local (checked structurally: main() splits the queue into
+    video_items/image_items and only ever sends images down the local path,
+    and this test would need a live server to test main() end-to-end, which
+    is out of scope for a unit test -- so this test instead locks in the
+    CONTRACT via a direct read of the source, catching an accidental removal
+    of the video routing in a future edit).
+
+    2026-09-30: the split used to be an inline `is_video = it.get("type") ==
+    "video"` check inside the loop; it is now a two-phase partition (videos
+    go to a bounded thread pool of HTTP fetches, images stay serial). The
+    contract is identical -- videos must never reach generate_thumb_local --
+    so this now asserts the partition instead of the old inline shape."""
     src = (FILES_DIR / "thumb_backfill.py").read_text()
-    if 'is_video = it.get("type") == "video"' not in src:
+    if 'it.get("type") == "video"' not in src:
         raise AssertionError(
-            "expected an explicit is_video check gating the fast local path -- "
+            "expected the video/image partition gating the fast local path -- "
             "if this was refactored, make sure videos still route to the HTTP "
             "path (thumb_service's video poster logic is NOT reimplemented here)")
 
