@@ -40,6 +40,10 @@ media_gallery_refresh_interval: "1h"
 media_gallery_thumb_backfill_interval: "5min"
 media_gallery_thumb_backfill_budget: 400
 media_gallery_thumb_backfill_delay: 1.0
+# Parallel HTTP workers for the video phase (see thumb_backfill.py's --workers
+# help; 4-way was measured safe on this 2-vCPU CT and cuts a video batch's
+# wall clock ~4x). Images stay serial.
+media_gallery_thumb_backfill_workers: 4
 
 # On-the-fly thumbnail service port (bound on ip_media_gallery, routed by lb-01
 # nginx /thumb/ behind Authentik). Generates + caches ~400px posters on demand.
