@@ -48,6 +48,12 @@ media_gallery_thumb_backfill_delay: 2.0
 # nginx /thumb/ behind Authentik). Generates + caches ~400px posters on demand.
 media_gallery_thumb_port: 8090
 
+# Where thumb_service.py reaches the LOCAL rclone serve over HTTP to build
+# video posters via ffmpeg range reads (a few MB, a few seconds even for
+# multi-GB videos — see that service's comment). Must be the address the CT
+# can reach itself on; loopback is allowed by the iptables rule set.
+media_gallery_thumb_video_http_base: "http://172.16.0.46:8089"
+
 # Trash service port (delete media + exclusion ledger; bound on ip_media_gallery,
 # routed by lb-01 nginx /trash/ behind Authentik).
 media_gallery_trash_port: 8091
@@ -89,3 +95,10 @@ media_gallery_thumbcache_tmpfs_size: "6G"
 # request count — two 3 GB videos would blow a count-based cap). Read by
 # thumb_service.py as THUMB_SPACE_MARGIN_MB.
 media_gallery_thumb_space_margin_mb: 256
+
+# Include video posters in the background thumbnail backfill (default true).
+# Video posters are generated via HTTP range requests against the local rclone
+# serve (a few MB and a few seconds per video, even multi-GB ones) — so the
+# historical "videos are too expensive to backfill" reasoning no longer holds.
+# Set false to fall back to images-only backfill.
+media_gallery_thumb_backfill_include_video: true

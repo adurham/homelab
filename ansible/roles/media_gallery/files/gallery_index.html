@@ -1080,6 +1080,7 @@
       frag.appendChild(makeFolder(n,0,''));
     });
     elFolder.innerHTML=''; elFolder.appendChild(frag);
+    setRoute('');
     // prune folder-selection of folders that no longer exist, refresh the bar
     if(typeof selectedFolders!=='undefined'){
       Array.from(selectedFolders).forEach(function(n){
@@ -1109,8 +1110,29 @@
       .catch(function(){ toast('Network error creating folder','err'); });
   }
 
+  // URL route persistence: keeps the current view across a page refresh
+  // (fixes "refreshing inside a folder dumped me back to the landing page").
+  // The hash is the single source of truth at boot; every navigation writes it.
+  // Formats: '' (landing) | '#f=<folder>' | '#s=<query>' | '#dup'
+  function setRoute(h){
+    try{
+      if(location.hash!==h) history.replaceState(null,'',location.pathname+location.search+(h||''));
+    }catch(_){ /* replaceState unavailable (file:// etc.) — view still works */
+      try{ location.hash=(h||'').replace(/^#/,''); }catch(__){}
+    }
+  }
+  function routeTarget(){
+    var h=(location.hash||'').replace(/^#/,'');
+    if(!h) return null;
+    if(h==='dup') return {view:'dup'};
+    if(h.indexOf('f=')===0){ try{ return {folder:decodeURIComponent(h.slice(2))}; }catch(_){ return null; } }
+    if(h.indexOf('s=')===0){ try{ return {search:decodeURIComponent(h.slice(2))}; }catch(_){ return null; } }
+    return null;
+  }
+
   // ---------- FOLDER VIEW ----------
   function openFolder(chat){
+    if(chat==='__search__'){ openSearchResults(); return; }   // reload while in search view
     // Only reset the selection when NAVIGATING to a different folder — NOT on a
     // same-folder re-render (e.g. the background reloadManifest timer calls
     // openFolder(current) to refresh, and must not wipe an in-progress selection).
@@ -1143,6 +1165,33 @@
     renderPhotos();
     renderFolderRail();   // drop targets for drag-to-move
     if(navigating) window.scrollTo(0,0);
+    setRoute('#f='+encodeURIComponent(chat));
+  }
+
+  // ---------- GLOBAL SEARCH RESULTS VIEW ----------
+  // Reached by typing in the search box while on the landing page. Shows every
+  // visible item (all folders) filtered by searchQuery, with the same grid /
+  // lightbox / selection behavior as a folder view.
+  function openSearchResults(){
+    current='__search__';
+    var items=manifest.filter(function(it){ return !it.hidden; });
+    applySort(items);
+    view=items;
+    elFolder.style.display='none'; elFolder.innerHTML='';
+    var dv=document.getElementById('dupView'); if(dv) dv.style.display='none';
+    var fbb=document.getElementById('fbulkBar'); if(fbb) fbb.classList.remove('show');
+    elPhoto.style.display='grid';
+    elBack.style.display='inline-block';
+    elSort.style.display='inline-block';
+    document.getElementById('zoom').style.display=listView?'none':'';
+    elUploadBtn.style.display='none';   // global aggregate; can't upload into it
+    clearSelection();
+    hideUploadBar();
+    setCrumb('Search results');
+    elSub.textContent=filteredView().length+' match'+(filteredView().length===1?'':'es');
+    renderPhotos();
+    renderFolderRail();
+    setRoute('#s='+encodeURIComponent(searchQuery));
   }
 
   // items in the current folder after applying the search filter
@@ -1911,16 +1960,37 @@
   lb.addEventListener('click',function(e){if(e.target===lb)closeLb();});
 
   // ---------- SEARCH / FILTER ----------
+  // Works from ANYWHERE: in a folder it filters that folder's grid; on the
+  // landing page it switches into a global "search results" view across every
+  // folder (previously typing on the landing page did nothing at all —
+  // renderPhotos() was only ever reached when current!=null).
   var _searchT=null;
+  function runSearch(){
+    searchQuery=elSearch.value.trim().toLowerCase();
+    if(current==='__search__'){
+      // already in the results view: re-filter in place, keep route + count fresh
+      if(!searchQuery){ renderFolders(); return; }
+      elSub.textContent=filteredView().length+' match'+(filteredView().length===1?'':'es');
+      renderPhotos();
+      setRoute('#s='+encodeURIComponent(searchQuery));
+    }else if(searchQuery && current==null){
+      // typing on the landing page -> enter the global results view
+      openSearchResults();
+    }else if(current!=null && current!=='__dup__'){
+      renderPhotos();   // in-folder filter
+    }
+  }
   elSearch.addEventListener('input',function(){
     clearTimeout(_searchT);
-    _searchT=setTimeout(function(){
-      searchQuery=elSearch.value.trim().toLowerCase();
-      if(current!=null) renderPhotos();
-    },120);
+    _searchT=setTimeout(runSearch,120);
   });
   elSearch.addEventListener('keydown',function(e){
-    if(e.key==='Escape'){ elSearch.value=''; searchQuery=''; if(current!=null) renderPhotos(); elSearch.blur(); }
+    if(e.key==='Escape'){
+      elSearch.value=''; searchQuery='';
+      if(current==='__search__'){ renderFolders(); }
+      else if(current!=null && current!=='__dup__') renderPhotos();
+      elSearch.blur();
+    }
     e.stopPropagation();   // don't trigger grid shortcuts while typing
   });
 
@@ -1934,7 +2004,7 @@
   elZoom.addEventListener('input',function(){
     document.documentElement.style.setProperty('--tilesize', elZoom.value+'px');
   });
-  elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*'?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[])); applySort(view); renderPhotos(); } });
+  elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*'||current==='__search__')?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]); applySort(view); renderPhotos(); } });
 
   // ---------- RIGHT-CLICK CONTEXT MENU ----------
   var elCtx=document.getElementById('ctxMenu');
@@ -2218,6 +2288,7 @@
   var _dupReport=null;   // the current in-memory dedup report (kept fresh after deletes)
   function showDuplicates(){
     current='__dup__';
+    setRoute('#dup');
     elFolder.style.display='none'; elPhoto.style.display='none';
     elDup.style.display='block'; elBack.style.display='inline-block';
     elSort.style.display='none'; elUploadBtn.style.display='none';
@@ -2514,8 +2585,25 @@
         if(pendingRmdir[nm]) return;
         if(!chatMap[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
       });
+      // Capture the incoming route BEFORE anything renders — renderFolders()
+      // writes setRoute('') as part of a normal landing render, which would
+      // otherwise wipe the hash we're about to restore from.
+      var rt=routeTarget();
       renderFolders();   // always render landing (so "+ New folder" is available)
       bgPoll();          // show the background-delete indicator if a queue is draining
+      // ---- restore the route from the URL hash (survives a refresh) ----
+      // Previously every load landed on the folders page regardless of what
+      // you were viewing, so refreshing inside a folder kicked you out.
+      if(rt){
+        if(rt.folder && (chatMap[rt.folder]||emptyFolders.indexOf(rt.folder)>=0)){ openFolder(rt.folder); }
+        else if(rt.folder){
+          // folder no longer exists (renamed/deleted) -> fall back to landing
+          setRoute('');
+        } else if(rt.search){
+          elSearch.value=rt.search; searchQuery=rt.search.toLowerCase();
+          openSearchResults();
+        } else if(rt.view==='dup'){ showDuplicates(); }
+      }
     })
     .catch(function(err){
       elState.textContent='Failed to load gallery: '+err.message;
