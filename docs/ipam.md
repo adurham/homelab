@@ -55,9 +55,11 @@ AT&T BGW (IP Passthrough)
                          (.40) as a LEAF (user, 2026-09-30: "off the homelab
                          switch"; port not verified) — nothing on the pod's
                          LAN port, no structural traffic through it
-                 -> game-room switch (unmanaged) — a second pod answers at
-                    .39 (uptime 3.7 d on 2026-09-30); its cabling is NOT
-                    verified (same rule: leaf only, nothing in its LAN port)
+                 -> game-room switch (unmanaged) — pod there was reset
+                    2026-09-25; a second Nest pod answers at .39 (uptime 3.7 d
+                    on 2026-09-30). That it IS the game-room pod, and how it
+                    is cabled, are NOT verified (rule: leaf only, nothing in
+                    its LAN port)
 ```
 
 (Re-cabled 2026-09-30 14:50-14:56 CDT per the user: pod removed from the path
@@ -185,8 +187,8 @@ hour (macstudio-m4-1): 20h 21, 21h 18, 22h 95, 23h 161; 09-30 00h 215, 01h 153,
 logged 100% loss to the gateway with `link=active` — the PHY never dropped, no
 NIC link-down on any node. Kernel `vmbr0: received packet on nic0 with own
 address as source address` (L2 loop/echo fingerprint), per Loki over 09-29
-evening + 09-30: ~2.4k / 2.7k / 2.4k on pve01/02/03 (single digits on quiet
-days). Corosync KNET flapping, tailscale-gw relay churn and outbound failures
+evening + 09-30: ~2.4k / 2.7k / 2.4k on pve01/02/03 (0-4 on the quiet days 09-26..28; 5-29 on the
+09-25 blackout day). Corosync KNET flapping, tailscale-gw relay churn and outbound failures
 on lb-01 / hermes-gw-01 / vm-01 in the same windows.
 
 **Who flapped, who didn't.**
@@ -206,19 +208,23 @@ on lb-01 / hermes-gw-01 / vm-01 in the same windows.
 **Change (user, 2026-09-30 14:50-14:56 CDT; the watchers show the gateway /
 SG105E / pod blip while cables moved, settled 14:55:56).** Basement pod taken
 out of the path (direct trunk -> under-desk cable; pod now a leaf off the lab
-switch, nothing on its LAN port). It rebooted ~14:52 (status-API uptime).
+switch, nothing on its LAN port). It rebooted at ~14:54:30 (status-API uptime) and answered pings again at 14:55:38 (labwatch).
 Effect: the lab corner no longer depends on any pod's mesh/backhaul state
 (closes the 2026-09-25 SPOF) and the inline-bridge loop surface is gone.
 
 **Verification 14:56 -> 17:17 CDT (2h21m), all read live:**
-- dup-source-MAC kernel lines: 0 on all three nodes (last seen: pve01 11:07:24,
-  i.e. BEFORE the change; none on pve02/03 after ~10:00). Corosync KNET events:
-  0. Quorate 3/3.
+- dup-source-MAC kernel lines: 0 on all three nodes since 14:56, by the nodes'
+  journals AND by Loki (independent of them; journal ingest confirmed flowing
+  the whole window; Loki checked through 17:35). Last events before the change,
+  per Loki: pve02 ~08:55, pve01 ~11:07, pve03 ~12:10. Caveat: pve02/pve03
+  journals are Storage=volatile and were wiped by the 13:01 reset, so only Loki
+  (and pve01's persistent journal) can see earlier. Corosync KNET events: 0.
+  Quorate 3/3.
 - Active echo test (10 broadcasts out per node; inbound frames carrying the
   node's OWN source MAC): 0 returned on pve01/02/03.
 - Natural canary: an ecobee thermostat (192.168.86.22, MAC 44:61:32:df:66:47)
-  ARP-sweeps the whole /24 at ~75/s permanently (documented ecobee behaviour,
-  ~90% of broadcast frames, harmless to throughput). In a loop every such frame
+  ARP-sweeps the whole /24 at 60-100 frames/s (seen in every capture today; a reported
+  ecobee quirk; 84-95% of all broadcast frames; ~6 KB/s, trivial bandwidth). In a loop every such frame
   arrives 2+ times: 0 of 2,745 broadcast/multicast frames in 26 s on pve01 had
   an identical twin within 30 ms.
 - labwatch (both studios): 0 state transitions since 14:55:56; netwatch: 0 loss
@@ -232,7 +238,7 @@ Effect: the lab corner no longer depends on any pod's mesh/backhaul state
   (usda-*, win-*, templates) are onboot=0 by design.
 
 **NOT proven.** The same watchers had a 2.5 h quiet spell (12:14-14:50) before
-the change and the dup-frame counter had already stopped at 11:07, so a clean
+the change and the dup-frame counter had already stopped by ~12:10, so a clean
 afternoon is not evidence by itself; storms ran ~20:30-05:00 (plus a light
 11-12h tail). The test is a storm-prone window. Pass = dup-source-MAC lines ~0
 per node and labwatch <~5 transitions/hour through 20:30 -> 06:00; fail = the
