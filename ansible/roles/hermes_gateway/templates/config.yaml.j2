@@ -727,10 +727,24 @@ curator:
 #                        content matches known-dangerous patterns (pickle.load,
 #                        yaml.load, eval(, os.system, verify=False, ...).
 #                        Non-blocking: the write lands, the model self-corrects.
+#
+# The two entries below are the plugins installed by *code* (this template);
+# the two after them are installed by the `hermes plugins install/enable`
+# tasks later in tasks/main.yml, which MUTATE this file at runtime by
+# appending to `plugins.enabled`. Both lists must therefore be declared here
+# in full — when the template omitted the runtime-installed ones, every
+# deploy reverted the list, the enable tasks re-appended it, and the role
+# reported changed on every run forever (config.yaml render + both enable
+# tasks, never converging). Keep this list a superset of every
+# `hermes plugins enable` this role runs for the machine-root profile.
 plugins:
   enabled:
     - disk-cleanup
     - security-guidance
+    # Installed from a fork, not the catalog — see tasks/main.yml "Install
+    # Ollama Cloud Web Search Plugin (machine-root profile)" for why.
+    - web-ollama-cloud
+    - claude-subscription-directsdk-experimental
   disabled: []
 
 # Persistent remote backend (`hermes serve`, systemd unit
