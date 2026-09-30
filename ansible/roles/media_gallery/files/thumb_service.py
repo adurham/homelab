@@ -32,14 +32,14 @@ from urllib.parse import unquote
 
 from PIL import Image, ImageFile
 
+from serve_publish import local_path as serve_local_path
+
 # Truncated-but-viewable JPEGs: the source platforms (and the scrapers that
 # copy from them) occasionally store files cut short by a handful of bytes.
 # Browsers render these fine; Pillow refuses them by default, which left
 # those items permanently poster-less and looking like a broken thumbnailer.
 # Tolerate the truncation (the decode still yields the real image content).
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-
-from serve_publish import local_path as serve_local_path
 
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
