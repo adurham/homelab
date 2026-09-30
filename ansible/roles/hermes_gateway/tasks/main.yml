@@ -802,6 +802,7 @@
     mode: '0600'
   no_log: true
   notify: Restart Hermes Gateway
+  tags: [claude_native_creds]
 
 # Reproduces the provider's own spawn resolution with the env token stripped
 # (see directsdk.py Client._run) and fails the play if the CLI reports a
@@ -819,6 +820,7 @@
   changed_when: false
   failed_when: >-
     '"loggedIn": true' not in hermes_native_auth_probe.stdout
+  tags: [claude_native_creds]
 
 - name: Drop Gemini OAuth Credentials
   ansible.builtin.copy:
