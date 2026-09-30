@@ -109,25 +109,28 @@ fallback_providers:
     model: deepseek-v4.1-flash
 
 # Web search/extract backends, mirrored from the MacBook's ~/.hermes/config.yaml
-# web block (2026-09-07 sync). brave-free is the primary backend
-# (BRAVE_SEARCH_API_KEY in env); search_chain lists the auto-detect fallback
-# order (ddgs = keyless DuckDuckGo). by_provider carries PER-PROVIDER
-# overrides that hermes-agent consults ahead of the flat backend/
-# search_backend/extract_backend fields above whenever the resolved
-# provider has an entry here: anthropic uses the `claude-code` backend
-# (shells out to the `claude` CLI already installed + authenticated on
-# this box — see tasks/main.yml "Install Claude Code CLI Globally" /
-# "Bootstrap Anthropic Claude Code Credentials") for native, zero-extra-
-# API-key search+extract; exo/ollama-cloud both use brave-free/trafilatura
-# same as the flat defaults. anthropic_native_search stays true as a
-# second, independent Anthropic-only native-search path (Claude's own
-# server-side web tool) — orthogonal to by_provider.anthropic above.
+# web block (2026-09-07 sync). search_chain is the primary path: an ordered
+# failover list the fork walks, falling through on 429/rate-limit/any failure.
+# by_provider carries PER-PROVIDER overrides consulted ahead of the flat
+# backend/search_backend/extract_backend fields whenever the resolved provider
+# has an entry here; on THIS gateway the main provider is
+# claude-subscription-directsdk-experimental, so its entry (and the `anthropic`
+# one, same subscription) would win over the flat defaults if set. Neither has
+# a web-search-specific override any more — see the removal note below.
+#
+# REMOVED 2026-09-29: `anthropic_native_search` / `_max_uses` and the two
+# by_provider `claude-code` entries (anthropic + claude-subscription-directsdk-
+# experimental). All three referenced the fork's Anthropic server-tool cluster,
+# retired 2026-09-25 in the owner-approved Slice A/C cleanup
+# (agent/fork/anthropic_native_web_search.py + plugins/web/claude_code, both
+# deleted; restore tag pre-cc-removal-20260925). They were dead config: no
+# reader for the two keys, and no registered provider named `claude-code`, so
+# the by_provider entries merely shadowed the flat defaults with a name that
+# resolves to nothing. Do not re-add without re-landing the modules.
 web:
   backend: brave-free
   search_backend: brave-free
   extract_backend: trafilatura
-  anthropic_native_search: true
-  anthropic_native_search_max_uses: 5
   search_chain:
     # Six independent providers, ordered fastest-and-most-reliable first.
     # Brave is NOT first: brave-free is capped at 1 request/second, and the
@@ -153,12 +156,6 @@ web:
     ollama-cloud:
       search_backend: brave-free
       extract_backend: trafilatura
-    anthropic:
-      search_backend: claude-code
-      extract_backend: claude-code
-    claude-subscription-directsdk-experimental:
-      search_backend: claude-code
-      extract_backend: claude-code
     exo:
       search_backend: brave-free
       extract_backend: trafilatura
