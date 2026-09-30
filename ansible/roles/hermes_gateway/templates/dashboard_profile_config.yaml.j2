@@ -128,6 +128,13 @@ web:
   anthropic_native_search: true
   anthropic_native_search_max_uses: 5
   search_chain:
+    # Same six-provider order as templates/config.yaml.j2 — see that file's
+    # search_chain comment for the per-provider rationale and the 2026-09-29
+    # burst measurements that demoted brave-free out of first position.
+    - keenable
+    - exa
+    - ollama-cloud
+    - parallel
     - brave-free
     - ddgs
   by_provider:
