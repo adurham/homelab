@@ -761,23 +761,64 @@
   no_log: true
   when: discord_home_probe.rc != 0
 
-- name: Bootstrap Anthropic Claude Code Credentials (no overwrite)
-  # Source-of-truth for Anthropic creds is whatever lives in the file on the
-  # CT itself — `claude setup-token` (run interactively against this CT)
-  # writes there and rotates its own refresh tokens. Ansible only seeds the
-  # initial value from vault so the first turn works; thereafter `force: no`
-  # protects the live file from being clobbered on re-applies. The vault
-  # value will go stale fast (laptop's keychain rotates), so do not rely on
-  # it past the first deploy.
+# ─── Claude Code native credential store (2026-09-30 incident fix) ──────────
+#
+# The claude-subscription-directsdk provider spawns the real `claude` CLI,
+# and its fork commit 58b0918 deliberately STRIPS CLAUDE_CODE_OAUTH_TOKEN
+# from the child env (so native resolves its own credential store instead of
+# an inherited var — required for the enterprise-org-pinned Tanium login on
+# the Mac). Native therefore authenticates ONLY from
+# /home/hermes/.claude/.credentials.json on this host.
+#
+# Until this fix the role used a "seed once, force: no" copy from the vault
+# var vault_hermes_gw_anthropic_creds_json — an unrelated, now-stale OAuth
+# pair (it was seeded from the laptop's rotating login). Nothing kept the
+# file in sync with the setup-token the box actually uses, and on 2026-09-30
+# it was found as an EMPTY HUSK (accessToken "", expiresAt 0), so every
+# Claude call through that provider failed with "OAuth session expired and
+# could not be refreshed". It went unnoticed because the pre-reboot gateway
+# processes were running an older pop-free plugin build; the reboot loaded
+# the pop code and exposed the husk.
+#
+# Fix: RENDER the file (managed, not seed-once) from the SAME
+# vault_hermes_gw_claude_code_oauth_token that already feeds .env on both
+# profiles — one source of truth, content-diff idempotent, and a fresh
+# deploy can never re-seed a husk or a stale pair. Shape notes:
+#   - refreshToken "" and expiresAt far-future: setup-tokens are LONG-LIVED
+#     and NOT refreshable. A real near-expiry timestamp would make the CLI
+#     attempt a refresh it cannot perform and log out early; the fixed
+#     literal keeps this task idempotent (a computed now()+N would diff
+#     every run).
+#   - no_log: true — the content diff would otherwise print the token.
+# Rotation: `claude setup-token` on the LXC -> update the vault var -> run
+# deploy_hermes_gateway.yml (or the smoke-test task below alone).
+- name: Render Claude Code Native Credentials (managed)
   ansible.builtin.copy:
-    content: "{{ vault_hermes_gw_anthropic_creds_json }}"
+    content: >-
+      {"claudeAiOauth":{"accessToken":"{{ vault_hermes_gw_claude_code_oauth_token }}","refreshToken":"","expiresAt":1893456000000,"scopes":["user:file_upload","user:inference","user:mcp_servers","user:profile","user:sessions:claude_code"],"subscriptionType":"max","rateLimitTier":"default_claude_max_5x"}}
     dest: /home/hermes/.claude/.credentials.json
     owner: hermes
     group: hermes
     mode: '0600'
-    force: false
   no_log: true
   notify: Restart Hermes Gateway
+
+# Reproduces the provider's own spawn resolution with the env token stripped
+# (see directsdk.py Client._run) and fails the play if the CLI reports a
+# logged-out native store — i.e. exactly the 2026-09-30 failure, caught at
+# deploy time instead of by users. Deliberately NOT no_log: the auth-status
+# JSON is the diagnosis when this fails.
+- name: Smoke-test Claude Code Native Login (no env token)
+  ansible.builtin.shell:
+    cmd: >-
+      env -i HOME=/home/hermes PATH=/usr/bin:/bin USER=hermes LOGNAME=hermes
+      /usr/bin/claude auth status
+  become: true
+  become_user: hermes
+  register: hermes_native_auth_probe
+  changed_when: false
+  failed_when: >-
+    '"loggedIn": true' not in hermes_native_auth_probe.stdout
 
 - name: Drop Gemini OAuth Credentials
   ansible.builtin.copy:
