@@ -199,6 +199,18 @@ def main():
                if f"{it.get('chat') or ''}/{it['stem']}.jpg" not in existing]
     log(f"missing thumbnails: {len(missing)}")
 
+    # 2026-09-30: process VIDEO posters FIRST. The manifest arrives newest
+    # first, so the pre-fix order ground through images for days before it
+    # ever reached the (previously 11.5K-strong) video backlog — which is
+    # exactly why "thumbnail generation keeps being broken" was the lived
+    # experience: the newest folders a user actually browses kept showing
+    # blank video tiles while the repair queue worked on old images.
+    # Videos are also the items users notice most (a missing photo poster
+    # still shows SOMETHING; a missing video poster is a dead tile).
+    missing.sort(key=lambda it: 0 if it.get("type") == "video" else 1)
+    n_vid = sum(1 for it in missing if it.get("type") == "video")
+    log(f"queue order: {n_vid} videos first, then {len(missing) - n_vid} images")
+
     if not missing:
         log("nothing to backfill — every item already has a thumbnail")
         return
@@ -255,7 +267,10 @@ def main():
                 f"~{bytes_seen/1024/1024:.0f} MB thumbnail data transferred, "
                 f"{rate:.2f}/s, ETA {eta_min:.0f} min")
 
-        time.sleep(args.delay)
+        # Videos make real HTTP range requests (several per item); a 1s pause
+        # is enough to keep the Drive API and the CT's single ffmpeg happy.
+        if not is_video:
+            time.sleep(args.delay)
 
     log(f"DONE: {done} generated, {failed} failed, "
         f"{time.time()-t0:.0f}s elapsed, {bytes_seen/1024/1024:.0f} MB")
