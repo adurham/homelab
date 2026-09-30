@@ -98,6 +98,8 @@
 # contains only the encrypted Drive cache, not plaintext images. (Cannot defend
 # against a live root shell — that's irreducible for an auto-decrypting service
 # without a TPM — but this closes the offline-disk and backup-leak vectors.)
+# The serve tmpfs holds the DECRYPTED metadata the SPA fetches (manifest.json
+# etc.) for the same reason.
 # Unit filenames are systemd-escaped paths.
 - name: Compute systemd-escaped mount unit names
   ansible.builtin.command: "systemd-escape -p --suffix=mount {{ item }}"
@@ -105,6 +107,7 @@
   changed_when: false
   loop:
     - "{{ media_gallery_state }}/thumbcache"
+    - "{{ media_gallery_serve_dir }}"
 
 - name: Render thumbcache tmpfs mount unit
   ansible.builtin.template:
@@ -118,6 +121,30 @@
 - name: Enable & Start thumbcache tmpfs mount (decrypted posters RAM-only)
   ansible.builtin.systemd:
     name: "{{ tg_mount_units.results[0].stdout }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Render serve tmpfs mount unit
+  ansible.builtin.template:
+    src: serve.mount.j2
+    dest: "/etc/systemd/system/{{ tg_mount_units.results[1].stdout }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Ensure serve dir exists (mount point for the metadata tmpfs)
+  ansible.builtin.file:
+    path: "{{ media_gallery_serve_dir }}"
+    state: directory
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Enable & Start serve tmpfs mount (decrypted metadata RAM-only)
+  ansible.builtin.systemd:
+    name: "{{ tg_mount_units.results[1].stdout }}"
     enabled: true
     state: started
     daemon_reload: true
@@ -152,6 +179,56 @@
 # Post-split, the gallery box does NOT run the collector (that moved to the
 # media_ingest role / CT). This box runs: gallery (SPA + rclone serve), thumb,
 # trash, upload services, plus the manifest builder and the tier-1 dedup scan.
+- name: Deploy Serve Publish Helper (shared local-tmpfs metadata mirror lib)
+  ansible.builtin.copy:
+    src: serve_publish.py
+    dest: "{{ media_gallery_dir }}/serve_publish.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Deploy Serve Seed Script (boot-time tmpfs refill from Drive)
+  ansible.builtin.copy:
+    src: serve_seed.sh
+    dest: "{{ media_gallery_dir }}/serve_seed.sh"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Render Serve Service Unit (local tmpfs metadata on :{{ media_gallery_serve_port }})
+  ansible.builtin.template:
+    src: serve.service.j2
+    dest: /etc/systemd/system/media-gallery-serve.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload Systemd
+    - Restart Serve
+
+- name: Enable & Start Serve Service
+  ansible.builtin.systemd:
+    name: media-gallery-serve.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Render Serve Seed Service Unit (oneshot at boot)
+  ansible.builtin.template:
+    src: serve-seed.service.j2
+    dest: /etc/systemd/system/media-gallery-serve-seed.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Serve Seed (refills the tmpfs now and on every boot)
+  ansible.builtin.systemd:
+    name: media-gallery-serve-seed.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
 - name: Deploy Manifest Builder
   ansible.builtin.copy:
     src: build_manifest.py
@@ -383,7 +460,9 @@
     owner: "{{ media_gallery_user }}"
     group: "{{ media_gallery_user }}"
     mode: '0644'
-  notify: Publish Gallery SPA to encrypted store
+  notify:
+    - Publish Gallery SPA to encrypted store
+    - Publish Gallery SPA to local serve mirror
 
 - name: Render Gallery Service Unit
   ansible.builtin.template:
@@ -495,13 +574,38 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
-- name: Deploy Thumbnail Prewarm Script (called by refresh)
+- name: Deploy Thumbnail Prewarm Script (own service+timer since 2026-09-30)
   ansible.builtin.copy:
     src: prewarm_thumbs.sh
     dest: "{{ media_gallery_dir }}/prewarm_thumbs.sh"
     owner: "{{ media_gallery_user }}"
     group: "{{ media_gallery_user }}"
     mode: '0750'
+
+- name: Render Thumbnail Prewarm Service Unit
+  ansible.builtin.template:
+    src: prewarm.service.j2
+    dest: /etc/systemd/system/media-gallery-prewarm.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Thumbnail Prewarm Timer Unit
+  ansible.builtin.template:
+    src: prewarm.timer.j2
+    dest: /etc/systemd/system/media-gallery-prewarm.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Thumbnail Prewarm Timer
+  ansible.builtin.systemd:
+    name: media-gallery-prewarm.timer
+    enabled: true
+    state: started
+    daemon_reload: true
 
 - name: Render Gallery Refresh Service Unit
   ansible.builtin.template:
@@ -589,6 +693,7 @@
     - "{{ media_gallery_thumb_port }}"
     - "{{ media_gallery_trash_port }}"
     - "{{ media_gallery_upload_port }}"
+    - "{{ media_gallery_serve_port }}"
   notify: Save tg iptables
 
 - name: "iptables: allow lb-01 (Authentik front door) to service ports"
@@ -605,6 +710,7 @@
     - "{{ media_gallery_thumb_port }}"
     - "{{ media_gallery_trash_port }}"
     - "{{ media_gallery_upload_port }}"
+    - "{{ media_gallery_serve_port }}"
   notify: Save tg iptables
 
 - name: "iptables: drop all other access to service ports"
@@ -620,6 +726,7 @@
     - "{{ media_gallery_thumb_port }}"
     - "{{ media_gallery_trash_port }}"
     - "{{ media_gallery_upload_port }}"
+    - "{{ media_gallery_serve_port }}"
   notify: Save tg iptables
 
 # SSH: key-only. mediagallery is nologin; admin is root-via-key. No password auth.

@@ -92,6 +92,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from serve_publish import stage_manifest
+
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "")
 GALLERY = REMOTE + "gallery"
@@ -175,9 +177,8 @@ def main():
 
     log("fetching manifest…")
     mp = work / "manifest.json"
-    r = rclone("copyto", f"{GALLERY}/manifest.json", str(mp))
-    if r.returncode != 0:
-        log("cannot fetch manifest:", r.stderr[:200])
+    # Prefer the local tmpfs serve copy (instant); fall back to the Drive fetch.
+    if not stage_manifest(mp, RCLONE_CONF, REMOTE, log=log):
         sys.exit(1)
     manifest = json.loads(mp.read_text())
     items = [it for it in manifest if args.include_video or it.get("type") != "video"]

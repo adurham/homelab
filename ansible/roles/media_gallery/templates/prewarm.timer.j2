@@ -1,0 +1,21 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# Schedule for media-gallery-prewarm.service.
+#
+# OnBootSec: after a boot the tmpfs is empty, so refill promptly (the seed
+# for the metadata serve dir runs around the same time; this one is the
+# multi-hour one).
+# OnUnitInactiveSec (NOT OnUnitActiveSec): the refill can run for hours on a
+# cold cache, and OnUnitActiveSec counts from the last START — a long run
+# would find its next deadline already in the past and re-fire immediately,
+# giving zero rest (the exact bug fixed for the thumb-backfill timer).
+# Counting from completion gives a real gap between runs.
+# OnUnitInactiveSec needs a prior activation as its base, hence OnBootSec too.
+[Unit]
+Description=media-gallery thumbnail prewarm schedule
+
+[Timer]
+OnBootSec=15min
+OnUnitInactiveSec=1h
+
+[Install]
+WantedBy=timers.target

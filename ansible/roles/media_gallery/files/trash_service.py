@@ -31,6 +31,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
+from serve_publish import publish_local
+
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
 # Seconds an item sits in the queue before the reaper actually deletes it. Gives
@@ -310,6 +312,10 @@ def _prune_dedup_report(stems) -> None:
             os.close(fd)
             Path(tmp).write_text(json.dumps(rep, separators=(",", ":")))
             rclone("copyto", tmp, DEDUP_REMOTE)
+            # Keep the local serve mirror in sync too (lb-01 serves the
+            # Duplicates view's dedup.json from the tmpfs at :8093), else a
+            # just-deleted item could linger there until the next scan.
+            publish_local(Path(tmp), "dedup.json", log=lambda m: print(f"[trash] {m}", flush=True))
             try:
                 os.unlink(tmp)
             except OSError:

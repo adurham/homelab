@@ -32,6 +32,8 @@ from urllib.parse import unquote
 
 from PIL import Image
 
+from serve_publish import local_path as serve_local_path
+
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
 PORT = int(os.environ.get("THUMB_PORT", "8090"))
@@ -81,11 +83,23 @@ def _build_manifest_index():
     live request path."""
     tmp = LOCAL_CACHE / "_manifest_index_fetch.json"
     try:
-        r = rclone("copyto", f"{GALLERY}/manifest.json", str(tmp))
-        if r.returncode != 0:
-            print(f"[thumb] manifest fetch for index failed: {r.stderr[:200]!r}", flush=True)
-            return {}, False
-        manifest = json.loads(tmp.read_text())
+        # Prefer the local tmpfs serve copy of the manifest (written by
+        # build_manifest.py at every rebuild): reading it costs no Drive
+        # traffic, versus the ~85MB copyto this used to do every TTL window.
+        local = serve_local_path("manifest.json")
+        try:
+            if local.is_file():
+                manifest = json.loads(local.read_text())
+            else:
+                manifest = None
+        except (OSError, ValueError):
+            manifest = None
+        if manifest is None:
+            r = rclone("copyto", f"{GALLERY}/manifest.json", str(tmp))
+            if r.returncode != 0:
+                print(f"[thumb] manifest fetch for index failed: {r.stderr[:200]!r}", flush=True)
+                return {}, False
+            manifest = json.loads(tmp.read_text())
         index = {}
         for it in manifest:
             chat = it.get("chat") or ""

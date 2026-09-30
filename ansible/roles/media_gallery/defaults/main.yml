@@ -57,6 +57,23 @@ media_gallery_trash_port: 8091
 media_gallery_upload_port: 8092
 media_gallery_upload_max_mb: 16384
 
+# Local metadata serve port + tmpfs dir (2026-09-30). rclone serves the LOCAL
+# tmpfs mirror of the gallery metadata the SPA fetches (manifest.json,
+# folders.json, dedup.json, index.html) at this port; lb-01 routes those exact
+# paths here so a page load does not stream ~85MB from Google Drive (~10s ->
+# ~0.2s, measured). Media originals + thumbs keep flowing through the
+# Drive-backed gallery/thumb services — only metadata is local.
+# NOTE: media_gallery_serve_port is defined in group_vars/all/vars.yml (the
+# lb-01 nginx template needs it too, and group_vars beat role defaults —
+# defining it in both places invites drift).
+media_gallery_serve_dir: /var/lib/media-gallery/serve
+
+# tmpfs size for that serve dir: manifest.json (~85MB today) + folders.json +
+# dedup.json (~26MB) + the SPA, with headroom for a transiently larger
+# manifest between publishes (temp file + rename). Keep well under CT RAM
+# (media_gallery_ct_memory_mb, 8 GiB) alongside the 6 GiB thumbcache.
+media_gallery_serve_tmpfs_size: "512M"
+
 # Thumbnail cache tmpfs size (RAM-backed; decrypted thumbs + the transient
 # full-original download used to make a VIDEO poster live here, never on disk).
 # Must exceed the LARGEST original so big-video posters can be generated — at

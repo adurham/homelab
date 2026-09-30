@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Auto-refresh the gallery: rebuild the date-sorted manifest from the current
-# archive, warm thumbnails for any new items, then update the duplicate report
-# incrementally. Driven by a systemd timer. Idempotent + cheap on a no-change run.
+# archive, then update the duplicate report incrementally. Driven by a systemd
+# timer. Idempotent + cheap on a no-change run.
 #
 # SPLIT ARCHITECTURE: this box (the gallery platform) holds NO upstream source creds.
 # Item dates are supplied by the collector at push time (recorded into the
@@ -20,6 +20,15 @@
 # forever) and uses LSH banding instead of brute-force comparison, so a
 # steady-state run costs seconds, not an hour -- cheap enough to chain onto
 # this same hourly refresh unconditionally.
+#
+# THUMB PREWARM REMOVED FROM THIS CHAIN (2026-09-30): it used to run here
+# (step 2), inside this script's flock. After a reboot wiped the tmpfs, the
+# multi-hour refill held the lock and every subsequent hourly refresh was
+# SKIPPED -- which also kept NEW UPLOADS out of the gallery for hours, since
+# the manifest rebuild lives here too. The prewarm is now its own service+unit
+# (media-gallery-prewarm.service/.timer, see prewarm_thumbs.sh) and runs
+# concurrently, safely: it is resumable/idempotent and touches only the thumb
+# cache, while this chain only rewrites the manifest/dedup/hidden files.
 set -uo pipefail
 
 DIR=/opt/media-gallery
@@ -46,15 +55,17 @@ fi
 
 echo "=== gallery refresh $(date -Is) ==="
 
-# 1) rebuild manifest (no upstream source access; datemap + archive only)
+# 1) rebuild manifest (no upstream source access; datemap + archive only).
+#    Publishes manifest.json + folders.json locally (tmpfs serve mirror) and
+#    to Drive.
 "$DIR/venv/bin/python" "$DIR/build_manifest.py" || echo "manifest build failed"
 
-# 2) warm thumbnails for any new items (skips cached)
-bash "$DIR/prewarm_thumbs.sh" || echo "prewarm failed"
-
-# 3) incremental duplicate-report refresh (only hashes new items; see
+# 2) incremental duplicate-report refresh (only hashes new items; see
 # dedup_scan.py's module docstring for the incremental + LSH-banding design
-# that makes this safe to run every hour instead of only on manual demand)
+# that makes this safe to run every hour instead of only on manual demand).
+#    Runs BEFORE anything thumbnail-related: it reads the local manifest and
+#    the prewarm cache and fetches only genuinely-missing thumbs, so it is
+#    never blocked behind a multi-hour cache refill.
 "$DIR/venv/bin/python" "$DIR/dedup_scan.py" || echo "dedup scan failed"
 
 echo "=== refresh done $(date -Is) ==="
