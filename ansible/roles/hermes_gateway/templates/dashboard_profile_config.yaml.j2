@@ -114,19 +114,20 @@ dashboard:
 # bot and the interactive default profile — it deserves the same tuned
 # reasoning/tool-search/delegation/web settings, not silent defaults.
 #
-# web: mirrored verbatim. anthropic_native_search / by_provider's
-# claude-subscription-directsdk-experimental entry (claude-code backend)
-# apply directly since this profile's main provider is always
-# claude-subscription-directsdk-experimental; by_provider.ollama-cloud/exo/
-# anthropic entries are inert here (never selected — main never runs on
-# those providers on this profile) but kept for consistency with the other
-# two profiles' identical block.
+# web: mirrored verbatim from templates/config.yaml.j2 (same six-provider
+# search_chain, same flat backend defaults). The by_provider block keeps only
+# the entries that still resolve: ollama-cloud and exo → brave-free/trafilatura,
+# same as the flat defaults. The claude-code entries (and the two
+# anthropic_native_search keys) were REMOVED 2026-09-29 with the rest of the
+# dead config — see config.yaml.j2's web-block comment. They mattered MORE
+# here than on the machine-root profile: this profile's main provider IS
+# claude-subscription-directsdk-experimental, so its by_provider entry won
+# over the flat defaults and pointed this profile's extract path at a backend
+# that no longer exists.
 web:
   backend: brave-free
   search_backend: brave-free
   extract_backend: trafilatura
-  anthropic_native_search: true
-  anthropic_native_search_max_uses: 5
   search_chain:
     # Same six-provider order as templates/config.yaml.j2 — see that file's
     # search_chain comment for the per-provider rationale and the 2026-09-29
@@ -141,9 +142,6 @@ web:
     ollama-cloud:
       search_backend: brave-free
       extract_backend: trafilatura
-    claude-subscription-directsdk-experimental:
-      search_backend: claude-code
-      extract_backend: claude-code
     exo:
       search_backend: brave-free
       extract_backend: trafilatura
