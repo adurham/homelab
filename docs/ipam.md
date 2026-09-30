@@ -48,21 +48,24 @@ AT&T BGW (IP Passthrough)
   -> Google Nest Wifi Pro (main unit, living room)
        -> TP-Link TL-SG105E (5-port managed, .15) — first hop off the Nest
             -> 8-port basement "trunk" switch (unmanaged) — branch hub
-                 -> Nest Wifi Pro basement pod — INLINE, NOT a leaf (see
-                    incident below) — WAN port fed from the trunk switch,
-                    LAN port continues on to the under-desk switch. This is
-                    the SOLE path to everything below it.
-                      -> 5-port under-work-desk switch (unmanaged)
-                           -> NETGEAR GS108Ev4 (lab switch, .51) -> PVE
-                              nodes + Mac Studios
-                 -> game-room switch (unmanaged) — pod currently UNPLUGGED
-                    (user reset it 2026-09-25, not yet redeployed)
+                 -> 5-port under-work-desk switch (unmanaged) — DIRECT cable
+                    from the trunk; no pod in the path (since 2026-09-30)
+                      -> NETGEAR GS108Ev4 (lab switch, .51) -> PVE
+                         nodes + Mac Studios + Nest Wifi Pro basement pod
+                         (.40) as a LEAF (user, 2026-09-30: "off the homelab
+                         switch"; port not verified) — nothing on the pod's
+                         LAN port, no structural traffic through it
+                 -> game-room switch (unmanaged) — a second pod answers at
+                    .39 (uptime 3.7 d on 2026-09-30); its cabling is NOT
+                    verified (same rule: leaf only, nothing in its LAN port)
 ```
 
-(Corrected 2026-09-25 evening, superseding the leaf-topology diagram this
-doc carried earlier the same day — that version was wrong for the basement
-pod specifically. Chain + ordering per user description; port-level
-interconnects below the trunk are not individually verified.)
+(Re-cabled 2026-09-30 14:50-14:56 CDT per the user: pod removed from the path
+— direct trunk -> under-desk cable, pod re-attached as a leaf. This replaces
+the 2026-09-25 diagram in which the basement pod sat INLINE between the trunk
+and the under-desk switch (the SPOF in the incident below). Chain + ordering
+per user description; port-level interconnects below the trunk are not
+individually verified.)
 
 ### INCIDENT 2026-09-25 evening: basement pod inline = whole-homelab SPOF (CONFIRMED)
 
@@ -98,11 +101,11 @@ reachability FROM outside the pod (this laptop, upstream generally) was cut.
 CDT); forwarding resumed and the whole path stabilized by ~19:45, confirmed
 clean for 6+ continuous minutes plus live SSH/pvecm checks after.
 
-**Fix NOT yet applied (the actual root-cause fix, still open):** physically
-run a direct cable from the basement trunk switch to the under-desk switch,
-bypassing the pod entirely, so the PVE cluster + both Mac Studios are no
-longer structurally dependent on any Nest pod's mesh membership/backhaul
-state. This also resolves the original "can't force wired backhaul"
+**Root-cause fix — APPLIED 2026-09-30 ~14:50-14:56 CDT** (user re-cabled;
+verification in the 2026-09-29/30 storm entry below): a direct cable now runs
+from the basement trunk switch to the under-desk switch, bypassing the pod
+entirely, so the PVE cluster + both Mac Studios are no longer structurally
+dependent on any Nest pod's mesh membership/backhaul state. This also resolves the original "can't force wired backhaul"
 complaint for free — once the pod carries no structural traffic, there's
 nothing that needs forcing; it can stay on wireless backhaul (or unplugged)
 as pure WiFi coverage with zero blast radius if it acts up again. Given this
@@ -162,6 +165,82 @@ precedent); pve03's boot HDD (ata1) threw SATA link resets again at 15:06;
 Netgear port 5 (documented = pve01) reads `100M full` while pve01's own NIC
 reports 1000 Mb/s — verify mapping/renegotiation. Loss-triggered watchers
 armed on both studios (`/tmp/netwatch_power.log`).
+
+### INCIDENT 2026-09-29/30: overnight LAN storm -> Healthchecks DOWN; pod removed from the path
+
+**Symptom.** Healthchecks.io `homelab-grafana-watchdog` went DOWN 00:43:05 CDT
+and back UP 00:48:00 (email: "downtime 4 minutes, 55 seconds"). Grafana
+(graf-01, CT107 on pve01) never stopped — rules evaluated every minute all
+night. Its dead-man's-switch pings to hc-ping.com failed at ~00:38:25 and
+~00:43 with `TLS handshake timeout` (other windows: DNS timeouts to
+172.16.0.10): off-segment TCP was failing, the lab's own services were not.
+The later resets that day (pve02 02:34; all three nodes 13:01 = INCIDENT
+CLASS B) post-date the alert and are NOT its cause.
+
+**The night (CDT).** Onset 2026-09-29 20:29:17 after a clean 7.5 h (first
+gateway=DOWN in both studios' `labwatch.log`). labwatch state transitions per
+hour (macstudio-m4-1): 20h 21, 21h 18, 22h 95, 23h 161; 09-30 00h 215, 01h 153,
+02h 99, 03h 50, 04h 86, 05-08h 25/24/59/41, 09-11h 8/2/12, 12h 19 (last flap
+12:14:35), then quiet 12:14-14:50 bar the 13:01 reset. Both studios' `netwatch`
+logged 100% loss to the gateway with `link=active` — the PHY never dropped, no
+NIC link-down on any node. Kernel `vmbr0: received packet on nic0 with own
+address as source address` (L2 loop/echo fingerprint), per Loki over 09-29
+evening + 09-30: ~2.4k / 2.7k / 2.4k on pve01/02/03 (single digits on quiet
+days). Corosync KNET flapping, tailscale-gw relay churn and outbound failures
+on lb-01 / hermes-gw-01 / vm-01 in the same windows.
+
+**Who flapped, who didn't.**
+- Clean: AT&T BGW320 (uptime counter: no reboot since 09-25; WAN 0 errors, GPON
+  O5), Nest main (no reboot since 09-28), every node NIC, graf-01 itself.
+- Flapped in lockstep on DIFFERENT paths: the wired lab corner (studios ->
+  gateway loss, SG105E .15, KNET); Home Assistant (.2, wired on the trunk,
+  upstream of the pod zone — Emporia cloud poll 59 unavailable windows overnight
+  vs 1-5 on quiet nights); WiFi-only clients (Sony TV 100 unavailable windows
+  18:00-06:00 vs 0/1/4 on clean nights; Shelly/EcoNet/heat-pump entities).
+- Reading: a disturbance on the flat LAN that reached at least the trunk/SG105E
+  layer AND the WiFi side while sparing the BGW/WAN => Nest main + the L2 fabric
+  under it, not the ISP. A single failing port cannot explain flapping on paths
+  that share none. TRIGGER NOT IDENTIFIED (nothing logged at 20:29; the GS108's
+  own counters/uptime are not readable remotely without the 1Password login).
+
+**Change (user, 2026-09-30 14:50-14:56 CDT; the watchers show the gateway /
+SG105E / pod blip while cables moved, settled 14:55:56).** Basement pod taken
+out of the path (direct trunk -> under-desk cable; pod now a leaf off the lab
+switch, nothing on its LAN port). It rebooted ~14:52 (status-API uptime).
+Effect: the lab corner no longer depends on any pod's mesh/backhaul state
+(closes the 2026-09-25 SPOF) and the inline-bridge loop surface is gone.
+
+**Verification 14:56 -> 17:17 CDT (2h21m), all read live:**
+- dup-source-MAC kernel lines: 0 on all three nodes (last seen: pve01 11:07:24,
+  i.e. BEFORE the change; none on pve02/03 after ~10:00). Corosync KNET events:
+  0. Quorate 3/3.
+- Active echo test (10 broadcasts out per node; inbound frames carrying the
+  node's OWN source MAC): 0 returned on pve01/02/03.
+- Natural canary: an ecobee thermostat (192.168.86.22, MAC 44:61:32:df:66:47)
+  ARP-sweeps the whole /24 at ~75/s permanently (documented ecobee behaviour,
+  ~90% of broadcast frames, harmless to throughput). In a loop every such frame
+  arrives 2+ times: 0 of 2,745 broadcast/multicast frames in 26 s on pve01 had
+  an identical twin within 30 ms.
+- labwatch (both studios): 0 state transitions since 14:55:56; netwatch: 0 loss
+  lines. Loss from pve01: 0% to gateway .1 (0.5-0.8 ms), SG105E .15 (2.2),
+  basement pod .40 (0.42 — wired-fast; the WiFi-only ecobee averages 16 ms),
+  HA .2 (0.39), GS108 .51 (1.9), studios .47/.48 (0.36).
+- HA, 166 WiFi/cloud-side entities: 1 transition to unavailable since 14:56 (a
+  Shelly temperature sensor) vs 55 flap-minutes in last night's worst hour.
+- Fleet: all CTs running, tms-01 up (:22/:5433); the only down scrape targets
+  are the two un-launched exo nodes (expected). The 21 stopped VMs on pve01
+  (usda-*, win-*, templates) are onboot=0 by design.
+
+**NOT proven.** The same watchers had a 2.5 h quiet spell (12:14-14:50) before
+the change and the dup-frame counter had already stopped at 11:07, so a clean
+afternoon is not evidence by itself; storms ran ~20:30-05:00 (plus a light
+11-12h tail). The test is a storm-prone window. Pass = dup-source-MAC lines ~0
+per node and labwatch <~5 transitions/hour through 20:30 -> 06:00; fail = the
+signature returns, which exonerates the pod and leaves Nest-main bridging and
+the SG105E/trunk. Open, no programmatic readout: both pods' `/api/v1/status`
+read lan0Link/ethernetLink = false despite wired-fast RTT, so the Google Home
+app's Connection type is the only authority on wired-vs-wireless backhaul. GS108
+loop prevention is still OFF (table above); second pod .39 placement unverified.
 
 ### INCIDENT CLASS B: recurring simultaneous 3-node hard resets (2026-09-28 analysis)
 
