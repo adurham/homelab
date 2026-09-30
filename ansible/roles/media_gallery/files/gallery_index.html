@@ -98,6 +98,14 @@
     padding:3px 5px;border-radius:5px;text-align:center;}
 
   .state{text-align:center;color:var(--muted);padding:60px 20px;font-size:15px;}
+  /* "Show more" sentinel appended by renderPhotos() when a view holds more
+     items than the DOM render cap (see RENDER_PAGE in the JS) — spans the
+     whole grid, clearly clickable. */
+  .showmore{grid-column:1/-1;display:block;width:100%;text-align:center;padding:22px 14px;
+    margin:6px 0 30px;border:1px dashed var(--border);border-radius:10px;cursor:pointer;
+    color:var(--accent);background:var(--panel);font-size:14px;}
+  .showmore:hover{background:var(--panel-hi);}
+  body.listview .showmore{grid-column:auto;}
 
   /* new-folder tile */
   .folder.newfolder{display:flex;align-items:center;justify-content:center;
@@ -1236,10 +1244,25 @@
 
   // shown[] = the array the grid + lightbox actually operate on (filtered+sorted)
   var shown=[];
+  // 2026-09-30: DOM-TILE RENDER CAP. renderPhotos() used to materialize one
+  // tile per matched item. That is fine for a normal folder, but a broad
+  // search ("a" matches every stem) selects all ~278K manifest items and the
+  // tab dies building 278K DOM subtrees + IntersectionObserver entries — the
+  // reported "page crashed" on search. The full match set stays in `shown`
+  // (lightbox, keyboard nav, selection all still span it); only the DOM is
+  // paged, with an explicit "Show more" affordance so nothing is hidden
+  // silently. 1200 keeps the initial render fast even for the biggest folders
+  // (a-large-folder is 16.6K items) while feeling like a full grid.
+  var RENDER_PAGE=1200;
+  var renderLimit=RENDER_PAGE;
+  var renderCtx=null;      // current view+query key; a change resets the page
   function renderPhotos(){
+    var ctx=(current===null?'~landing':current)+'\u0000'+searchQuery;
+    if(ctx!==renderCtx){ renderCtx=ctx; renderLimit=RENDER_PAGE; }
     shown=filteredView();
+    var limit=Math.min(shown.length, renderLimit);
     var frag=document.createDocumentFragment();
-    shown.forEach(function(it,i){
+    shown.slice(0,limit).forEach(function(it,i){
       var t=document.createElement('div');
       t.className='tile'; t.dataset.i=i; t.dataset.stem=it.stem;
       if(selected.has(it.stem)) t.classList.add('selected');
@@ -1284,6 +1307,19 @@
       frag.appendChild(t);
     });
     elPhoto.innerHTML=''; elPhoto.appendChild(frag);
+    // "Show more" sentinel: renderPhotos only materializes renderLimit tiles
+    // (see RENDER_PAGE above) — surface that honestly instead of silently
+    // truncating the grid.
+    if(shown.length>limit){
+      var more=document.createElement('div');
+      more.className='showmore';
+      more.textContent='Showing '+limit.toLocaleString()+' of '+shown.length.toLocaleString()+' — click to show more';
+      more.addEventListener('click',function(){
+        renderLimit+=RENDER_PAGE*4;
+        renderPhotos();
+      });
+      elPhoto.appendChild(more);
+    }
     kbFocus=-1;
     updateStatusBar(current!=null && current!=='__landing__');
     if(!shown.length){ elState.style.display='block'; elState.textContent=searchQuery?'No matches.':'No items in this folder.'; }
