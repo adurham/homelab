@@ -177,6 +177,54 @@ every circuit:
 | 2026-09-20 20:57 | 20+ min of silence before the boot on pve02/03 |
 | 2026-09-22 00:12 | stagger 00:10:38 / 00:11:08 / 00:11:13 |
 | 2026-09-25 19:53 | stagger 19:48:16 / 19:50:22 / 19:50:29 |
+| 2026-09-30 02:34 | SINGLE-node (pve02 only) — see separate note below |
+| 2026-09-30 13:01 | stagger 13:01:21 / :26 / :26 (CDT; boots 18:01:21Z/:26Z) — FIRST EVENT CAPTURED LIVE by all three witnesses |
+
+**EVENT 2026-09-30 13:01 CDT (18:01Z) — captured live by the instrumentation.**
+All three nodes' journals stop mid-flight between 13:00:27 (last line) and
+13:01:21 (pve01 kernel first line); `last -x` = "crash" on all three; pve01
+journald logged `File .../system.journal corrupted or uncleanly shut down,
+renaming and replacing` at boot. No pstore entries on any node. No
+HA/fence/watchdog log line before death (same signature as prior events).
+
+Witness evidence (all three /root/lab_witness.log + both Studios'
+/tmp/labwatch.log) shows the discriminating pattern for this occurrence:
+
+- At 13:00:43 pve03's own last heartbeat: `nic0=up quorate=Yes`. At 13:01:00
+  (first sample after) BOTH Studios' labwatch logged `netgear-gs108=DOWN`
+  (tplink + nest-pod + gateway stayed UP) while pve01/02/03 were already
+  DOWN — i.e. ALL THREE nodes + the Netgear GS108 went dark together, while
+  the upstream TP-Link SG105E, Nest pod, gateway and both Studios rode it out.
+- netwatch_persistent on both studios shows ZERO loss/latency anomaly in the
+  ~3 minutes before 13:01 (last pre-event sample 12:59-13:00: `LOSS=0%`), so
+  this was a hard cut, not a degrading link.
+- Recovery stagger: pve01 up first (13:01:33), then sg105e/netgear (13:01:35-48),
+  then pve03 (13:01:54) and pve02 (13:01:57); labwatch returns all-UP 13:01:25→13:02:07.
+- House power: whole-house CT `sensor.edgewater_road_power_minute_average`
+  stayed 2880-3766 W straight through 17:50-18:10Z (no dip <100 W). (Same
+  caveat as before: a 1-min average cannot see a sub-second sag.)
+- SMART: pve02 unsafe-shutdowns 119→120 and pve03 unchanged at 157 across
+  this event (pve03 counter is stale/inconsistent — it did not increment even
+  though the node hard-reset; treat per-event deltas as unreliable on pve03).
+  All three nodes are still running their pre-event kernels/uptimes reset at
+  13:01; no fsck errors surfaced at boot (`fsck` slice exists on all three).
+- Blast radius that rode it out: all LXCs and VMs came back (both Studios
+  never rebooted; HA host uptime unbroken; the Netgear switch answered :80
+  immediately after; CT uptimes all 18:02-18:04Z = restarted with their nodes).
+
+**This occurrence is the strongest discriminator yet, and it points AWAY from
+the pure "three independent PSUs" framing:** pve03's witness heartbeat was
+`quorate=Yes, nic0=up` at 13:00:43 and dead by ~13:01:00, and the Netgear
+GS108's mgmt plane vanished in the SAME instant as the nodes (both studios
+saw it), while the SG105E (upstream of the GS108) stayed up. That is
+consistent with a power/feed event on the shared branch feeding the
+Netgear+PVE corner (mechanism (a)), NOT with an HA self-fence (mechanism (b))
+— a fence would not take the separate Netgear switch's own mgmt IP down, and
+would leave the fence log line + softdog reason; neither exists. Next
+occurrence: physically inspect the strip/branch feeding that corner, and
+check whether the GS108's own uptime counter reset (its web UI at
+192.168.86.51 now answers; a single read-only visit is allowed, do NOT loop
+logins).
 
 Evidence gathered 2026-09-28 (VictoriaMetrics `node_boot_time_seconds`
 steps + Loki journals + HA per-circuit power):
