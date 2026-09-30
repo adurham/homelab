@@ -129,6 +129,24 @@ web:
   anthropic_native_search: true
   anthropic_native_search_max_uses: 5
   search_chain:
+    # Six independent providers, ordered fastest-and-most-reliable first.
+    # Brave is NOT first: brave-free is capped at 1 request/second, and the
+    # gateway fires parallel searches, so it failed 1/6 under a 6-wide burst
+    # while every other entry answered 6/6 (measured 2026-09-29). It stays in
+    # the chain as a mid-tier fallback rather than the default hop.
+    #   keenable     — keyless, fastest median (0.61s), burst 6/6
+    #   exa          — keyless (anonymous tier), burst 6/6
+    #   ollama-cloud — billed against the Ollama sub, free-of-extra-cost here;
+    #                  also attaches page extracts to every search result.
+    #                  Requires the web-ollama-cloud plugin (installed further
+    #                  down tasks/main.yml) — absent, the chain skips it.
+    #   parallel     — keyless, burst 6/6
+    #   brave-free   — 1 req/s cap; keyed via vault_hermes_gw_brave_api_key
+    #   ddgs         — keyless, slowest (1.5s) but the best unique-domain recall
+    - keenable
+    - exa
+    - ollama-cloud
+    - parallel
     - brave-free
     - ddgs
   by_provider:

@@ -168,6 +168,13 @@
   register: hermes_lockfile_reset
   changed_when: false
   failed_when: false
+  # ansible.builtin.command has no check-mode semantics (it would be skipped, and
+  # the dirty-checkout failure below then reproduces inside `--check` runs too,
+  # hiding every later task's diff). `check_mode: false` runs it for real — it
+  # discards an npm build artifact, never user work — so --check exercises the
+  # same path a real apply does. See the task comment above for why the file is
+  # dirty in the first place.
+  check_mode: false
 
 # This checkout backs all THREE systemd units (hermes-gateway.service,
 # hermes-serve.service, hermes-gateway-dashboard.service all run
@@ -258,6 +265,21 @@
   ansible.builtin.pip:
     name:
       - ddgs
+    virtualenv: /opt/hermes-agent/venv
+  become: true
+  become_user: hermes
+  notify: Restart Hermes Gateway
+
+- name: Install web-extract backend (trafilatura)
+  # web.extract_backend is trafilatura in every profile's config.yaml — a
+  # keyless direct-fetch + extract backend (the fork's plugins/web/trafilatura).
+  # The package is NOT auto-installed by the plugin: its post_setup hook only
+  # runs when a provider is picked through `hermes tools`, which this role
+  # never does. Without it every web_extract call fails with "trafilatura
+  # package is not installed" and falls through to the keyless rescue ring.
+  ansible.builtin.pip:
+    name:
+      - trafilatura
     virtualenv: /opt/hermes-agent/venv
   become: true
   become_user: hermes
@@ -668,6 +690,44 @@
   register: hermes_directsdk_enable_root
   changed_when: false
 
+# ─── Ollama Cloud web-search provider plugin (2026-09-29) ───────────────────
+# Third entry in web.search_chain (see templates/config.yaml.j2). Search +
+# extract via Ollama's native REST API, billed against the existing Ollama
+# subscription — reuses OLLAMA_API_KEY, already in .env.
+#
+# Installed from ADAM'S FORK, not upstream: upstream HEAD (9c739a9, the
+# catalog pin) appends /api/web_search to OLLAMA_BASE_URL, which on this box
+# is https://ollama.com/v1 (the OpenAI-compatible base the ollama-cloud MODEL
+# provider needs) — producing /v1/api/web_search -> HTTP 404. The fork carries
+# _native_base_url(), which strips the /v1 suffix before the native endpoint is
+# appended. Reported upstream-shaped; revisit if rriggs merges an equivalent fix.
+#
+# `creates:` makes it idempotent. Restart Hermes Gateway is notified because a
+# plugin that provides a web backend only takes effect in a fresh process.
+- name: Install Ollama Cloud Web Search Plugin (machine-root profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes plugins install https://github.com/adurham/hermes-plugin-ollama-cloud-search
+    creates: /home/hermes/.hermes/plugins/web-ollama-cloud
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  notify: Restart Hermes Gateway
+
+# `enable` is not idempotent-safe to gate on `creates:` (the plugin dir exists
+# after the install above), so it runs every apply and reports changed_when:
+# false — same shape as the directsdk enable tasks.
+- name: Enable Ollama Cloud Web Search Plugin (machine-root profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes plugins enable web-ollama-cloud
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  register: hermes_ollama_cloud_enable_root
+  changed_when: false
+  notify: Restart Hermes Gateway
+
 # Seed DISCORD_HOME_CHANNEL with the vaulted default ONLY if no line
 # beginning with that key exists yet. The default lands OUTSIDE the
 # Ansible-managed block so /sethome runtime updates (via
@@ -939,6 +999,32 @@
     HOME: /home/hermes
   register: hermes_directsdk_enable_dashboard
   changed_when: false
+
+# Plugins are per-HERMES_HOME, so the dashboard profile needs its OWN copy of
+# the Ollama Cloud web-search plugin the machine-root tasks above installed.
+# Same reasoning and same fork source as those tasks; the dashboard profile's
+# config.yaml.j2 carries the identical six-entry search_chain, so without this
+# the third hop would be skipped there. `creates:` keeps it idempotent.
+- name: Install Ollama Cloud Web Search Plugin (dashboard profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes -p dashboard plugins install https://github.com/adurham/hermes-plugin-ollama-cloud-search
+    creates: /home/hermes/.hermes/profiles/dashboard/plugins/web-ollama-cloud
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  notify: Restart Hermes Gateway Dashboard
+
+- name: Enable Ollama Cloud Web Search Plugin (dashboard profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes -p dashboard plugins enable web-ollama-cloud
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  register: hermes_ollama_cloud_enable_dashboard
+  changed_when: false
+  notify: Restart Hermes Gateway Dashboard
 
 # ─── hermes-gateway-dashboard.service — api_server for the dashboard profile ──
 #
