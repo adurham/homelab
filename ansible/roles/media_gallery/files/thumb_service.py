@@ -30,7 +30,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
-from PIL import Image
+from PIL import Image, ImageFile
+
+# Truncated-but-viewable JPEGs: the source platforms (and the scrapers that
+# copy from them) occasionally store files cut short by a handful of bytes.
+# Browsers render these fine; Pillow refuses them by default, which left
+# those items permanently poster-less and looking like a broken thumbnailer.
+# Tolerate the truncation (the decode still yields the real image content).
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from serve_publish import local_path as serve_local_path
 
