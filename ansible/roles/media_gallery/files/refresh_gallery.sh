@@ -47,6 +47,10 @@ exec >>"$LOG" 2>&1
 # dedup.json. Demonstrated live 2026-09-12: a manual foreground test of
 # dedup_scan.py collided with the hourly timer mid-development. -n = fail
 # fast (don't queue up a pile of waiting runs) rather than block.
+# NOTE (2026-09-30): the lock now only serializes THIS script's own runs --
+# the thumbnail prewarm moved to its own unit, so a multi-hour cache refill
+# can no longer starve the hourly refresh (and the manifest rebuild that new
+# uploads depend on). Do not re-add long-running steps inside this lock.
 exec 9>"$LOCK"
 if ! flock -n 9; then
   echo "=== gallery refresh $(date -Is): SKIPPED, another run already in progress ==="
