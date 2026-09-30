@@ -187,6 +187,18 @@ re-tier a role or auxiliary task:
    auto-installed by anything yet). This step remains manual — the local
    session has no ansible/Jinja machinery of its own.
 
+One more var in the same file is not a per-role table:
+`hermes_routing_auto_route_providers`, rendered as
+`delegation.auto_route.providers` in both templates. The fork's delegation
+router (`tools/delegation_router.py`) only runs when the PARENT's provider
+is in that list, and its built-in default is `('anthropic',)` alone —
+which silently disabled auto-routing once the gateway's main provider
+became `claude-subscription-directsdk-experimental` (2026-09-29). The var
+lists both providers the gateway itself runs under; `ollama-cloud` is
+deliberately absent because every ollama-cloud-primary pin already lands
+on the same credentials an unrouted child inherits, so listing it would
+change nothing.
+
 **Deliberate delta (intentionally NOT synced):**
 `delegation.max_concurrent_children` is 10 on the MacBook and
 `config.yaml.j2`, but 3 on `dashboard_profile_config.yaml.j2` — documented

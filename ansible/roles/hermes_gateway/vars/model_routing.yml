@@ -21,7 +21,9 @@
 #
 # FIXED 2026-09-12: both templates (config.yaml.j2 AND
 # dashboard_profile_config.yaml.j2) now render their
-# delegation.model_by_role / delegation.by_provider / auxiliary.anthropic /
+# delegation.model_by_role / delegation.by_provider /
+# delegation.reasoning_effort_by_role / delegation.max_iterations_by_role /
+# delegation.auto_route.providers / auxiliary.anthropic /
 # auxiliary.ollama-cloud / providers.ollama-cloud.models blocks DIRECTLY
 # from the hermes_routing_* vars below via
 # `{{ hermes_routing_X | to_nice_yaml(indent=2, sort_keys=False) |
@@ -522,6 +524,19 @@ hermes_routing_max_iterations_by_role:
   project-coordinator: 60
   aidefence-guardian: 60
   claims-authorizer: 60
+
+# Providers for which delegation auto-routing may run. The fork's
+# tools/delegation_router.py gate defaults to ('anthropic',) only, which
+# silently disabled auto-routing once the gateway's main provider became
+# claude-subscription-directsdk-experimental (2026-09-29). The gate keys on
+# the PARENT's provider (parent-keyed as of the fork's routing fix B), so
+# every provider a routed parent can run under is listed here.
+# ollama-cloud is deliberately absent: every ollama-cloud-primary pin routes
+# to ollama-cloud/deepseek-v4.1-flash, the same credentials an unrouted
+# child inherits, so listing it would change nothing.
+hermes_routing_auto_route_providers:
+  - anthropic
+  - claude-subscription-directsdk-experimental
 
 hermes_routing_delegation_by_provider:
   anthropic:

@@ -466,6 +466,8 @@ delegation:
   max_iterations_by_role:
 {{ hermes_routing_max_iterations_by_role | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
   auto_route:
+    providers:
+{{ hermes_routing_auto_route_providers | to_nice_yaml(indent=2, sort_keys=False) | indent(6, True) }}
     tier_roles:
       light: researcher
       standard: coder
