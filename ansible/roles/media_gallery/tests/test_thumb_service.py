@@ -227,6 +227,95 @@ def test_stale_index_entry_triggers_retry_in_ensure_thumb():
                 f"got {calls['copyto_attempts']!r}")
 
 
+def test_prefer_media_leaf_skips_bin_siblings():
+    """A stem can have BOTH a raw .bin download and the real .mp4 on Drive; a
+    plain listing sorts .bin first, and picking it leaves the item permanently
+    without a thumbnail (decode always fails). The media-extension preference
+    must pick the .mp4."""
+    with tempfile.TemporaryDirectory() as td:
+        ts = _fresh_import(Path(td))
+        listing = [
+            "usatame_abc_123.bin",   # sorts first; NOT decodable
+            "usatame_abc_123.mp4",   # the real file
+        ]
+        leaf = ts._prefer_media_leaf(listing, "usatame_abc_123")
+        if leaf != "usatame_abc_123.mp4":
+            raise AssertionError(f"expected the .mp4, got {leaf!r}")
+        # and with only non-media siblings it must still return something
+        leaf2 = ts._prefer_media_leaf(["x_1.bin"], "x_1")
+        if leaf2 != "x_1.bin":
+            raise AssertionError(f"expected fallback to the only candidate, got {leaf2!r}")
+
+
+def test_find_original_prefers_media_extension_on_listing_fallback():
+    """find_original's listing fallback must apply the same preference (this
+    is the path taken for items newer than the last manifest build)."""
+    with tempfile.TemporaryDirectory() as td:
+        ts = _fresh_import(Path(td))
+
+        def fake_rclone(*args):
+            class R:
+                returncode = 0
+                stderr = ""
+                stdout = ""
+            args = list(args)
+            if args[0] == "copyto" and args[1] == f"{ts.GALLERY}/manifest.json":
+                Path(args[2]).write_text(json.dumps([]))  # empty manifest -> fallback
+                return R()
+            if args[0] == "lsf":
+                r = R()
+                r.stdout = "stem9_100x100_aa.bin\nstem9_100x100_aa.mp4\n"
+                return r
+            return R()
+
+        ts.rclone = fake_rclone
+        leaf = ts.find_original("chat", "stem9_100x100_aa")
+        if leaf != "stem9_100x100_aa.mp4":
+            raise AssertionError(f"expected the mp4 leaf, got {leaf!r}")
+
+
+def test_video_poster_http_uses_range_url_and_seek_fallback():
+    """_video_poster_http must hit the /by-chat/... namespace (NOT the rclone
+    remote string with its 'gcrypt:' prefix — that 404s), try -ss 1 then -ss 0,
+    and return True only when a non-empty file was produced."""
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        ts = _fresh_import(td)
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            class CP:
+                returncode = 1
+                stderr = b"boom"
+            # succeed only on the SECOND attempt (the -ss 0 one)
+            last = len([c for c in calls if c and c[0] == "ffmpeg"])
+            if last >= 2:
+                dst = td / "out.jpg"
+                dst.write_bytes(b"jpegbytes")
+                CP.returncode = 0
+                CP.stderr = b""
+            return CP()
+
+        orig_run = ts.subprocess.run
+        ts.subprocess.run = fake_run
+        try:
+            ok = ts._video_poster_http("somechat", "leaf.mp4", td / "out.jpg")
+        finally:
+            ts.subprocess.run = orig_run
+        if not ok:
+            raise AssertionError("expected the second attempt to succeed")
+        first = calls[0]
+        if not any(str(a).startswith(f"{ts.VIDEO_HTTP_BASE}/by-chat/somechat/leaf.mp4")
+                   for a in first):
+            raise AssertionError(f"expected a /by-chat/ range URL, got {first!r}")
+        if any(a == "gcrypt:by-chat/somechat/leaf.mp4" for a in first):
+            raise AssertionError("must not use the rclone remote string in the HTTP URL")
+        seeks = [c[c.index("-ss") + 1] for c in calls if "-ss" in c]
+        if seeks != ["1", "0"]:
+            raise AssertionError(f"expected seek fallback 1 then 0, got {seeks!r}")
+
+
 def main():
     print("test_thumb_service: running")
     check("manifest index used, expensive listing skipped when indexed",
@@ -237,6 +326,12 @@ def main():
           test_manifest_fetch_failure_falls_back_gracefully)
     check("stale index entry triggers retry-with-real-listing in ensure_thumb",
           test_stale_index_entry_triggers_retry_in_ensure_thumb)
+    check("media-extension preference skips .bin siblings",
+          test_prefer_media_leaf_skips_bin_siblings)
+    check("find_original listing fallback prefers media extensions",
+          test_find_original_prefers_media_extension_on_listing_fallback)
+    check("video poster uses HTTP range URL + seek fallback",
+          test_video_poster_http_uses_range_url_and_seek_fallback)
     print(f"test_thumb_service: ALL {PASS} TESTS PASSED")
     print("PASS")
     sys.exit(0)

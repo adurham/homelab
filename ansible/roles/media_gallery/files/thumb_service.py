@@ -47,10 +47,26 @@ THUMBS = REMOTE + "thumbs"
 GALLERY = REMOTE + "gallery"
 THUMB_PX = 400
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".gif"}
-# Bytes of a video to stream for a poster frame (header + first frames) instead
-# of downloading the whole original. 24 MiB covers most start-of-file moov atoms.
-VIDEO_HEAD_BYTES = int(os.environ.get("THUMB_VIDEO_HEAD_BYTES", str(24 * 1024 * 1024)))
-# Above this size we never full-download just for a poster (placeholder instead).
+IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
+# Some stems have MULTIPLE siblings on Drive (e.g. scraper sources keep both a
+# raw ".bin" download and the real ".mp4"). Plain listing order puts ".bin"
+# first alphabetically, so any leaf resolution that just takes the first
+# prefix-match picks the wrong file — which then fails to decode and leaves
+# that item without a thumbnail forever. Prefer known media extensions.
+_PREFERRED_EXT = VIDEO_EXT | IMAGE_EXT
+# Where the local rclone serve exposes the archive over HTTP (read-only, same
+# instance the browser uses for originals). VIDEO POSTERS ARE MADE FROM THIS
+# via ffmpeg's HTTP range support rather than by downloading the file:
+# ffmpeg seeks to -ss and pulls ONLY the byte ranges it needs (moov atom +
+# the frame near the seek point), so a multi-GB video costs a few MB of
+# transfer instead of the full download. Measured on gallery-01: a 4.7 GB
+# video (moov at end) produced a poster in ~4 s / few MB. This replaced a
+# "download the first 24 MiB and hope the moov atom is in it" trick, which
+# fails for every non-faststart file (Telegram/most-camera mp4s put moov at
+# the END) and left ~half the library with no video poster at all.
+VIDEO_HTTP_BASE = os.environ.get("THUMB_VIDEO_HTTP_BASE", "http://172.16.0.46:8089")
+# Fallback ceiling for the legacy full-download path (only used when the
+# HTTP route is unavailable/fails — e.g. rclone serve down).
 VIDEO_FULL_MAX = int(os.environ.get("THUMB_VIDEO_FULL_MAX_MB", "300")) * 1024 * 1024
 
 LOCAL_CACHE.mkdir(parents=True, exist_ok=True)
@@ -270,13 +286,10 @@ def find_original(chat, stem):
     if leaf is not None:
         return leaf
     # Fallback: not in the manifest index (too new, or a stale/never-refreshed
-    # index) -- do the real (expensive) folder listing, exactly as before.
+    # index) -- do the real (expensive) folder listing, exactly as before,
+    # but prefer a decodable media extension (see _prefer_media_leaf).
     r = rclone("lsf", f"{SRC}/{chat}/")
-    for line in r.stdout.splitlines():
-        candidate = line.strip()
-        if candidate.startswith(stem + "."):
-            return candidate
-    return None
+    return _prefer_media_leaf(r.stdout.splitlines(), stem)
 
 
 def make_thumb(src_path: Path, dst_path: Path, is_video: bool):
@@ -291,6 +304,64 @@ def make_thumb(src_path: Path, dst_path: Path, is_video: bool):
             im = im.convert("RGB")
             im.thumbnail((THUMB_PX, THUMB_PX), Image.LANCZOS)
             im.save(dst_path, "JPEG", quality=80)
+
+
+def _video_poster_http(chat: str, leaf: str, dst: Path) -> bool:
+    """Generate a video poster via ffmpeg against the local rclone HTTP serve.
+
+    Returns True when dst was written. ffmpeg issues HTTP range requests, so
+    only the moov atom + the frame near the seek point cross the wire — a few
+    MB even for a multi-GB file. `-ss 0` is the second attempt because some
+    clips show a blank first frame at 1s; probesize/analyzeduration caps keep
+    ffmpeg from scanning deep into the file before decoding."""
+    url = f"{VIDEO_HTTP_BASE}/by-chat/{chat}/{leaf}"
+    last_err = ""
+    for seek in ("1", "0"):
+        try:
+            cp = subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error",
+                 "-probesize", "5M", "-analyzeduration", "5M",
+                 "-ss", seek, "-i", url,
+                 "-frames:v", "1", "-vf", f"scale={THUMB_PX}:-1", str(dst)],
+                capture_output=True, timeout=120)
+            if cp.returncode == 0 and dst.exists() and dst.stat().st_size > 0:
+                return True
+            last_err = (cp.stderr or b"")[-300:].decode("utf-8", "replace")
+        except subprocess.TimeoutExpired:
+            last_err = "timeout"
+        except Exception as e:  # noqa: BLE001
+            last_err = f"{type(e).__name__}: {e}"
+    print(f"[thumb] http video poster failed {chat}/{leaf}: {last_err}", flush=True)
+    return False
+
+
+def _prefer_media_leaf(candidates, stem: str):
+    """Pick the best leaf for a stem from listing lines: a known media
+    extension wins over anything else (a .bin sibling sorts first in a plain
+    listing but cannot be decoded — see _PREFERRED_EXT)."""
+    leaves = [c.strip() for c in candidates
+              if c.strip().startswith(stem + ".")]
+    if not leaves:
+        return None
+    for leaf in leaves:
+        if os.path.splitext(leaf)[1].lower() in _PREFERRED_EXT:
+            return leaf
+    return leaves[0]
+
+
+def _refresh_leaf(chat: str, stem: str, stale_leaf: str, log_prefix: str):
+    """Authoritative re-resolve of a stem's leaf filename after a stale-index
+    404 (folder merge/rename since the last manifest build). Returns the
+    corrected leaf or None. Same one-shot full listing the legacy path used,
+    with media-extension preference (see _prefer_media_leaf)."""
+    fresh_r = rclone("lsf", f"{SRC}/{chat}/")
+    fresh_leaf = _prefer_media_leaf(fresh_r.stdout.splitlines(), stem)
+    if fresh_leaf and fresh_leaf != stale_leaf:
+        print(f"[thumb] {log_prefix} {chat}/{stem} "
+              f"({stale_leaf!r} -> {fresh_leaf!r}), retrying with real listing",
+              flush=True)
+        return fresh_leaf
+    return None
 
 
 def ensure_thumb(chat, stem) -> Path | None:
@@ -315,41 +386,29 @@ def ensure_thumb(chat, stem) -> Path | None:
         is_video = ext in VIDEO_EXT
         tmp_src = LOCAL_CACHE / chat / f"_src_{leaf}"
 
-        # VIDEO posters: don't download the whole original (could be GBs). A frame
-        # near the start only needs the file header + first frames, so stream just
-        # the first VIDEO_HEAD_BYTES via `rclone cat --count` and let ffmpeg grab a
-        # poster from that prefix. Falls back to the full-download path only if the
-        # prefix doesn't yield a frame (rare: moov atom at end of file).
+        # VIDEO posters: generate via ffmpeg against the LOCAL rclone HTTP
+        # endpoint, which understands range requests — ffmpeg pulls only the
+        # moov atom + the frame near the seek point (a few MB even for a
+        # multi-GB file). Proven on gallery-01: 4.7 GB video → poster in ~4 s.
+        # (`-ss 0` second attempt covers clips whose first second is a
+        # blank/black frame; some also need no seek at all.)
         if is_video:
+            # attempt 1: manifest's leaf; attempt 2: re-resolved leaf (a stale
+            # manifest entry 404s the HTTP fetch just like it did the legacy
+            # download — e.g. folder merged/renamed since the last rebuild).
+            if _video_poster_http(chat, leaf, local):
+                rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
+                return local
+            fresh_leaf = _refresh_leaf(chat, stem, leaf, "stale manifest-index entry for")
+            if fresh_leaf:
+                leaf = fresh_leaf
+                if _video_poster_http(chat, leaf, local):
+                    rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
+                    return local
+            # HTTP route failed (codec ffmpeg can't read? rclone serve down?).
+            # Fall through to the legacy full-download path, which still
+            # refuses huge files.
             total = remote_size(chat, leaf) or 0
-            # Stream just the first VIDEO_HEAD_BYTES (header + first frames) and let
-            # ffmpeg grab a poster from that prefix. Works for faststart/web videos
-            # (the vast majority). Avoids pulling the whole original (could be GBs).
-            part = LOCAL_CACHE / chat / f"_part_{leaf}"
-            part.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                with open(part, "wb") as fh:
-                    cp = subprocess.run(
-                        ["rclone", "--config", RCLONE_CONF, "cat",
-                         "--count", str(VIDEO_HEAD_BYTES), f"{SRC}/{chat}/{leaf}"],
-                        stdout=fh, stderr=subprocess.DEVNULL, timeout=120,
-                    )
-                if cp.returncode == 0 and part.exists() and part.stat().st_size > 0:
-                    make_thumb(part, local, True)
-                    if local.exists() and local.stat().st_size > 0:
-                        rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
-                        return local
-            except Exception as e:  # noqa: BLE001
-                print(f"[thumb] prefix frame decode failed for {chat}/{stem}: {e}", flush=True)
-                # prefix had no decodable frame (e.g. trailing moov) -> below
-            finally:
-                try:
-                    part.unlink()
-                except OSError:
-                    pass
-            # prefix failed. For very large videos, DON'T full-download just for a
-            # poster — show a placeholder instead (avoids the 1.4 GB-for-a-thumb
-            # stall that hammered Drive). Smaller videos fall through to full DL.
             if total and total > VIDEO_FULL_MAX:
                 return None
         # Reserve space for the full original BEFORE downloading, so concurrent
@@ -382,14 +441,9 @@ def ensure_thumb(chat, stem) -> Path | None:
                     # Retry ONCE with the authoritative full listing before
                     # giving up -- this is the deliberate, rare-path fallback
                     # cost, not something paid on every request.
-                    fresh_r = rclone("lsf", f"{SRC}/{chat}/")
-                    fresh_leaf = next(
-                        (c.strip() for c in fresh_r.stdout.splitlines()
-                         if c.strip().startswith(stem + ".")), None)
-                    if fresh_leaf and fresh_leaf != leaf:
-                        print(f"[thumb] stale manifest-index entry for {chat}/{stem} "
-                              f"({leaf!r} -> {fresh_leaf!r}), retrying with real listing",
-                              flush=True)
+                    fresh_leaf = _refresh_leaf(chat, stem, leaf,
+                                               "stale manifest-index entry for")
+                    if fresh_leaf:
                         leaf = fresh_leaf
                         r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
                 if r.returncode != 0:

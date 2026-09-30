@@ -162,8 +162,11 @@ def main():
     ap.add_argument("--delay", type=float, default=2.0,
                      help="seconds to sleep between requests (default: 2.0)")
     ap.add_argument("--include-video", action="store_true",
-                     help="also backfill video posters (default: images only, "
-                          "since video posters cost far more bandwidth/time per item)")
+                     help="also backfill video posters. 2026-09-30: this is now "
+                          "passed by the deployed background cron too — video "
+                          "posters cost only a few MB via the HTTP-range path "
+                          "(see thumb_service.py), vs a full-file download when "
+                          "this flag was written off as too expensive.")
     ap.add_argument("--http-fallback", action="store_true",
                      help="force every item through thumb_service.py's live HTTP "
                           "endpoint (the original, slower implementation) instead "
@@ -215,7 +218,11 @@ def main():
         if use_http:
             url = f"{THUMB_SERVICE_URL}/thumb/{chat}/{stem}.jpg"
             try:
-                with urllib.request.urlopen(url, timeout=60) as resp:  # noqa: S310 — THUMB_SERVICE_URL is our own trusted internal http:// endpoint, not user input
+                # 120s (not 60): a video poster is now generated server-side via
+                # ffmpeg HTTP-range reads (a few MB, a few seconds normally),
+                # but a cold/slow Drive moment can push the first range read
+                # past a minute; the old 60s cap recorded those as failures.
+                with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310 — THUMB_SERVICE_URL is our own trusted internal http:// endpoint, not user input
                     data = resp.read()
                     bytes_seen += len(data)
                     if resp.status == 200:
