@@ -150,6 +150,29 @@
     - Validate Nginx Config
     - Restart Nginx
 
+# 2026-09-30 live incident: nginx workers run as www-data, but the SHARED
+# temp/spool tree (/var/lib/nginx/{proxy,body,...}) was left owned by
+# `nobody` (the compiled-in default user of a throwaway test instance that
+# ran without a `user` directive). Proxied responses larger than nginx's
+# in-memory buffers must spill to those dirs; with them unwritable every
+# large response (the 85MB gallery manifest, the Tanium API) failed mid-body
+# with `open() ... failed (13: Permission denied) while reading upstream` —
+# which the browser saw as "Failed to load gallery". Enforce ownership on
+# every deploy so no stray root/nobody-run instance can break prod again.
+- name: Ensure nginx temp/spool tree is owned by the worker user
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: www-data
+    group: root
+    mode: '0700'
+  loop:
+    - /var/lib/nginx/proxy
+    - /var/lib/nginx/body
+    - /var/lib/nginx/fastcgi
+    - /var/lib/nginx/scgi
+    - /var/lib/nginx/uwsgi
+
 - name: Enable Nginx Site
   ansible.builtin.file:
     src: /etc/nginx/sites-available/proxmox
