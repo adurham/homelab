@@ -314,6 +314,8 @@ delegation:
   max_iterations_by_role:
 {{ hermes_routing_max_iterations_by_role | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
   auto_route:
+    providers:
+{{ hermes_routing_auto_route_providers | to_nice_yaml(indent=2, sort_keys=False) | indent(6, True) }}
     tier_roles:
       light: researcher
       standard: coder
@@ -513,3 +515,20 @@ skills:
   # eager skill listing is strictly more capable and costs nothing on
   # claude-subscription-directsdk-experimental.
   lazy_listing: false
+
+# Declared in full even though nothing here installs these by template: the
+# `hermes -p dashboard plugins install/enable` tasks in tasks/main.yml MUTATE
+# this file at runtime (appending to plugins.enabled), and hermes itself
+# stamps _config_version on first write. Without both blocks present here, the
+# template render reverts them and the role reports `changed` on
+# 'Render Dashboard Profile config.yaml' forever -- the same non-convergence
+# class fixed for the machine-root template (see its plugins: block). Keep
+# this list a superset of every `hermes -p dashboard plugins enable` this role
+# runs, and keep _config_version >= the version hermes_cli.config migrates to.
+plugins:
+  enabled:
+    - claude-subscription-directsdk-experimental
+    - web-ollama-cloud
+  disabled: []
+_config_version: 46
+
