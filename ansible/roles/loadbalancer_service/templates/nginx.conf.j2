@@ -690,11 +690,16 @@ server {
     }
 
     # Fallbacks to the Drive-backed server (used only when the local tmpfs
-    # copy is absent or the local service is down). The SPA path needs its URI
-    # rewritten back to /gallery/index.html; the data path proxies as-is.
+    # copy is absent or the local service is down). Named locations cannot
+    # carry a URI part in proxy_pass (nginx rejects that at config-test time),
+    # so: the data path relies on nginx preserving the original request URI on
+    # an error_page internal redirect (the canonical upstream-failover
+    # pattern); the SPA path additionally rewrites, because its incoming URI
+    # (/ or /index.html) is not the path the Drive server serves.
     location @gallery_drive_spa {
         internal;
-        proxy_pass http://{{ ip_media_gallery }}:8089/gallery/index.html;
+        rewrite ^ /gallery/index.html break;
+        proxy_pass http://{{ ip_media_gallery }}:8089;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
