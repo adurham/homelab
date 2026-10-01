@@ -1,0 +1,18 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# Sequential heavy-job runner: reclaim hidden duplicates -> video dedupe sweep
+# -> spam OCR scan, ONE AT A TIME (running them concurrently pushed this
+# 2-vCPU/8GB CT to load 32 + 100% swap, and an OOM killed the trash service
+# mid-reclaim). Each stage is resumable, and the timer re-fires until the work
+# is done (each stage self-stops cheaply when there's nothing left).
+[Unit]
+Description=media-gallery heavy jobs (reclaim -> video dedupe -> spam scan)
+After=network-online.target media-gallery-trash.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/bin/bash {{ media_gallery_dir }}/gallery_heavy_jobs.sh
+# No TimeoutStartSec: each stage is genuinely long (the reclaim alone is tens
+# of thousands of Drive deletes) and every stage checkpoints itself, so a kill
+# only loses the current item.

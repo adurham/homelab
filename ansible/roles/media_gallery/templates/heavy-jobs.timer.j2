@@ -1,0 +1,13 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# Fires the sequential heavy-job runner and re-fires until the backlog is
+# empty. OnUnitInactiveSec (NOT OnUnitActiveSec) gives a real gap between runs
+# — a long run must not make the next deadline fire immediately.
+[Unit]
+Description=media-gallery heavy jobs schedule (reclaim/dedupe/spam, sequential)
+
+[Timer]
+OnBootSec=30min
+OnUnitInactiveSec=20min
+
+[Install]
+WantedBy=timers.target

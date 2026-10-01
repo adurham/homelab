@@ -274,6 +274,51 @@
   register: tesseract_install
   until: tesseract_install is succeeded
 
+# ─── Heavy jobs (reclaim -> video dedupe -> spam scan), sequential ──────────
+# Running these concurrently pushed the CT to load 32 + 100% swap and an OOM
+# killed the trash service mid-reclaim. The runner serializes them with a
+# health gate between stages; the timer re-fires until the backlog is empty.
+- name: Deploy Reclaim Driver (hidden duplicate removal; dry-run by default)
+  ansible.builtin.copy:
+    src: reclaim_hidden.py
+    dest: "{{ media_gallery_dir }}/reclaim_hidden.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Deploy Heavy Jobs Runner (sequential + health-gated)
+  ansible.builtin.copy:
+    src: gallery_heavy_jobs.sh
+    dest: "{{ media_gallery_dir }}/gallery_heavy_jobs.sh"
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Render Heavy Jobs Service Unit
+  ansible.builtin.template:
+    src: heavy-jobs.service.j2
+    dest: /etc/systemd/system/media-gallery-heavy-jobs.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Heavy Jobs Timer Unit
+  ansible.builtin.template:
+    src: heavy-jobs.timer.j2
+    dest: /etc/systemd/system/media-gallery-heavy-jobs.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Heavy Jobs Timer
+  ansible.builtin.systemd:
+    name: media-gallery-heavy-jobs.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
 - name: Deploy Duplicate Scanner (tier-1 perceptual hash)
   ansible.builtin.copy:
     src: dedup_scan.py
