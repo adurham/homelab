@@ -418,12 +418,11 @@ ENTIRELY as the feed for the lab corner: pve01/pve02/pve03, the GS108 switch,
 AND the two Mac Studios on the battery-backed outlets (exactly 6 — one per
 device); the strip leaves the path entirely. No circuit tester / no separate
 replacement strip needed.
-- LOAD BUDGET to check once connected: rated 900W/1500VA. Realistic combined
-  draw ~400-650W (3 OptiPlex nodes ~150-300W; 2 Mac Studios variable,
-  peak under exo load is the big unknown; GS108 ~5W). Check the LCD load %
-  with everything running and stay under ~75-80% for headroom; if peak
-  concurrent load reads high, move the studios to surge-only outlets (they
-  ride sags well today) or split to a second UPS later.
+- LOAD BUDGET (resolved 2026-10-01, user-measured): total ≈705W worst case
+  — 3 OptiPlex nodes (~300W combined worst case) + 2 Mac Studios (~200W
+  each max, user has never seen them exceed this) + GS108 (~5W) — against
+  the 900W rating, ~20% headroom. Comfortable fit; no need to relegate the
+  studios to surge-only outlets.
 - This simultaneously mitigates AND discriminates: no more events -> strip
   contacts were the fault; UPS logs a transfer/AVR event per incident ->
   upstream sag (timestamps close the case); pve02 dies alone on clean UPS
