@@ -33,9 +33,12 @@ mkdir -p "$SERVE_DIR/gallery"
 
 # Only the files the SPA actually fetches over HTTP. hidden.json / folder_meta
 # / excluded.json are read server-side via rclone, never by the browser.
+# sizes.json is a compact "chat/stem" -> bytes sidecar for the trash service's
+# audit ledger (reading the 85MB manifest for a size lookup OOM-killed the
+# trash unit under bulk deletes, 2026-10-01).
 LIST="$(mktemp)"
 trap 'rm -f "$LIST"' EXIT
-printf 'index.html\nmanifest.json\nfolders.json\ndedup.json\n' >"$LIST"
+printf 'index.html\nmanifest.json\nfolders.json\ndedup.json\nsizes.json\n' >"$LIST"
 
 rclone --config "$RCLONE_CONF" copy "$GALLERY_REMOTE" "$SERVE_DIR/gallery/" \
   --files-from "$LIST" --transfers 4 --checkers 4 --stats=0 \
