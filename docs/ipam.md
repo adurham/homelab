@@ -410,6 +410,23 @@ onto a different circuit entirely, then wait.
 An old strip with an escalating event frequency is a fire-risk item as well
 as a reliability one: inspect for discoloration/warmth before trusting it.
 
+**REMEDIATION (2026-10-01, decided):** user ordered a CyberPower GX1500U
+(1500VA/900W pure sine wave, line-interactive, AVR, 12 outlets — 6
+battery+surge / 6 surge-only, USB+serial monitoring, NUT-supported via
+usbhid-ups — Best Buy open-box $197). The UPS will replace the old strip
+ENTIRELY as the feed for the lab corner: pve01/pve02/pve03 + the GS108 switch
+all move onto its battery-backed outlets, the strip leaves the path. No
+circuit tester / no separate replacement strip needed (12 outlets covers the
+4 devices).
+- This simultaneously mitigates AND discriminates: no more events -> strip
+  contacts were the fault; UPS logs a transfer/AVR event per incident ->
+  upstream sag (timestamps close the case); pve02 dies alone on clean UPS
+  power -> that machine's own PSU/cord.
+- TO DO on arrival: wire NUT (usbhid-ups) on a CT or node hosting the UPS's
+  USB, export input.voltage + ups.status to VictoriaMetrics, add a Grafana
+  alert for transfer events (OB/OL transitions) so the next occurrence
+  timestamps itself. Update this entry with the outcome.
+
 **Next occurrence, first moves (updated):** read `/root/lab_witness.log`
 on all three nodes for the drop ordering (node-side 1s witnesses are now the
 primary instrument), then Loki for the final lines, then compute the
