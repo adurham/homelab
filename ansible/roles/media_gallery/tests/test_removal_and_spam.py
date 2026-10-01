@@ -93,7 +93,10 @@ def test_ledger_exclude_false_keeps_stem_capturable():
 
 
 def test_ledger_caps_growth():
-    """The ledger must not grow without bound (MAX_ENTRIES trims oldest)."""
+    """The ledger must not grow without bound (MAX_ENTRIES trims oldest) --
+    and trimmed records must ROLL INTO THE ARCHIVE, not vanish. (Regression:
+    the 2026-10-01 bulk reclaim silently dropped the earliest audit records
+    once it passed the 50k cap -- exactly what this ledger exists to track.)"""
     with tempfile.TemporaryDirectory() as d:
         td = Path(d)
         rl = _fresh("removal_ledger", td)
@@ -106,6 +109,22 @@ def test_ledger_caps_growth():
         stems = [e["stem"] for e in entries]
         if stems != ["s7", "s8", "s9", "s10", "s11"]:
             raise AssertionError(f"expected the NEWEST 5, got {stems}")
+        # the 7 trimmed records must survive in the archive, in order
+        import json as _j
+        arch = _j.loads(rl.ARCHIVE.read_text())["entries"]
+        arch_stems = [e["stem"] for e in arch]
+        if arch_stems != [f"s{i}" for i in range(7)]:
+            raise AssertionError(f"expected archived s0..s6, got {arch_stems}")
+        # a second overflow appends rather than replaces (3 more adds -> 3
+        # more trims at MAX=5: archive 7 -> 10, live stays at 5)
+        for i in range(12, 15):
+            rl.record_removal(f"s{i}", "c", exclude=False)
+        arch2 = _j.loads(rl.ARCHIVE.read_text())["entries"]
+        if len(arch2) != 10:
+            raise AssertionError(f"expected 10 archived after 2nd overflow, got {len(arch2)}")
+        live2 = rl.load_ledger()
+        if [e["stem"] for e in live2] != ["s10", "s11", "s12", "s13", "s14"]:
+            raise AssertionError(f"live after 2nd overflow: {[e['stem'] for e in live2]}")
 
 
 def test_video_upstream_id_tier_a():
