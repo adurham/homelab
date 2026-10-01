@@ -106,85 +106,7 @@ hermes_routing_model_by_role:
     fallback:
       model: glm-5.3
       provider: ollama-cloud
-  pii-detector:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  project-board-sync:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  sync-coordinator:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  performance-monitor:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  resource-allocator:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  base-template-generator:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  release-manager:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  workflow-automation:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  load-balancer:
-    model: gemma4:31b
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  test-long-runner:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  aidefence-guardian:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  claims-authorizer:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
   researcher:
-    model: glm-5.3-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-haiku-4-5-20251001
-      provider: claude-subscription-directsdk-experimental
-  scout-explorer:
     model: glm-5.3-flash
     provider: ollama-cloud
     fallback:
@@ -196,115 +118,7 @@ hermes_routing_model_by_role:
     fallback:
       model: claude-sonnet-5
       provider: claude-subscription-directsdk-experimental
-  analyze-code-quality:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  issue-tracker:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  pr-manager:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
   tester:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  planner:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  github-modes:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  dev-backend-api:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  data-ml-model:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  ops-cicd-github:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  docs-api-openapi:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  spec-mobile-react-native:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  production-validator:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  test-architect:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  python-specialist:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  typescript-specialist:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  database-specialist:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  project-coordinator:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  topology-optimizer:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  benchmark-suite:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
@@ -316,122 +130,8 @@ hermes_routing_model_by_role:
     fallback:
       model: claude-sonnet-5
       provider: claude-subscription-directsdk-experimental
-  specification:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  pseudocode:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  refinement:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  memory-specialist:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  agent:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  goal-planner:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  code-goal-planner:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  performance-optimizer:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
   arch-system-design:
     model: glm-5.3
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  architecture:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  adr-architect:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  security-architect:
-    model: kimi-k2.7-code
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  security-architect-aidefence:
-    model: kimi-k2.7-code
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  security-auditor:
-    model: kimi-k2.7-code
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  ddd-domain-expert:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  performance-engineer:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  sparc-orchestrator:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5
-      provider: claude-subscription-directsdk-experimental
-  injection-analyst:
-    model: kimi-k2.7-code
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  repo-architect:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
-  reasoningbank-learner:
-    model: deepseek-v4.1-flash
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
@@ -440,91 +140,24 @@ hermes_routing_model_by_role:
 # stays max as the default for untyped dispatches). Adam, 2026-09-29.
 hermes_routing_reasoning_effort_by_role:
   orchestrator: max
-  sparc-orchestrator: max
   arch-system-design: max
-  architecture: max
-  adr-architect: max
-  ddd-domain-expert: max
-  repo-architect: max
-  reasoningbank-learner: max
   sr-coder: max
   consultant: max
-  performance-engineer: max
   mid-coder: high
   coder: high
   pm: high
   reviewer: high
-  security-architect: high
-  security-architect-aidefence: high
-  security-auditor: high
-  injection-analyst: high
-  python-specialist: high
-  typescript-specialist: high
-  database-specialist: high
-  dev-backend-api: high
-  data-ml-model: high
-  docs-api-openapi: high
-  spec-mobile-react-native: high
-  ops-cicd-github: high
-  test-architect: high
   tester: high
-  production-validator: high
-  planner: high
-  goal-planner: high
-  code-goal-planner: high
   code-analyzer: high
-  analyze-code-quality: high
-  specification: high
-  pseudocode: high
-  refinement: high
-  memory-specialist: high
-  topology-optimizer: high
-  agent: high
-  test-long-runner: high
-  benchmark-suite: high
   performance-benchmarker: high
-  performance-optimizer: high
   researcher: medium
-  scout-explorer: medium
-  issue-tracker: medium
-  pr-manager: medium
-  github-modes: medium
-  project-coordinator: medium
-  aidefence-guardian: medium
-  claims-authorizer: medium
   jr-coder: medium
-  pii-detector: low
-  project-board-sync: low
-  sync-coordinator: low
-  performance-monitor: low
-  resource-allocator: low
-  base-template-generator: low
-  release-manager: low
-  workflow-automation: low
-  load-balancer: low
-
 # Per-role iteration caps. Coding/real-work roles use the spawn-role default
 # (leaf 300 / orchestrator 500 -- round-2 coders needed 176-201 steps);
 # only utility (30) and ops/tooling (60) roles are capped lower.
 hermes_routing_max_iterations_by_role:
   orchestrator: 500
   leaf: 300
-  pii-detector: 30
-  project-board-sync: 30
-  sync-coordinator: 30
-  performance-monitor: 30
-  resource-allocator: 30
-  base-template-generator: 30
-  release-manager: 30
-  workflow-automation: 30
-  load-balancer: 30
-  issue-tracker: 60
-  pr-manager: 60
-  github-modes: 60
-  project-coordinator: 60
-  aidefence-guardian: 60
-  claims-authorizer: 60
-
 # Providers for which delegation auto-routing may run. The fork's
 # tools/delegation_router.py gate defaults to ('anthropic',) only, which
 # silently disabled auto-routing once the gateway's main provider became
