@@ -311,6 +311,79 @@ check whether the GS108's own uptime counter reset (its web UI at
 192.168.86.51 now answers; a single read-only visit is allowed, do NOT loop
 logins).
 
+**EVENT 2026-10-01 13:23:57 CDT (18:23Z) — SECOND event captured live; first with a full node-side reconstruction.**
+
+This is now the strongest evidence set in the series, and it refines the
+mechanism to a SHORT DEEP POWER SAG on the lab corner. Captured entirely from
+node-side instrumentation (the 1s TCP witnesses) + Loki + VictoriaMetrics:
+
+- **Death order (per the survivors):** pve03's witness logged `pve01=down`
+  at 13:24:00, `pve02=down` at 13:24:01 — BOTH dead within ~1-2s of each
+  other. pve01's own last witness line was 13:23:41 and its journal ends
+  mid-connection-traffic (sshd churn) at 13:23:41 with NO shutdown sequence,
+  no kernel message, no panic. pve02's last Loki line: 13:23:56.207. Both
+  died `crash` (wtmp), no pstore.
+- **pve03 SURVIVED but its NIC carrier dropped for exactly 19s:**
+  `e1000e nic0: NIC Link is Down` at 13:23:58 → `Link is Up 1000 Mbps Full
+  Duplex` at 13:24:17. It stayed quorate, served through, and its HA lock
+  blipped only briefly (watchdog closed 13:24:05, `watchdog active` again
+  13:24:40 — no fire, margin never exhausted).
+- **Power-return math from boot timers:** pve01 `Startup finished in 17.6s
+  (firmware) + 9.792s (loader) + ...`, boot_time 13:24:27 ⇒ power-on ≈
+  13:23:59.5; pve02 firmware 18.331s + loader 15.315s, boot_time 13:24:32
+  ⇒ power-on ≈ 13:23:58.6. So the interruption was only ~2-13 seconds —
+  a SAG, not an outage: power was back before the nodes' ATX supplies
+  fully drained, and pve03's rail never dropped below its PS-ON threshold.
+- **Blast radius that rode it out / died:** the GS108 corner switch ALSO
+  rebooted (~19s: netgear mgmt `down 13:24:02 → up 13:24:18`) in the same
+  instant the two nodes died, while the SG105E briefly dropped as well
+  (13:24:03→13:24:32). The Nest router (gw) blipped 13:24:04→13:24:19.
+  Everything recovered; none of the CTs/guests were corrupted.
+- **House power CT:** 18:24 sample 3164 W (no dip; adjacent minutes
+  2832-2905 W) — consistent with past events (1-min average cannot see a
+  sub-second sag).
+- **All other lab hosts** (the whole CT fleet on all three nodes) died and
+  rebooted with their nodes at 18:24:27-32Z — 23 instances' boot_time
+  reset in VictoriaMetrics at that second.
+- **FREQUENCY IS INCREASING:** this is the 3rd occurrence in 35 hours
+  (Sep30 02:34 pve02-solo, Sep30 13:01 all-three, Sep30 21:05 pve02-solo,
+  Oct1 13:24 pve01+pve02), vs one every ~2-4 days before. pve02 died in
+  ALL FOUR; it is the canary (lowest ride-through on the strip).
+
+**Mechanism conclusion:** the pattern is a short (2-20s) deep voltage sag on
+the branch feeding the lab corner (nodes + GS108 + SG105E all on it), with
+per-PSU ride-through differences deciding who survives. This kills the
+remaining alternatives: a clean series break would take everything to power-on
+instantaneously with zero recovery stagger AND no survivor; an HA self-fence
+cannot drop a switch's and the router's own mgmt planes, and the 60s watchdog
+margin was never approached. The GS108's mgmt plane dying with them is the
+discriminator that rules OUT a pure-L2 cause. Consult (glm-5.3, 2026-10-01)
+independently read the same evidence and endorsed: "strip-level power
+interruption; switch died and rebooted; pve01/pve02 died; pve03's PSU rode
+through" and noted the stagger means a DECAYING/CHATTERING voltage (arcing
+contact or thermal breaker near threshold), which matches the increasing
+frequency and makes this a potential FIRE-RISK progression, not just a
+reliability nuisance.
+
+**Actions taken 2026-10-01:**
+- `lab_witness.sh` v2 deployed to all three nodes (repo
+  `scripts/network/lab_witness.sh`): added a `wan` probe (TCP 1.1.1.1:443)
+  so the next event can separate house/WAN-side from lab-local, and the
+  probe list now covers the corner switches + router.
+- Incident record: this entry. Next-event protocol below.
+
+**Next occurrence, first moves (updated):** read `/root/lab_witness.log`
+on all three nodes for the drop ordering (node-side 1s witnesses are now the
+primary instrument), then Loki for the final lines, then compute the
+power-return time from `Startup finished` + boot_time. If a survivor shows a
+NIC blip again, that's the sag signature. Physical: inspect the strip and
+wall receptacle feeding the lab corner for discoloration/warmth (arcing =
+fire risk), reseat all plugs, and consider a cheap UPS+NUT piped into
+Loki/VM — it converts every invisible sag into a logged transfer event and
+mitigates it simultaneously; with the current cadence a verdict lands within
+days. Note the nodes share ONE strip (user, 2026-09-28) and pve02 is the
+most sensitive point.
+
 Evidence gathered 2026-09-28 (VictoriaMetrics `node_boot_time_seconds`
 steps + Loki journals + HA per-circuit power):
 

@@ -19,18 +19,27 @@
 #
 # Log is transition-only (+30s heartbeat) and fsync'd, so the tail survives an
 # abrupt power loss. Rotates at 5 MB. Deployed by Hermes 2026-09-29.
+# v2 (2026-10-01): added the `wan` probe (TCP 1.1.1.1:443) so a future event
+# can separate a house/WAN-side drop from a lab-local one. Shipped after the
+# Oct 1 event was fully reconstructed from NODE-side data alone (see
+# docs/ipam.md, EVENT 2026-10-01): 2-of-3 nodes hard-reset + the GS108 switch
+# rebooting under them, consistent with a short deep power sag on the lab
+# corner. The WAN probe adds the one missing axis next time.
 # Unit file: lab-witness.service
 LOG=/root/lab_witness.log
 MAXB=5242880
 
 # name ip port   ("icmp" = ICMP echo; nodes use TCP/22 because inter-node ICMP
-# is firewalled off by design)
+# is firewalled off by design; wan = TCP to a public IP, reachable when the
+# whole path house->internet is up — it traverses the same corner switches,
+# so read it together with the switch probes, never alone)
 TARGETS="pve01 192.168.86.11 22
 pve02 192.168.86.12 22
 pve03 192.168.86.13 22
 netgear 192.168.86.51 80
 sg105e 192.168.86.15 80
-gw 192.168.86.1 icmp"
+gw 192.168.86.1 icmp
+wan 1.1.1.1 443"
 
 declare -A PREV
 
