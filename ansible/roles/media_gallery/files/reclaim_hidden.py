@@ -29,9 +29,9 @@ Usage:
 """
 import argparse
 import json
+import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 STATE = Path("/var/lib/media-gallery")
@@ -93,11 +93,19 @@ def post_trashbatch(chat, stems, apply_):
         "detail": "reclaim: hidden duplicate copy removal",
         "by": "reclaim_hidden",
     }).encode()
-    req = urllib.request.Request(  # noqa: S310 — own trusted local service
-        f"{TRASH_URL}/trashbatch", data=body,
-        headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310
-        return json.loads(resp.read())
+    # curl (not urllib): urllib's timeout bounds each read, not the whole
+    # transfer — a stalled peer hung a sibling sweep for 80+ minutes on this
+    # box (2026-10-01). curl --max-time is a hard wall-clock cap, and -sS
+    # keeps the failure message visible.
+    r = subprocess.run(
+        ["curl", "-fsS", "--max-time", "280", "--retry", "2",
+         "--retry-delay", "3", "-X", "POST",
+         "-H", "Content-Type: application/json", "--data-binary", "@-",
+         f"{TRASH_URL}/trashbatch"],
+        input=body, capture_output=True, timeout=600)
+    if r.returncode != 0:
+        raise IOError(f"trashbatch curl rc={r.returncode}: {r.stderr[:200]!r}")
+    return json.loads(r.stdout)
 
 
 def main():
@@ -170,10 +178,13 @@ def main():
         "each stem also has a reason=duplicate record in the removal ledger.")
     # spot-verify via the ledger API
     try:
-        req = urllib.request.Request(f"{TRASH_URL}/deletions?reason=duplicate&limit=1")  # noqa: S310
-        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
-            summ = json.loads(resp.read()).get("summary") or {}
-        log(f"ledger summary now: {summ}")
+        r = subprocess.run(
+            ["curl", "-fsS", "--max-time", "60",
+             f"{TRASH_URL}/deletions?reason=duplicate&limit=1"],
+            capture_output=True, timeout=120)
+        if r.returncode == 0:
+            summ = json.loads(r.stdout).get("summary") or {}
+            log(f"ledger summary now: {summ}")
     except Exception as e:  # noqa: BLE001
         log(f"(ledger verify skipped: {e})")
     return 0
