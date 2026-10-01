@@ -450,13 +450,35 @@ def main():
         } for s in members_sorted])
     dup_groups.sort(key=len, reverse=True)
 
+    # ---- VIDEO duplicate lane (2026-10-01) ----
+    # dedup_scan historically saw ONLY images (dHash over thumbnails; videos
+    # excluded entirely), leaving the single biggest reclaim untouched: live
+    # measurement found ~51 GB in same-size video groups, including
+    # byte-identical pairs pushed from two accounts. dedup_videos.py adds two
+    # confidence tiers (same-upstream-id+size = mechanical; otherwise
+    # sha256 chunk verification over the local HTTP range path). Merged here so
+    # the Duplicates review + hide ledger treat them uniformly.
+    video_groups = []
+    try:
+        import dedup_videos
+        video_groups = dedup_videos.as_dedup_groups(
+            dedup_videos.find_video_duplicates(manifest, progress=None))
+        log(f"video lane: {len(video_groups)} duplicate groups "
+            f"({sum(len(g) - 1 for g in video_groups)} extra copies)")
+    except Exception as e:  # noqa: BLE001 — the image lane must not fail on this
+        log(f"video lane FAILED (image scan unaffected): {type(e).__name__}: {e}")
+    all_groups = dup_groups + video_groups
+    all_groups.sort(key=len, reverse=True)
+
     out = {
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "hamming": HAMMING,
         "scanned": len(hashes),
-        "groups": dup_groups,
-        "dup_items": sum(len(g) for g in dup_groups),
-        "dup_groups": len(dup_groups),
+        "groups": all_groups,
+        "dup_items": sum(len(g) for g in all_groups),
+        "dup_groups": len(all_groups),
+        "video_groups": len(video_groups),
+        "video_extra_copies": sum(len(g) - 1 for g in video_groups),
     }
     op = work / "dedup.json"
     op.write_text(json.dumps(out, separators=(",", ":")))
@@ -465,7 +487,7 @@ def main():
         log("upload dedup.json failed:", r.stderr[:200])
         sys.exit(1)
     publish_local(op, "dedup.json", log=log)
-    log(f"dedup.json: {len(dup_groups)} groups, {out['dup_items']} items, "
+    log(f"dedup.json: {len(all_groups)} groups, {out['dup_items']} items, "
         f"{time.time() - t0:.1f}s — DONE")
 
     # ---- hidden ledger ----
@@ -486,9 +508,13 @@ def main():
             pass
         # 'keep' survives only for stems still in the manifest
         keep = {s for s in keep if s in items}
-        # hide every non-newest group member, minus the keep overrides
+        # hide every non-newest group member, minus the keep overrides.
+        # 2026-10-01: this now covers the VIDEO groups too (all_groups) — same
+        # semantics as images, so a video duplicate vanishes from browsing and
+        # shows up in the Duplicates review, where deleting it reclaims the
+        # bytes. Hiding is always reversible from that page.
         hidden = set()
-        for group in dup_groups:  # each group already newest-first
+        for group in all_groups:  # each group already newest-first
             for m in group[1:]:
                 hidden.add(m["stem"])
         hidden -= keep
