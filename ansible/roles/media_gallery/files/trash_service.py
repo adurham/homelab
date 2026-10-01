@@ -32,6 +32,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from serve_publish import publish_local
+from removal_ledger import record_removal, record_many, load_ledger, summary
 
 REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
@@ -53,6 +54,7 @@ DEDUP_REMOTE = REMOTE + "gallery/dedup.json"
 QUEUE_FILE = Path(os.environ.get("TG_DELETE_QUEUE", "/var/lib/media-gallery/pending_delete.json"))
 SRC = REMOTE + "by-chat"
 THUMBS = REMOTE + "thumbs"
+GALLERY = REMOTE + "gallery"
 EXCLUDE_REMOTE = REMOTE + "gallery/excluded.json"
 
 _lock = threading.Lock()
@@ -137,6 +139,11 @@ def undo_deletes(stems: list) -> dict:
         save_excluded(ex)
     if restorable:
         _trigger_manifest_rebuild()
+        # AUDIT TRAIL: record the UNDO too, so the history shows the full arc
+        # (marked -> restored) rather than a delete that silently vanished.
+        for s in restorable:
+            record_removal(s, "", action="restored", reason="user_undo",
+                           detail="trashundo", by="user", exclude=False)
     too_late = [s for s in sset if s not in set(restorable)]
     return {"restored": restorable, "restored_count": len(restorable),
             "too_late": too_late}
@@ -206,6 +213,50 @@ def find_original_leaf(chat, stem):
     return None
 
 
+_MANIFEST_SIZE_CACHE = {"data": None, "ts": 0.0}
+
+
+def _manifest_sizes(chat, stems) -> dict:
+    """Bulk size lookup {stem: bytes} from the local manifest (ONE read for the
+    whole batch — the per-stem `_manifest_size` would re-parse an 85MB file for
+    every stem in a bulk delete). Cached for 60s so a burst of deletes shares
+    one parse."""
+    import json as _json
+    now = time.time()
+    if _MANIFEST_SIZE_CACHE["data"] is None or now - _MANIFEST_SIZE_CACHE["ts"] > 60:
+        data = None
+        try:
+            from serve_publish import local_path
+            p = local_path("manifest.json")
+            if p.is_file():
+                data = _json.loads(p.read_text())
+        except (OSError, ValueError):
+            data = None
+        if data is None:
+            try:
+                r = rclone("cat", f"{GALLERY}/manifest.json")
+                if r.returncode == 0 and r.stdout.strip():
+                    data = _json.loads(r.stdout)
+            except (OSError, ValueError):
+                data = None
+        if data is not None:
+            _MANIFEST_SIZE_CACHE["data"] = data
+            _MANIFEST_SIZE_CACHE["ts"] = now
+    data = _MANIFEST_SIZE_CACHE["data"] or []
+    want = {(chat, s) for s in stems}
+    out = {}
+    for it in data:
+        k = (it.get("chat") or "", it.get("stem"))
+        if k in want:
+            out[k[1]] = int(it.get("size") or 0)
+    return out
+
+
+def _manifest_size(chat, stem) -> int:
+    """Byte size of ONE stem (single-item deletes). See _manifest_sizes."""
+    return _manifest_sizes(chat, [stem]).get(stem, 0)
+
+
 def trash_item(chat, stem) -> dict:
     with _lock:
         result = {"stem": stem, "chat": chat, "deleted": [], "errors": []}
@@ -230,6 +281,13 @@ def trash_item(chat, stem) -> dict:
             ex.add(stem)
             save_excluded(ex)
             result["excluded_total"] = len(ex)
+            # AUDIT TRAIL (2026-10-01): record WHY this vanished (the exclusion
+            # ledger above already guarantees the collectors won't re-fetch).
+            # Size is looked up from the local manifest so the ledger can show
+            # real reclaimed bytes.
+            record_removal(stem, chat, action="deleted", reason="user_delete",
+                           detail="trash single", size=_manifest_size(chat, stem),
+                           by="user")
             _trigger_manifest_rebuild()
             _prune_dedup_report([stem])
         else:
@@ -382,6 +440,25 @@ class Handler(BaseHTTPRequestHandler):
                 "reaped": _reaper_state["reaped"],
                 "failed": _reaper_state["failed"],
             })
+        if p.startswith("/deletions"):
+            # AUDIT TRAIL read API (2026-10-01): what was removed/deduped and
+            # WHY. Query: ?limit=N (newest first), ?action=, ?reason=, ?chat=.
+            from urllib.parse import parse_qs
+            qs = parse_qs(p.split("?", 1)[1]) if "?" in p else {}
+            limit = int((qs.get("limit") or ["200"])[0])
+            want_action = (qs.get("action") or [None])[0]
+            want_reason = (qs.get("reason") or [None])[0]
+            want_chat = (qs.get("chat") or [None])[0]
+            entries = load_ledger()
+            if want_action:
+                entries = [e for e in entries if e.get("action") == want_action]
+            if want_reason:
+                entries = [e for e in entries if e.get("reason") == want_reason]
+            if want_chat:
+                entries = [e for e in entries if e.get("chat") == want_chat]
+            entries = list(reversed(entries))[:max(1, min(limit, 5000))]
+            return self._json(200, {"entries": entries, "count": len(entries),
+                                    "summary": summary()})
         self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -449,6 +526,18 @@ class Handler(BaseHTTPRequestHandler):
             for s in stems:
                 ex.add(s)
             save_excluded(ex)
+        # AUDIT TRAIL (2026-10-01): record the intent + reason for every stem
+        # as soon as it's marked (the actual bytes go later via the reaper).
+        # `reason` is caller-supplied so bulk deletes (duplicates review, spam
+        # cleanup) can say WHY, instead of everything being an opaque "delete".
+        _sz = _manifest_sizes(chat, stems)
+        record_many([{"stem": s, "chat": chat, "size": _sz.get(s, 0)}
+                     for s in stems],
+                    action="deleted",
+                    reason=(body.get("reason") or "user_delete"),
+                    detail=(body.get("detail") or "trashmark"),
+                    by=(body.get("by") or "user"),
+                    exclude=False)   # already excluded just above
         # 2) queue the real deletes for the background reaper
         added = enqueue_deletes(chat, stems)
         # 3) kick a manifest rebuild so a fresh page load is already correct
@@ -510,6 +599,15 @@ class Handler(BaseHTTPRequestHandler):
             for s in stems:
                 ex.add(s)
             save_excluded(ex)
+            # AUDIT TRAIL (2026-10-01): same as the mark path — record why.
+            _sz = _manifest_sizes(chat, stems)
+            record_many([{"stem": s, "chat": chat, "size": _sz.get(s, 0)}
+                         for s in stems],
+                        action="deleted",
+                        reason=(body.get("reason") or "user_delete"),
+                        detail=(body.get("detail") or "trashbatch"),
+                        by=(body.get("by") or "user"),
+                        exclude=False)   # already excluded just above
             _trigger_manifest_rebuild()
             _prune_dedup_report(stems)
             return self._json(200, {"deleted": deleted, "requested": len(stems),
