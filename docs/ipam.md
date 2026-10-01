@@ -334,11 +334,16 @@ node-side instrumentation (the 1s TCP witnesses) + Loki + VictoriaMetrics:
   ⇒ power-on ≈ 13:23:58.6. So the interruption was only ~2-13 seconds —
   a SAG, not an outage: power was back before the nodes' ATX supplies
   fully drained, and pve03's rail never dropped below its PS-ON threshold.
-- **Blast radius that rode it out / died:** the GS108 corner switch ALSO
-  rebooted (~19s: netgear mgmt `down 13:24:02 → up 13:24:18`) in the same
-  instant the two nodes died, while the SG105E briefly dropped as well
-  (13:24:03→13:24:32). The Nest router (gw) blipped 13:24:04→13:24:19.
-  Everything recovered; none of the CTs/guests were corrupted.
+- **Blast radius, corrected reading (2026-10-01 20:40):** pve03's link partner
+  port went down for the full 19s (its PHY logged carrier loss 13:23:58 →
+  link back 13:24:17; the GS108 answered again 1s AFTER link return). The
+  upstream SG105E's mgmt plane stayed unreachable ~15s LONGER than the
+  survivor's own link recovery (down 13:24:03, up 13:24:32) — independent
+  evidence the disturbance reached above the corner. CAVEAT: the netgear and
+  router probe "down" windows (13:24:02→:18, 13:24:04→:19) overlap pve03's
+  OWN link outage, so they are NOT independent evidence those devices
+  rebooted this time — do not cite them as such. Everything recovered; none
+  of the CTs/guests were corrupted.
 - **House power CT:** 18:24 sample 3164 W (no dip; adjacent minutes
   2832-2905 W) — consistent with past events (1-min average cannot see a
   sub-second sag).
@@ -350,20 +355,22 @@ node-side instrumentation (the 1s TCP witnesses) + Loki + VictoriaMetrics:
   Oct1 13:24 pve01+pve02), vs one every ~2-4 days before. pve02 died in
   ALL FOUR; it is the canary (lowest ride-through on the strip).
 
-**Mechanism conclusion:** the pattern is a short (2-20s) deep voltage sag on
-the branch feeding the lab corner (nodes + GS108 + SG105E all on it), with
-per-PSU ride-through differences deciding who survives. This kills the
-remaining alternatives: a clean series break would take everything to power-on
-instantaneously with zero recovery stagger AND no survivor; an HA self-fence
-cannot drop a switch's and the router's own mgmt planes, and the 60s watchdog
-margin was never approached. The GS108's mgmt plane dying with them is the
-discriminator that rules OUT a pure-L2 cause. Consult (glm-5.3, 2026-10-01)
-independently read the same evidence and endorsed: "strip-level power
-interruption; switch died and rebooted; pve01/pve02 died; pve03's PSU rode
-through" and noted the stagger means a DECAYING/CHATTERING voltage (arcing
-contact or thermal breaker near threshold), which matches the increasing
-frequency and makes this a potential FIRE-RISK progression, not just a
-reliability nuisance.
+**Mechanism conclusion:** the pattern is a short (seconds-long) deep voltage
+sag on the branch feeding the lab corner, with per-PSU ride-through
+differences deciding who survives. What kills the alternatives: a clean
+series break would take everything to power-on instantaneously with zero
+recovery stagger AND no survivor; HA self-fence is excluded by timing (deaths
+<25s after a healthy quorum heartbeat vs the 60s softdog margin, no fence
+lines); and the load-bearing discriminator vs a NETWORK fault is physical —
+two hosts hard-died instantly with zero pre-death signature AND the surviving
+third host's NIC carrier dropped in the same second. No network fault
+hard-kills a host, and none resets a live host's PHY carrier. Consult
+(glm-5.3, 2026-10-01) independently read the same evidence and endorsed:
+"strip-level power interruption; switch died and rebooted; pve01/pve02 died;
+pve03's PSU rode through" and noted the stagger means a DECAYING/CHATTERING
+voltage (arcing contact or thermal breaker near threshold), which matches the
+increasing frequency and makes this a potential FIRE-RISK progression, not
+just a reliability nuisance.
 
 **Actions taken 2026-10-01:**
 - `lab_witness.sh` v2 deployed to all three nodes (repo
@@ -371,6 +378,37 @@ reliability nuisance.
   so the next event can separate house/WAN-side from lab-local, and the
   probe list now covers the corner switches + router.
 - Incident record: this entry. Next-event protocol below.
+
+**REFINEMENT (2026-10-01 evening, user input): the suspect is the OLD POWER
+STRIP's contacts, not any grid/brownout condition.** The user confirmed the
+strip is old. Key discriminator against a house-brownout reading: a real
+brownout affects every circuit and would show in the Emporia data across the
+house. It does not — Emporia shows the basement circuits calmly at 2-211W
+during the events, whole-house never above ~20kW/30d peak, nothing anywhere
+near overload, and the rest of the house rides every event cleanly. This is
+NOT an overload or a house-wide sag.
+
+What the data CANNOT see: the strip and its sockets/plugs are DOWNSTREAM of
+every CT clamp. A failing contact (arcing, corrosion, spring gone weak) only
+affects devices physically plugged into THAT strip, and draws no measurable
+power — invisible to any CT. So "Emporia shows no problem" is fully
+consistent with a strip-contact fault; it rules out overload/sag, not the
+strip itself.
+
+Also note the survivor nuance: pve03 shares the strip but survived with a 19s
+PHY blip rather than dying. Two candidates: (a) per-device PSU hold-up
+differences (same strip event, only the two most sensitive PSUs dropped), or
+(b) pve02's own PSU/connector is degrading and its fault current is what
+stresses the shared strip. pve02 died in ALL 4 recent events — canary or
+instigator.
+
+**The isolating experiment (free, no hardware):** move pve02 off the strip
+onto a different circuit entirely, then wait.
+- pve02 keeps dying alone -> its PSU/cord, replace that.
+- the OTHER two start dying instead -> the strip (replace it).
+- all quiet -> it was the strip contact, cured by moving.
+An old strip with an escalating event frequency is a fire-risk item as well
+as a reliability one: inspect for discoloration/warmth before trusting it.
 
 **Next occurrence, first moves (updated):** read `/root/lab_witness.log`
 on all three nodes for the drop ordering (node-side 1s witnesses are now the
