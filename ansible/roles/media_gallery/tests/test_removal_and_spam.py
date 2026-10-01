@@ -150,6 +150,30 @@ def test_video_id_extraction_ignores_short_tokens():
             raise AssertionError("browser-upload stems have no upstream id")
 
 
+def test_video_groups_survive_hiding():
+    """REGRESSION (2026-10-01): group detection must NOT filter out
+    already-hidden members. The hide ledger is rebuilt from these groups every
+    run; if a hidden member were excluded, a 2-member group would disintegrate
+    after its first hide and the loser would be UNHIDDEN on the next scan
+    (observed as 'duplicates came back after an hour')."""
+    with tempfile.TemporaryDirectory() as d:
+        td = Path(d)
+        dv = _fresh("dedup_videos", td)
+        mk = lambda stem, chat, hidden: {  # noqa: E731
+            "stem": stem, "chat": chat, "type": "video", "size": 500,
+            "file": f"by-chat/{chat}/x.mp4", "date": "2026-01-01",
+            "hidden": hidden}
+        # same upstream id; the loser is ALREADY hidden from a previous run
+        items = [
+            mk("userA_0hfs2uhp229as7zmuy8mr_source", "userA", False),
+            mk("userB_0hfs2uhp229as7zmuy8mr_source", "userB", True),
+        ]
+        groups = dv.find_video_duplicates(items, max_verify=0)
+        if len(groups) != 1 or len(groups[0]) != 2:
+            raise AssertionError(
+                f"hidden member must stay in the group, got {groups}")
+
+
 def test_spam_classifier_promo_and_ui():
     """The classifier's decision rules (no OCR needed — text is passed in)."""
     with tempfile.TemporaryDirectory() as d:
@@ -212,6 +236,8 @@ def main():
     check("ledger caps growth (keeps newest)", test_ledger_caps_growth)
     check("video Tier A groups by upstream id", test_video_upstream_id_tier_a)
     check("upstream id extraction shape", test_video_id_extraction_ignores_short_tokens)
+    check("video groups survive hiding (stability regression)",
+          test_video_groups_survive_hiding)
     check("spam classifier promo/ui/normal/profile", test_spam_classifier_promo_and_ui)
     check("spam approve hides+records, never deletes", test_spam_approve_never_deletes)
     print(f"test_removal_and_spam: ALL {PASS} TESTS PASSED")

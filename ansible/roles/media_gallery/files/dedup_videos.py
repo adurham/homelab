@@ -141,8 +141,15 @@ def find_video_duplicates(items, max_verify=MAX_VERIFY_PER_RUN, progress=None):
     {stem, chat, thumb, file, date, size, kind, verified} (newest first).
 
     `max_verify` caps how many FILES Tier B will chunk-verify per run
-    (0 = skip Tier B entirely, i.e. Tier A only — used for fast audits)."""
-    vids = [i for i in items if i.get("type") == "video" and not i.get("hidden")]
+    (0 = skip Tier B entirely, i.e. Tier A only — used for fast audits).
+
+    2026-10-01 STABILITY FIX: this must NOT filter out already-hidden items.
+    The hide ledger is rebuilt from these groups every run; excluding hidden
+    members made a 2-member group disintegrate after its first hide, which
+    UNHID the loser on the next hourly scan. Groups must be computed from the
+    full membership set every time.
+    """
+    vids = [i for i in items if i.get("type") == "video"]
     by_size = defaultdict(list)
     for i in vids:
         sz = i.get("size") or 0
