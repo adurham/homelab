@@ -518,6 +518,25 @@ def main():
             for m in group[1:]:
                 hidden.add(m["stem"])
         hidden -= keep
+        # 2026-10-01 INTEGRATION FIX: this rebuild used to RESET hidden to only
+        # this scanner's dup members, silently UNHIDING everything hidden by
+        # another source (spam_scan approvals) on the next hourly run. Preserve
+        # every hide recorded in the removal ledger that is still in the
+        # manifest and not explicitly kept — the ledger is the record of
+        # intent, so it wins over this recompute.
+        try:
+            from removal_ledger import load_ledger
+            # NOTE: `live` must come from the FULL manifest, not `items` —
+            # `items` excludes videos when INCLUDE_VIDEO=0, and a video
+            # spam-hide must still survive this rebuild.
+            live = {it.get("stem") for it in manifest}
+            for e in load_ledger():
+                if e.get("action") == "dedup_hidden" and e.get("reason") != "duplicate":
+                    s = e.get("stem")
+                    if s and s in live and s not in keep:
+                        hidden.add(s)
+        except Exception as e:  # noqa: BLE001 — never fail the scan on this
+            log(f"hidden-ledger union with removal ledger skipped: {type(e).__name__}: {e}")
         ledger = {"hidden": sorted(hidden), "keep": sorted(keep)}
         HIDDEN_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = str(HIDDEN_FILE) + ".tmp"
