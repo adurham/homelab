@@ -54,10 +54,15 @@ EXCLUDE_REMOTE = REMOTE + "gallery/excluded.json"
 # new, so it gets the better default.
 LOCK = Path(os.environ.get("TG_DELETIONS_LOCK", str(STATE / "deletions.lock")))
 
-# Cap the ledger so it can't grow without bound; oldest entries drop first.
-# The user asked to be able to SEE what happened — 50k records is far more
-# history than the UI needs and keeps the file a few MB.
+# Cap the live ledger so it can't grow without bound; oldest entries roll
+# over into an ARCHIVE (deletions-archive.json) rather than being discarded.
+# The user asked to be able to SEE what happened, and the bulk reclaim
+# (70K+ deletions) blew straight past a 50k live cap — silently dropping the
+# earliest audit records, which defeats the purpose. The live file stays a few
+# MB for the UI; the archive is append-only history (also mirrored to Drive).
 MAX_ENTRIES = int(os.environ.get("TG_DELETIONS_MAX", "50000"))
+ARCHIVE = Path(os.environ.get("TG_DELETIONS_ARCHIVE", str(STATE / "deletions-archive.json")))
+REMOTE_ARCHIVE = REMOTE + "gallery/deletions-archive.json"
 
 
 def _now():
@@ -84,10 +89,18 @@ def _load_locked():
 
 
 def _save_locked(entries):
-    """Atomic write + Drive mirror. Caller must hold LOCK."""
+    """Atomic write + Drive mirror. Caller must hold LOCK.
+
+    When the live ledger exceeds MAX_ENTRIES, the OLDEST overflow is APPENDED
+    to the archive before trimming — never discarded. (2026-10-01: the bulk
+    reclaim deleted 70K+ files and silently pushed the earliest audit records
+    off the end of a plain cap, which is exactly what this module exists to
+    prevent.)"""
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     if len(entries) > MAX_ENTRIES:
+        overflow = entries[:-MAX_ENTRIES]
         entries = entries[-MAX_ENTRIES:]
+        _archive_append_locked(overflow)
     obj = {"entries": entries, "updated": _now()}
     fd, tmp = tempfile.mkstemp(dir=str(LEDGER.parent), suffix=".json")
     os.close(fd)
@@ -98,6 +111,32 @@ def _save_locked(entries):
         _rclone("copyto", str(LEDGER), REMOTE_LEDGER)
     except OSError:
         pass
+
+
+def _archive_append_locked(overflow):
+    """Append trimmed records to the archive. Caller must hold LOCK."""
+    try:
+        old = []
+        try:
+            with open(ARCHIVE) as f:
+                raw = json.load(f)
+            old = raw.get("entries") if isinstance(raw, dict) else raw
+            old = old or []
+        except (OSError, ValueError):
+            old = []
+        old.extend(overflow)
+        obj = {"entries": old, "updated": _now()}
+        fd, tmp = tempfile.mkstemp(dir=str(ARCHIVE.parent), suffix=".json")
+        os.close(fd)
+        Path(tmp).write_text(json.dumps(obj, separators=(",", ":")))
+        os.replace(tmp, ARCHIVE)
+        try:
+            _rclone("copyto", str(ARCHIVE), REMOTE_ARCHIVE)
+        except OSError:
+            pass
+    except OSError as e:
+        print(f"[ledger] archive append failed ({len(overflow)} records): {e}",
+              flush=True)
 
 
 def _add_excluded(stems):
