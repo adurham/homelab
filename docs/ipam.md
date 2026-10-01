@@ -414,18 +414,24 @@ as a reliability one: inspect for discoloration/warmth before trusting it.
 (1500VA/900W pure sine wave, line-interactive, AVR, 12 outlets — 6
 battery+surge / 6 surge-only, USB+serial monitoring, NUT-supported via
 usbhid-ups — Best Buy open-box $197). The UPS will replace the old strip
-ENTIRELY as the feed for the lab corner: pve01/pve02/pve03 + the GS108 switch
-all move onto its battery-backed outlets, the strip leaves the path. No
-circuit tester / no separate replacement strip needed (12 outlets covers the
-4 devices).
+ENTIRELY as the feed for the lab corner: pve01/pve02/pve03, the GS108 switch,
+AND the two Mac Studios on the battery-backed outlets (exactly 6 — one per
+device); the strip leaves the path entirely. No circuit tester / no separate
+replacement strip needed.
+- LOAD BUDGET to check once connected: rated 900W/1500VA. Realistic combined
+  draw ~400-650W (3 OptiPlex nodes ~150-300W; 2 Mac Studios variable,
+  peak under exo load is the big unknown; GS108 ~5W). Check the LCD load %
+  with everything running and stay under ~75-80% for headroom; if peak
+  concurrent load reads high, move the studios to surge-only outlets (they
+  ride sags well today) or split to a second UPS later.
 - This simultaneously mitigates AND discriminates: no more events -> strip
   contacts were the fault; UPS logs a transfer/AVR event per incident ->
   upstream sag (timestamps close the case); pve02 dies alone on clean UPS
   power -> that machine's own PSU/cord.
-- TO DO on arrival: wire NUT (usbhid-ups) on a CT or node hosting the UPS's
-  USB, export input.voltage + ups.status to VictoriaMetrics, add a Grafana
-  alert for transfer events (OB/OL transitions) so the next occurrence
-  timestamps itself. Update this entry with the outcome.
+- TO DO on arrival: wire NUT (usbhid-ups) on a host, export input.voltage +
+  ups.status + load to VictoriaMetrics, add a Grafana alert for transfer
+  events (OB/OL transitions) so the next occurrence timestamps itself.
+  Update this entry with the outcome.
 
 **Next occurrence, first moves (updated):** read `/root/lab_witness.log`
 on all three nodes for the drop ordering (node-side 1s witnesses are now the
