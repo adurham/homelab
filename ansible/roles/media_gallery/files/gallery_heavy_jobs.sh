@@ -72,8 +72,11 @@ run_video_dedup() {
 
 run_spam_scan() {
   echo "--- stage: spam OCR scan $(date -Is)"
-  # Bounded slice per cycle; the per-stem OCR cache makes re-runs incremental.
-  sudo -u mediagallery "$PY" "$DIR/spam_scan.py" --budget 30000 \
+  # Bounded slice per cycle. Was 30000 -- at the measured ~0.42/s OCR rate that
+  # is a ~20h stage that monopolized the whole sequential cycle (reclaim
+  # waited a full day between slices). 10000 ≈ 6-7h keeps the stages rotating;
+  # the checkpoint fix means a killed slice resumes from its cache.
+  sudo -u mediagallery "$PY" "$DIR/spam_scan.py" --budget 10000 \
     || echo "spam scan exited non-zero (resumable)"
 }
 
