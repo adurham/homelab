@@ -137,6 +137,64 @@ groups:
           severity: critical
         isPaused: false
 
+      - uid: exo_runners_not_ready
+        title: exo model runners not ready
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # Both nodes report the cluster-wide runner count; max() keeps
+              # the alert alive if one node's scrape is missing. A crashed
+              # runner is re-placed by exo itself (~2 min reload), so this
+              # fires only when it stays down past that.
+              expr: max(exo_runners{job="exo", status="RunnerReady"}) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [2]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Error
+        for: 4m
+        annotations:
+          summary: "exo: fewer than 2 model runners ready"
+          description: "The exo cluster has had fewer than 2 runners in RunnerReady for 4 minutes, so the served model (DeepSeek-V4.1-Flash, TP=2) cannot answer requests. exo re-places a crashed runner on its own in ~2 minutes; this means it did not come back. Check `grep -E 'crashed with critical|Runner terminated' ~/exo.log` on macstudio-m4-1/2, then relaunch with ./start_cluster.sh (rollback: DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-Vision-Exp ./start_cluster.sh)."
+        labels:
+          severity: critical
+        isPaused: false
+
       - uid: tanium_appliance_unreachable
         title: Tanium appliance unreachable
         condition: C
