@@ -11,6 +11,9 @@
 #   - dedup_videos      : verification cache means only NEW videos are hashed
 #   - spam_scan         : OCR verdicts are cached per stem
 # so a crash, reboot, or manual kill loses at most the current item.
+# Each stage also takes a bounded slice per cycle (reclaim --max-items,
+# spam --budget) so all three stages make progress instead of one job
+# monopolizing the box for ~10 hours.
 #
 # Usage: gallery_heavy_jobs.sh [stage]   (no stage = run all, in order)
 set -uo pipefail
@@ -54,7 +57,9 @@ wait_healthy() {
 
 run_reclaim() {
   echo "--- stage: reclaim hidden duplicates $(date -Is)"
-  sudo -u mediagallery "$PY" "$DIR/reclaim_hidden.py" --apply --batch 400 --pause 0.5 \
+  # Bounded slice per cycle so the other stages still get their turn (a full
+  # pass is tens of thousands of files; it resumes next cycle).
+  sudo -u mediagallery "$PY" "$DIR/reclaim_hidden.py" --apply --batch 400 --pause 0.5 --max-items 25000 \
     || echo "reclaim exited non-zero (resumable — re-run continues)"
 }
 
@@ -67,8 +72,8 @@ run_video_dedup() {
 
 run_spam_scan() {
   echo "--- stage: spam OCR scan $(date -Is)"
-  # budget high; the per-stem OCR cache makes re-runs incremental
-  sudo -u mediagallery "$PY" "$DIR/spam_scan.py" --budget 200000 \
+  # Bounded slice per cycle; the per-stem OCR cache makes re-runs incremental.
+  sudo -u mediagallery "$PY" "$DIR/spam_scan.py" --budget 30000 \
     || echo "spam scan exited non-zero (resumable)"
 }
 

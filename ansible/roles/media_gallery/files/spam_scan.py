@@ -91,8 +91,11 @@ def _fetch_original(item, tmpdir):
     this scanner looks for. Verified live 2026-10-01: thumbnail OCR of a promo
     card returned noise while OCR of the SAME original read
     `example.com/examplehandle` cleanly. The thumb is only used for the contact
-    sheet (where a human eyeballs it anyway)."""
-    import urllib.request
+    sheet (where a human eyeballs it anyway).
+
+    Fetch via curl (not urllib): urllib's timeout bounds each read, not the
+    whole transfer, and a mid-body stall hung a sibling sweep for 80+ minutes
+    on this box (2026-10-01). curl --max-time is a hard wall-clock cap."""
     chat = item.get("chat") or ""
     leaf = os.path.basename(item.get("file") or "")
     if not leaf:
@@ -101,15 +104,16 @@ def _fetch_original(item, tmpdir):
     dst = Path(tmpdir) / f"{item.get('stem','x')}{ext}"
     url = f"{HTTP_BASE}/by-chat/{chat}/{leaf}"
     try:
-        req = urllib.request.Request(url)  # noqa: S310 — own trusted local endpoint
-        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
-            data = resp.read()
-        if not data:
-            return None
-        dst.write_bytes(data)
-        return dst
+        r = subprocess.run(
+            ["curl", "-fsS", "--max-time", "120", "--retry", "1",
+             "--retry-delay", "2", "-o", str(dst), url],
+            capture_output=True, timeout=240)
+        if r.returncode == 0 and dst.is_file() and dst.stat().st_size > 0:
+            return dst
+        last = f"curl rc={r.returncode} stderr={r.stderr[:160]!r}"
     except Exception as e:  # noqa: BLE001 — fall through to the rclone path
         last = f"{type(e).__name__}: {e}"
+    dst.unlink(missing_ok=True)
     try:
         r = subprocess.run(
             ["rclone", "--config", RCLONE_CONF, "copyto",

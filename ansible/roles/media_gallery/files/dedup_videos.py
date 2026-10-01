@@ -84,21 +84,28 @@ def _save_cache(cache):
 def _chunk_hash(chat, leaf, offset, count):
     """sha256 of a byte range, via the local HTTP serve (range-capable).
 
+    Uses curl rather than urllib for the fetch: urllib's socket timeout only
+    bounds each individual read, so a peer that stalls mid-request can hang it
+    indefinitely — observed live 2026-10-01: one range read froze a sweep for
+    80+ minutes at zero IO and zero CPU. curl's --max-time is a HARD
+    wall-clock cap on the whole transfer, so a stuck read always terminates
+    (and then falls through to the rclone path).
+
     Falls back to `rclone cat --offset/--count` if the HTTP path fails, so a
     temporarily-down serve degrades to a slower-but-working verification."""
     import hashlib
-    import urllib.request
     url = f"{HTTP_BASE}/by-chat/{chat}/{leaf}"
     h = hashlib.sha256()
     try:
-        # S310: this URL is our own trusted local endpoint (THUMB_VIDEO_HTTP_BASE).
-        req = urllib.request.Request(url, headers={"Range": f"bytes={offset}-{offset + count - 1}"})  # noqa: S310
-        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
-            data = resp.read()
-        if not data:
-            return None
-        h.update(data)
-        return h.hexdigest()
+        r = subprocess.run(
+            ["curl", "-fsS", "--max-time", "90", "--retry", "1",
+             "--retry-delay", "2",
+             "-r", f"{offset}-{offset + count - 1}", url],
+            capture_output=True, timeout=200)
+        if r.returncode == 0 and r.stdout:
+            h.update(r.stdout)
+            return h.hexdigest()
+        last = f"curl rc={r.returncode} stderr={r.stderr[:160]!r}"
     except Exception as e:  # noqa: BLE001 — fall through to the rclone path
         last = f"{type(e).__name__}: {e}"
     try:
@@ -204,6 +211,11 @@ def find_video_duplicates(items, max_verify=MAX_VERIFY_PER_RUN, progress=None):
             by_sig[sig].append(m)
             if progress and verified_count % 20 == 0:
                 progress(verified_count)
+            if verified_count % 25 == 0:
+                # Checkpoint: a kill or stall must not throw away the whole
+                # run's verification work (the cache is ~70KB — saving is
+                # cheap, and re-runs already skip everything cached).
+                _save_cache(cache)
         for _sig, l in by_sig.items():
             if len(l) > 1:
                 groups.append(sorted(l, key=lambda m: m.get("date") or "", reverse=True))
