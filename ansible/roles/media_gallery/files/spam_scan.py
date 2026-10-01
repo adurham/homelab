@@ -48,6 +48,11 @@ TESS = os.environ.get("TESSERACT_BIN", "tesseract")
 # OCR is the expensive part; budget keeps a run bounded (mirrors the backfill's
 # philosophy: do real work, exit, re-run is idempotent).
 DEFAULT_BUDGET = int(os.environ.get("SPAM_BUDGET", "1500"))
+# Persist OCR progress every N items so a kill/OOM mid-scan loses at most this
+# many items of work (2026-10-01: the full scan is 186K images / ~a day per
+# slice -- losing a whole slice to a kill was wasteful; same loss class that
+# bit dedup_videos). The cache+candidates file is the resumability mechanism.
+SPAM_CHECKPOINT_EVERY = int(os.environ.get("SPAM_CHECKPOINT_EVERY", "250"))
 
 PROMO_PAT = re.compile(
     r"(subscribe|follow\s+me|follow\s+for|dm\s+me|dms?\s+open|link\s+in\s+bio|"
@@ -244,8 +249,40 @@ def main():
 
     flagged = []
     t0 = time.time()
+
+    # Precompute the live-set once (write_out() reuses it), and load any
+    # previous candidates so this run's flags overwrite theirs (same "current
+    # wins" merge the old end-of-run code did -- just hoisted so mid-run
+    # checkpoints produce identical output).
+    live = {(i.get("stem"), i.get("chat")) for i in items}
+    all_flagged = {}
+    try:
+        prev_out = json.loads(OUT.read_text()) if OUT.is_file() else {}
+        for f in (prev_out.get("candidates") or []):
+            all_flagged[f["stem"]] = f
+    except (OSError, ValueError):
+        pass
+
+    def write_out():
+        """Atomically persist candidates+cache; returns the live-filtered list."""
+        cand = [f for f in all_flagged.values()
+                if (f["stem"], f["chat"]) in live]
+        OUT.parent.mkdir(parents=True, exist_ok=True)
+        tmp = str(OUT) + ".tmp"
+        Path(tmp).write_text(json.dumps(
+            {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+             "candidates": cand, "cache": cache},
+            separators=(",", ":")))
+        os.replace(tmp, OUT)
+        return cand
+
     tmpdir = tempfile.mkdtemp(prefix="spamscan_")
     for n, i in enumerate(todo, 1):
+        if n % SPAM_CHECKPOINT_EVERY == 0:
+            try:
+                write_out()
+            except OSError as e:
+                log(f"  (checkpoint write failed: {e}; continuing)")
         # OCR the ORIGINAL (thumbnails destroy the text — see _fetch_original)
         src = _fetch_original(i, tmpdir)
         if src is None:
@@ -265,6 +302,7 @@ def main():
             flagged.append({"stem": i.get("stem"), "chat": i.get("chat"),
                             "size": i.get("size"), "flag": flag, "why": why,
                             "ocr": (text or "").strip()[:160]})
+            all_flagged[i.get("stem")] = flagged[-1]
         if n % 100 == 0:
             log(f"  {n}/{len(todo)} ({len(flagged)} flagged so far, "
                 f"{time.time()-t0:.0f}s)")
@@ -274,22 +312,8 @@ def main():
     except OSError:
         pass
 
-    # merge with previously-flagged entries not in this run
-    all_flagged = {f["stem"]: f for f in flagged}
-    try:
-        prev = json.loads(OUT.read_text()) if OUT.is_file() else {}
-        for f in (prev.get("candidates") or []):
-            all_flagged.setdefault(f["stem"], f)
-    except (OSError, ValueError):
-        pass
-    # drop candidates for stems no longer in the manifest
-    live = {(i.get("stem"), i.get("chat")) for i in items}
-    cand = [f for f in all_flagged.values() if (f["stem"], f["chat"]) in live]
-
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                               "candidates": cand, "cache": cache},
-                              separators=(",", ":")))
+    # Final write (same merge/live-filter path as the mid-run checkpoints).
+    cand = write_out()
     by_flag = {}
     for f in cand:
         by_flag[f["flag"]] = by_flag.get(f["flag"], 0) + 1
