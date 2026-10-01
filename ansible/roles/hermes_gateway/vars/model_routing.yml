@@ -92,8 +92,8 @@ hermes_routing_model_by_role:
     model: claude-opus-5-5
     provider: claude-subscription-directsdk-experimental
     fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
+      model: glm-5.3
+      provider: ollama-cloud
   coder:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
