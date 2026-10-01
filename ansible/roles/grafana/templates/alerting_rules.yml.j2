@@ -2201,3 +2201,67 @@ groups:
         labels:
           severity: warning
         isPaused: false
+
+      # Added 2026-10-01 after the recurring-unclean-reboot investigation
+      # (docs/ipam.md, EVENT 2026-10-01): the cluster hard-resets every few
+      # days -- 3 occurrences in 35h on Oct 1 -- and until now the ONLY way
+      # anyone learned about one was a human noticing "the network is slow"
+      # or logs being read after the fact. A node whose boot time jumped in
+      # the last hour is exactly the signature; pve01-03 + the lab corner are
+      # the known victims of the short deep power sag on their shared strip.
+      # This turns the next occurrence into a push notification with the
+      # timestamp, so the witness logs can be read while the evidence is
+      # fresh. Excludes tc-* (disposable Tanium test fleet, rebuilt at will).
+      - uid: pve_node_rebooted
+        title: PVE node rebooted (unexpected/unclean)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: changes(node_boot_time_seconds{instance=~"pve0[123]"}[1h])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "{{ '{{' }} $labels.instance {{ '}}' }} rebooted within the last hour"
+          description: "node_boot_time_seconds changed on {{ '{{' }} $labels.instance {{ '}}' }} in the last hour -- the node restarted. If this was NOT a planned reboot, it is likely another occurrence of the lab-corner power-sag class (docs/ipam.md EVENT 2026-10-01): read /root/lab_witness.log on all three pve nodes for the drop ordering, then Loki for the final lines, then compute power-return from `Startup finished` + boot_time. Check `last -x | head` for whether wtmp recorded it as `crash` (unclean) or a clean shutdown, and check whether a surviving node's NIC carrier dropped (the sag signature)."
+        labels:
+          severity: warning
+        isPaused: false
