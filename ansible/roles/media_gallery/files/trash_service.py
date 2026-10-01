@@ -219,37 +219,40 @@ _MANIFEST_SIZE_CACHE = {"sizes": None, "ts": 0.0}
 def _manifest_sizes(chat, stems) -> dict:
     """Bulk size lookup {stem: bytes} for the audit ledger.
 
-    2026-10-01 MEMORY FIX: this used to retain the WHOLE parsed manifest
-    (~280K item dicts ≈ 400MB) in the service, which — combined with a large
-    delete batch — got the trash service OOM-killed mid-reclaim. It now keeps
-    only a {(chat, stem): size} dict of ints (≈30MB), and drops the parsed
-    document immediately after. The manifest is also read as a plain file
-    (the tmpfs serve copy) with the Drive copy only as a fallback."""
+    2026-10-01 MEMORY FIX (twice over): this used to retain the WHOLE parsed
+    manifest (~280K item dicts ≈ 400MB) in the service; caching a reduced
+    map still required *parsing* the 85MB manifest (~400MB transient spike),
+    which under bulk deletes kept OOM-killing this unit (1.6GB cgroup cap;
+    restart counter 2). It now reads the COMPACT sizes.json sidecar that
+    build_manifest.py publishes (~8MB of "chat/stem": bytes ints → ~50MB
+    parse). The manifest itself is never parsed here again."""
     import json as _json
     now = time.time()
     if _MANIFEST_SIZE_CACHE["sizes"] is None or now - _MANIFEST_SIZE_CACHE["ts"] > 300:
         sizes = {}
         data = None
+        # preferred: the compact sidecar (tmpfs serve copy, then Drive)
         try:
             from serve_publish import local_path
-            p = local_path("manifest.json")
+            p = local_path("sizes.json")
             if p.is_file():
                 data = _json.loads(p.read_text())
         except (OSError, ValueError):
             data = None
         if data is None:
             try:
-                r = rclone("cat", f"{GALLERY}/manifest.json")
+                r = rclone("cat", f"{GALLERY}/sizes.json")
                 if r.returncode == 0 and r.stdout.strip():
                     data = _json.loads(r.stdout)
             except (OSError, ValueError):
                 data = None
-        if data is not None:
-            for it in data:
-                s = it.get("stem")
-                if s:
-                    sizes[(it.get("chat") or "", s)] = int(it.get("size") or 0)
-            del data
+        if isinstance(data, dict):
+            # sidecar key format: "<chat>/<stem>" -> bytes
+            for k, v in data.items():
+                parts = k.rsplit("/", 1)
+                if len(parts) == 2:
+                    sizes[(parts[0], parts[1])] = int(v or 0)
+        if sizes:
             _MANIFEST_SIZE_CACHE["sizes"] = sizes
             _MANIFEST_SIZE_CACHE["ts"] = now
     sizes = _MANIFEST_SIZE_CACHE["sizes"] or {}
@@ -305,11 +308,55 @@ def trash_item(chat, stem) -> dict:
         return result
 
 
+# ── Coalesced background rebuild (2026-10-01) ────────────────────────────────
+# The reclaim driver fires one /trashbatch every ~85s for hours. The old
+# fire-and-forget Popen spawned a FULL build_manifest.py per batch (~0.5-1GB
+# peak: it parses 274K items to rebuild), and _prune_dedup_report spawned a
+# thread that rewrote the 26MB dedup.json per batch — together these were the
+# biggest OOM contributors during bulk deletes (container is 8GB total with a
+# ~5-6GB thumbcache tmpfs). Same coalescing pattern as upload_service's
+# REBUILD_DEBOUNCE_SEC: at most one rebuild per window, and never two at once.
+REBUILD_DEBOUNCE_SEC = float(os.environ.get("TG_REBUILD_DEBOUNCE_SEC", "90"))
+_rebuild_cv = threading.Condition()
+_rebuild_state = {"pending": False, "running": False}
+
+# Stems awaiting a dedup/hidden prune. Accumulated across batches; one pass
+# rewrites the report for all of them.
+PRUNE_DEBOUNCE_SEC = float(os.environ.get("TG_PRUNE_DEBOUNCE_SEC", "30"))
+_prune_cv = threading.Condition()
+_prune_state = {"pending": set(), "running": False}
+
+
 def _trigger_manifest_rebuild():
     """Rebuild the manifest (fast, cached date map) in the background so the
     on-disk manifest stays consistent after a delete. The SPA already drops the
     tile client-side; this keeps a fresh page-load correct without waiting for
-    the hourly refresh. Fire-and-forget; never blocks the HTTP response."""
+    the hourly refresh.
+
+    Coalesced: repeated calls within REBUILD_DEBOUNCE_SEC (or while a rebuild
+    is in flight) collapse into one follow-up rebuild, so a bulk delete's
+    hundreds of batches cost a rebuild per ~90s instead of one each — that
+    storm was both a CPU hog and an OOM contributor."""
+    def _runner():
+        while True:
+            with _rebuild_cv:
+                if not _rebuild_state["pending"]:
+                    _rebuild_state["running"] = False
+                    return
+                _rebuild_state["pending"] = False
+            _do_rebuild()
+            # Debounce: wait before honoring any requests that arrived while
+            # the rebuild ran (they'll be covered by the next pass).
+            time.sleep(REBUILD_DEBOUNCE_SEC)
+    with _rebuild_cv:
+        _rebuild_state["pending"] = True
+        if _rebuild_state["running"]:
+            return  # the in-flight runner will pick this up
+        _rebuild_state["running"] = True
+    threading.Thread(target=_runner, daemon=True).start()
+
+
+def _do_rebuild():
     here = os.path.dirname(os.path.abspath(__file__))
     py = os.path.join(here, "venv", "bin", "python")
     if not os.path.exists(py):
@@ -318,12 +365,13 @@ def _trigger_manifest_rebuild():
     env.setdefault("RCLONE_CONFIG", RCLONE_CONF)
     env.setdefault("TG_RCLONE_REMOTE", REMOTE)
     try:
-        subprocess.Popen(
+        subprocess.run(
             [py, os.path.join(here, "build_manifest.py")],
             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=900,
         )
     except Exception as e:  # noqa: BLE001
-        print(f"[trash] failed to spawn build_manifest.py rebuild: {e}", flush=True)
+        print(f"[trash] background manifest rebuild failed: {e}", flush=True)
 
 
 def _prune_dedup_report(stems) -> None:
@@ -344,53 +392,78 @@ def _prune_dedup_report(stems) -> None:
     make the client resilient to any report that's still somehow stale
     (clock skew, a scan mid-flight, etc).
 
+    2026-10-01 COALESCED: this used to spawn one thread per /trashbatch call,
+    each fetching + rewriting + re-uploading the 26MB dedup.json and pruning
+    the hidden ledger — under the reclaim's batch storm that was a large
+    memory/Drive-load contributor (trash unit OOM-killed twice). Calls now
+    accumulate stems and one worker does a single pass per PRUNE_DEBOUNCE_SEC,
+    so hundreds of batches cost a handful of passes.
+
     Best-effort: any failure here is silently swallowed — the client-side
     filter is the real safety net, this is purely a nicety that keeps the
     on-disk report itself accurate sooner.
     """
-    def _work():
-        # A deleted stem must never stay in the hide ledger regardless of the
-        # dedup report's state, so prune it FIRST (independent of the report
-        # fetch/rewrite below).
-        _prune_hidden_ledger(stems)
-        try:
-            r = rclone("cat", DEDUP_REMOTE)
-            if r.returncode != 0 or not r.stdout.strip():
-                return  # no report yet, or fetch failed — nothing to prune
-            rep = json.loads(r.stdout)
-            sset = {str(s) for s in stems}
-            groups = rep.get("groups") or []
-            new_groups = []
-            changed = False
-            for g in groups:
-                kept = [m for m in g if str(m.get("stem")) not in sset]
-                if len(kept) != len(g):
-                    changed = True
-                if len(kept) >= 2:
-                    new_groups.append(kept)
-                elif kept:
-                    changed = True  # group collapsed below 2 — drop entirely
-            if not changed:
-                return
-            rep["groups"] = new_groups
-            rep["dup_groups"] = len(new_groups)
-            rep["dup_items"] = sum(len(g) for g in new_groups)
-            fd, tmp = tempfile.mkstemp(suffix=".json")
-            os.close(fd)
-            Path(tmp).write_text(json.dumps(rep, separators=(",", ":")))
-            rclone("copyto", tmp, DEDUP_REMOTE)
-            # Keep the local serve mirror in sync too (lb-01 serves the
-            # Duplicates view's dedup.json from the tmpfs at :8093), else a
-            # just-deleted item could linger there until the next scan.
-            publish_local(Path(tmp), "dedup.json", log=lambda m: print(f"[trash] {m}", flush=True))
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-        except Exception as e:  # noqa: BLE001
-            print(f"[trash] dedup-report prune failed: {e}", flush=True)
+    with _prune_cv:
+        _prune_state["pending"].update(str(s) for s in stems)
+        if _prune_state["running"]:
+            return  # the in-flight worker will pick the stems up
+        _prune_state["running"] = True
+    threading.Thread(target=_prune_worker, daemon=True).start()
 
-    threading.Thread(target=_work, daemon=True).start()
+
+def _prune_worker():
+    while True:
+        with _prune_cv:
+            batch = set(_prune_state["pending"])
+            _prune_state["pending"].clear()
+            if not batch:
+                _prune_state["running"] = False
+                return
+        _prune_one(batch)
+        time.sleep(PRUNE_DEBOUNCE_SEC)
+
+
+def _prune_one(stems) -> None:
+    # A deleted stem must never stay in the hide ledger regardless of the
+    # dedup report's state, so prune it FIRST (independent of the report
+    # fetch/rewrite below).
+    _prune_hidden_ledger(stems)
+    try:
+        r = rclone("cat", DEDUP_REMOTE)
+        if r.returncode != 0 or not r.stdout.strip():
+            return  # no report yet, or fetch failed — nothing to prune
+        rep = json.loads(r.stdout)
+        sset = {str(s) for s in stems}
+        groups = rep.get("groups") or []
+        new_groups = []
+        changed = False
+        for g in groups:
+            kept = [m for m in g if str(m.get("stem")) not in sset]
+            if len(kept) != len(g):
+                changed = True
+            if len(kept) >= 2:
+                new_groups.append(kept)
+            elif kept:
+                changed = True  # group collapsed below 2 — drop entirely
+        if not changed:
+            return
+        rep["groups"] = new_groups
+        rep["dup_groups"] = len(new_groups)
+        rep["dup_items"] = sum(len(g) for g in new_groups)
+        fd, tmp = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        Path(tmp).write_text(json.dumps(rep, separators=(",", ":")))
+        rclone("copyto", tmp, DEDUP_REMOTE)
+        # Keep the local serve mirror in sync too (lb-01 serves the
+        # Duplicates view's dedup.json from the tmpfs at :8093), else a
+        # just-deleted item could linger there until the next scan.
+        publish_local(Path(tmp), "dedup.json", log=lambda m: print(f"[trash] {m}", flush=True))
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[trash] dedup-report prune failed: {e}", flush=True)
 
 
 def _prune_hidden_ledger(stems) -> None:

@@ -321,6 +321,27 @@ async def main():
     mp.unlink()
     log("manifest uploaded to gcrypt:gallery/manifest.json — DONE")
 
+    # Also publish a COMPACT sizes sidecar (stem -> bytes) for the trash
+    # service's audit ledger. WHY (2026-10-01): the trash unit runs under a
+    # ~1.6GB cgroup cap, and reading the 85MB manifest to look up delete sizes
+    # spikes ~400MB — under a big /trashbatch that repeatedly OOM-killed it
+    # mid-reclaim (restart counter hit 2). This file is ~8MB of ints and
+    # parses in ~50MB, so the audit trail survives bulk deletes.
+    try:
+        sizes = {}
+        for it in manifest:
+            s = it.get("stem")
+            if s:
+                sizes[f"{it.get('chat') or ''}/{s}"] = int(it.get("size") or 0)
+        sp = work / "sizes.json"
+        sp.write_text(json.dumps(sizes, separators=(",", ":")))
+        rclone("copyto", str(sp), f"{GALLERY}/sizes.json")
+        publish_local(sp, "sizes.json")
+        sp.unlink()
+        log(f"sizes.json published ({len(sizes)} stems) — DONE")
+    except Exception as e:  # noqa: BLE001
+        log(f"sizes.json skipped: {e}")
+
     # Also publish the FULL folder list (incl. EMPTY folders) so the SPA can show
     # folders that have no items yet. The manifest only carries items, so without
     # this an empty folder vanishes on reload.
