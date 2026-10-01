@@ -101,11 +101,11 @@ hermes_routing_model_by_role:
       model: claude-sonnet-5
       provider: claude-subscription-directsdk-experimental
   consultant:
-    model: deepseek-v4.1-flash
-    provider: ollama-cloud
+    model: claude-fable-5-1
+    provider: claude-subscription-directsdk-experimental
     fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
+      model: glm-5.3
+      provider: ollama-cloud
   pii-detector:
     model: gemma4:31b
     provider: ollama-cloud
@@ -365,7 +365,7 @@ hermes_routing_model_by_role:
       model: claude-sonnet-5
       provider: claude-subscription-directsdk-experimental
   arch-system-design:
-    model: deepseek-v4.1-flash
+    model: glm-5.3
     provider: ollama-cloud
     fallback:
       model: claude-opus-5
@@ -492,7 +492,7 @@ hermes_routing_reasoning_effort_by_role:
   project-coordinator: medium
   aidefence-guardian: medium
   claims-authorizer: medium
-  jr-coder: low
+  jr-coder: medium
   pii-detector: low
   project-board-sync: low
   sync-coordinator: low
