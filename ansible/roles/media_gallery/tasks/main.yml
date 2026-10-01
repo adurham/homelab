@@ -237,6 +237,43 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+# Shared removal-audit ledger (what was deleted/deduped and WHY) + the video
+# duplicate lane + the OCR spam finder. removal_ledger is imported by
+# trash_service and spam_scan; dedup_videos is imported by dedup_scan.
+- name: Deploy Removal Ledger (audit trail shared module)
+  ansible.builtin.copy:
+    src: removal_ledger.py
+    dest: "{{ media_gallery_dir }}/removal_ledger.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0640'
+
+- name: Deploy Video Dedupe Module (imported by dedup_scan)
+  ansible.builtin.copy:
+    src: dedup_videos.py
+    dest: "{{ media_gallery_dir }}/dedup_videos.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0640'
+
+- name: Deploy Spam Scanner (OCR candidate finder; manual-run, never auto-deletes)
+  ansible.builtin.copy:
+    src: spam_scan.py
+    dest: "{{ media_gallery_dir }}/spam_scan.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Install tesseract (spam_scan OCR discriminator)
+  ansible.builtin.apt:
+    name: tesseract-ocr
+    state: present
+    update_cache: true
+  retries: 3
+  delay: 10
+  register: tesseract_install
+  until: tesseract_install is succeeded
+
 - name: Deploy Duplicate Scanner (tier-1 perceptual hash)
   ansible.builtin.copy:
     src: dedup_scan.py
