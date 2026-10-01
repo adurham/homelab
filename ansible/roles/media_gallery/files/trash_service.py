@@ -213,17 +213,22 @@ def find_original_leaf(chat, stem):
     return None
 
 
-_MANIFEST_SIZE_CACHE = {"data": None, "ts": 0.0}
+_MANIFEST_SIZE_CACHE = {"sizes": None, "ts": 0.0}
 
 
 def _manifest_sizes(chat, stems) -> dict:
-    """Bulk size lookup {stem: bytes} from the local manifest (ONE read for the
-    whole batch — the per-stem `_manifest_size` would re-parse an 85MB file for
-    every stem in a bulk delete). Cached for 60s so a burst of deletes shares
-    one parse."""
+    """Bulk size lookup {stem: bytes} for the audit ledger.
+
+    2026-10-01 MEMORY FIX: this used to retain the WHOLE parsed manifest
+    (~280K item dicts ≈ 400MB) in the service, which — combined with a large
+    delete batch — got the trash service OOM-killed mid-reclaim. It now keeps
+    only a {(chat, stem): size} dict of ints (≈30MB), and drops the parsed
+    document immediately after. The manifest is also read as a plain file
+    (the tmpfs serve copy) with the Drive copy only as a fallback."""
     import json as _json
     now = time.time()
-    if _MANIFEST_SIZE_CACHE["data"] is None or now - _MANIFEST_SIZE_CACHE["ts"] > 60:
+    if _MANIFEST_SIZE_CACHE["sizes"] is None or now - _MANIFEST_SIZE_CACHE["ts"] > 300:
+        sizes = {}
         data = None
         try:
             from serve_publish import local_path
@@ -240,15 +245,19 @@ def _manifest_sizes(chat, stems) -> dict:
             except (OSError, ValueError):
                 data = None
         if data is not None:
-            _MANIFEST_SIZE_CACHE["data"] = data
+            for it in data:
+                s = it.get("stem")
+                if s:
+                    sizes[(it.get("chat") or "", s)] = int(it.get("size") or 0)
+            del data
+            _MANIFEST_SIZE_CACHE["sizes"] = sizes
             _MANIFEST_SIZE_CACHE["ts"] = now
-    data = _MANIFEST_SIZE_CACHE["data"] or []
-    want = {(chat, s) for s in stems}
+    sizes = _MANIFEST_SIZE_CACHE["sizes"] or {}
     out = {}
-    for it in data:
-        k = (it.get("chat") or "", it.get("stem"))
-        if k in want:
-            out[k[1]] = int(it.get("size") or 0)
+    for s in stems:
+        v = sizes.get((chat, s))
+        if v is not None:
+            out[s] = v
     return out
 
 
