@@ -273,7 +273,7 @@ for c in "${CHANGES[@]}"; do
     if [ "$(lower "$new")" = "$(lower "$target")" ]; then
       printf '  OK       %-27s %s -> %s\n' "$attr" "$cur" "$new"
     else
-      printf '  FAILED   %-27s wrote "%s" but read "$new" back\n' "$attr" "$target" "$new"
+      printf '  FAILED   %-27s wrote "%s" but read "%s" back\n' "$attr" "$target" "$new"
       printf '           check: dmesg | tail\n'
       FAILED=$((FAILED+1))
     fi
