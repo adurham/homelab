@@ -432,15 +432,20 @@ replacement strip needed.
   events (OB/OL transitions) so the next occurrence timestamps itself.
   Update this entry with the outcome.
 
-**INSTALLED 2026-10-01 evening (~18:59-19:03 CDT; user).** A CyberPower UPS
-(bought at Home Depot; exact model not yet recorded) now feeds the lab
-corner. User's device list: "the homelab switch, the basement wifi pod, the
-3 PVE nodes, and the workstation" — i.e. GS108 (.51), basement pod (.40),
-pve01/02/03, and amd-workstation. The old strip is OUT of the path entirely
-(user-confirmed) — the decided remediation is fully applied on the powered
-side. NOT on the UPS: both Mac Studios and the SG105E/trunk/under-desk
-switches. (This device list supersedes the earlier load-budget plan, which
-had assumed the two Studios on battery outlets.)
+**INSTALLED 2026-10-01 evening (~18:59-19:03 CDT; user).** CyberPower
+**GX1500U** — the open-box unit from this day's research (Best Buy, $197;
+model confirmed by the user 19:25). Specs: 1500VA/900W line-interactive
+(single-boost AVR, 4 ms transfer, sine-wave on battery), 12 NEMA 5-15R =
+6 battery+surge / 6 surge-only, HID-compliant USB data port (USB A-B cable
+in box), RJ45 1-in/1-out surge passthrough, runtime 2 min full / 11 min
+half load at rating. It now feeds the lab corner. User's device list: "the
+homelab switch, the basement wifi pod, the 3 PVE nodes, and the
+workstation" — i.e. GS108 (.51), basement pod (.40), pve01/02/03, and
+amd-workstation. The old strip is OUT of the path entirely (user-confirmed)
+— the decided remediation is fully applied on the powered side. NOT on the
+UPS: both Mac Studios and the SG105E/trunk/under-desk switches. (This
+device list supersedes the earlier load-budget plan, which had assumed the
+two Studios on battery outlets.)
 
 Rewire window, as captured by both studios' labwatch/netwatch:
 - ~18:59:0x corner power cut — nodes + GS108 + pod all show DOWN by 18:59:20.
@@ -458,15 +463,19 @@ Rewire window, as captured by both studios' labwatch/netwatch:
   159 (pve03, known-stale) as of 19:16.
 
 **MONITORING GAP (open as of 19:19):** the UPS's USB data port is NOT
-connected to any host — no UPS HID device visible on pve01/02/03 or
-amd-workstation, and NUT is installed nowhere — so input voltage / OB-OL
-transfer events are NOT being logged yet. The UPS still mitigates, and "no
-further events while on battery-backed power" still discriminates, but it
-cannot timestamp the next disturbance until the USB is wired. Next step
-(user action): plug the UPS USB cable into the nearest always-on host
-(pve01 recommended — in the corner with the UPS, persistent journal;
-amd-workstation is the fallback if the cable reaches it), then wire NUT +
-VictoriaMetrics export + the Grafana transfer alert per the plan above.
+connected to any host (re-verified 19:23 — no CyberPower HID device
+0764:* on pve01/02/03 or amd-workstation; NUT installed nowhere), so input
+voltage / OB-OL transfer events are NOT being logged yet. The UPS still
+mitigates, and "no further events while on battery-backed power" still
+discriminates, but it cannot timestamp the next disturbance until the USB
+is wired. Next step (user action): plug the UPS USB cable into the nearest
+always-on host (pve01 recommended — in the corner with the UPS, persistent
+journal; amd-workstation is the fallback if the cable reaches it), then
+wire NUT + VictoriaMetrics export + the Grafana transfer alert per the plan
+above. The in-box cable is a USB A-to-B; a standard one works if the
+open-box unit's cable is missing. (The GX1500U's own front LCD shows input
+voltage + load — a manual glance can confirm what the AC feed is doing
+before any host attachment, but nothing is logged until NUT is wired.)
 
 **CUTOVER NOTE (2026-10-02 00:01Z / Oct 1 19:01 CDT):** an all-three-node hard
 reset occurred at 00:01Z — this one was **USER-INITIATED**: the user was
