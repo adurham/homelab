@@ -21,7 +21,7 @@
 | IP Range | Category | Count | Primary Devices |
 | :--- | :--- | :--- | :--- |
 | `.1 - .2` | Core Infra | 2 | Nest Wifi Pro Gateway, Home Assistant |
-| `.11 - .13` | Lab Cluster | 3 | Proxmox Nodes (Apple M4 Max Hardware) |
+| `.11 - .13` | Lab Cluster | 3 | Proxmox Nodes (Dell OptiPlex — pve01 7090, pve02/pve03 5080) |
 | `.22 - .196` | Climate | 8+ | Flair Vents & Bridge, Ecobee Remote Sensors |
 | `.28 - .63` | Nest/Google | 4+ | Cameras, Displays, Doorbells |
 | `.38 - .198` | Smart Power | 5+ | Shelly Pumps, Wyze Plugs, IoT |
