@@ -18,6 +18,13 @@ ups_autoshutdown_poll_seconds: 5
 # Must be continuously on battery this long before the trigger can fire
 # (damps a 2-second blip that immediately recovers).
 ups_autoshutdown_ob_sustain_seconds: 60
+# Cumulative on-battery time within ONE episode that also satisfies the trigger
+# gate. Closes the stuttering-storm hole: a run of short 5-10s transfers with
+# brief OL gaps in between never reaches the continuous 60s, yet the battery
+# drains throughout (found in a 2026-10-02 consult review).
+ups_autoshutdown_ob_cumulative_seconds: 300
+# Continuously on line this long => the episode is over, counter resets.
+ups_autoshutdown_ob_cumulative_reset_seconds: 600
 # ...and either remaining charge <= this percent...
 ups_autoshutdown_stop_charge_percent: 20
 # ...or remaining runtime <= these seconds (whichever trips first).

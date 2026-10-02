@@ -63,6 +63,12 @@ DEFAULT_CONFIG = {
     # How often to refresh the guests_running metric (spawns pvesh ~0.9s CPU).
     "guests_metric_seconds": 60,
     "ob_sustain_seconds": 60,
+    # Cumulative on-battery time within ONE episode that also satisfies the
+    # trigger gate — closes the stuttering-storm hole (many short transfers
+    # never reach the continuous 60s, but the battery still drains).
+    "ob_cumulative_seconds": 300,
+    # How long continuously on line before the episode counter resets.
+    "ob_cumulative_reset_seconds": 600,
     "stop_charge_percent": 20,
     "stop_runtime_seconds": 300,
     "phase1_name_regex": "^tc-",
@@ -337,6 +343,27 @@ class Engine:
 
         st["ob_seconds"] = int(self.now - self.ob_since) if self.ob_since else 0
 
+        # CUMULATIVE on-battery tracking for the stuttering-storm case: short
+        # repeated transfers with brief OL gaps never satisfy the continuous
+        # 60s debounce, yet the battery genuinely drains throughout. Accrue
+        # wall-time while OB, and reset only after a sustained OL period
+        # (ob_cumulative_reset_seconds, default 600s) proves the episode is
+        # really over. Persisted in state.json so a daemon restart doesn't
+        # forget an in-progress episode.
+        episode_ob = float(st.get("episode_ob_seconds") or 0.0)
+        last_tick = st.get("last_tick")
+        dt = max(0.0, min(self.now - last_tick, 120.0)) if last_tick else 0.0
+        if not online:
+            episode_ob += dt
+        st["episode_ob_seconds"] = episode_ob
+        st["last_tick"] = self.now
+        if online and self.online_since is not None:
+            ol_run = self.now - self.online_since
+            if ol_run >= cfg["ob_cumulative_reset_seconds"] and episode_ob:
+                LOG.info("battery episode closed after %.0fs on line (cumulative OB was %.0fs)",
+                         ol_run, episode_ob)
+                st["episode_ob_seconds"] = 0.0
+
         cur = st.get("state", STATE_MONITORING)
         if cur == STATE_DISABLED:
             self._transition(STATE_MONITORING)
@@ -365,13 +392,31 @@ class Engine:
         if online or self.ob_since is None:
             return
         ob_for = self.now - self.ob_since
-        if ob_for < cfg["ob_sustain_seconds"]:
+
+        # Two ways the gate can be satisfied:
+        #  1. CONTINUOUS on-battery >= ob_sustain_seconds (the original debounce
+        #     for isolated short blips — must keep working: see selftest s1/s5).
+        #  2. CUMULATIVE on-battery >= ob_cumulative_seconds (default 300s)
+        #     within one episode. This closes the stuttering-storm hole: a run
+        #     of short 5-10s transfers separated by brief OL gaps never lets
+        #     the continuous timer reach 60s, yet the battery genuinely drains
+        #     the whole time. Tracked across daemon restarts in state.json.
+        #
+        # NOT done: waiving the gate purely on low charge. Tried 2026-10-02 and
+        # the selftest immediately caught it breaking the short-sag guarantee
+        # (s1) — a low charge percentage with healthy runtime is exactly the
+        # "let it debounce" case, not the emergency case.
+        continuous_ok = ob_for >= cfg["ob_sustain_seconds"]
+        st_cumulative = int(self.state.get("episode_ob_seconds") or 0)
+        cumulative_ok = st_cumulative >= cfg["ob_cumulative_seconds"]
+        if not (continuous_ok or cumulative_ok):
             return
         if not self._is_tripped(ups):
             return
         charge = ups.get("charge")
         runtime = ups.get("runtime")
-        reason = "on battery %.0fs, charge=%s%% runtime=%ss" % (ob_for, charge, runtime)
+        reason = ("on battery %.0fs (cumulative %ss), charge=%s%% runtime=%ss"
+                  % (ob_for, st_cumulative, charge, runtime))
         if cfg["dry_run"]:
             self.would_trigger = 1
             guests = self.backend.list_running()
@@ -594,11 +639,18 @@ class Engine:
             self._last_warn = self.now
 
     def _heartbeat(self):
+        # Persist on the heartbeat cadence too. Until 2026-10-02 persist() only
+        # ran on state TRANSITIONS, so counters that change while merely
+        # monitoring (episode_ob_seconds, last_tick) never reached disk and a
+        # daemon restart silently forgot an in-progress battery episode — which
+        # is exactly the situation the cumulative-OB tracking exists for.
         if (self.now - self.last_heartbeat) >= self.cfg["heartbeat_log_seconds"]:
             st = self.state
-            LOG.info("heartbeat: state=%s mode=%s ob=%ss targets=%d", st.get("state"), st.get("mode"),
-                     st.get("ob_seconds", 0), len(st.get("targets", {})))
+            LOG.info("heartbeat: state=%s mode=%s ob=%ss cumulative=%ss targets=%d",
+                     st.get("state"), st.get("mode"), st.get("ob_seconds", 0),
+                     int(st.get("episode_ob_seconds") or 0), len(st.get("targets", {})))
             self.last_heartbeat = self.now
+            self.persist()
 
 
 # --------------------------------------------------------------------------
@@ -983,6 +1035,59 @@ def selftest():
         assert got is not None and got["status"] == "OL", got
         assert got["charge"] == 55.0 and got["runtime"] == 1800.0, got
 
+    def s10():
+        # Stuttering-storm guard: a run of SHORT transfers separated by brief
+        # OL gaps never reaches the 60s CONTINUOUS debounce, but the battery
+        # genuinely drains. Cumulative tracking must catch it.
+        # (Consult finding 2026-10-02; first fix attempt waived the gate on low
+        # charge and broke s1/s5 — this is the design that survives both.)
+        eng, be, st = fresh(stop_ticks=1)
+        low = {"status": "OB", "charge": 18.0, "runtime": 280.0}
+        # 12 cycles of: 30s on battery (under the 60s continuous gate), then 20s
+        # back on line (under the 600s reset) => ~360s cumulative OB, which
+        # crosses the 300s cumulative threshold that a stuttering storm needs.
+        for _ in range(12):
+            advance(eng, be, low, 30)
+            advance(eng, be, {"status": "OL", "charge": 18.0, "runtime": 280.0}, 20)
+        assert st.get("episode_ob_seconds", 0) >= 300, \
+            "cumulative OB time should accrue across short transfers: %s" % st.get("episode_ob_seconds")
+        assert st["state"] in (STATE_STOPPING, STATE_STOPPED), \
+            "stuttering storm must eventually trigger: %s" % st["state"]
+        assert be.calls, "should have issued stops: %s" % be.calls
+
+    def s11():
+        # ...but a HEALTHY battery at 30s on battery must still be debounced
+        # (the gate's original purpose must survive the cumulative change).
+        eng, be, st = fresh()
+        advance(eng, be, {"status": "OB", "charge": 90.0, "runtime": 3000.0}, 35)
+        assert st["state"] == STATE_MONITORING, st["state"]
+        assert not be.calls, "healthy battery must still be debounced: %s" % be.calls
+
+    def s12():
+        # Episode counter resets after a long clean period, so a storm tomorrow
+        # does not inherit today's accumulated seconds.
+        eng, be, st = fresh()
+        low = {"status": "OB", "charge": 50.0, "runtime": 1500.0}
+        advance(eng, be, low, 120)          # accrue some OB time (no trip: charge healthy)
+        accrued = st.get("episode_ob_seconds", 0)
+        assert accrued >= 100, accrued
+        advance(eng, be, {"status": "OL", "charge": 50.0, "runtime": 1500.0}, 700)  # > reset window
+        assert st.get("episode_ob_seconds", 0) == 0, \
+            "episode counter must reset after sustained OL: %s" % st.get("episode_ob_seconds")
+
+    def s13():
+        # Persistence guard: episode counters must reach disk WITHOUT a state
+        # transition (heartbeat persist). Before this, a restart during a
+        # battery episode silently lost the accumulated time — the exact
+        # scenario cumulative tracking exists for.
+        eng, be, st = fresh(heartbeat_log_seconds=5)
+        eng.last_heartbeat = 0
+        advance(eng, be, {"status": "OB", "charge": 50.0, "runtime": 1500.0}, 10)
+        on_disk = json.load(open(os.path.join(eng.cfg["state_dir"], "state.json")))
+        assert on_disk.get("episode_ob_seconds"), \
+            "episode_ob_seconds must be persisted during monitoring: %s" % on_disk
+        assert on_disk.get("last_tick"), "last_tick must be persisted: %s" % on_disk
+
     scenario("short sag does not trigger", s1)
     scenario("high charge + long runtime does not trigger", s2)
     scenario("full stop then auto-recovery after stable mains", s3)
@@ -992,6 +1097,10 @@ def selftest():
     scenario("disabled flag blocks everything", s7)
     scenario("stubborn guest gets force-stopped", s8)
     scenario("upsc is called without variable args (UNREADABLE regression guard)", s9)
+    scenario("stuttering storm triggers on cumulative OB time", s10)
+    scenario("healthy battery is still debounced", s11)
+    scenario("episode counter resets after sustained on-line", s12)
+    scenario("episode counters persist without a state transition", s13)
 
     if failures:
         print("\n%d FAILURES: %s" % (len(failures), failures))

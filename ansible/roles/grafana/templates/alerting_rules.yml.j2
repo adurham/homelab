@@ -2393,6 +2393,80 @@ groups:
         isPaused: false
 
       # ---------------------------------------------------------------------
+      # UPS INPUT side. Added 2026-10-02 after a consult review pointed out a
+      # real asymmetry: every other UPS rule watches the OUTPUT (did we go on
+      # battery / did guests stop), but the original fault was diagnosed on
+      # the INPUT (mains sag on the lab branch). Without this, the UPS can
+      # silently absorb the very disturbance we're trying to characterise,
+      # and a clean "no reboots" streak proves nothing.
+      #
+      # The value of this rule is NOT that it pages for a 2V wobble — it's
+      # that any input-side event gives the next storm a timestamped cause
+      # instead of another post-mortem. See docs/ipam.md INCIDENT CLASS B and
+      # the "still unproven" caveat there.
+      # ---------------------------------------------------------------------
+
+      - uid: ups_input_sag_or_transfer
+        title: UPS input disturbance (lab corner) — sag or AVR action
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # Two independent signals of an input-side disturbance:
+              #   * input.voltage below the observed steady band (121-123V)
+              #   * the driver asserting BOOST/TRIM (AVR action) or OB (transfer)
+              # Steady-state on this branch is 120-123V (196 samples over 18h,
+              # all >=120V), so 115 is a deliberately conservative floor that a
+              # real sag blows through but ordinary wobble does not.
+              expr: 'min_over_time(nut_ups_input_voltage{instance="pve01"}[5m]) < 115 or max_over_time(nut_ups_status_bit{instance="pve01",status=~"BOOST|TRIM|OB"}[5m]) > 0'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "Lab-corner UPS saw an INPUT-side disturbance (mains sag / AVR boost / transfer)"
+          description: "This is the signal the whole UPS exercise is trying to capture: the lab corner's MAINS feed dipped, or the UPS's AVR had to boost/trim, or it transferred to battery. NOTE the 15s metric cadence means a sub-second sag can still be missed — a NEGATIVE here is weaker evidence than a positive. If this fires: (1) record the timestamp; (2) check whether ups_on_battery_transfer also fired (real transfer = the corner was actually on battery); (3) check whether pve_node_rebooted fired (the sag beat the UPS); (4) compare against the Emporia whole-house CT for that minute — a house-wide dip means upstream/grid, nothing house-side means the lab branch specifically. This turns the next event into a timestamped cause instead of a post-mortem."
+        labels:
+          severity: warning
+        isPaused: false
+
+      # ---------------------------------------------------------------------
       # UPS-driven guest autoshutdown (roles/ups_autoshutdown on pve01).
       # Added 2026-10-01: the daemon stops guests gracefully when the lab
       # corner is about to run out of battery, and restarts them when mains
