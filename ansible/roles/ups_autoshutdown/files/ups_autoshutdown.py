@@ -60,6 +60,8 @@ DEFAULT_CONFIG = {
     "dry_run": True,
     "poll_seconds": 5,
     "heartbeat_log_seconds": 300,
+    # How often to refresh the guests_running metric (spawns pvesh ~0.9s CPU).
+    "guests_metric_seconds": 60,
     "ob_sustain_seconds": 60,
     "stop_charge_percent": 20,
     "stop_runtime_seconds": 300,
@@ -688,12 +690,32 @@ def daemon(config_path):
                 engine.cycle(ups)
             except Exception as exc:  # noqa: BLE001 — a crash here must never kill the daemon
                 LOG.exception("cycle failed: %s", exc)
-            running = engine.backend.list_running()
-            write_metrics(cfg, state, len(running) if running is not None else None,
+            # The guests_running metric does NOT need per-cycle freshness — it
+            # is a coarse context gauge, not a control signal. Spawning pvesh
+            # every poll (measured ~0.9s CPU each) just to count guests was
+            # burning ~18% of a core continuously. Refresh it on a slow cadence
+            # instead; the state machine above already enumerates guests
+            # whenever it actually needs to act.
+            _refresh_guests_running(engine, state)
+            write_metrics(cfg, state, state.get("guests_running"),
                           engine.would_trigger, state.get("ob_seconds", 0))
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
         time.sleep(cfg["poll_seconds"])
+
+
+def _refresh_guests_running(engine, state):
+    """Update state['guests_running'] at most every
+    ups_autoshutdown_guests_metric_seconds (default 60)."""
+    cfg = engine.cfg
+    now = engine.now
+    last = getattr(engine, "_guests_metric_at", 0)
+    if (now - last) < cfg.get("guests_metric_seconds", 60):
+        return
+    engine._guests_metric_at = now
+    running = engine.backend.list_running()
+    if running is not None:
+        state["guests_running"] = len(running)
 
 
 # --------------------------------------------------------------------------
