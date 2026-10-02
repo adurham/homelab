@@ -294,6 +294,14 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+- name: Deploy Bin Re-ingest Driver (rename legacy .bin orphans to real ext; rename-only, dry-run by default)
+  ansible.builtin.copy:
+    src: bin_reingest.py
+    dest: "{{ media_gallery_dir }}/bin_reingest.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
 - name: Deploy Heavy Jobs Runner (sequential + health-gated)
   ansible.builtin.copy:
     src: gallery_heavy_jobs.sh
