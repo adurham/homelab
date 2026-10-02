@@ -1,29 +1,31 @@
 # Managed by ansible — see roles/nut_ups.
-# UPS definition file. Section name [{{ nut_ups_name }}] is also the
-# systemd instance name used by `nut-driver@{{ nut_ups_name }}.service`
-# (Debian's nut-driver@.service resolves its device via
+# UPS definition file.
+#
+# GLOBAL DIRECTIVES FIRST, BEFORE any [section]. Per ups.conf(5): "The file
+# begins with global directives, and then each UPS has a section". They must
+# NOT live in an [upsdrvctl] section — nut-driver-enumerator(8) treats EVERY
+# bracketed section as a DEVICE, so a [upsdrvctl] block makes it generate a
+# bogus `nut-driver@upsdrvctl.service` that fails and restart-loops forever
+# (real bug found 2026-10-02; it spammed 'Failed to start
+# nut-driver@upsdrvctl.service' every ~15s and tripped the
+# log_service_restart_loop alert on pve01).
+maxretry = 10
+retrydelay = 5
+
+# The UPS itself. Section name is also the systemd instance name used by
+# `nut-driver@{{ nut_ups_name }}.service` (Debian's nut-driver@.service
+# resolves its device via
 # `nut-driver-enumerator.sh --get-device-for-service <instance>`).
 #
-# driver=usbhid-ups + vendorid is the documented generic path for this
-# unit: it enumerates as 0764:0601 "CPS GX1500U", and NUT ships a
-# matching udev rule (/usr/lib/udev/rules.d/62-nut-usbups.rules).
-# pollinterval=2: the sag/transfer events this box exists to catch can
-# be seconds long — poll the device fast (driver default is 2s; keep it
-# explicit so it can't silently drift).
-#
-# NB (learned live 2026-10-01): `maxretry` is NOT a per-driver variable —
-# usbhid-ups rejects it ("Fatal error: 'maxretry' is not a valid variable
-# name for this driver") and the unit enters an auto-restart loop. It
-# belongs in the [upsdrvctl] global section, which is where it now lives.
+# driver=usbhid-ups + vendorid is the documented generic path for this unit:
+# it enumerates as 0764:0601 "CPS GX1500U", and NUT ships a matching udev rule
+# (/usr/lib/udev/rules.d/62-nut-usbups.rules).
+# pollinterval=2: the sag/transfer events this box exists to catch can be
+# seconds long — poll the device fast (driver default is 2s; keep it explicit
+# so it can't silently drift).
 [{{ nut_ups_name }}]
     driver = usbhid-ups
     port = auto
     vendorid = {{ nut_ups_vendor_id }}
     desc = "CyberPower GX1500U (lab corner: pve01-03 + GS108 + basement pod + amd-workstation)"
     pollinterval = 2
-
-# Global upsdrvctl settings (apply to the driver controller, not the
-# driver itself): retry driver startup up to N times with 5s gaps —
-# USB enumeration can lag on a cold boot.
-[upsdrvctl]
-    maxretry = 10
