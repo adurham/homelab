@@ -22,8 +22,12 @@
   # without the role don't scan a missing directory. pve01 now needs it
   # for nut_ups.prom. Must run after the role so the directory + first
   # dump exist before Alloy restarts with the collector enabled.
+  #
+  # gather_facts MUST stay true here: roles/alloy branches on
+  # ansible_facts['os_family'] (Debian vs RPM package paths) and fails
+  # with "object of type 'dict' has no attribute 'os_family'" without it.
   hosts: pve01
-  gather_facts: false
+  gather_facts: true
   tasks:
     - name: Install alloy
       ansible.builtin.include_role:
