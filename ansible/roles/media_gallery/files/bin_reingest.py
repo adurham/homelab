@@ -258,6 +258,36 @@ def save_state(st):
         log(f"[warn] state save failed: {e}")
 
 
+def verify(renamed_out):
+    """Read-only: assert every recorded rename landed (src gone, dst present at
+    the same size). One full listing, then set membership -- no per-file calls.
+    Exits non-zero if any rename is unverified."""
+    try:
+        recs = json.loads(open(renamed_out).read())
+    except (OSError, ValueError) as e:
+        log(f"[verify] cannot read {renamed_out}: {e}")
+        return 2
+    fol = listing()
+    missing_dst, lingering_src, size_bad = [], [], []
+    for r in recs:
+        d, dst, src, sz = r["folder"], r["dst"], r["src"], r["size"]
+        leaves = fol.get(d, {})
+        if src in leaves:
+            lingering_src.append(f"{d}/{src}")
+        if dst not in leaves:
+            missing_dst.append(f"{d}/{dst}")
+        elif leaves[dst] != sz:
+            size_bad.append(f"{d}/{dst} {leaves[dst]}!={sz}")
+    log(f"[verify] {len(recs)} renames: missing_dst={len(missing_dst)} "
+        f"lingering_src={len(lingering_src)} size_mismatch={len(size_bad)}")
+    for label, lst in (("missing_dst", missing_dst),
+                       ("lingering_src", lingering_src),
+                       ("size_mismatch", size_bad)):
+        for x in lst[:10]:
+            log(f"[verify-{label}] {x}")
+    return 0 if not (missing_dst or lingering_src or size_bad) else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -272,7 +302,15 @@ def main():
     ap.add_argument("--pause", type=float, default=PAUSE)
     ap.add_argument("--workers", type=int, default=8,
                     help="parallel classification workers (local IO-bound probes)")
+    ap.add_argument("--renamed-out", default="",
+                    help="write the list of successful renames here (for --verify)")
+    ap.add_argument("--verify", default="",
+                    help="path to a --renamed-out file: assert every src is gone "
+                         "and dst is present at the same size (read-only)")
     args = ap.parse_args()
+
+    if args.verify:
+        return verify(args.verify)
 
     t0 = time.time()
     log(f"=== bin_reingest start apply={args.apply} canary={args.canary} "
@@ -383,30 +421,36 @@ def main():
     done = 0
     done_bytes = 0
     fails = []
+    renamed = []            # {src, dst, size, folder} for post-run verification
     for (d, leaf, ext, sz) in eligible:
         stem = leaf[:-4] if leaf.lower().endswith(".bin") else os.path.splitext(leaf)[0]
         dst_leaf = stem if stem.lower().endswith(ext) else stem + ext
         src_path = f"{SRC}/{d}/{leaf}"
         dst_path = f"{SRC}/{d}/{dst_leaf}"
+        # A server-side moveto returns rc=0 only when the rename landed; the
+        # canary confirmed bytes+modtime are preserved with no transfer, so
+        # there is no need for a per-file size round-trip (halves Drive API
+        # calls). One authoritative listing at the end verifies every rename.
         ok, err = moveto(src_path, dst_path)
         if not ok:
             fails.append((f"{d}/{leaf}", err))
             log(f"[FAIL] {d}/{leaf} -> {dst_leaf}: {err}")
-            continue
-        new_sz = size_of(dst_path)
-        if new_sz != sz:
-            log(f"[WARN] size mismatch {d}/{leaf} {sz} -> {new_sz}; "
-                f"leaving as-is for review")
-            fails.append((f"{d}/{leaf}", f"size mismatch {sz}->{new_sz}"))
+            time.sleep(args.pause)
             continue
         done += 1
         done_bytes += sz
+        renamed.append({"src": leaf, "dst": dst_leaf, "folder": d, "size": sz})
         if args.canary or done % 25 == 0 or done == len(eligible):
-            log(f"[rename] {done}/{len(eligible)} {d}/{leaf} -> {dst_leaf} "
-                f"({sz} bytes)")
+            log(f"[rename] {done}/{len(eligible)} {d}/{leaf} -> {dst_leaf} ({sz} bytes)")
         time.sleep(args.pause)
 
     save_state(st)
+    if args.renamed_out:
+        try:
+            with open(args.renamed_out, "w") as f:
+                json.dump(renamed, f)
+        except OSError as e:
+            log(f"[warn] renamed-out write failed: {e}")
     log(f"=== done: renamed={done} bytes={done_bytes} "
         f"({done_bytes/1e9:.2f} GB) failures={len(fails)} "
         f"in {time.time()-t0:.0f}s ===")
