@@ -7,3 +7,12 @@
 [upsmon]
     password  = {{ vault_nut_upsmon_password }}
     upsmon primary
+
+# Dedicated account for the scheduled battery self-test (ups-selftest.sh).
+# Deliberately SEPARATE from upsmon so the monitor account keeps its
+# zero-command privileges: this one may issue exactly ONE instant command,
+# the quick battery test. killpower / shutdown / load-off are NOT granted —
+# a self-test must never be able to power anything off.
+[selftest]
+    password  = {{ vault_nut_selftest_password }}
+    instcmds  = test.battery.start.quick

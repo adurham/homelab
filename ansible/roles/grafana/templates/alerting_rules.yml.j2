@@ -2293,7 +2293,14 @@ groups:
               # unit=nut-monitor.service is the upsmon systemd unit on the
               # owning node. Range query (not instant) for the same
               # label-preservation reason as the log_* rules above.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit="nut-monitor.service", host="pve01"} |~ "(?i)on battery" [10m]))'
+              #
+              # The `|~` chain ALSO drops the two lines ups-selftest.sh emits
+              # ("SELFTEST-MARKER starting..." and "self-test result: ..."):
+              # a quick self-test transfers to battery for a few seconds and
+              # would otherwise page as a fake mains event every month.
+              # Filtering on the script's own markers is robust regardless of
+              # how long the test transfer actually lasts.
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit="nut-monitor.service", host="pve01"} |~ "(?i)on battery" != "SELFTEST-MARKER" != "self-test result" [10m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -2462,6 +2469,65 @@ groups:
         annotations:
           summary: "Lab-corner UPS saw an INPUT-side disturbance (mains sag / AVR boost / transfer)"
           description: "This is the signal the whole UPS exercise is trying to capture: the lab corner's MAINS feed dipped, or the UPS's AVR had to boost/trim, or it transferred to battery. NOTE the 15s metric cadence means a sub-second sag can still be missed — a NEGATIVE here is weaker evidence than a positive. If this fires: (1) record the timestamp; (2) check whether ups_on_battery_transfer also fired (real transfer = the corner was actually on battery); (3) check whether pve_node_rebooted fired (the sag beat the UPS); (4) compare against the Emporia whole-house CT for that minute — a house-wide dip means upstream/grid, nothing house-side means the lab branch specifically. This turns the next event into a timestamped cause instead of a post-mortem."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: ups_selftest_failed
+        title: UPS battery self-test failed or warned
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # ups-selftest.sh (monthly timer) writes one hot series per
+              # outcome. Alert on any non-passed result: warning/error/
+              # timeout/aborted all mean "the battery did not cleanly take
+              # load this month", which is the leading indicator of a UPS that
+              # has quietly become a power strip with a relay.
+              expr: 'nut_ups_selftest_result{result!="passed",instance="pve01"} > 0'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "Lab-corner UPS self-test did not pass ({{ '{{' }} $labels.result {{ '}}' }})"
+          description: "The monthly quick battery self-test returned something other than 'passed'. The result label names the outcome: 'warning' = the UPS could not hold the load cleanly; 'error'/'aborted' = the test could not complete; 'timeout' = no final result inside the window. Any of these means the battery may no longer carry the corner, which matters because the guest autoshutdown's whole safety margin assumes it can. Act: `upsc gx1500u ups.test.result` for the raw string, then consider a human-supervised DEEP test and battery replacement (~3 year service life; check battery.mfr.date). Note a single 'warning' is not proof of failure — retest before ordering a battery. The self-test is suppressed around scheduled runs (see ups-selftest.sh) so this never reflects a test that did not run."
         labels:
           severity: warning
         isPaused: false

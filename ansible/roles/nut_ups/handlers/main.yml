@@ -18,3 +18,9 @@
     name: nut-ups-textfile.timer
     state: restarted
     daemon_reload: true
+
+- name: Restart ups-selftest timer
+  ansible.builtin.systemd:
+    name: ups-selftest.timer
+    state: restarted
+    daemon_reload: true

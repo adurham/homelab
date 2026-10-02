@@ -1,0 +1,15 @@
+# Managed by ansible — see roles/nut_ups.
+[Unit]
+Description=UPS battery self-test (lab-corner GX1500U)
+# Must run AFTER NUT is up, and we want it well clear of the nightly backup
+# window (02:00-03:00) so a test transfer never lands mid-vzdump.
+After=nut-server.service
+Wants=nut-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ups-selftest.sh
+# The script has its own internal timeout for the test result; this is the
+# outer safety net so a wedged upscmd can never leave the unit hanging (and
+# with it, the autoshutdown suppression flag file).
+TimeoutStartSec=300

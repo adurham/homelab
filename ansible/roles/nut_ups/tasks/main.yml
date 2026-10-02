@@ -199,3 +199,57 @@
     name: nut-ups-textfile.service
     state: started
   changed_when: false
+
+# ----- Scheduled battery self-test -----
+# A line-interactive UPS with a dead battery is a power strip with a relay;
+# the only way to know the battery still takes load is to transfer to it on a
+# schedule and check. QUICK tests only — a deep test genuinely discharges and
+# could trip the guest autoshutdown. See templates/ups-selftest.sh.j2.
+- name: Render self-test credential file (root-only, password only)
+  # Password ALONE on one line — no comments, no trailing blank lines. The
+  # consuming script reads the whole file as the password, so a rendered
+  # Jinja header would silently become part of the credential (real bug found
+  # 2026-10-02: file was 299 bytes vs a 24-char password, giving
+  # ERR PASSWORD-REQUIRED / UNKNOWN-COMMAND on every command).
+  ansible.builtin.copy:
+    content: "{{ vault_nut_selftest_password }}\n"
+    dest: /etc/nut/selftest.cred
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  notify: Restart ups-selftest timer
+
+- name: Render UPS self-test script
+  ansible.builtin.template:
+    src: ups-selftest.sh.j2
+    dest: /usr/local/bin/ups-selftest.sh
+    owner: root
+    group: root
+    mode: '0700'
+  notify: Restart ups-selftest timer
+
+- name: Render UPS self-test systemd service
+  ansible.builtin.template:
+    src: ups-selftest.service.j2
+    dest: /etc/systemd/system/ups-selftest.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart ups-selftest timer
+
+- name: Render UPS self-test systemd timer
+  ansible.builtin.template:
+    src: ups-selftest.timer.j2
+    dest: /etc/systemd/system/ups-selftest.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart ups-selftest timer
+
+- name: Start and enable ups-selftest timer
+  ansible.builtin.systemd:
+    name: ups-selftest.timer
+    state: started
+    enabled: true
+    daemon_reload: true
