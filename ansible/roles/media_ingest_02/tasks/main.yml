@@ -179,6 +179,90 @@
   notify: Restart Media Ingest 02 Timer
   no_log: true
 
+# ─── Patch: stop chronic re-download of protected media (key-less DRM) ───
+# Root cause (found live 2026-10-02): the protected/DASH download path NEVER
+# persists a downloaded mark when the media cannot be fetched or decrypted, so
+# the dupe-check never skips it and the SAME items are re-downloaded (and
+# re-pushed) on every 2h sweep, indefinitely — 8+ models, the worst item every
+# day for 32 straight days. Two independent terminal failures, both in the
+# protected-download manager, both occurring BEFORE the success-marking step:
+#   (1) the CDN returns the media response without a content-length header
+#       (gzip/chunked transfer), so the size read raises TypeError before any
+#       byte is written; and
+#   (2) the item cannot be decrypted without a configured key (no CDM device),
+#       so the run ends in a terminal failure.
+# This patch (a) asks the CDN for identity encoding so it reports a real
+# content-length (removes failure (1); verified live: 54/54 responses gained a
+# real length), and (b) persists the downloaded mark on ANY terminal failure of
+# the protected path, reusing the upstream's OWN terminal-mark helper (the same
+# one its size-skip path calls) so the dupe-check skips the item next sweep.
+# Both edits are idempotent (marker strings; a re-run does not rematch) and a
+# verify task fails loudly if either did not apply — a silent no-op would
+# leave the churn running. Package identity comes from the vault (no_log).
+- name: Find installed protected-download manager
+  ansible.builtin.find:
+    paths: "{{ media_ingest_02_dir }}/venv/lib"
+    # find matches the BASENAME, not a path glob, so a slash-containing
+    # pattern silently returns 0 files. Recurse and match the module
+    # basename instead (also keeps the package identity out of the repo).
+    patterns: "alt_download.py"
+    file_type: file
+    recurse: true
+  register: m02_altdl_py
+  changed_when: false
+  no_log: true
+
+- name: Fail if protected-download manager not found (upstream layout changed)
+  ansible.builtin.fail:
+    msg: >-
+      Protected-download manager not found under the venv: the scraper package
+      layout changed or the install is incomplete, so the protected-media churn
+      patches could not be applied. Re-check the pinned version's module layout.
+  when: m02_altdl_py.files | length == 0
+  no_log: true
+
+- name: Patch protected-download manager to request identity encoding
+  ansible.builtin.replace:
+    path: "{{ m02_altdl_py.files[0].path }}"
+    regexp: "(?s)headers = \\{\"Cookie\": f\"\\{ele\\.hls_header\\}\\{auth_requests\\.get_cookies_str\\(\\)\\}\"\\}\n"
+    replace: "headers = {\"Cookie\": f\"{ele.hls_header}{auth_requests.get_cookies_str()}\", \"Accept-Encoding\": \"identity\"}\n"
+  when: m02_altdl_py.files[0].path is defined and m02_altdl_py.files | length > 0
+  notify: Restart Media Ingest 02 Timer
+  no_log: true
+
+- name: Patch protected-download manager to persist a mark on terminal failure
+  ansible.builtin.replace:
+    path: "{{ m02_altdl_py.files[0].path }}"
+    regexp: "(?s)            return await self\\._handle_result_alt\\(\\n                sharedPlaceholderObj, ele, audio, video, username, model_id\\n            \\)\\n        finally:\\n            common_globals\\.sem\\.release\\(\\)\\n"
+    replace: "            return await self._handle_result_alt(\n                sharedPlaceholderObj, ele, audio, video, username, model_id\n            )\n        except Exception as _protected_err:\n            # PROTECTED-FAIL-MARK: this protected media could not be fetched\n            # or decrypted, which is terminal for this run (no key configured).\n            # Persist the downloaded mark via the upstream's own terminal-mark\n            # helper so the dupe-check skips it next sweep instead of\n            # re-downloading the same asset on every tick, indefinitely.\n            try:\n                if ele.id:\n                    await mark_media_as_downloaded(\n                        ele,\n                        model_id=model_id,\n                        username=username,\n                        downloaded=True,\n                    )\n            except Exception:\n                pass\n            raise _protected_err\n        finally:\n            common_globals.sem.release()\n"
+  when: m02_altdl_py.files[0].path is defined and m02_altdl_py.files | length > 0
+  notify: Restart Media Ingest 02 Timer
+  no_log: true
+
+- name: Verify protected-download encoding patch applied
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -q
+      - -F
+      - '"Accept-Encoding": "identity"'
+      - "{{ m02_altdl_py.files[0].path }}"
+  when: m02_altdl_py.files | length > 0
+  changed_when: false
+  no_log: true
+
+- name: Verify protected-download failure-mark patch applied
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -q
+      - -F
+      - "PROTECTED-FAIL-MARK"
+      - "{{ m02_altdl_py.files[0].path }}"
+  when: m02_altdl_py.files | length > 0
+  changed_when: false
+  no_log: true
+
 # ─── Config + env (secrets from vault) ─────────────────────────────────────
 - name: Render Scraper Config
   ansible.builtin.template:
