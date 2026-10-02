@@ -1,0 +1,19 @@
+# Managed by ansible — see roles/nut_ups.
+# UPS definition file. Section name [{{ nut_ups_name }}] is also the
+# systemd instance name used by `nut-driver@{{ nut_ups_name }}.service`
+# (Debian's nut-driver@.service resolves its device via
+# `nut-driver-enumerator.sh --get-device-for-service <instance>`).
+#
+# driver=usbhid-ups + vendorid is the documented generic path for this
+# unit: it enumerates as 0764:0601 "CPS GX1500U", and NUT ships a
+# matching udev rule (/usr/lib/udev/rules.d/62-nut-usbups.rules).
+# pollinterval=2: the sag/transfer events this box exists to catch can
+# be seconds long — poll the device fast (driver default is 2s; keep it
+# explicit so it can't silently drift).
+[{{ nut_ups_name }}]
+    driver = usbhid-ups
+    port = auto
+    vendorid = {{ nut_ups_vendor_id }}
+    desc = "CyberPower GX1500U (lab corner: pve01-03 + GS108 + basement pod + amd-workstation)"
+    pollinterval = 2
+    maxretry = 10

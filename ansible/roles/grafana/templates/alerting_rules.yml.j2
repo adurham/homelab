@@ -2261,7 +2261,133 @@ groups:
         for: 0m
         annotations:
           summary: "{{ '{{' }} $labels.instance {{ '}}' }} rebooted within the last hour"
-          description: "node_boot_time_seconds changed on {{ '{{' }} $labels.instance {{ '}}' }} in the last hour -- the node restarted. If this was NOT a planned reboot, it is likely another occurrence of the lab-corner power-sag class (docs/ipam.md EVENT 2026-10-01): read /root/lab_witness.log on all three pve nodes for the drop ordering, then Loki for the final lines, then compute power-return from `Startup finished` + boot_time. Check `last -x | head` for whether wtmp recorded it as `crash` (unclean) or a clean shutdown, and check whether a surviving node's NIC carrier dropped (the sag signature)."
+          description: "node_boot_time_seconds changed on {{ '{{' }} $labels.instance {{ '}}' }} in the last hour -- the node restarted. If this was NOT a planned reboot, it is likely another occurrence of the lab-corner power-sag class (docs/ipam.md EVENT 2026-10-01): read /root/lab_witness.log on all three pve nodes for the drop ordering, then Loki for the final lines, then compute power-return from `Startup finished` + boot_time. Check `last -x | head` for whether wtmp recorded it as `crash` (unclean) or a clean shutdown, and check whether a surviving node's NIC carrier dropped (the sag signature). If the UPS went on battery at the same timestamp (ups_on_battery_transfer), the sag reached the mains feed and the UPS covered (or failed to cover) it -- both events together are the closing evidence."
+        labels:
+          severity: warning
+        isPaused: false
+
+      # ---------------------------------------------------------------------
+      # Lab-corner UPS (roles/nut_ups on pve01). Added 2026-10-01 with the
+      # CyberPower GX1500U install: the UPS both mitigates the recurring
+      # deep-sag events AND is the measuring instrument for them -- upsmon
+      # polls the device every 2s and logs every transfer to syslog, which
+      # Alloy ships to Loki. This rule turns the next mains disturbance
+      # into an immediately-stamped push instead of a post-mortem crash
+      # reconstruction. See docs/ipam.md "INCIDENT CLASS B".
+      # ---------------------------------------------------------------------
+
+      - uid: ups_on_battery_transfer
+        title: UPS on battery (lab corner) — mains transfer event
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              # upsmon's stock ONBATT message is "UPS <name> on battery";
+              # unit=nut-monitor.service is the upsmon systemd unit on the
+              # owning node. Range query (not instant) for the same
+              # label-preservation reason as the log_* rules above.
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit="nut-monitor.service", host="pve01"} |~ "(?i)on battery" [10m]))'
+              instant: false
+              range: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 0"
+              type: math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "Lab-corner UPS on pve01 transferred to BATTERY (mains disturbance at the lab corner)"
+          description: "upsmon logged 'on battery' for the GX1500U -- the lab corner's mains feed dipped or dropped and the UPS took over. This is the timestamped transfer event the UPS was installed to capture (docs/ipam.md INCIDENT CLASS B). Next moves: note this timestamp; if pve_node_rebooted also fired around now, the sag was deeper than the UPS ride-through and nodes reset (read /root/lab_witness.log drop order); if nothing else fired, the UPS simply covered a sag -- compare against the Emporia whole-house CT at this minute (a 1-min average will miss a sub-second sag; absence of a house-wide dip + this event = lab-branch-local disturbance, now proven in real time). If the transfer is followed by no 'on line' recovery within minutes, the corner is RUNNING ON BATTERY: check runtime (nut_ups_battery_runtime) and decide about a graceful shutdown -- nothing auto-shuts-down by design (monitor-only)."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: ups_monitor_stale
+        title: UPS telemetry stale (lab-corner GX1500U)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # The dump script always emits nut_ups_scrape_success (1 or 0);
+              # 0 = upsc could not read the UPS (driver/upsd down or the USB
+              # cable came out). The series going ABSENT entirely (host down)
+              # is covered by host_down, hence noDataState: OK here.
+              expr: nut_ups_scrape_success{instance="pve01"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        annotations:
+          summary: "UPS metrics dump on pve01 has been failing (scrape_success=0) for 15m"
+          description: "nut-ups-textfile.sh cannot read gx1500u via upsc -- the NUT driver or upsd is down, or the UPS USB cable is disconnected. Until this recovers the corner has NO event recording: transfers to battery will only surface via upsmon syslog (if upsmon is alive) or not at all. Check on pve01: `systemctl status nut-driver@gx1500u nut-server nut-monitor`, `upsc gx1500u`, `lsusb | grep 0764`. Re-run `ansible-playbook deploy_nut_ups.yml` if config drifted."
         labels:
           severity: warning
         isPaused: false

@@ -7,6 +7,13 @@ all:
           pve_sync_vlan_ip: "172.20.0.11"
           pve_migrate_vlan_ip: "172.21.0.11"
           zfs_scrub_day_of_month: 1
+          # Lab-corner UPS (CyberPower GX1500U) USB data cable is attached
+          # to THIS node (verified 2026-10-01: 0764:0601 "CPS GX1500U",
+          # serial QA9RQ7001561). roles/nut_ups runs here; the flag also
+          # enables Alloy's textfile collector for nut_ups.prom. If the
+          # USB cable ever moves to another node, move this flag with it
+          # and update roles/nut_ups/README.md.
+          nut_ups_enabled: true
           # Nightly vzdump job (roles/proxmox_backup_jobs). Existing job id
           # 41c3b19b-20ea-4ba0-b760-52a79d1cb83a was hand-configured in the
           # Proxmox UI at some unknown point BEFORE this role existed --

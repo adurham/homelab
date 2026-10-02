@@ -19,12 +19,16 @@
 // so hosts without that role installed don't get an exporter block
 // scanning a directory that doesn't exist -- prometheus.exporter.unix
 // logs a scrape error (not fatal, but noisy) if the directory is missing.
+// 2026-10-01: ALSO gated on nut_ups_enabled (pve01) -- the nut_ups role
+// (roles/nut_ups) dumps UPS state to the SAME textfile dir, so the
+// collector must be enabled on any host running EITHER role. One
+// directory, one collector.
 prometheus.exporter.unix "host" {
-    enable_collectors = ["systemd"{% if smartctl_exporter_enabled | default(false) %}, "textfile"{% endif %}]
+    enable_collectors = ["systemd"{% if (smartctl_exporter_enabled | default(false)) or (nut_ups_enabled | default(false)) %}, "textfile"{% endif %}]
     systemd {
         unit_include = ".+\\.service"
     }
-{% if smartctl_exporter_enabled | default(false) %}
+{% if (smartctl_exporter_enabled | default(false)) or (nut_ups_enabled | default(false)) %}
     textfile {
         directory = "{{ smartctl_exporter_textfile_dir | default('/var/lib/node_exporter/textfile_collector') }}"
     }

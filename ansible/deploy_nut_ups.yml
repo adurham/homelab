@@ -1,0 +1,30 @@
+---
+# Re-apply JUST the nut_ups role (and the Alloy wiring for its textfile
+# collector) to pve01, without running the broad deploy_monitoring.yml.
+#
+# Run from the personal MacBook (~/repos/homelab/ansible):
+#   ansible-playbook deploy_nut_ups.yml
+#
+# --limit defaults to pve01 via the play's own hosts pattern; the UPS USB
+# is attached to pve01 (verified: 0764:0601 "CPS GX1500U", serial
+# QA9RQ7001561). If the cable ever moves, update roles/nut_ups/README.md
+# and the inventory var `nut_ups_enabled`.
+- name: Configure lab-corner UPS monitoring (NUT) on the owning node
+  hosts: pve01
+  gather_facts: false
+  tasks:
+    - name: Install nut_ups
+      ansible.builtin.include_role:
+        name: nut_ups
+
+- name: Wire the Alloy textfile collector for the UPS dump
+  # Alloy's textfile collector block is gated on a per-host var so hosts
+  # without the role don't scan a missing directory. pve01 now needs it
+  # for nut_ups.prom. Must run after the role so the directory + first
+  # dump exist before Alloy restarts with the collector enabled.
+  hosts: pve01
+  gather_facts: false
+  tasks:
+    - name: Install alloy
+      ansible.builtin.include_role:
+        name: alloy

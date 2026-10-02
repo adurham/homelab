@@ -1,0 +1,38 @@
+# Managed by ansible — see roles/nut_ups.
+#
+# upsmon: MONITOR-ONLY. The lab-corner UPS exists so transfer/sag events
+# get logged and so the corner rides out sags. It must NOT arm an
+# automatic shutdown of the cluster: powervalue 0 + MINSUPPLIES 0 is the
+# documented NUT pattern for "this system takes no power from the
+# monitored UPS and never shuts down because of it" (Monitoring-only NUT
+# clients wiki page; upsmon.conf(5)). SHUTDOWNCMD is additionally a
+# no-op as a third belt.
+#
+# If an ordered shutdown policy is ever wanted it is a deliberate,
+# reviewed change here (MINSUPPLIES/powervalue + a real SHUTDOWNCMD +
+# remote upsmon on pve02/pve03 as secondaries) — not a drive-by edit.
+MONITOR {{ nut_ups_name }}@localhost 0 upsmon {{ vault_nut_upsmon_password }} primary
+
+MINSUPPLIES 0
+
+# No automatic shutdown, ever — explicit no-op command.
+SHUTDOWNCMD "/bin/true"
+
+# Poll fast: transfer events on this box can be seconds long. Localhost
+# queries are free; keep both at 2s rather than the 5s default.
+POLLFREQ 2
+POLLFREQALERT 2
+HOSTSYNC 15
+DEADTIME 15
+OFFDURATION 30
+RBWARNTIME 43200
+NOCOMMWARNTIME 300
+FINALDELAY 5
+
+# Log state changes to syslog (-> journal -> Loki, which is where the
+# transfer-event alert rule looks) but never WALL: no terminal spam on
+# the nodes for a UPS that is monitoring-only anyway.
+NOTIFYFLAG ONLINE   SYSLOG
+NOTIFYFLAG ONBATT   SYSLOG
+NOTIFYFLAG LOWBATT  SYSLOG
+NOTIFYFLAG REPLBATT SYSLOG
