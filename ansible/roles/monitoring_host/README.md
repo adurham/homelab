@@ -9,10 +9,13 @@ monitoring stack. Currently used for `vm-01` (VictoriaMetrics + blackbox
 - `pveam update` + cluster-wide check for the CT's vmid in
   `pvesh /cluster/resources`. Skips create steps if the CT already
   exists anywhere in the cluster.
-- `pct create` with two NICs (eth0 LAN DHCP, eth1 private static),
-  internal DNS (`ip_dns_primary`, `searchdomain chi.lab.amd-e.com`),
-  unprivileged, `nesting=1`, sshpubkey from the calling node's
-  `/root/.ssh/authorized_keys`.
+- `pct create` with a single NIC on the `private` SDN bridge
+  (`net0` = static `net_private_ip`, gw `net_private_gw`), internal DNS
+  (`ip_dns_primary`, searchdomain chi.lab.amd-e.com), unprivileged,
+  `nesting=1`, sshpubkey from the calling node's
+  `/root/.ssh/authorized_keys`. Monitoring CTs are PRIVATE-SDN ONLY —
+  they scrape LAN targets outbound via the tailscale-gw NAT; the role
+  strips any legacy `bridge=vmbr0` NIC on re-apply.
 - For already-existing CTs: idempotent `pct set --nameserver/--searchdomain`
   plus an `ssh + pct exec + tee` push of `/etc/resolv.conf` so the
   internal-DNS fix lands on the running container without rebuild. CT

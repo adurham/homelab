@@ -8,15 +8,19 @@ handled by `roles/tanium_client_host`.
 
 ## What it does
 
-- Looks in `/tmp` for a `taniumclient_*-<distro><major>_amd64.deb`
-  matching the target CT's distro and version, falling back to the
-  universal package if a distro-specific build isn't present.
-- Installs via `apt-get install -f` (deb format) or `dnf install` (rpm)
-  to pick up dependencies automatically.
-- Restarts `taniumclient` so the bound `ServerNameList` from
-  `roles/tanium_client_host`'s ks.dat takes effect.
+- Pulls a `tanium-init.dat` (bound `ServerNameList`) from the Tanium
+  server's API (`{{ tanium_client_server_url }}/api/v2/keys/315`) and
+  installs it at `/opt/Tanium/TaniumClient/tanium-init.dat`.
+- Downloads the Linux client bundle from the Tanium server, then finds
+  a `taniumclient_*-<distro><major>_amd64.deb` in `/tmp` matching the
+  target CT's distro/version, falling back to the `universal` package.
+- Installs via `apt` (deb), `dnf` (rpm; a `dnf --nogpgcheck` shell
+  override for EL8), or `zypper --no-gpg-checks` (SUSE).
+- Restarts `taniumclient` so the just-installed `tanium-init.dat`
+  (`ServerNameList`) takes effect.
 
 ## Where it's invoked
 
-`deploy_tanium_clients.yml`, after `tanium_client_host` has staged the
-matching package into the CT's `/tmp`.
+`deploy_tanium_clients.yml` (tags `install`), against the
+`tanium_clients` inventory group, after the `tanium_client_host` play
+(tags `provision`) has created the CTs.

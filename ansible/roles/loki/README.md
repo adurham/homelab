@@ -10,7 +10,7 @@ by Alloy from every managed host.
 - Renders `/etc/loki/loki.yml` (config) + systemd unit.
 - Storage: filesystem-backed chunks + index in
   `{{ loki_storage_dir }}` (default `/var/lib/loki`).
-- Retention: 14 days (`loki_retention_period: 336h`).
+- Retention: 30 days (`loki_retention_period: 720h`).
 
 ## Key variables (`defaults/main.yml`)
 
@@ -27,8 +27,8 @@ pruning before the generic `disk_full` alert (90%) catches it.
 
 ## Where it's invoked
 
-`deploy_monitoring.yml`'s play 3 (`Configure VictoriaMetrics`, alongside
-the `loki` role-include).
+`deploy_monitoring.yml`'s play 8 (`Configure VictoriaMetrics`, alongside
+the `victoriametrics` role-include).
 
 ## History
 

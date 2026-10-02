@@ -1,5 +1,15 @@
 # BWT Lab — Next Session Handoff
 
+> **SUPERSEDED (2026-10-02).** This handoff is from 2026-05-18 and the
+> work it describes is closed. Two concrete changes since: the pending
+> `bwt-tms` cleanup (VMID 225) is DONE — no `bwt-tms` VM exists and no
+> `deploy_bwt_tms.yml` / `bwt_module_servers` inventory remains in the
+> repo; and the TanOS servers plus client CTs have since been removed
+> from the cluster entirely (only `bwt-dhcp` CT 114 remains). The
+> planned "load harness" task below was not carried to a full
+> reproduction — see [harness-blocker.md](harness-blocker.md) for the
+> definitive outcome. Kept as a session record.
+
 Written 2026-05-18 after a long session. Read this first before doing
 anything. The actual task is **build the load harness for the throttle
 repro**, not anything else.

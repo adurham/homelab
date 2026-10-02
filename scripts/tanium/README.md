@@ -21,16 +21,21 @@ not as an extensible toolset.
 A mix of:
 
 - PCAP analyzers (`analyze_tanium_pcaps.py` + `ANALYZE_TANIUM_PCAPS_README.md`)
-- Performance test scripts (`tanium_perf_test*`, `tanium_download_perf_test.py`,
+- Performance test scripts (`tanium_download_perf_test.py`,
   `TANIUM_PERF_TEST_README.md`)
 - API and SQL utilities (`clientAPI.py`, `md5_sql_*`, `push_metrics.py`,
   `question_load.py`, `change_tds_settings.py`, `toggle_tds_sensors.py`)
 - Bulk import / cleanup scripts (`import_users.ps1`, `import_groups.ps1`,
   `clean THR alerts.py`, `extract_ids.py`, `extract_urls.ps1`)
-- Action / sensor scaffolding (`actions/`, `sensors/`, `create_action.py`)
+- Action / sensor scaffolding (`actions/` (`tls_test.py`), `sensors/`,
+  `create_action.py`)
 - Misc helpers (`open_psql.sh`, `rename_files.sh`, `reset_tanium_pki.sh`,
   `scan_port_443.py`, `spam_questions.py`, `sudo_airgap.{sh,ps1}`,
-  `tanium_compare.py`, `tds_wrapper.py`, `tls_test.py`, `urls.txt`)
+  `tanium_compare.py`, `tds_wrapper.py`, `urls.txt`)
+- BWT throttle-measurement rig (`bwt-run-experiment.py`, `bwt-sample-metrics.sh`,
+  `bwt-check.sh`) and cluster/proxy tooling (`configure_cluster.sh`,
+  `fetch_artifactory_bundle.sh`)
+- Package-parameter audit (`find_out_of_order_parameterized_packages.py`)
 
 ## If something here is genuinely needed
 

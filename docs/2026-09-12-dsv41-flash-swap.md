@@ -1,5 +1,14 @@
 # 2026-09-12: DeepSeek-V4.1-Flash swap (retiring deepseek-v4-flash:0731)
 
+> **Status (2026-10-02): DONE.** The Flash→Flash swap is committed
+> (`fcefbdf`). The Tier-B decision below — "no Pro-tier role or aux
+> task moved", `deepseek-v4-pro:0813` "stays pinned everywhere" — was
+> **SUPERSEDED on 2026-09-15** by commit `24e35bc`: upstream DeepSeek
+> retired `deepseek-v4-pro:0813` on 2026-09-14, so essentially every
+> Pro-tier role this doc leaves on Pro was moved to
+> `deepseek-v4.1-flash`. The "Not yet done" deploy step at the bottom
+> has since been performed — the live gateway runs `deepseek-v4.1-flash`.
+
 ## What changed
 
 Ollama released `deepseek-v4.1-flash` on ollama.com (2026-09-10), adding

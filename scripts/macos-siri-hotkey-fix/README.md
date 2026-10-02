@@ -1,6 +1,6 @@
 # macOS Siri / 1Password Cmd+Shift+Space conflict fix
 
-**Machine:** Personal MacBook, macOS 27.0 beta (build 26A5416b, "Tahoe"-era with the new merged Spotlight/Siri redesign).
+**Machine:** Personal MacBook, macOS 27.0.1 (build 26A434, "Tahoe"-era with the new merged Spotlight/Siri redesign). Originally diagnosed on a 27.0 beta build (26A5416b); as of 27.0.1 the `Siri AI` process (`com.apple.campo`) is still present.
 
 **Symptom:** Pressing Cmd+Shift+Space (1Password's Quick Access global shortcut) opened 1Password's quick bar, then a beat later Siri popped up on top of it and 1Password's panel self-dismissed (it lost focus/key-window status when Siri activated).
 

@@ -40,8 +40,12 @@ dicts at the top of `cat_accident_daemon.py`. `PERIODIC` maps
 ## Where it runs
 
 Unlike the rest of this repo (Proxmox / LXC infra deployed by Ansible), the
-detector daemon runs on the **MacBook Pro** (`192.168.86.74`) as a launchd
-LaunchAgent. The canonical live copy lives at:
+detector daemon runs on the **MacBook Pro** as a launchd LaunchAgent. That
+laptop's LAN IP is DHCP-assigned and has drifted — a stale `192.168.86.74` is
+still floating around in older notes; the live address on 2026-10-02 was
+`192.168.86.46`. Nothing in the daemon depends on a hardcoded laptop IP (the
+Mac is the MQTT client), so this only matters for anyone reaching the Mac.
+The canonical live copy lives at:
 
     ~/.hermes/pet-accident-detector/cat_accident_daemon.py
     ~/.hermes/pet-accident-detector/.venv/         (isolated venv: paho-mqtt + Pillow)
@@ -51,6 +55,16 @@ the live location and restart the daemon:
 
     cp pet-accident-detector/cat_accident_daemon.py ~/.hermes/pet-accident-detector/
     launchctl kickstart -k gui/$(id -u)/com.adurham.petaccident
+
+> **Operational status — live-checked 2026-10-02, NOT running.** The LaunchAgent
+> is not currently installed on the Mac: `~/Library/LaunchAgents/com.adurham.petaccident.plist`
+> is absent, `launchctl print gui/$(id -u)/com.adurham.petaccident` returns
+> "Could not find service", and no `cat_accident_daemon` process is running. The
+> daemon's last log entry is 2026-08-02 (`VLM error: Connection refused` — the
+> VLM backend at `192.168.86.201:8090` was already unreachable then, and still
+> was on 2026-10-02; the exo cluster's alert rules read "down"/"not ready" in the
+> same window). Re-bootstrap the plist from the tracked copy before trusting the
+> `launchctl kickstart` line above.
 
 ## Architecture
 
@@ -90,6 +104,13 @@ well beyond this detector.
 
 Monitored cameras: `basement`, `foyer`, `kitchen_display` (event-driven) and
 `cat_room` (periodic, every 15 min).
+
+> **Drift note (verified 2026-10-02):** the *live* daemon at
+> `~/.hermes/pet-accident-detector/cat_accident_daemon.py` matches the list
+> above, but the **tracked** copy at `pet-accident-detector/cat_accident_daemon.py`
+> is one sync behind — it omits `kitchen_display` from `EVENT_DRIVEN`. The next
+> `cp` in this direction would clobber the live config, so re-add
+> `"kitchen_display": "Kitchen",` before syncing.
 
 ## Secrets (none committed)
 

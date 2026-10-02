@@ -18,7 +18,11 @@ plane stays LAN-only despite having an L3 endpoint on the SDN.
    helper that adds an iptables `INPUT` rule via a dedicated
    `PRIVATE-MONITORING-IN` chain — drops new inbound, accepts
    ESTABLISHED/RELATED. Lives in a user chain so pve-firewall reloads
-   don't wipe it.
+   don't wipe it. Every `iptables` call passes `-w 30` (wait up to 30s
+   for the xtables lock): without it the boot-time run races
+   pve-firewall's own load and dies with "Another app is currently
+   holding the xtables lock", leaving the chain empty and the unit
+   failed (observed live on pve02/pve03 at the 2026-09-25 19:54 boot).
 
 ## Key variables (`defaults/main.yml`)
 

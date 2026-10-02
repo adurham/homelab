@@ -11,6 +11,11 @@ Commits this session (chronological): `2ae252f`, `36e833e`, `bac1076`,
 `445ca41`, `6177dee`, `628a33e`, `3c39f73`, `a4d6783`, `bf12a80`,
 `b88325d`, `1c9194d`, `08c67ff`, `8fbb145`, `a0f32bb`.
 
+> **Note (2026-10-02):** this is a point-in-time record of the
+> 2026-09-10 sweep, not current status. Live state has drifted since —
+> e.g. `ts-02`/`tms-02`, listed under "known, intentionally-accepted
+> gaps" as down, are running again. Read that section as of 2026-09-10.
+
 ## 1. Origin: Hue Play HDMI sync box "blip"
 
 Root cause was an internal coordinator hang inside the sync box itself,
