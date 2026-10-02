@@ -74,9 +74,15 @@ Brief tour of what is actually running. See the matching files under
   commit `0b3a929`.) Pool-pump protection lives in `automations/pool_safety.yaml`.
 - Infrastructure alerting — `automations/adguard_watchdog.yaml`,
   `automations/frigate_watchdog.yaml`, `automations/disk_space_watchdog.yaml`,
-  `automations/smart_vent_watchdog.yaml`, `automations/grafana_alert_webhook.yaml`.
+  `automations/smart_vent_watchdog.yaml`, `automations/ecobee_pairing_watchdog.yaml`,
+  `automations/grafana_alert_webhook.yaml`.
   Liveness monitors (AdGuard, Frigate NVR, HA host disk space, Smart Vent
-  Controller's AppDaemon heartbeat) and the Grafana → iPhone push bridge.
+  Controller's AppDaemon heartbeat, the ecobee HomeKit pairing) and the
+  Grafana → iPhone push bridge. `ecobee_pairing_watchdog.yaml` reloads the
+  Edgewater Road HomeKit config entry when the pairing (thermostat + room
+  sensors + all door/window contacts) has been unavailable 3+ min, and
+  escalates if it's still down after 10 — see the 2026-09/10 flap-storm
+  correlation in docs/ipam.md and the header comment in the file.
   `smart_vent_watchdog.yaml` self-heals via `hassio.addon_restart` on
   heartbeat staleness >6min, rate-limited to 1 restart/15min, escalates
   to a critical push if the restart doesn't clear it — see the 2026-08-08

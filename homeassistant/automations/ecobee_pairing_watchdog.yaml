@@ -1,0 +1,156 @@
+# Ecobee HomeKit pairing watchdog ("Edgewater Road")
+#
+# What it watches: the single homekit_controller pairing to the ecobee
+# thermostat (config entry 01JWBHM9X5MWW0EPGZPPY9ZPTT), which carries the
+# thermostat itself, every room sensor, and every door/window contact --
+# including binary_sensor.garage_door_contact, the person-door sensor the
+# garage-lights automation triggers on. When this pairing drops, ALL of
+# those entities go "unavailable" together.
+#
+# Why it exists (2026-10-02): the pairing flapped 101 times between 09-24
+# and 09-30 (median ~55s, max ~13min per episode), every entity dropping
+# in lockstep, correlated with the LAN/WiFi storm windows documented in
+# docs/ipam.md (the 09-29/30 L2 incident). Those outages are silent
+# failure conditions for door-triggered automations: an open that happens
+# mid-flap never fires garage_lights_door_motion_control. After the user's
+# 09-30 network re-cable (pod removed from the trunk path) the pairing has
+# been clean (0 flaps in 57h as of 2026-10-02). This watchdog covers the
+# two failure modes that remain:
+#   1. a WEDGE: pairing stuck disconnected after a network event healed
+#      (self-heal = reload the config entry; verified working 2026-10-02,
+#      ~4s, entity_ids stable);
+#   2. a RECURRENCE of storm-style flapping that needs the network looked
+#      at (escalation notification after 10+ minutes down).
+#
+# Rate limits: reloads at most 1x/15min and escalation at most 1x/hour,
+# enforced via each automation's own last_triggered (same pattern as
+# mailbox_truck.yaml). No helper entities needed.
+#
+# If the config entry is ever re-added, re-point the entry_id below (find
+# it in Settings -> Devices & Services, or GET /api/config/config_entries).
+
+# Self-heal: reload the pairing when it has been down 3+ minutes.
+- alias: "Infrastructure: Ecobee Pairing Watchdog (self-heal)"
+  id: "infrastructure_ecobee_pairing_watchdog_reload"
+  description: >-
+    Reload the Edgewater Road HomeKit config entry when the pairing has
+    been unavailable for 3+ minutes (re-checked every 5 min while down).
+    Rate-limited to one reload per 15 minutes.
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    # First detection of a fresh outage.
+    - platform: state
+      id: "stale"
+      entity_id:
+        - binary_sensor.garage_door_contact
+        - climate.ecobee_thermostat
+      to: "unavailable"
+      for: "00:03:00"
+    # Re-check while a long outage persists (covers a reload that fired
+    # while the network was still down, i.e. no-op recoveries).
+    - platform: time_pattern
+      id: "recheck"
+      minutes: "/5"
+
+  condition:
+    # Rate limit: at most one reload per 15 minutes.
+    - condition: template
+      value_template: >-
+        {{ this.attributes.last_triggered is none or
+           (now() - this.attributes.last_triggered).total_seconds() > 900 }}
+    # Still down, and down long enough to not be a blip (recheck path
+    # needs the 3-min test explicitly; the state trigger already has it).
+    - condition: template
+      value_template: >-
+        {{ (is_state('binary_sensor.garage_door_contact', 'unavailable') and
+            (now() - states['binary_sensor.garage_door_contact'].last_changed).total_seconds() > 180)
+           or (is_state('climate.ecobee_thermostat', 'unavailable') and
+            (now() - states['climate.ecobee_thermostat'].last_changed).total_seconds() > 180) }}
+
+  action:
+    - service: homeassistant.reload_config_entry
+      data:
+        entry_id: "01JWBHM9X5MWW0EPGZPPY9ZPTT"
+    - service: system_log.write
+      data:
+        message: >-
+          Ecobee pairing watchdog: Edgewater Road pairing unavailable 3+ min
+          ({{ trigger.id }}) -- reloaded config entry (self-heal)
+        level: warning
+
+# Escalate: if the pairing is still down 10+ minutes in, notify locally.
+- alias: "Infrastructure: Ecobee Pairing Watchdog (escalate)"
+  id: "infrastructure_ecobee_pairing_watchdog_escalate"
+  description: >-
+    Raise a local persistent notification when the Edgewater Road HomeKit
+    pairing has been unavailable for 10+ minutes despite self-heal
+    reloads. Rate-limited to one notification per hour.
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: state
+      id: "stale"
+      entity_id:
+        - binary_sensor.garage_door_contact
+        - climate.ecobee_thermostat
+      to: "unavailable"
+      for: "00:10:00"
+
+  condition:
+    # Rate limit: at most one escalation per hour.
+    - condition: template
+      value_template: >-
+        {{ this.attributes.last_triggered is none or
+           (now() - this.attributes.last_triggered).total_seconds() > 3600 }}
+    # Confirm it is actually still down right now (the trigger's `for`
+    # applies to this entity's last transition; a reload resets it).
+    - condition: template
+      value_template: >-
+        {{ is_state('binary_sensor.garage_door_contact', 'unavailable') or
+           is_state('climate.ecobee_thermostat', 'unavailable') }}
+
+  action:
+    - service: persistent_notification.create
+      data:
+        title: "Ecobee HomeKit pairing is down"
+        message: >-
+          The Edgewater Road HomeKit pairing (thermostat, room sensors,
+          door/window contacts) has been unavailable for 10+ minutes as of
+          {{ now().strftime('%Y-%m-%d %H:%M:%S') }}. Door-triggered
+          automations (garage/front/backyard) are degraded while it is
+          down. A self-heal reload was already attempted; if this persists,
+          check the network path (see docs/ipam.md, pairing is on WiFi at
+          192.168.86.22).
+        notification_id: "ecobee_pairing_watchdog"
+    - service: system_log.write
+      data:
+        message: >-
+          Ecobee pairing watchdog: pairing still unavailable 10+ min after
+          self-heal -- escalated to persistent notification
+        level: error
+
+# Recover: clear the escalation notification once the pairing is back.
+- alias: "Infrastructure: Ecobee Pairing Watchdog (recovery)"
+  id: "infrastructure_ecobee_pairing_watchdog_recovery"
+  description: "Dismiss the pairing-down notification when the pairing recovers."
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.garage_door_contact
+        - climate.ecobee_thermostat
+      from: "unavailable"
+
+  action:
+    - service: persistent_notification.dismiss
+      data:
+        notification_id: "ecobee_pairing_watchdog"
+    - service: system_log.write
+      data:
+        message: "Ecobee pairing watchdog: pairing recovered (notification dismissed)"
+        level: info
