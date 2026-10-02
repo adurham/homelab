@@ -85,9 +85,9 @@ It also never recovers while the UPS is unreadable or on battery again.
   battery, so the cluster (and this daemon) keeps running; if the battery
   exhausts, AC loss cuts them — the path all three already auto-recover
   from via BIOS AC-recovery settings (verified 2026-10-01: all three came
-  back unattended after the rewire's power cut; pve02/03 are `AcPwrRcvry=On`,
-  pve01 is `Last` — pve01 needs its BIOS flipped to `On` for that guarantee
-  to hold for a *graceful* power loss).
+  back unattended after the rewire's power cut; **all three are now
+  `AcPwrRcvry=On` as of 2026-10-01** — pve01 was `Last` and was flipped
+  via `scripts/hardware/dell-set-ac-recovery-on.sh`).
 - **Never touches excluded VMIDs** (`exclude_vmids` default empty).
 - **Never acts while `/var/lib/ups-autoshutdown/disabled` exists** — one
   file to make it a no-op without stopping the daemon.

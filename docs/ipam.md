@@ -507,6 +507,25 @@ everything else; HA guests via `ha-manager crm-command stop`, plain guests
 via the status API), force-stopping only after per-guest and whole-
 sequence deadlines. It never shuts down a NODE — nodes ride the battery,
 and the AC-loss path they already auto-recover from is the backstop.
+
+**BIOS AC-recovery: ALL THREE NODES ARE `On` (completed 2026-10-01 22:0x).**
+pve02/pve03 were already `On`; pve01 was `Last` (would have stayed off after
+a graceful power-off on battery). Flipped via
+`/usr/local/bin/dell-set-ac-recovery-on.sh` (`scripts/hardware/` in the repo)
+— the dell-wmi-sysman write path requires the BIOS admin password, which the
+script prompts for silently and clears from the kernel buffer on exit.
+Verified: `AcPwrRcvry=On` read back on pve01, no driver errors in dmesg.
+
+**amd-workstation (Minisforum DRFXI / AMI BIOS): NOT settable from software.**
+No `/sys/class/firmware-attributes` interface (the kernel has the
+`firmware_attributes_class` module but no provider driver for this board), no
+ACPI/WMI vendor hooks, and the settings live in opaque UEFI vars
+(`AmdSetupRpl`, `AMD_PBS_SETUP`) with no decoder — blind-writing those is how
+boards get bricked. This needs a keyboard+monitor BIOS session:
+Advanced → APM Configuration → Restore AC Power Loss → Power On (may appear as
+`State After G3` under Chipset, or under `Advanced → ACPI Configuration`).
+Note the box also lost power Sep 25 14:50 → Oct 1 19:07 with no shutdown
+sequence in its journal, so it has no demonstrated ride-through record.
 Recovery restarts exactly what it stopped once mains is stable 5 min (10
 if a recovery happened in the last 30 min). Safety: `state.json` on local
 disk is the source of truth, `/var/lib/ups-autoshutdown/disabled` is the
