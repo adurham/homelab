@@ -302,6 +302,8 @@ def main():
     ap.add_argument("--pause", type=float, default=PAUSE)
     ap.add_argument("--workers", type=int, default=8,
                     help="parallel classification workers (local IO-bound probes)")
+    ap.add_argument("--apply-workers", type=int, default=6,
+                    help="parallel rename workers (each is a Drive metadata op)")
     ap.add_argument("--renamed-out", default="",
                     help="write the list of successful renames here (for --verify)")
     ap.add_argument("--verify", default="",
@@ -422,27 +424,36 @@ def main():
     done_bytes = 0
     fails = []
     renamed = []            # {src, dst, size, folder} for post-run verification
-    for (d, leaf, ext, sz) in eligible:
+    total = len(eligible)
+
+    def do_rename(item):
+        """One server-side rename. Independent metadata ops, so a small pool is
+        safe; each call is a fresh rclone process (the ~4s Drive-API + startup
+        latency dominates, which is why serial is far too slow at this scale)."""
+        d, leaf, ext, sz = item
         stem = leaf[:-4] if leaf.lower().endswith(".bin") else os.path.splitext(leaf)[0]
         dst_leaf = stem if stem.lower().endswith(ext) else stem + ext
-        src_path = f"{SRC}/{d}/{leaf}"
-        dst_path = f"{SRC}/{d}/{dst_leaf}"
-        # A server-side moveto returns rc=0 only when the rename landed; the
-        # canary confirmed bytes+modtime are preserved with no transfer, so
-        # there is no need for a per-file size round-trip (halves Drive API
-        # calls). One authoritative listing at the end verifies every rename.
-        ok, err = moveto(src_path, dst_path)
-        if not ok:
-            fails.append((f"{d}/{leaf}", err))
-            log(f"[FAIL] {d}/{leaf} -> {dst_leaf}: {err}")
-            time.sleep(args.pause)
-            continue
-        done += 1
-        done_bytes += sz
-        renamed.append({"src": leaf, "dst": dst_leaf, "folder": d, "size": sz})
-        if args.canary or done % 25 == 0 or done == len(eligible):
-            log(f"[rename] {done}/{len(eligible)} {d}/{leaf} -> {dst_leaf} ({sz} bytes)")
+        ok, err = moveto(f"{SRC}/{d}/{leaf}", f"{SRC}/{d}/{dst_leaf}")
         time.sleep(args.pause)
+        return (d, leaf, dst_leaf, sz, ok, err)
+
+    # Renames run in parallel (see do_rename); the per-call pause keeps the
+    # Drive API pacer and the CT comfortable, and the end --verify confirms
+    # every recorded rename actually landed.
+    with cf.ThreadPoolExecutor(max_workers=args.apply_workers) as ex:
+        futs = [ex.submit(do_rename, e) for e in eligible]
+        for fut in cf.as_completed(futs):
+            d, leaf, dst_leaf, sz, ok, err = fut.result()
+            if not ok:
+                fails.append((f"{d}/{leaf}", err))
+                log(f"[FAIL] {d}/{leaf} -> {dst_leaf}: {err}")
+                continue
+            done += 1
+            done_bytes += sz
+            renamed.append({"src": leaf, "dst": dst_leaf, "folder": d, "size": sz})
+            if args.canary or done % 25 == 0:
+                log(f"[rename] {done}/{total} {d}/{leaf} -> {dst_leaf} ({sz} bytes)")
+    log(f"[rename] {done}/{total} complete")
 
     save_state(st)
     if args.renamed_out:
