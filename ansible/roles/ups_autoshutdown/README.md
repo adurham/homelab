@@ -41,14 +41,27 @@ guests flips `state` back to `started`).
 All of these must hold, evaluated every `poll_seconds` (default 5s):
 
 1. UPS reports on-battery (`OB` in `ups.status`)
-2. continuously for `ob_sustain_seconds` (default 60s) — a two-second blip
-   that immediately recovers never fires
+2. EITHER continuously for `ob_sustain_seconds` (default 60s) — a two-second
+   blip that immediately recovers never fires —
+   OR cumulatively for `ob_cumulative_seconds` (default 300s) within one
+   episode. The cumulative path exists because a **stuttering storm** (many
+   short 5-10s transfers with brief on-line gaps between them) never lets the
+   continuous timer reach 60s, yet drains the battery the entire time. The
+   counter resets only after `ob_cumulative_reset_seconds` (default 600s)
+   continuously on line, and is persisted so a daemon restart doesn't forget
+   an in-progress episode.
 3. AND either `battery.charge <= stop_charge_percent` (default 20%)
    OR `battery.runtime <= stop_runtime_seconds` (default 300s)
 
-The second condition catches the case where charge percentage lies (an
+The runtime condition catches the case where charge percentage lies (an
 aging battery can read 40% and still have 2 minutes left), which is exactly
 the failure mode this UPS already showed on install day.
+
+**A design that was tried and rejected:** waiving the sustain gate purely on
+low charge. The selftest immediately caught it breaking the short-sag
+guarantee — a low charge percentage with healthy runtime is precisely the
+"let it debounce" case, not the emergency case. Cumulative tracking is the
+design that satisfies both. (Selftest scenario s10/s11 guards this.)
 
 ## Stop sequence
 
@@ -92,7 +105,7 @@ It also never recovers while the UPS is unreadable or on battery again.
 - **Never acts while `/var/lib/ups-autoshutdown/disabled` exists** — one
   file to make it a no-op without stopping the daemon.
 
-## The three safety layers
+## The four safety layers
 
 1. `dry_run: true` (default on deploy) — evaluates and logs
    `DRY RUN: would stop N guests (...)`, writes `ups_autoshutdown_would_trigger 1`,
@@ -101,9 +114,15 @@ It also never recovers while the UPS is unreadable or on battery again.
    timing are what you expect.
 2. `disabled` flag file — instantaneous operator kill switch:
    `ups-autoshutdown disable` / `enable`.
-3. The built-in selftest runs on every ansible deploy and fails the play if
-   the state machine regressed (`ups-autoshutdown selftest`, 8 scenarios,
-   in-memory backend, never touches the cluster).
+3. `selftest-active` flag file — written by `ups-selftest.sh` (see
+   `roles/nut_ups`) while a scheduled battery self-test runs. Trigger
+   evaluation is suspended for the duration, so **maintenance can never be
+   mistaken for a mains outage and start stopping guests**. An already-running
+   sequence continues normally.
+4. The built-in selftest runs on every ansible deploy and fails the play if
+   the state machine regressed (`ups-autoshutdown selftest`, 13 scenarios,
+   in-memory backend, never touches the cluster). Several scenarios are
+   regression guards for real bugs found live — keep it green.
 
 ## Operator commands
 

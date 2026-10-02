@@ -165,6 +165,24 @@ Manages the lifecycle of LXC containers, VMs, and cluster configuration.
   - `deploy_monitoring.yml` — VictoriaMetrics + Grafana.
   - `deploy_grafana_ack_bot.yml` — Discord reaction ack/silence bot for
     Grafana alerts (hermes-gw-01, see `roles/grafana_ack_bot/README.md`).
+  - `deploy_nut_ups.yml` — NUT monitoring for the lab-corner UPS
+    (pve01): driver + upsd + monitor-only upsmon, metrics to
+    VictoriaMetrics, and a monthly quick battery self-test. See
+    `roles/nut_ups/README.md`.
+  - `deploy_ups_autoshutdown.yml` — battery-driven orderly guest shutdown
+    + auto-recovery for the lab corner. Never powers off a node. See
+    `roles/ups_autoshutdown/README.md`.
+
+### `scripts/hardware/` — firmware and host BIOS helpers
+
+- `dell-set-ac-recovery-on.sh` — set one Dell BIOS attribute (default
+  `AcPwrRcvry=On`) via `dell-wmi-sysman`, prompting for the BIOS admin
+  password and readback-verifying. Deployed to `/usr/local/bin/`.
+- `dell-bios-uniformity.sh` — table-driven audit + `--apply` for the
+  homelab-relevant Dell BIOS attributes across the pve nodes (AC recovery,
+  deep sleep/WoL, SMART-error POST behaviour, and vendor hooks). Dry-run by
+  default. See the `dell-optiplex-thermal-bios` reference and the BIOS
+  uniformity entry in `docs/ipam.md`.
 
 ### `homeassistant/` — smart home automation
 
@@ -185,6 +203,7 @@ Home Assistant configuration deployed to the HA host. Notable subsystems:
 - `grafana_auth.py` + `grafana_curl.sh` — JWT-token extractor for browser-based Grafana SSO + curl wrapper that injects the token (see `README_GRAFANA_AUTH.md`).
 - `hermes_config_sync.py` — mirrors `ansible/roles/hermes_gateway/vars/model_routing.yml` (the delegate_task/auxiliary model-routing source of truth) into a local, non-ansible-managed `~/.hermes/config.yaml`. Dry-run by default, `--apply` to write (timestamped backup), `--check` for scripting. Requires `ruamel.yaml` (`uv pip install --python .venv/bin/python3 ruamel.yaml`). See `ansible/roles/hermes_gateway/README.md` for the full drift-prevention workflow.
 - `tanium/` — Tanium platform tooling (client API, TDS, performance testing, sensors, etc.).
+- `hardware/` — host firmware/BIOS helpers (see above).
 
 ## Operational Procedures
 

@@ -414,10 +414,14 @@ as a reliability one: inspect for discoloration/warmth before trusting it.
 (1500VA/900W pure sine wave, line-interactive, AVR, 12 outlets — 6
 battery+surge / 6 surge-only, USB+serial monitoring, NUT-supported via
 usbhid-ups — Best Buy open-box $197). The UPS will replace the old strip
-ENTIRELY as the feed for the lab corner: pve01/pve02/pve03, the GS108 switch,
-AND the two Mac Studios on the battery-backed outlets (exactly 6 — one per
-device); the strip leaves the path entirely. No circuit tester / no separate
-replacement strip needed.
+ENTIRELY as the feed for the lab corner; the strip leaves the path entirely.
+No circuit tester / no separate replacement strip needed.
+
+> **SUPERSEDED by the INSTALLED entry below.** The plan here assumed the two
+> Mac Studios would go on battery outlets (6 outlets = 6 devices). They did
+> not — the actual device list is pve01-03, GS108, basement pod, and
+> amd-workstation. Kept for the load-budget reasoning and the
+> mitigate-and-discriminate logic, both of which still apply.
 - LOAD BUDGET (resolved 2026-10-01, user-measured): total ≈705W worst case
   — 3 OptiPlex nodes (~300W combined worst case) + 2 Mac Studios (~200W
   each max, user has never seen them exceed this) + GS108 (~5W) — against
@@ -431,6 +435,9 @@ replacement strip needed.
   ups.status + load to VictoriaMetrics, add a Grafana alert for transfer
   events (OB/OL transitions) so the next occurrence timestamps itself.
   Update this entry with the outcome.
+  **DONE 2026-10-01/02** — NUT live on pve01, metrics + alerts in place. See
+  the INSTALLED and MONITORING entries below, plus the 2026-10-02 automation
+  entries (guest autoshutdown, input-side alert, scheduled self-test).
 
 **INSTALLED 2026-10-01 evening (~18:59-19:03 CDT; user).** CyberPower
 **GX1500U** — the open-box unit from this day's research (Best Buy, $197;
@@ -687,6 +694,18 @@ false DOWN lines before this was caught.
 for the drop ordering, then `/tmp/netwatch_persistent.log` for packet-level
 detail, then `last -x` + `journalctl -b -1` on each node, and grab the
 Netgear's uptime from its UI by hand.
+
+> **PARTIALLY AUTOMATED as of 2026-10-02** — much of this is now push-alerted
+> rather than post-mortem: `pve_node_rebooted` (VM, node boot-time change),
+> `ups_on_battery_transfer` (Loki, the transfer timestamp),
+> `ups_input_sag_or_transfer` (VM, input voltage < 115 or AVR/OB bits), and
+> `ups_autoshutdown_lab_stopped` (critical). The witness logs are still the
+> authority for DROP ORDERING — read them for sequencing, not for detection.
+> Also note `/root/lab_witness.log` on each node (1s TCP witnesses, deployed
+> 2026-09-29) is now usually faster to read than the studios' copies.
+> Caveat that has NOT changed: the 15s metric cadence can miss a sub-second
+> sag, so a negative on the input-side rule is weaker evidence than a
+> positive.
 
 **THIRD occurrence, live during this same day's later session (~19:07-19:26+
 CDT), observed by a Hermes session responding to a "network still running
