@@ -311,4 +311,3 @@
            is_state('binary_sensor.guest_bathroom_occupancy', 'on') or
            is_state('binary_sensor.nest_protect_living_room_occupancy', 'on') or
            is_state('binary_sensor.nest_protect_foyer_occupancy', 'on') }}
-
