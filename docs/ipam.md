@@ -432,6 +432,42 @@ replacement strip needed.
   events (OB/OL transitions) so the next occurrence timestamps itself.
   Update this entry with the outcome.
 
+**INSTALLED 2026-10-01 evening (~18:59-19:03 CDT; user).** A CyberPower UPS
+(bought at Home Depot; exact model not yet recorded) now feeds the lab
+corner. User's device list: "the homelab switch, the basement wifi pod, the
+3 PVE nodes, and the workstation" — i.e. GS108 (.51), basement pod (.40),
+pve01/02/03, and amd-workstation. The old strip is OUT of the path entirely
+(user-confirmed) — the decided remediation is fully applied on the powered
+side. NOT on the UPS: both Mac Studios and the SG105E/trunk/under-desk
+switches. (This device list supersedes the earlier load-budget plan, which
+had assumed the two Studios on battery outlets.)
+
+Rewire window, as captured by both studios' labwatch/netwatch:
+- ~18:59:0x corner power cut — nodes + GS108 + pod all show DOWN by 18:59:20.
+  All three nodes' `last -x` for the 13:24 session end in `crash` and pve01's
+  journal stops 18:59:02 mid-connection (pve02/03 journals are volatile and
+  lost that window) — i.e. power was pulled on running nodes as the strip
+  came out. User-initiated; NOT a class-B event).
+- GS108 back 19:00:38, pod 19:00:48, nodes booted 19:01:07 (pve01) /
+  19:01:24 (pve03) / 19:01:30 (pve02); brief gateway blips 19:01:41 and
+  19:03:00-08 during final cable moves; quiet since 19:03:13.
+- Neither Mac Studio rebooted (up since Sep 22). Cluster quorate 3/3; all
+  CTs/VMs back with their nodes (verified via `/cluster/resources` 19:19);
+  Loki/VM/HA/frigate/GS108/SG105E all answering. SMART unsafe-shutdown
+  counters ticked again from the pull: nvme0 = 121 (pve01) / 123 (pve02) /
+  159 (pve03, known-stale) as of 19:16.
+
+**MONITORING GAP (open as of 19:19):** the UPS's USB data port is NOT
+connected to any host — no UPS HID device visible on pve01/02/03 or
+amd-workstation, and NUT is installed nowhere — so input voltage / OB-OL
+transfer events are NOT being logged yet. The UPS still mitigates, and "no
+further events while on battery-backed power" still discriminates, but it
+cannot timestamp the next disturbance until the USB is wired. Next step
+(user action): plug the UPS USB cable into the nearest always-on host
+(pve01 recommended — in the corner with the UPS, persistent journal;
+amd-workstation is the fallback if the cable reaches it), then wire NUT +
+VictoriaMetrics export + the Grafana transfer alert per the plan above.
+
 **CUTOVER NOTE (2026-10-02 00:01Z / Oct 1 19:01 CDT):** an all-three-node hard
 reset occurred at 00:01Z — this one was **USER-INITIATED**: the user was
 moving the lab corner's power onto the new UPS and cut the old feed. It is
@@ -445,8 +481,10 @@ cutover, ~00:16Z). Two validations came out of it:
    code would have lost the whole slice). Gallery self-recovered: all
    services back, serve tmpfs reseeded from Drive in ~70s, manifest serving
    0.12s.
-Post-cutover state: pve01/02/03 + GS108 + both studios all on UPS battery
-outlets. Clean-clock for the strip-vs-upstream verdict: starts 00:16Z.
+Post-cutover state (corrected 19:12 from the user + live-verified): pve01/02/03
++ GS108 + basement pod + amd-workstation are on UPS outlets; the two Mac
+Studios were NOT moved onto it (an earlier claim in this note that they were
+is superseded). Clean-clock for the strip-vs-upstream verdict: starts 00:16Z.
 UPS USB monitoring: not yet wired — needs the UPS's USB cable plugged into
 one of the pve nodes (any; pve01 preferred) so NUT (usbhid-ups) can export
 input voltage / load / transfer events to VictoriaMetrics.
