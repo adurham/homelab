@@ -185,9 +185,15 @@ def classify(fol):
 
 
 def sniff(remote_path):
-    """First 16 bytes of a remote file, as hex (magic-byte identification)."""
+    """First 16 bytes of a remote file, as hex (magic-byte identification).
+
+    Uses `rclone cat --count 16` so ONLY 16 bytes are ever materialized —
+    a plain `rclone cat` (or a `cat | head` shell pipe) would stream the whole
+    file into memory, which is a real hazard when a report is asked for over a
+    folder full of multi-GB items.
+    """
     r = subprocess.run(
-        ["rclone", "--config", RCLONE_CONF, "cat", remote_path],
+        ["rclone", "--config", RCLONE_CONF, "cat", remote_path, "--count", "16"],
         capture_output=True)
     if r.returncode != 0 or not r.stdout:
         return ""
