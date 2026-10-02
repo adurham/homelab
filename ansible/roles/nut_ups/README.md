@@ -66,6 +66,45 @@ metric-shaped record.
 directory, `/var/lib/node_exporter/textfile_collector` — one dir, one
 collector). The flag lives on the owning host in `inventory/proxmox.yml`.
 
+## Scheduled battery self-test
+
+A line-interactive UPS with a dead battery is a power strip with a relay. The
+only way to know the battery still takes load is to transfer to it on a
+schedule — so this role also ships `ups-selftest.sh` on a **monthly timer**
+(`ups-selftest.timer`, 04:00 on the 1st, clear of the 02:00-03:00 vzdump
+window).
+
+- **QUICK tests only.** `test.battery.start.deep` genuinely discharges and can
+  trip the guest autoshutdown; deep tests stay manual and human-supervised.
+  The script also refuses to run below 90% charge or while not on line.
+- **Dedicated `[selftest]` upsd account**, granted exactly
+  `test.battery.start.quick` — never `ALL`, never killpower/load.off, so a
+  self-test can never power anything off. Credential lives in a 0600
+  root-only file (`/etc/nut/selftest.cred`) containing the password ALONE —
+  rendering it from a template with comments made the consumer read the whole
+  file as the password (real bug, 2026-10-02; every command then failed with a
+  misleading `ERR UNKNOWN-COMMAND`).
+- **Suppression is mandatory plumbing.** A test that transfers is
+  indistinguishable from a real sag, so the script writes a `selftest-active`
+  flag the `ups_autoshutdown` daemon honours (suspends trigger evaluation),
+  and the `ups_on_battery_transfer` alert filters the script's own journal
+  markers. Without both, maintenance could stop guests and page as a fake
+  mains event.
+- Results -> `nut_ups_selftest.prom` -> Alloy -> VM, with the
+  `ups_selftest_failed` rule alerting on any non-passed outcome.
+
+Measured behaviour worth knowing: a CyberPower **quick** test does NOT transfer
+to battery — it reports `OL DISCHRG` for ~12s (captured at 1s resolution), so
+a quick test produces no OB event. The suppression machinery still matters for
+deep tests and other UPS models.
+
+## Monitor-only upsmon, and why
+
+`upsmon` runs with `MINSUPPLIES 0` and `SHUTDOWNCMD /bin/true`: it monitors and
+logs, but deliberately never shuts anything down. **Do not "fix" this** — the
+`ups_autoshutdown` role owns the shutdown decision, and re-arming upsmon would
+create a competing, blind shutdown path.
+
 ## Where it's invoked
 
 - Its own playbook: `ansible/deploy_nut_ups.yml` (role + Alloy re-render
