@@ -2,28 +2,15 @@
 - id: 'garage_lights_door_motion_control'
   alias: 'Garage Lights - Door Open and Motion Control'
   description: >-
-    Turns on garage lights when any garage door opens or motion is detected,
-    stays on for 15 minutes after last motion
+    Turns on garage lights when the garage door opens (ecobee person-door
+    sensor) or motion is detected, stays on for 15 minutes after last motion
   trigger:
-    # Trigger when any garage door opens
+    # Door-open source = the ecobee person-door sensor ONLY (user directive
+    # 2026-10-02). The 3 bay-door sensors and the Yale lock's door-sense are
+    # NOT trigger sources -- do not re-add them here.
     - platform: state
-      entity_id:
-        - binary_sensor.garage_door_contact
-        - binary_sensor.left_garage_bay_garage_door
-        - binary_sensor.middle_garage_bay_garage_door
-        - binary_sensor.right_garage_bay_garage_door
+      entity_id: binary_sensor.garage_door_contact
       to: 'on'
-      # Friendly entity_id fix 2026-09-10: the 4th entry was the raw Shelly
-      # device-ID entity_id (binary_sensor.shelly1minig3_b08184ee0fd0_garage_door),
-      # which does not exist in HA's current entity registry (confirmed
-      # via /api/states) -- likely stale from before this device got its
-      # friendly entity_id. The right garage bay door was silently NOT
-      # triggering the lights on its own open event (motion detection
-      # still caught it as a fallback, so this wasn't a total outage,
-      # just a redundant-not dead-simple gap). Retargeted to the real,
-      # currently-live entity_id, matching left/middle's naming pattern.
-    # 2026-10-02: person door = the ecobee contact above (user directive);
-    # a lock door-sense trigger was tried here and removed -- do not re-add.
     # Trigger when motion is detected in garage
     - platform: state
       entity_id: binary_sensor.garage_door_motion
