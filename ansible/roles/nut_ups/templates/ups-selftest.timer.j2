@@ -1,0 +1,17 @@
+# Managed by ansible — see roles/nut_ups.
+[Unit]
+Description=Monthly UPS battery self-test
+
+[Timer]
+# First Sunday of the month is awkward in OnCalendar; use "*-*-01..07 04:00"
+# which fires on the 1st-7th but Persistent+daily-ish granularity would
+# double-fire. Simplest robust form: 04:00 on the 1st of each month.
+# 04:00 sits clear of the 02:00-03:00 vzdump window on all three nodes.
+OnCalendar=*-*-01 04:00:00
+# If the host was off/asleep at the scheduled time, run soon after boot
+# rather than silently skipping the month.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

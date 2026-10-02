@@ -320,6 +320,32 @@ class Engine:
                 self._transition(STATE_DISABLED)
             return
 
+        # Self-test suppression: ups-selftest.sh drops a flag file while a
+        # scheduled battery self-test runs. A quick self-test TRANSFERS TO
+        # BATTERY for a few seconds — indistinguishable from a real sag unless
+        # we know. Without this the daemon could start stopping guests because
+        # of our own maintenance. Trigger evaluation is suspended; an already
+        # running sequence continues normally.
+        if os.path.exists(os.path.join(cfg["state_dir"], "selftest-active")):
+            self._throttled_log("UPS self-test active; suppressing trigger evaluation")
+            if ups is not None:
+                online = not is_on_battery(ups)
+                if online:
+                    self.ob_since = None
+                    if self.online_since is None:
+                        self.online_since = self.now
+                else:
+                    self.online_since = None
+                    if self.ob_since is None:
+                        self.ob_since = self.now
+                st["ob_seconds"] = int(self.now - self.ob_since) if self.ob_since else 0
+            if st.get("state") == STATE_STOPPING:
+                self._advance_stopping(ups, False if ups else False)
+            elif st.get("state") == STATE_RECOVERING:
+                self._advance_recovery(ups, True)
+            self._heartbeat()
+            return
+
         if ups is None:
             if st.get("state") == STATE_STOPPING:
                 self._throttled_log("UPS unreadable during stop sequence; continuing (no abort evaluation)")

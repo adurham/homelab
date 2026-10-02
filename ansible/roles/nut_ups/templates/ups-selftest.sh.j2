@@ -1,0 +1,175 @@
+#!/bin/bash
+# ups-selftest.sh — automated UPS battery self-test for the lab corner.
+#
+# WHY
+#   A line-interactive UPS with a dead battery is a power strip with a relay.
+#   The only way to know the battery still takes load is to actually transfer
+#   to it on a schedule and check the result. Manual testing never happens;
+#   this makes it mechanical.
+#
+# WHAT IT DOES
+#   1. Marks the start in the journal so the transfer-event alert can subtract
+#      the test's own ONBATT blip (a self-test looks exactly like a real mains
+#      transfer — without this every test would page as a false "mains event").
+#   2. Signals the autoshutdown daemon (flag file) so it does not interpret a
+#      test transfer as a real outage and start stopping guests.
+#   3. Runs a QUICK self-test and waits for the result.
+#   4. Writes the result as Prometheus textfile metrics for Alloy -> VM ->
+#      Grafana, and journals a clear outcome line.
+#
+# SAFETY — QUICK ONLY, NEVER AUTOMATED DEEP
+#   A quick test transfers for a few seconds at full charge. A DEEP test
+#   genuinely discharges the battery and could drag the UPS into low-battery
+#   territory — which would correctly (but undesirably) trip the guest
+#   autoshutdown. Deep tests stay manual, run by a human who is watching.
+#   This script refuses anything but the quick test.
+#
+# Usage: ups-selftest.sh [--timeout SECONDS]
+# Exit: 0 passed, 1 failed/aborted, 2 setup error, 3 timed out.
+
+set -uo pipefail
+
+UPS="${UPS_NAME:-gx1500u}"
+UPSCMD="/usr/bin/upscmd"
+UPSC="/usr/bin/upsc"
+CRED_FILE="${UPS_SELFTEST_CRED:-/etc/nut/selftest.cred}"
+AUTOSHUTDOWN_FLAG_DIR="${UPS_AUTOSHUTDOWN_FLAG_DIR:-/var/lib/ups-autoshutdown}"
+AUTOSHUTDOWN_FLAG="$AUTOSHUTDOWN_FLAG_DIR/selftest-active"
+METRICS_FILE="${UPS_SELFTEST_METRICS:-/var/lib/node_exporter/textfile_collector/nut_ups_selftest.prom}"
+TAG="ups-selftest"
+TIMEOUT=90
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --timeout) TIMEOUT="${2:-90}"; shift ;;
+    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+log() { logger -t "$TAG" "$*"; echo "$*"; }
+die() { log "ERROR: $*"; exit 2; }
+
+# ---------------------------------------------------------------- preflight
+[ -x "$UPSCMD" ] || die "$UPSCMD missing"
+[ -r "$CRED_FILE" ] || die "credential file $CRED_FILE missing or unreadable"
+
+CRED="$(tr -d '\r\n' < "$CRED_FILE")"
+[ -n "$CRED" ] || die "credential file $CRED_FILE is empty"
+# Fail loudly rather than sending a malformed credential: a file containing
+# comments/newlines (e.g. a rendered Jinja template instead of a bare
+# password) makes every upscmd fail with a confusing "ERR UNKNOWN-COMMAND" /
+# "ERR PASSWORD-REQUIRED" instead of an obvious error. Validated with a plain
+# regex match rather than a case pattern — the earlier case-pattern version
+# had a quoting bug that was itself a syntax error.
+if printf '%s' "$CRED" | grep -qE '[#[:space:]]'; then
+  die "credential file $CRED_FILE does not look like a bare password (contains '#' or whitespace — is it a rendered template?)"
+fi
+if [ "$(wc -l < "$CRED_FILE" 2>/dev/null || echo 1)" -gt 1 ]; then
+  die "credential file $CRED_FILE has multiple lines — expected the password alone"
+fi
+
+# Refuse to test while actually running on battery — a test during a real
+# outage is meaningless and would compound the event.
+STATUS="$("$UPSC" "$UPS" ups.status 2>/dev/null | awk '{print $1}')"
+if [ -z "$STATUS" ]; then
+  die "cannot read ups.status (driver/upsd down?)"
+fi
+case "$STATUS" in
+  OL*|ol*)
+    ;;
+  *)
+    log "refusing to self-test: UPS is not on line (status='$STATUS')"
+    exit 1
+    ;;
+esac
+
+CHARGE="$("$UPSC" "$UPS" battery.charge 2>/dev/null | tr -dc '0-9')"
+if [ -n "$CHARGE" ] && [ "$CHARGE" -lt 90 ]; then
+  log "refusing to self-test: battery charge ${CHARGE}% below 90% — a test now would deepen an already-low battery"
+  exit 1
+fi
+
+# ------------------------------------------------------------------- marker
+# Order matters: flag + journal marker BEFORE the transfer, so the daemon and
+# the alert rule both know about it for the whole window.
+mkdir -p "$AUTOSHUTDOWN_FLAG_DIR" 2>/dev/null
+if [ -d "$AUTOSHUTDOWN_FLAG_DIR" ]; then
+  printf 'self-test started %s\n' "$(date -Is)" > "$AUTOSHUTDOWN_FLAG" 2>/dev/null
+fi
+log "SELFTEST-MARKER starting quick self-test (charge=${CHARGE:-?}%, timeout=${TIMEOUT}s)"
+
+cleanup() {
+  rm -f "$AUTOSHUTDOWN_FLAG" 2>/dev/null
+}
+trap cleanup EXIT
+
+# --------------------------------------------------------------------- run
+if ! "$UPSCMD" -u selftest -p "$CRED" "$UPS" test.battery.start.quick >/dev/null 2>&1; then
+  log "FAILED: upscmd could not start the self-test (auth or permission problem?)"
+  RESULT="error"
+  EXIT=1
+else
+  # Poll for the driver to report a final (non-transient) result.
+  RESULT="in progress"
+  EXIT=3
+  waited=0
+  while [ "$waited" -lt "$TIMEOUT" ]; do
+    sleep 3
+    waited=$((waited + 3))
+    r="$("$UPSC" "$UPS" ups.test.result 2>/dev/null)"
+    case "$r" in
+      ""|"No test initiated"|"In progress")
+        continue
+        ;;
+      "Done and passed")
+        RESULT="passed"; EXIT=0; break
+        ;;
+      "Done and warning")
+        RESULT="warning"; EXIT=1; break
+        ;;
+      "Done and error"|"Aborted")
+        RESULT="$r"; EXIT=1; break
+        ;;
+      *)
+        # Unknown string: record it verbatim rather than guessing.
+        RESULT="$r"; EXIT=1; break
+        ;;
+    esac
+  done
+  if [ "$EXIT" -eq 3 ]; then
+    RESULT="timeout"
+    log "FAILED: no final result within ${TIMEOUT}s (last='$("$UPSC" "$UPS" ups.test.result 2>/dev/null)')"
+  fi
+fi
+
+# ----------------------------------------------------------------- metrics
+NOW="$(date +%s)"
+TMP="${METRICS_FILE}.$$.tmp"
+{
+  echo "# HELP nut_ups_selftest_result 1 for the most recent self-test outcome."
+  echo "# TYPE nut_ups_selftest_result gauge"
+  echo "# HELP nut_ups_selftest_last_run_timestamp_seconds When the last self-test finished."
+  echo "# TYPE nut_ups_selftest_last_run_timestamp_seconds gauge"
+  echo "# HELP nut_ups_selftest_scrape_success 1 if the self-test script completed a run (any outcome)."
+  echo "# TYPE nut_ups_selftest_scrape_success gauge"
+  for r in passed warning error timeout aborted other; do
+    v=0
+    case "$RESULT" in
+      passed) [ "$r" = passed ] && v=1 ;;
+      warning) [ "$r" = warning ] && v=1 ;;
+      timeout) [ "$r" = timeout ] && v=1 ;;
+      error|"Done and error") [ "$r" = error ] && v=1 ;;
+      Aborted|aborted) [ "$r" = aborted ] && v=1 ;;
+      *) [ "$r" = other ] && v=1 ;;
+    esac
+    echo "nut_ups_selftest_result{result=\"$r\"} $v"
+  done
+  echo "nut_ups_selftest_last_run_timestamp_seconds $NOW"
+  echo "nut_ups_selftest_scrape_success 1"
+} > "$TMP" 2>/dev/null && mv "$TMP" "$METRICS_FILE" 2>/dev/null
+rm -f "$TMP" 2>/dev/null
+
+log "self-test result: $RESULT"
+exit "$EXIT"
