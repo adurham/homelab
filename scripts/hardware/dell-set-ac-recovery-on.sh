@@ -33,7 +33,10 @@ read -r -s -p "BIOS admin password (leave blank if none is set): " PW
 echo
 
 cleanup() {
-  printf '%s' "" > "$AUTH" 2>/dev/null || true
+  # Zero-byte writes are rejected by this attribute (it validates length),
+  # so a real clear must send a single newline; the kernel store strips the
+  # trailing '\n' and memcpy's the remaining (empty) string. Verified live.
+  printf '\n' > "$AUTH" 2>/dev/null || true
   PW=""
 }
 trap cleanup EXIT
