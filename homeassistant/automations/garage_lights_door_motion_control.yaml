@@ -22,19 +22,8 @@
       # still caught it as a fallback, so this wasn't a total outage,
       # just a redundant-not dead-simple gap). Retargeted to the real,
       # currently-live entity_id, matching left/middle's naming pattern.
-    # Person-door redundancy (added 2026-10-02): the ecobee contact above
-    # silently MISSES opens -- recorder-verified 2026-09-24 18:31 (4s open,
-    # light only came on 42s late via motion; contact never fired) and
-    # 2026-10-01 02:32-03:23 (the lock's own sensor showed the door open
-    # across multiple BLE reconnects; the contact never fired once). The
-    # Yale/August lock's door sensor reads the same physical person door
-    # over an independent BLE path, so it's added as a second trigger. The
-    # 2s `for` filters that sensor's sub-second lock-reconnect blips; the
-    # shortest confirmed-real open was 4s, so a genuine open can't be masked.
-    - platform: state
-      entity_id: binary_sensor.garage_door_door_3
-      to: 'on'
-      for: '00:00:02'
+    # 2026-10-02: person door = the ecobee contact above (user directive);
+    # a lock door-sense trigger was tried here and removed -- do not re-add.
     # Trigger when motion is detected in garage
     - platform: state
       entity_id: binary_sensor.garage_door_motion
