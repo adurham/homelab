@@ -11,6 +11,7 @@ sync when adding/removing/moving CTs or VMs.
 | Private (VXLAN) | `172.16.0.0/24`   | `private` | SDN private subnet for service traffic   |
 | BWT Lab (VXLAN) | `10.99.0.0/24`    | `bwt`     | Isolated subnet for Tanium bandwidth-throttle repro (NEC 00271560 et al) |
 | PVE Sync (VLAN 20) | `172.20.0.0/24` | `vmbr0.20` | Isolated L2 segment for corosync + ZFS replication, physically confined to switch ports 3/4/5 — see below |
+| PVE Migrate (VLAN 21) | `172.21.0.0/24` | `vmbr0.21` | Isolated L2 segment for live-migration traffic + its node-to-node SSH transport, same physical ports 3/4/5 — see below |
 
 ### LAN static-IP allocations (outside the Nest router's DHCP pool)
 
@@ -497,6 +498,13 @@ battery.charge is high. Watch `nut_ups_battery_charge` to confirm it
 climbs; the UPS is still the measuring instrument meanwhile (upsmon logs
 the transfer regardless).
 
+> **RESOLVED (verified live 2026-10-02):** the battery has finished
+> charging — `battery.charge: 100`, `ups.status: OL` (CHRG/LB cleared),
+> `battery.runtime: 3200` (metric series ~2275s), self-test `Done and
+> passed`. The "until charged" caveat above no longer applies: a transfer
+> would now actually be ridden out. The 16%/31% figures in this and the
+> autoshutdown entry are the deploy-day state, not current.
+
 Two deploy-day pitfalls fixed in the role itself (both would recur on a
 fresh host): (1) `maxretry` is an `[upsdrvctl]` global, NOT a per-driver
 variable — usbhid-ups fatal-errors on it; (2) the UPS was plugged in
@@ -582,7 +590,9 @@ tc-ubuntu24 (plain) + ntp-01 (HA) cleanly, `recover` brought both back
 (ntp-01 relocated to pve03 via the HA rebalance, chrony healthy).
 Thresholds are initial estimates — battery was still charging from the
 open-box 16% at arm time (31% and climbing), so this has NOT yet been
-through a real outage. Watch `ups_autoshutdown_lab_stopped` /
+through a real outage. (Charge has since completed — 100%/OL as of
+2026-10-02, see the RESOLVED note above; the "not yet through a real
+outage" caveat stands.) Watch `ups_autoshutdown_lab_stopped` /
 `ups_autoshutdown_dryrun_would_stop`; the first genuine low-battery event
 is the real acceptance test, and the stop/runtime numbers may want tuning
 afterwards (record actuals here).
@@ -918,8 +928,14 @@ This is the actual Proxmox-native mechanism (`man pvesr`, NETWORK section)
 for repointing replication traffic onto a dedicated network — no per-job
 config needed, applies cluster-wide immediately.
 
-**Corosync:** NOT yet added as a second ring (`link1`) on this network —
-still single-ring on the LAN (`link0`). This is the one remaining piece
+> **SUPERSEDED (verified live 2026-10-02):** an earlier draft here claimed
+> "NOT yet added as a second ring (`link1`) on this network — still
+> single-ring on the LAN (`link0`)." That was true only momentarily during
+> the 2026-08-04 build; `link1` was added the same day (block immediately
+> below). Current state on all three nodes: `corosync.conf` carries
+> `ring1_addr` 172.20.0.11/12/13, `config_version: 4`, `link1` preferred
+> (`knet_link_priority: 10`) over `link0` (`: 5`).
+
 **Corosync: added as a second ring, DONE and verified (2026-08-04).**
 `link1` added on the isolated VLAN with `knet_link_priority` set so it's
 preferred over the LAN (`link0`) — corosync actively uses the isolated
@@ -1053,8 +1069,13 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | `ntp-01`        | 105  | `172.16.0.11`    | -                  | Chrony, syncs against `time.nist.gov`       |
 | `vm-01`         | 106  | `172.16.0.42`    | DHCP (`192.168.86.x`) | VictoriaMetrics + blackbox + Loki + Alloy   |
 | `graf-01`       | 107  | `172.16.0.41`    | -                  | Grafana + image renderer                    |
-| `proxy-01`      | 108  | `172.16.0.12`    | -                  | Squid caching proxy                         |
-| `adblock-proxy-01` | 118 | `172.16.0.49`  | -                  | mitmproxy explicit HTTPS proxy for personal-device Discord ad-stripping (Tailscale-only ingress, joins tailnet directly like hermes-gw-01) |
+| `proxy-01`      | 108  | `172.16.0.12`    | -                  | Squid caching proxy (listens `:3129` ssl-bump / `:3130`) |
+| `hermes-gw-01`  | 113  | `172.16.0.50`    | - (Tailscale: `hermes-gw-01.tail19c543.ts.net`) | Hermes gateway; joins the tailnet directly, reached by tailnet name |
+| `gallery-01`    | 115  | `172.16.0.46`    | - (Tailscale: `100.83.114.12`) | Media gallery platform (OS/tailnet hostname kept as `tg-harvester-01`); joins the tailnet directly |
+| `media-ingest-01` | 116 | `172.16.0.47`   | -                  | Media collector (outbound-only)             |
+| `media-ingest-02` | 117 | `172.16.0.48`   | -                  | Secondary-source gallery collector (outbound-only) |
+| `adblock-proxy-01` | 118 | `172.16.0.49`  | DHCP (`192.168.86.x`) | mitmproxy explicit HTTPS proxy for personal-device Discord ad-stripping (Tailscale-only ingress, joins tailnet directly like hermes-gw-01) |
+| `frigate-01`    | 170  | `172.16.0.45`    | `192.168.86.85` (static) | Frigate NVR (Docker-in-LXC); eth0 on vmbr0 for RTSP/HA + eth1 on `private` |
 
 `172.16.0.40` was previously assigned to **both** `mail-01` and `vm-01` (ARP race). Resolved 2026-05-01 — moved `vm-01` to `.42`. See commit `12bb4c2`.
 
@@ -1230,6 +1251,15 @@ DHCP pool: 10.99.0.50–250 (12h lease). 10.99.0.1 is the gateway (pve01),
 five TanOS servers (excluded from DHCP because TanOS sets static IP at
 install time via kickstart).
 
+**Correction (verified live 2026-10-02):** the eight `bwt-tc-0N` client
+rows above read `10.99.0.50-250 (DHCP)`, but `inventory/proxmox.yml`
+(`bwt_lab` → `bwt_clients`) pins each to a static `ansible_host` in
+10.99.0.100–107, and `roles/bwt_dhcp_host` supports MAC→IP reservations
+(`bwt_dhcp_static_hosts`, currently `[]`). The pool *range* is correctly
+stated; the per-client rows should be treated as **static 10.99.0.100–107
+per the inventory**, with the reservation list still to be populated.
+(Task-triage item, not yet reconciled in code.)
+
 ## Tanium clients (test endpoints)
 
 VMIDs 300-313, IPs `172.16.0.60–73`. See `inventory/proxmox.yml` under `tanium_clients`.
@@ -1242,8 +1272,9 @@ VMIDs 300-313, IPs `172.16.0.60–73`. See `inventory/proxmox.yml` under `tanium
 - **200–219** — existing `tanium_cluster` placeholders (ts-01/02, tms-01/02, tzs-01/02)
 - **220–249** — BWT lab TanOS VMs (`bwt-ts`, `bwt-zs-01..04`)
 - **250–253** — Windows test VMs (win-sql-01, win-ts-01, win-tms-01, win-tzs-01)
-- **300–319** — existing `tanium_clients` LXC endpoints
-- **320–339** — BWT lab LXC clients (`bwt-tc-01..NN`)
+- **254–258** — Windows *case-1* test VMs (win-sql-case1-01, win-ts-case1-01, win-tms-case1-01, win-tzs-case1-01, win-dc-case1-01) — live on pve01, stopped (verified live 2026-10-02; same `onboot=0` by-design status as the 250-253 set)
+- **300–319** — existing `tanium_clients` LXC endpoints (VMIDs 301-306, 307-310, 312-314; 300 and 311 unassigned)
+- **320–339** — BWT lab LXC clients (`bwt-tc-01..08` = 320-327)
 - **400+** — reserved / ad-hoc test VMs (e.g. 400 = Some-Other-ECF-Testing)
 - **9000-9999** — Proxmox templates (9000=Windows Server 2022, 9001=TanOS 1.8.6 fresh-install, 9002=TanOS 1.8.6 BWT-ready)
 
@@ -1273,9 +1304,17 @@ happen silently. The current pattern keeps them in lockstep.
 
 1. Pick a free IP in the appropriate range (check this file).
 2. Pick a free VMID (next sequential within the convention range).
-3. Add an `ip_<name>` entry to `ansible/group_vars/all/vars.yml`.
+3. Add an `ip_<name>` entry to `ansible/group_vars/all/vars.yml` — the
+   private-subnet IP that templates the CT's eth0 (as `ip_frigate` /
+   `ip_media_ingest` etc. do). A CT that joins the tailnet directly (e.g.
+   `hermes-gw-01`, `adblock-proxy-01`, `gallery-01`) additionally gets its
+   Tailscale hostname in the inventory (see step 4) while this var still
+   templates its static LXC IP.
 4. Add the host to `ansible/inventory/proxmox.yml` with
-   `ansible_host: "{{ ip_<name> }}"`, plus `vmid` and `target_node`.
+   `ansible_host: "{{ ip_<name> }}"`, plus `vmid` and `target_node`. If the
+   CT is reached directly over Tailscale instead of the private subnet,
+   `ansible_host` is its tailnet name/IP (with `ansible_ssh_common_args: ""`
+   to bypass the jump host) — but `ip_<name>` still exists per step 3.
 5. If the CT belongs to the private subnet, ensure it's a member of the
    `private_subnet` parent group in `proxmox.yml` (directly or via a
    child group) so it inherits the work-MacBook ProxyCommand.

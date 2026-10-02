@@ -12,6 +12,8 @@ day) doesn't relitigate it from scratch.
 | LAN                      | `192.168.86.0/24`   | trusted     | My house, my devices                                                       |
 | Tailscale tailnet        | `100.64.0.0/10`     | trusted     | Authenticated via Tailscale identity; only my account's devices            |
 | Private SDN              | `172.16.0.0/24`     | trusted     | VXLAN-isolated; only reachable from LAN via the Tailscale subnet router    |
+| PVE Sync VLAN            | `172.20.0.0/24`     | trusted     | 802.1Q VLAN 20, corosync + ZFS replication; no gateway, physically confined to switch ports 3/4/5 |
+| PVE Migrate VLAN         | `172.21.0.0/24`     | trusted     | 802.1Q VLAN 21, live-migration traffic + node-to-node SSH; same ports 3/4/5 |
 | Tanium client subnet     | `172.16.0.61–73`    | semi-trust  | Test endpoints; ephemeral; treated as compromised by default               |
 
 The private SDN is "trusted" because the perimeter (Tailscale-gw, lb-01,
@@ -27,7 +29,7 @@ freely — east-west filtering between them is **not** in the threat model.
 | Public DNS              | de-SEC + no-ip DDNS                         | Only `*.chi.lab.amd-e.com` records exposed              |
 | Tailscale subnet router | `tailscale-gw` (CT 101)                     | The only ingress to `172.16.0.0/24` from off-LAN        |
 | Public HTTPS            | `lb-01` (CT 103) nginx                      | TLS termination + Authentik forward-auth + ACL by `geo` |
-| Outbound proxy          | `proxy-01` (CT 108) squid                   | Used by TanOS appliances for binary downloads           |
+| Outbound proxy          | `proxy-01` (CT 108) squid                   | Used by TanOS appliances for binary downloads; listens `:3129` (ssl-bump) + `:3130` (Tanium-only lockdown) |
 
 ### Per-CT firewalls (`/etc/pve/firewall/<vmid>.fw`)
 
@@ -35,7 +37,7 @@ freely — east-west filtering between them is **not** in the threat model.
 | :-- | :------------- | :-------------------------------------------------------------- |
 | 100 | authentik      | SSH/ICMP from SDN+Tailscale; :80/443/9000/9443 from lb-01 only |
 | 104 | mail-01        | SSH/ICMP from SDN+Tailscale; :25 from graf-01 + authentik only |
-| 108 | proxy-01 squid | SSH/ICMP + :3128/3129 from SDN+Tailscale                        |
+| 108 | proxy-01 squid | SSH/ICMP + :3129/3130 from SDN+Tailscale |
 | 200 | ts-01          | SSH + Tanium-specific ports from SDN+Tailscale                  |
 | 201 | ts-02          | (same as 200)                                                   |
 | 202-205 | tms / tzs  | (same as 200)                                                   |
@@ -61,7 +63,11 @@ vm-01, graf-01) **do not** have per-CT firewall files. Reasoning:
   Now gated by Authentik forward-auth on the `victoriametrics.chi.lab.amd-e.com`
   FQDN at lb-01 (see `roles/loadbalancer_service/templates/nginx.conf.j2`).
   The direct private-IP path (`172.16.0.42:8428`) is still open within
-  the SDN — Grafana datasource and Alloy push use it.
+  the SDN — Grafana datasource and Alloy push use it. (The "9 service
+  CTs" above are the core 100-108 set. Separately, the personal/media
+  service CTs — 113 hermes-gw-01, 114 bwt-dhcp, 115 gallery-01, 116/117
+  media-ingest, 118 adblock-proxy-01, 170 frigate-01 — are likewise
+  outside the per-CT-firewall model, each for its own documented reason.)
 - The pve hosts are hardened against inbound from the SDN via
   `roles/pve_private_ip/`'s `PRIVATE-MONITORING-IN` chain — the
   hypervisor management plane is *not* on the SDN trust boundary.
@@ -101,7 +107,8 @@ any of these become true:
 - A CT starts handling untrusted user content directly (e.g., letting
   outsiders upload files)
 - The homelab gets opened up to non-trusted users (family members
-  with their own devices on the SDN)
+  with their own devices on the SDN) — note the untracked personal
+  service CTs (113/115/116/117/118/170) would need per-CT firewalls too
 - Tailscale ACLs are ever weakened (currently restricted to my own
   account's devices)
 - A regression in lb-01 starts forwarding non-Authentik-authed traffic

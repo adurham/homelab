@@ -18,7 +18,7 @@ back the `tanium_postgres_unreachable`, `tanium_console_unreachable`,
 ## Key variables (`defaults/main.yml`)
 
 - `blackbox_exporter_version` — Renovate-tracked against
-  `prometheus/blackbox_exporter`.
+  `prometheus/blackbox_exporter`. Default `0.28.0`.
 
 ## Probe targets
 
@@ -29,4 +29,5 @@ with the scraper config). `blackbox_https_targets` in
 
 ## Where it's invoked
 
-`deploy_monitoring.yml`'s play 3, alongside `victoriametrics` and `loki`.
+`deploy_monitoring.yml` (play `Configure VictoriaMetrics`), alongside
+`victoriametrics` + `loki`.

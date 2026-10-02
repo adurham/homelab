@@ -5,6 +5,17 @@ bandwidth-throttle behavior. Used to investigate NEC case 00271560 (sites
 127/128 showing post-CDN-disable peer-protocol exceedance) and any future
 throttle-enforcement cases.
 
+> **Status (2026-10-02): the lab is currently torn down.** The TanOS
+> VMs (`bwt-ts`, `bwt-zs-01..04`) and the 8 client CTs (`bwt-tc-01..08`)
+> have been removed from the cluster; only the `bwt` SDN VNet, the
+> `bwt-dhcp` CT (114), and the two `template-tanos-1.8.6*` templates
+> (9001/9002) remain. The playbooks and roles below are still in-tree
+> and rebuild the lab from those templates, so the build phases are not
+> stale — but nothing described here is running today. Before planning
+> further work, read [harness-blocker.md](harness-blocker.md): the lab
+> cannot reproduce the full `tanium_protocol_download` scenario
+> regardless.
+
 ## What this is for
 
 The repro lab exists to answer a class of question:
@@ -65,7 +76,7 @@ pve01's vmbr0. Ansible reaches BWT VMs via ProxyJump through pve01.
 - [build-tanium.md](build-tanium.md) — phase 3: TS/TZS install, throttle config via API, client install
 - [skill-candidates.md](skill-candidates.md) — patterns from this build that should be extracted as reusable skills
 
-## End-to-end automation (current state)
+## End-to-end automation (rebuild procedure — lab is not currently provisioned)
 
 After a one-time TanOS template bake (~10 min, fully automated via QMP
 keystrokes), the full lab rebuilds with:

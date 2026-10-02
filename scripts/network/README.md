@@ -63,6 +63,7 @@ checkboxes — the presence of the `checked` attribute means enabled:
 | `/powerSaving.cgi` | `powStateModSet` | Power Saving |
 | `/dos.cgi` | `dosState` | DoS Prevention |
 | `/switchDiscovery.cgi` | `upnp_status` | Switch Discovery (NSDP) |
+| `/leds.cgi` | `ledState` | Port LEDs |
 
 **Session limit ≈ 3, held until timeout.** Rapid probing exhausts the slots
 and login then fails with *"The maximum number of sessions has been
@@ -111,3 +112,15 @@ var pPri     = new Array(1,1,1,1,1);                            // bare Array()
 
 The `pkts` array is flat, four entries per port:
 `[txGood, txBad, rxGood, rxBad]`.
+
+## Reachability witness (`lab_witness.sh` / `lab-witness.service`)
+
+Not a switch config dump — a 1s-resolution TCP reachability witness deployed on
+all three PVE nodes as the `lab-witness` systemd unit (log `/root/lab_witness.log`).
+It exists to discriminate the recurring simultaneous-unclean-reboot
+investigation: it records the per-second transition sequence (which peer/switch/WAN
+target stops answering, and in what order) so a future event can be classified as
+either a lab-branch power event or HA self-fencing. Besides the three PVE nodes
+(TCP/22) and the two managed switches above (TCP/80), it probes the gateway
+(`192.168.86.1`, ICMP) and `1.1.1.1:443` (WAN). See `docs/ipam.md` (EVENT
+2026-09-30 / 2026-10-01) for how the logs are interpreted.

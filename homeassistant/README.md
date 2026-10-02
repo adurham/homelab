@@ -39,6 +39,7 @@ homeassistant/
 ├── automations.yaml           # UI-managed automations (HA owns this file).
 ├── automations/               # Repo-managed automations (one file per system).
 │   └── entertainment/         # Sub-package for media-room automations.
+├── command_line.yaml          # command_line integration sensors (Ookla speedtest).
 ├── apps/apps.yaml             # Unused placeholder (/config/apps/ — see below).
 ├── appdaemon/                 # AppDaemon apps (real vent-control logic lives here).
 │   ├── appdaemon.yaml
@@ -66,9 +67,11 @@ UI-managed `automations.yaml` HA edits in place.
 Brief tour of what is actually running. See the matching files under
 `automations/` for the gory details.
 
-- Safety — `automations/emergency_safety.yaml`,
-  `automations/circulation_safety.yaml`. Smoke / CO emergency response and
-  HVAC circulation watchdog.
+- Safety — `automations/circulation_safety.yaml`. HVAC circulation watchdog
+  (forces relay-controlled devices off on HA start; exhaust-fan cycle accounting).
+  (`emergency_safety.yaml` was removed 2026-05-30 — it triggered off Nest
+  Protect entities the SDM API doesn't expose, so it could never fire. See
+  commit `0b3a929`.) Pool-pump protection lives in `automations/pool_safety.yaml`.
 - Infrastructure alerting — `automations/adguard_watchdog.yaml`,
   `automations/frigate_watchdog.yaml`, `automations/disk_space_watchdog.yaml`,
   `automations/smart_vent_watchdog.yaml`, `automations/grafana_alert_webhook.yaml`.
@@ -136,7 +139,7 @@ ssh -p 2222 root@homeassistant.local "ha core check"
 ssh -p 2222 root@homeassistant.local "ha core log"
 
 # Restore from a HA-CLI backup (the deploy playbook takes one before each push).
-ssh -p 2222 root@homeassistant.local "ha core backup restore <slug>"
+ssh -p 2222 root@homeassistant.local "ha backups restore <slug>"
 ```
 
 The deploy playbook runs `yamllint homeassistant/` locally before any scp,

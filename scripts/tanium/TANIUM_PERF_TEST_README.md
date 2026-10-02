@@ -88,7 +88,7 @@ sudo python3 tanium_download_perf_test.py \
 **Windows (run as Administrator, with packet capture)**
 ```powershell
 python tanium_download_perf_test.py ^
-  --tc-dir "C:\Program Files\Tanium\Tanium Client" ^
+  --tc-dir "C:\Program Files (x86)\Tanium\Tanium Client" ^
   --file-url https://tanium-server.corp.com/downloads/test-100mb.bin ^
   --capture-traffic
 ```
@@ -104,7 +104,7 @@ sudo python3 tanium_download_perf_test.py \
 
 1. **Phase 1: Legacy Testing**
    - Stops Tanium Client service
-   - Sets `EnableCDNDownloads=0` in TaniumClient.ini
+   - Sets `EnableCDNDownloads=0` via `TaniumClient config set`
    - Starts Tanium Client service
    - For each iteration:
      - Clears Downloads directory
@@ -114,7 +114,7 @@ sudo python3 tanium_download_perf_test.py \
 
 2. **Phase 2: CDN Testing**
    - Stops Tanium Client service
-   - Sets `EnableCDNDownloads=1` in TaniumClient.ini
+   - Sets `EnableCDNDownloads=1` via `TaniumClient config set`
    - Starts Tanium Client service
    - Repeats same iterations as Phase 1
 
@@ -251,7 +251,7 @@ See `ANALYZE_TANIUM_PCAPS_README.md` for:
 
 - Script requires sudo/admin privileges to control the Tanium Client service
 - Ensure the test file URL is accessible from the Tanium Client
-- The script assumes TaniumClient.ini is in the tc-dir (will be created if missing)
+- The script reads the `soap_session` file in the tc-dir (required) and toggles CDN mode via `TaniumClient config set`, not by editing `TaniumClient.ini`
 - Each test iteration clears the Downloads directory to avoid cached results
 - Results are calculated only for successfully completed downloads
 - **Packet capture requires tcpdump** and may require additional permissions

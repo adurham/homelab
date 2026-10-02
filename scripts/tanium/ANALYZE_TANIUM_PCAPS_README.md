@@ -18,18 +18,18 @@ The analysis script expects PCAPs from the performance test tool:
 # Generate PCAPs using the performance test
 python3 tanium_download_perf_test.py
 
-# This creates a directory with PCAPs:
+# This creates a directory with PCAPs (named <mode>_iteration_N_<timestamp>.pcap):
 tanium_pcaps_YYYYMMDD_HHMMSS/
-├── legacy_iteration_1.pcap
-├── legacy_iteration_2.pcap
-├── legacy_iteration_3.pcap
-├── legacy_iteration_4.pcap
-├── legacy_iteration_5.pcap
-├── cdn_iteration_1.pcap
-├── cdn_iteration_2.pcap
-├── cdn_iteration_3.pcap
-├── cdn_iteration_4.pcap
-└── cdn_iteration_5.pcap
+├── legacy_iteration_1_<timestamp>.pcap
+├── legacy_iteration_2_<timestamp>.pcap
+├── legacy_iteration_3_<timestamp>.pcap
+├── legacy_iteration_4_<timestamp>.pcap
+├── legacy_iteration_5_<timestamp>.pcap
+├── cdn_iteration_1_<timestamp>.pcap
+├── cdn_iteration_2_<timestamp>.pcap
+├── cdn_iteration_3_<timestamp>.pcap
+├── cdn_iteration_4_<timestamp>.pcap
+└── cdn_iteration_5_<timestamp>.pcap
 
 # Analyze the PCAPs
 python3 analyze_tanium_pcaps.py --pcap-dir tanium_pcaps_YYYYMMDD_HHMMSS/

@@ -1,15 +1,22 @@
 # roles/victoriametrics
 
 VictoriaMetrics (Prometheus-compatible TSDB) on vm-01. Receives metrics
-two ways: pushed by Alloy (every managed host) and pulled at `:9100`
-from the Tanium cluster.
+pushed by Alloy (every managed host) and pulled from its own
+`blackbox_exporter` scrape jobs (Tanium postgres/console, cert expiry,
+iframe checks) defined in `prometheus.yml.j2`.
+
+Note: the Tanium appliances (`tanium_cluster`) run **no** monitoring
+agent — the old `:9100` node_exporter scrape job was retired 2026-08-09
+(TanOS default-deny iptables never exposed the port, and these vendor
+appliances run no custom software). Tanium host-down detection now comes
+from the agentless `blackbox_tanium_reachable` TCP/22 probe.
 
 ## What it does
 
 - Downloads the upstream binary (`victoria-metrics-prod`) from the
   GitHub releases pinned by `victoriametrics_version`.
 - Renders the systemd unit + scrape config (`prometheus.yml.j2`).
-- Sets `-retentionPeriod=1y` (one year of metric history; coupled with
+- Sets `-retentionPeriod=2y` (two years of metric history; coupled with
   blackbox/loki disk pressure alerts).
 - Configures blackbox probe targets for: HTTPS cert-expiry on the
   public-facing endpoints (`blackbox_https_targets`), Tanium postgres
@@ -24,4 +31,5 @@ from the Tanium cluster.
 
 ## Where it's invoked
 
-`deploy_monitoring.yml`'s play 3 (`Configure VictoriaMetrics`).
+`deploy_monitoring.yml`'s play `Configure VictoriaMetrics` (play 8), along
+with `pve_exporter`, `blackbox_exporter`, `loki`, `alloy` and `vm_backup`.

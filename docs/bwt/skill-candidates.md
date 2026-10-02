@@ -4,6 +4,13 @@ Patterns that emerged that should live as reusable skills (not buried in
 BWT-specific docs). Each section maps a discovered pattern to a candidate
 skill name and what it covers.
 
+> **Status note (2026-10-02):** the BWT lab these patterns came from has
+> been torn down (only `bwt-dhcp` CT 114 remains), but the candidates
+> below are general and still stand on their own. Two corrections:
+> `proxmox-tanos-automation` (listed below as "already extracted") is no
+> longer present at the stated path, and none of the five candidates
+> have been extracted as of this note.
+
 ## Already extracted
 
 - **`proxmox-tanos-automation`** (`~/.hermes/skills/tanium/proxmox-tanos-automation/`)

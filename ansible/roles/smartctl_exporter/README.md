@@ -43,9 +43,13 @@ week-over-week) rather than a one-shot local mail nobody reads.
   (labeled `disk`, `attribute`, `id`) for reallocated_sector_ct (5),
   power_on_hours (9), end_to_end_error (184), reported_uncorrect (187),
   command_timeout (188), airflow_temperature_cel (190),
-  temperature_celsius (194), reallocated_event_count (196),
-  current_pending_sector (197), offline_uncorrectable (198),
-  udma_crc_error_count (199).
+  temperature_celsius (194), current_pending_sector (197),
+  offline_uncorrectable (198), udma_crc_error_count (199), plus
+  `smartctl_device_last_selftest_passed` (1 pass / 0 fail / -1
+  interrupted-or-unknown) and `smartctl_device_last_selftest_lba_error`
+  from smartd's scheduled self-test log.
+  NOTE: id 196 (reallocated_event_count) is deliberately NOT exported —
+  see the exclusion note in `templates/smartctl-textfile.sh.j2`.
   IMPORTANT: `smartctl -j`'s `raw.value` field is packed with extra
   vendor data for some attributes (seen live: Power_On_Hours
   raw.value=261692357380596 while raw.string="35316 (238 2 0)" — same

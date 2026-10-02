@@ -1,5 +1,12 @@
 # BWT Load Harness — actual blocker
 
+> **Status note (2026-10-02):** the "lab is fully built" state below is
+> historical — the TanOS servers and client CTs have since been removed
+> from the cluster (only `bwt-dhcp` CT 114 remains). The conclusion is
+> unaffected and remains the definitive word on this blocker: a bare
+> TaniumServer cannot reproduce NEC's `tanium_protocol_download`
+> pattern.
+
 Status: lab is fully built, throttle config correct, but driving live
 `tanium_protocol_download` traffic requires content-distribution
 infrastructure that **bare TaniumServer does not include**.

@@ -102,9 +102,9 @@ python3 homeassistant/prune_orphan_entities.py --apply --i-know-what-im-doing
 
 - Never commit `ha_config.env`, `secrets.yaml`, or HA backup archives.
   All three are gitignored.
-- The deploy playbook always takes a `ha core backup` before pushing — if
-  validation fails on the host, restore with
-  `ha core backup restore <slug>`.
+- The deploy playbook always takes a `ha backups new` (partial,
+  `--folders homeassistant`) before pushing — if validation fails on the host,
+  restore with `ha backups restore <slug>`.
 - The `homeassistant` Hermes toolset blocks dangerous service domains
   (`shell_command`, `command_line`, `python_script`, `rest_command`,
   `hassio`, `pyscript`); call concrete device domains instead.
