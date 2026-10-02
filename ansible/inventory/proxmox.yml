@@ -14,6 +14,13 @@ all:
           # USB cable ever moves to another node, move this flag with it
           # and update roles/nut_ups/README.md.
           nut_ups_enabled: true
+          # ARMED 2026-10-01 after a staged live test (stop+recover of real
+          # guests, both HA and non-HA paths) passed end-to-end. Set per-host
+          # rather than in role defaults so a fresh host still ships in
+          # dry-run, and so a plain redeploy can never silently flip this.
+          # disarm: `ups-autoshutdown disable` on the host, or set false here
+          # and re-run deploy_ups_autoshutdown.yml.
+          ups_autoshutdown_dry_run: false
           # Nightly vzdump job (roles/proxmox_backup_jobs). Existing job id
           # 41c3b19b-20ea-4ba0-b760-52a79d1cb83a was hand-configured in the
           # Proxmox UI at some unknown point BEFORE this role existed --

@@ -1,0 +1,6 @@
+---
+- name: Restart ups-autoshutdown
+  ansible.builtin.systemd:
+    name: ups-autoshutdown.service
+    state: restarted
+    daemon_reload: true

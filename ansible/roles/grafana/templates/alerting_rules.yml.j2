@@ -2391,3 +2391,123 @@ groups:
         labels:
           severity: warning
         isPaused: false
+
+      # ---------------------------------------------------------------------
+      # UPS-driven guest autoshutdown (roles/ups_autoshutdown on pve01).
+      # Added 2026-10-01: the daemon stops guests gracefully when the lab
+      # corner is about to run out of battery, and restarts them when mains
+      # is stable. These rules are how the operator learns it happened (or
+      # WOULD have happened, while dry_run is on).
+      # ---------------------------------------------------------------------
+
+      - uid: ups_autoshutdown_dryrun_would_stop
+        title: UPS autoshutdown WOULD stop the lab (dry run armed)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # 1 only while dry_run is on AND the trigger conditions are
+              # currently met. This is the "flip dry_run off?" signal: it means
+              # the real thing would have stopped the lab right now.
+              expr: ups_autoshutdown_would_trigger{instance="pve01"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "DRY RUN: UPS autoshutdown would have stopped the lab just now"
+          description: "The lab corner is on battery and below the stop thresholds (charge<=20% or runtime<=300s) and ups_autoshutdown is in dry_run mode, so it did NOT act. This is the moment to decide: check `ups-autoshutdown status` on pve01, confirm the guest list, and either flip dry_run off (roles/ups_autoshutdown/defaults/main.yml -> ansible-playbook deploy_ups_autoshutdown.yml -e ups_autoshutdown_dry_run=false) or leave it monitoring. If this fires repeatedly during real outages, the dry-run period is over."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: ups_autoshutdown_lab_stopped
+        title: Lab auto-stopped — UPS battery exhausted
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # 1 from trigger through recovery complete (armed mode only).
+              expr: ups_autoshutdown_lab_stopped{instance="pve01"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "UPS autoshutdown stopped the lab (battery low on the lab corner)"
+          description: "The lab corner ran out of battery and ups_autoshutdown stopped the guests gracefully. THIS MEANS THE MAINS IS OUT and the UPS is draining (or has already dropped the nodes, which would take this alert's own pipeline down too — if you're reading this after the fact, check /var/lib/ups-autoshutdown/state.json on pve01 for the timeline). Recovery is AUTOMATIC: once mains has been stable for 5 minutes (10 if a recovery happened in the last 30), the daemon restarts exactly the guests it stopped. To intervene manually: `ups-autoshutdown recover`, and `ups-autoshutdown disable` stops any further automation."
+        labels:
+          severity: critical
+        isPaused: false

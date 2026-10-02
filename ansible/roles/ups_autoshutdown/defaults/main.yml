@@ -1,0 +1,50 @@
+---
+# ups_autoshutdown role defaults. See README.md before changing thresholds.
+
+ups_autoshutdown_config_path: /etc/ups-autoshutdown/config.json
+ups_autoshutdown_state_dir: /var/lib/ups-autoshutdown
+
+# Master safety switch. TRUE on first deploy by design: the daemon runs,
+# evaluates, logs "DRY RUN: would stop N guests", writes metrics, and takes
+# NO action. Flip to false only after watching it through a real event or a
+# staged test.
+ups_autoshutdown_dry_run: true
+
+# Poll cadence. upsmon itself polls the UPS every 2s; this daemon reads the
+# already-polled state from upsd, so 5s is plenty.
+ups_autoshutdown_poll_seconds: 5
+
+# --- trigger conditions (all must hold) ---
+# Must be continuously on battery this long before the trigger can fire
+# (damps a 2-second blip that immediately recovers).
+ups_autoshutdown_ob_sustain_seconds: 60
+# ...and either remaining charge <= this percent...
+ups_autoshutdown_stop_charge_percent: 20
+# ...or remaining runtime <= these seconds (whichever trips first).
+ups_autoshutdown_stop_runtime_seconds: 300
+
+# Guests whose NAME matches this regex stop FIRST (disposable Tanium test
+# fleet — rebuilt at will, cheap to bring back, and they free the most load
+# per unit of effort). Second phase = everything else.
+ups_autoshutdown_phase1_name_regex: "^tc-"
+
+# --- stop sequencing ---
+# Per-guest graceful window (ACPI/systemd shutdown), then force-stop.
+ups_autoshutdown_graceful_timeout_seconds: 90
+ups_autoshutdown_hard_stop_grace_seconds: 30
+# Whole-sequence cap: at this point everything still running is hard-stopped.
+ups_autoshutdown_sequence_deadline_seconds: 480
+# If mains comes back and stays back this long mid-sequence, stop issuing
+# further shutdowns (in-flight ones finish; nothing gets force-stopped).
+ups_autoshutdown_abort_online_seconds: 30
+
+# --- recovery ---
+# Mains must be stable this long before any guest is restarted.
+ups_autoshutdown_recovery_ol_seconds: 300
+# If a recovery already happened within this recent window, require this much
+# extra stable time (avoids restart/stop flapping during a stuttering outage).
+ups_autoshutdown_recovery_recent_window_seconds: 1800
+ups_autoshutdown_recovery_recent_extra_seconds: 300
+
+# Guests to never touch (e.g. ones whose absence is worse than a hard stop).
+ups_autoshutdown_exclude_vmids: []

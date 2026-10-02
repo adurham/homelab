@@ -1,0 +1,21 @@
+{# Managed by ansible — roles/ups_autoshutdown. Read by the daemon EVERY cycle,
+   so threshold changes apply live with no restart. #}
+{
+  "dry_run": {{ ups_autoshutdown_dry_run | bool | to_json }},
+  "poll_seconds": {{ ups_autoshutdown_poll_seconds }},
+  "ob_sustain_seconds": {{ ups_autoshutdown_ob_sustain_seconds }},
+  "stop_charge_percent": {{ ups_autoshutdown_stop_charge_percent }},
+  "stop_runtime_seconds": {{ ups_autoshutdown_stop_runtime_seconds }},
+  "phase1_name_regex": {{ ups_autoshutdown_phase1_name_regex | to_json }},
+  "graceful_timeout_seconds": {{ ups_autoshutdown_graceful_timeout_seconds }},
+  "hard_stop_grace_seconds": {{ ups_autoshutdown_hard_stop_grace_seconds }},
+  "sequence_deadline_seconds": {{ ups_autoshutdown_sequence_deadline_seconds }},
+  "abort_online_seconds": {{ ups_autoshutdown_abort_online_seconds }},
+  "recovery_ol_seconds": {{ ups_autoshutdown_recovery_ol_seconds }},
+  "recovery_recent_window_seconds": {{ ups_autoshutdown_recovery_recent_window_seconds }},
+  "recovery_recent_extra_seconds": {{ ups_autoshutdown_recovery_recent_extra_seconds }},
+  "exclude_vmids": {{ ups_autoshutdown_exclude_vmids | to_json }},
+  "state_dir": {{ ups_autoshutdown_state_dir | to_json }},
+  "metrics_file": "/var/lib/node_exporter/textfile_collector/ups_autoshutdown.prom",
+  "ups_name": {{ nut_ups_name | default('gx1500u') | to_json }}
+}
