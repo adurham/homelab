@@ -516,6 +516,45 @@ a graceful power-off on battery). Flipped via
 script prompts for silently and clears from the kernel buffer on exit.
 Verified: `AcPwrRcvry=On` read back on pve01, no driver errors in dmesg.
 
+**BIOS UNIFORMITY PASS: all three nodes now uniform on 12 attributes
+(2026-10-01 ~12:0x).** Applied via `scripts/hardware/dell-bios-uniformity.sh`
+(table-driven, dry-run by default, `--apply` prompts + readback-verifies per
+attribute). 18 writes: pve01 9, pve02 5, pve03 4. Nothing rebooted (uptime
+unbroken, quorum 3/3), no driver errors, credential buffers confirmed clear
+(a post-run probe write is refused, values untouched).
+
+What changed and why:
+- `DeepSleepCtrl` S4AndS5 → **Disabled** (all 3). Deep sleep cuts NIC power
+  in S4/S5 and breaks Wake-on-LAN — Dell KB 000146067 requires it off before
+  WoL works at all.
+- `WakeOnLan` Disabled → **LanOnly** (all 3). The only remote power-on path
+  for a headless node.
+- `SmartErrors` Enabled → **Disabled** (pve02/03). Dell's SMART reporting
+  HALTS POST on a failing disk ("Strike F1 to continue") — on a headless
+  basement box that is an unreachable node, and it would block the
+  AC-Recovery boot. Disk health is covered by `smartctl_exporter` →
+  VictoriaMetrics → Grafana instead. (pve02/03 shipped it enabled — the two
+  nodes with the *aged* boot HDDs, i.e. configured backwards.)
+- `Absolute` → **Disabled** (all 3) — corporate asset-tracking agent.
+- `BIOSConnect`, `SupportAssistOSRecovery`, `AutoOSRecoveryThreshold`,
+  `Microphone`, `InternalSpeaker`, `UsbPowerShare`, `PrimaryVideoSlot`
+  (pve02) — uniformity on headless boxes.
+
+Deliberately NOT changed: TPM attributes (pve01 exposes different names than
+pve02/03; re-provisioning risks clearing keys), `SecureBoot`,
+`Virtualization`, `PasswordLock`, `UefiBootPathSecurity` (already uniform),
+and anything reflecting genuine hardware differences.
+
+**WoL status: configured, NOT yet proven.** The OS side was already fine —
+`nic0` on all three shows `Supports Wake-on: pumbg` / `Wake-on: g` and
+`power/wakeup=enabled`, so no ethtool unit is needed. What's missing is an
+actual end-to-end wake test, which requires powering a node off (needs
+explicit go-ahead; don't do it on quorate nodes casually). Until then treat
+WoL as configured-but-unverified — Dell KB + forum reports document this
+OptiPlex generation being flaky about it even when set correctly. Any wake
+test must use a TCP probe or the PVE UI, not ping (inter-node ICMP is
+firewalled by design on this LAN).
+
 **amd-workstation (Minisforum DRFXI / AMI BIOS): NOT settable from software.**
 No `/sys/class/firmware-attributes` interface (the kernel has the
 `firmware_attributes_class` module but no provider driver for this board), no
