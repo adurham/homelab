@@ -10,10 +10,20 @@
 # pollinterval=2: the sag/transfer events this box exists to catch can
 # be seconds long — poll the device fast (driver default is 2s; keep it
 # explicit so it can't silently drift).
+#
+# NB (learned live 2026-10-01): `maxretry` is NOT a per-driver variable —
+# usbhid-ups rejects it ("Fatal error: 'maxretry' is not a valid variable
+# name for this driver") and the unit enters an auto-restart loop. It
+# belongs in the [upsdrvctl] global section, which is where it now lives.
 [{{ nut_ups_name }}]
     driver = usbhid-ups
     port = auto
     vendorid = {{ nut_ups_vendor_id }}
     desc = "CyberPower GX1500U (lab corner: pve01-03 + GS108 + basement pod + amd-workstation)"
     pollinterval = 2
+
+# Global upsdrvctl settings (apply to the driver controller, not the
+# driver itself): retry driver startup up to N times with 5s gaps —
+# USB enumeration can lag on a cold boot.
+[upsdrvctl]
     maxretry = 10

@@ -82,6 +82,20 @@
     enabled: true
     daemon_reload: true
 
+- name: Re-apply udev rules to the already-connected UPS device
+  # Learned live 2026-10-01: the nut-server package ships
+  # /usr/lib/udev/rules.d/62-nut-usbups.rules (grants group `nut` access to
+  # 0764:0601), but if the UPS was plugged in BEFORE the package landed
+  # (exactly our deploy-day case), the existing device node keeps its old
+  # ownership (root:root) and libusb gets "Access denied (insufficient
+  # permissions)" -> the driver start-loops with "Could not open any HID
+  # devices". A re-trigger makes udev re-process the connected device and
+  # apply the rule now instead of waiting for the next physical replug or
+  # reboot. Cheap + idempotent.
+  ansible.builtin.command:
+    cmd: udevadm trigger --subsystem-match=usb --action=change
+  changed_when: false
+
 - name: Start and enable NUT driver (usbhid-ups) for the attached UPS
   ansible.builtin.systemd:
     name: "nut-driver@{{ nut_ups_name }}.service"
