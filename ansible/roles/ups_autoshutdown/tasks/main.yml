@@ -32,12 +32,18 @@
     - "{{ ups_autoshutdown_config_path | dirname }}"
 
 - name: Install the ups-autoshutdown program
+  # notify is REQUIRED, not cosmetic: without it, deploying updated program
+  # code left the old version running in memory (found 2026-10-02 — the new
+  # heartbeat format only appeared after a manual restart; the file on disk
+  # was already correct). A daemon that silently runs stale code is worse
+  # than one that restarts.
   ansible.builtin.copy:
     src: ups_autoshutdown.py
     dest: /usr/local/lib/ups-autoshutdown/ups_autoshutdown.py
     owner: root
     group: root
     mode: '0755'
+  notify: Restart ups-autoshutdown
 
 - name: Install the ups-autoshutdown CLI wrapper
   ansible.builtin.copy:
