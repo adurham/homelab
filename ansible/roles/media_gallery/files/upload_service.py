@@ -72,6 +72,32 @@ FOLDER_META_FILE = Path(os.environ.get("TG_FOLDER_META", "/var/lib/media-gallery
 FOLDER_META_REMOTE = REMOTE + "gallery/folder_meta.json"
 _fmeta_lock = threading.Lock()
 
+# ─── Ingest exclusion backstop (2026-10-01) ────────────────────────────────
+# The exclusion ledger is what stops a deleted stem from ever coming back. Both
+# collectors gate on it client-side, but a client can be stale (missed a delete
+# that happened mid-sweep) or broken (the scraper wrapper's exclusion gate was
+# missing until today). This is the authoritative server-side backstop: an
+# ingest of a stem that's in the ledger is REJECTED at the door, regardless of
+# what the client believes. Cached for INGEST_EXCL_TTL so the 70K-entry ledger
+# isn't re-parsed on every push; refreshed on TTL, and failures keep the last
+# good set (never silently disable the gate).
+_excl_cache = {"set": None, "ts": 0.0}
+INGEST_EXCL_TTL = float(os.environ.get("INGEST_EXCL_TTL", "60"))
+
+
+def load_excluded_cached() -> set:
+    now = time.time()
+    if _excl_cache["set"] is not None and now - _excl_cache["ts"] < INGEST_EXCL_TTL:
+        return _excl_cache["set"]
+    try:
+        s = set(json.loads(EXCLUDE_FILE.read_text()) or [])
+        _excl_cache["set"] = s
+        _excl_cache["ts"] = now
+        return s
+    except (OSError, ValueError) as e:
+        print(f"[upload] excluded reload failed (using cached): {e}", flush=True)
+        return _excl_cache["set"] or set()
+
 
 def load_folder_meta() -> dict:
     try:
@@ -556,10 +582,7 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/excluded":
             # The collector fetches this to skip trashed/purged items before
             # spending upstream source bandwidth re-capturing them.
-            try:
-                ex = json.loads(EXCLUDE_FILE.read_text())
-            except (OSError, ValueError):
-                ex = []
+            ex = sorted(load_excluded_cached())
             return self._json(200, {"excluded": ex, "count": len(ex)})
         if p == "/movequeue":
             with _mvqlock:
@@ -1147,12 +1170,22 @@ class Handler(BaseHTTPRequestHandler):
         pdir = PENDING_ROOT / folder
         pdir.mkdir(parents=True, exist_ok=True)
         stored, errors, datemap_add, staged = [], [], {}, []
+        excl = load_excluded_cached() if stem_override else set()
         for item in items:
             if not getattr(item, "filename", None):
                 continue
             ext = safe_ext(item.filename)
             # honor a provided stem (single-file collector push); else generate
             stem = stem_override if (stem_override and len(items) == 1) else new_stem()
+            # Server-side exclusion backstop: a stem the user deleted/deduped
+            # must never be re-added by ANY client, however stale. Reject before
+            # writing anything. (Browser uploads use generated up_* stems that
+            # are never in the ledger; only the stem_override path can collide,
+            # hence the `excl` short-circuit above.)
+            if excl and (stem in excl):
+                errors.append(f"{item.filename}: excluded stem (deleted in gallery)")
+                print(f"[upload] rejected excluded stem={stem}", flush=True)
+                continue
             tmp = pdir / f"{stem}{ext}.tmp"
             try:
                 # chunked stream copy — never load whole file in RAM
