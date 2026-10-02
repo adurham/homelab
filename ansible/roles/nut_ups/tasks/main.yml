@@ -1,0 +1,187 @@
+---
+# nut_ups — NUT (Network UPS Tools) for the lab-corner CyberPower GX1500U
+# UPS. See README.md for the full design rationale.
+#
+# SCOPE (v1, deployed 2026-10-01): runs on the pve node the UPS USB cable
+# is attached to (pve01). upsd stays bound to loopback; NOTHING here
+# changes the cluster firewall and nothing opens a new inbound port.
+# Remote monitoring from the other two nodes + any ordered-shutdown
+# policy are documented extensions in README.md, deliberately not
+# deployed yet.
+#
+# MONITOR-ONLY, DELIBERATELY: this role must NOT arm automatic shutdowns.
+# The UPS exists so transfer/sag events get LOGGED (and so the corner
+# rides through them). See upsmon.conf.j2 — MINSUPPLIES 0, powervalue 0,
+# SHUTDOWNCMD /bin/true. An auto-shutdown policy is a separate decision
+# that has not been made.
+
+- name: Install NUT packages
+  ansible.builtin.apt:
+    name:
+      - nut-client
+      - nut-server
+    state: present
+    update_cache: true
+
+- name: Set NUT MODE (standalone = driver + server + monitor on this box)
+  ansible.builtin.lineinfile:
+    path: /etc/nut/nut.conf
+    regexp: '^MODE='
+    line: 'MODE=standalone'
+    owner: root
+    group: nut
+    mode: '0640'
+  notify: Restart nut-server
+
+- name: Render ups.conf (UPS definitions)
+  # The shipped nut-driver@.service resolves its device via
+  # `nut-driver-enumerator.sh --get-device-for-service <instance>`, i.e.
+  # unit instance == [section name] in this file. That is why
+  # nut_ups_name must match between ups.conf and the systemd unit below.
+  ansible.builtin.template:
+    src: ups.conf.j2
+    dest: /etc/nut/ups.conf
+    owner: root
+    group: nut
+    mode: '0640'
+  notify: Restart nut-server
+
+- name: Render upsd.conf (data server, loopback-only)
+  ansible.builtin.template:
+    src: upsd.conf.j2
+    dest: /etc/nut/upsd.conf
+    owner: root
+    group: nut
+    mode: '0640'
+  notify: Restart nut-server
+
+- name: Render upsd.users (upsmon credentials)
+  ansible.builtin.template:
+    src: upsd.users.j2
+    dest: /etc/nut/upsd.users
+    owner: root
+    group: nut
+    mode: '0640'
+  no_log: true
+  notify: Restart nut-server
+
+- name: Render upsmon.conf (monitor-only)
+  ansible.builtin.template:
+    src: upsmon.conf.j2
+    dest: /etc/nut/upsmon.conf
+    owner: root
+    group: nut
+    mode: '0640'
+  no_log: true
+  notify: Restart nut-monitor
+
+- name: Sync NUT driver instances from ups.conf (enumerator)
+  ansible.builtin.systemd:
+    name: nut-driver-enumerator.service
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Start and enable NUT driver (usbhid-ups) for the attached UPS
+  ansible.builtin.systemd:
+    name: "nut-driver@{{ nut_ups_name }}.service"
+    state: started
+    enabled: true
+
+- name: Start and enable nut-server (upsd)
+  ansible.builtin.systemd:
+    name: nut-server.service
+    state: started
+    enabled: true
+
+- name: Start and enable nut-monitor (upsmon)
+  ansible.builtin.systemd:
+    name: nut-monitor.service
+    state: started
+    enabled: true
+
+- name: Start and enable nut.target (boot-time umbrella for driver+server+monitor)
+  # nut.target is the multi-user.target hook (WantedBy=multi-user.target)
+  # and statically Wants nut-driver.target + nut-server + nut-monitor, so
+  # enabling IT is what makes the whole NUT tree come up on boot.
+  ansible.builtin.systemd:
+    name: nut.target
+    state: started
+    enabled: true
+
+- name: Wait for the UPS to appear on upsd
+  ansible.builtin.command:
+    cmd: "upsc {{ nut_ups_name }}"
+  register: nut_upsc_check
+  until: nut_upsc_check.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false
+  # Don't fail the whole play if the driver needs a moment on a cold
+  # boot; the metrics timer picks it up. Surface it loudly though.
+  failed_when: false
+
+- name: Probe key UPS variables (evidence the chain is live)
+  ansible.builtin.command:
+    cmd: "upsc {{ nut_ups_name }} ups.status input.voltage battery.charge battery.runtime ups.load"
+  register: nut_probe
+  changed_when: false
+  failed_when: false
+
+- name: Show UPS probe result
+  ansible.builtin.debug:
+    msg: "{{ nut_probe.stdout_lines | default(['(upsc produced no output — driver still starting?)']) }}"
+
+# ----- Metrics: textfile -> Alloy textfile collector -> VictoriaMetrics -----
+# Same architecture as roles/smartctl_exporter (deliberately — one shared
+# textfile dir, one collector, no new daemon).
+- name: Ensure textfile collector directory exists
+  ansible.builtin.file:
+    path: "{{ nut_ups_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Render UPS textfile dump script
+  ansible.builtin.template:
+    src: nut-ups-textfile.sh.j2
+    dest: /usr/local/bin/nut-ups-textfile.sh
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart nut-ups-textfile timer
+
+- name: Render nut-ups-textfile systemd service
+  ansible.builtin.template:
+    src: nut-ups-textfile.service.j2
+    dest: /etc/systemd/system/nut-ups-textfile.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart nut-ups-textfile timer
+
+- name: Render nut-ups-textfile systemd timer
+  ansible.builtin.template:
+    src: nut-ups-textfile.timer.j2
+    dest: /etc/systemd/system/nut-ups-textfile.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart nut-ups-textfile timer
+
+- name: Flush handlers so the timer picks up a fresh script/unit before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Start and enable nut-ups-textfile timer
+  ansible.builtin.systemd:
+    name: nut-ups-textfile.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Run one dump immediately so the textfile exists before Alloy's first scrape
+  ansible.builtin.systemd:
+    name: nut-ups-textfile.service
+    state: started
+  changed_when: false

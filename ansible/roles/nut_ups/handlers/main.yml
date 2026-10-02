@@ -1,0 +1,20 @@
+---
+# nut_ups handlers
+
+- name: Restart nut-server
+  ansible.builtin.systemd:
+    name: nut-server.service
+    state: restarted
+    daemon_reload: true
+
+- name: Restart nut-monitor
+  ansible.builtin.systemd:
+    name: nut-monitor.service
+    state: restarted
+    daemon_reload: true
+
+- name: Restart nut-ups-textfile timer
+  ansible.builtin.systemd:
+    name: nut-ups-textfile.timer
+    state: restarted
+    daemon_reload: true

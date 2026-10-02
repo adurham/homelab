@@ -1,0 +1,9 @@
+# Managed by ansible — see roles/nut_ups.
+[Unit]
+Description=Dump UPS state to Prometheus textfile
+After=local-fs.target nut-server.service
+Wants=nut-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nut-ups-textfile.sh

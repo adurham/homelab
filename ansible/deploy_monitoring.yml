@@ -64,6 +64,21 @@
         name: smartctl_exporter
       when: smartctl_exporter_enabled | default(false)
 
+- name: Install UPS monitoring (NUT) on the UPS-owning node
+  # Only touches hosts with nut_ups_enabled: true set in
+  # inventory/proxmox.yml (currently pve01 -- the node the lab-corner
+  # CyberPower GX1500U's USB cable is attached to; see roles/nut_ups).
+  # Must run BEFORE "Install Telemetry Agents" below for the same reason
+  # as the smartctl play above: the first nut_ups.prom dump needs to
+  # exist before Alloy renders its textfile collector block and restarts.
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Install nut_ups
+      ansible.builtin.include_role:
+        name: nut_ups
+      when: nut_ups_enabled | default(false)
+
 - name: Install Telemetry Agents
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster:!bwt_lab
   gather_facts: true

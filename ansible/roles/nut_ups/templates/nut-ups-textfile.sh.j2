@@ -1,0 +1,117 @@
+#!/bin/bash
+# Managed by ansible — see roles/nut_ups/tasks/main.yml.
+#
+# Dumps the lab-corner UPS's live state as Prometheus textfile-collector
+# metrics, so input voltage / load / battery state / line-vs-battery
+# status are visible in VictoriaMetrics + Grafana alongside everything
+# else. Written atomically (tmp + mv) because Alloy's textfile collector
+# parses the whole directory on every scrape and a partial write would
+# be parsed as corrupt metrics.
+#
+# The event-critical path is NOT this script — it is upsmon's own syslog
+# (polled every 2s, shipped to Loki, alerted by the
+# `ups_on_battery_transfer` rule). This is the trend/dashboard layer.
+set -euo pipefail
+
+UPSC=/usr/bin/upsc
+UPS="{{ nut_ups_name }}"
+OUTDIR="{{ nut_ups_textfile_dir }}"
+OUT="${OUTDIR}/nut_ups.prom"
+TMP="${OUT}.$$.tmp"
+
+mkdir -p "$OUTDIR"
+
+# `upsc` exits nonzero when the driver/upsd are down (e.g. right after a
+# reboot). Always emit a scrape_success so the alert layer can tell
+# "UPS gone" from "no data".
+dump=""
+if dump="$("$UPSC" "$UPS" 2>/dev/null)"; then
+  scrape=1
+else
+  dump=""
+  scrape=0
+fi
+
+{
+  echo "# HELP nut_ups_scrape_success 1 if upsc could read the UPS from upsd."
+  echo "# TYPE nut_ups_scrape_success gauge"
+  echo "# HELP nut_ups_info Static identity labels (model, firmware, serial); value is always 1."
+  echo "# TYPE nut_ups_info gauge"
+  echo "# HELP nut_ups_status_bit 1 when ups.status contains the named token."
+  echo "# TYPE nut_ups_status_bit gauge"
+  echo "# HELP nut_ups_input_voltage Input (mains) voltage in volts."
+  echo "# TYPE nut_ups_input_voltage gauge"
+  echo "# HELP nut_ups_output_voltage Output voltage in volts."
+  echo "# TYPE nut_ups_output_voltage gauge"
+  echo "# HELP nut_ups_battery_charge Battery charge percentage."
+  echo "# TYPE nut_ups_battery_charge gauge"
+  echo "# HELP nut_ups_battery_runtime Battery runtime remaining in seconds."
+  echo "# TYPE nut_ups_battery_runtime gauge"
+  echo "# HELP nut_ups_battery_voltage Battery voltage in volts."
+  echo "# TYPE nut_ups_battery_voltage gauge"
+  echo "# HELP nut_ups_load UPS load percentage."
+  echo "# TYPE nut_ups_load gauge"
+  echo "# HELP nut_ups_input_frequency Input frequency in Hz."
+  echo "# TYPE nut_ups_input_frequency gauge"
+  echo "# HELP nut_ups_realpower Nominal real power in watts."
+  echo "# TYPE nut_ups_realpower gauge"
+  echo "nut_ups_scrape_success ${scrape}"
+  if [ "$scrape" -eq 1 ]; then
+    printf '%s\n' "$dump" | python3 -c '
+{% raw %}
+import sys
+
+ups = sys.argv[1]
+vars = {}
+status = ""
+for line in sys.stdin:
+    line = line.strip()
+    if not line or ":" not in line:
+        continue
+    k, _, v = line.partition(":")
+    k = k.strip(); v = v.strip()
+    if k == "ups.status":
+        status = v
+    vars[k] = v
+
+def sanitize(s):
+    return s.replace("\\", "\\\\").replace("\"", "\\\"")
+
+info = {
+    "model": vars.get("device.model", vars.get("ups.model", "unknown")),
+    "mfr": vars.get("device.mfr", vars.get("ups.mfr", "unknown")),
+    "serial": vars.get("device.serial", vars.get("ups.serial", "unknown")),
+    "firmware": vars.get("ups.firmware", "unknown"),
+    "driver": vars.get("driver.name", "unknown"),
+}
+labels = ",".join(f"{k}=\"{sanitize(v)}\"" for k, v in info.items())
+print(f"nut_ups_info{{{labels}}} 1")
+
+for token in status.split():
+    print(f"nut_ups_status_bit{{status=\"{sanitize(token)}\"}} 1")
+
+gauge = {
+    "input.voltage": "nut_ups_input_voltage",
+    "output.voltage": "nut_ups_output_voltage",
+    "battery.charge": "nut_ups_battery_charge",
+    "battery.runtime": "nut_ups_battery_runtime",
+    "battery.voltage": "nut_ups_battery_voltage",
+    "ups.load": "nut_ups_load",
+    "input.frequency": "nut_ups_input_frequency",
+    "ups.realpower.nominal": "nut_ups_realpower",
+}
+for key, metric in gauge.items():
+    val = vars.get(key)
+    if val is None or val == "":
+        continue
+    try:
+        f = float(val)
+    except ValueError:
+        continue
+    print(f"{metric} {f}")
+{% endraw %}
+' "$UPS"
+  fi
+} > "$TMP"
+
+mv "$TMP" "$OUT"

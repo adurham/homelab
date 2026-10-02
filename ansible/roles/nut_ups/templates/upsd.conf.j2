@@ -1,0 +1,12 @@
+# Managed by ansible — see roles/nut_ups.
+# upsd (NUT data server) config.
+#
+# LOOPBACK-ONLY on purpose (v1): nothing outside this host needs upsd
+# yet, and keeping it off the LAN means zero new open ports and zero
+# cluster-firewall changes. Remote monitoring from the other two pve
+# nodes is a documented extension (README.md) that would switch this to
+# LISTEN 192.168.86.11 3493 + ALLOW 127.0.0.1 192.168.86.0/24 AND add an
+# IN ACCEPT for tcp/3493 sourced from +pve_nodes in the cluster
+# firewall — do not enable one without the other.
+LISTEN 127.0.0.1 3493
+ALLOW 127.0.0.1

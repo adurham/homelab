@@ -40,11 +40,13 @@ export.
 
 ## Alerts
 
-See `templates/alerting_rules.yml.j2`. 21 rules covering hosts down,
+See `templates/alerting_rules.yml.j2`. 38 rules covering hosts down,
 disk full, log-based events (OOM, postgres FATAL, SSH brute-force,
 postfix relay), cert expiry runway, pve replication failures, pve
-quorum loss, smart_vent_controller heartbeat staleness, Tati's WiFi
-presence tracker staleness, and the always-firing dead-man's-switch.
+quorum loss, pve node reboots, lab-corner UPS transfer events + UPS
+telemetry staleness (roles/nut_ups), smart_vent_controller heartbeat
+staleness, Tati's WiFi presence tracker staleness, and the
+always-firing dead-man's-switch.
 
 ## Notification routing
 

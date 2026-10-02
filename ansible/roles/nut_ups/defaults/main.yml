@@ -1,0 +1,21 @@
+---
+# nut_ups role defaults. See README.md for the design.
+
+# Name of the UPS as it appears in ups.conf / upsd / upsc AND as the
+# systemd unit instance `nut-driver@<name>.service`. Keep them identical.
+nut_ups_name: gx1500u
+
+# CyberPower USB vendor ID (the device enumerates as 0764:0601 with
+# product string "GX1500U"; NUT's udev rules ship a 0764:0601 entry
+# granting the `nut` group device access).
+nut_ups_vendor_id: "0764"
+
+# Where the Prometheus textfile dump lands. MUST match the directory the
+# Alloy textfile collector reads (roles/alloy/templates/config.alloy.j2).
+# Deliberately the SAME directory smartctl_exporter uses — one textfile
+# dir, one collector block, regardless of which roles are installed.
+nut_ups_textfile_dir: /var/lib/node_exporter/textfile_collector
+
+# How often to dump metrics. Matches Alloy's 15s scrape interval; the
+# event-critical detection path is upsmon's syslog (2s poll), not this.
+nut_ups_interval: "15s"

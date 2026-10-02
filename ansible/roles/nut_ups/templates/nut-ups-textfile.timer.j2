@@ -1,0 +1,11 @@
+# Managed by ansible — see roles/nut_ups.
+[Unit]
+Description=Periodic UPS textfile dump
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec={{ nut_ups_interval }}
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target

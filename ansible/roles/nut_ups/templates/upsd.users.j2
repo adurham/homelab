@@ -1,0 +1,9 @@
+# Managed by ansible — see roles/nut_ups.
+#
+# upsmon account for upsd. Password comes from the vault
+# (vault_nut_upsmon_password) so no credential is ever in git.
+# Read/monitor only — no instcmds, no actions: no client, anywhere,
+# can issue UPS commands (killpower etc.) through this account.
+[upsmon]
+    password  = {{ vault_nut_upsmon_password }}
+    upsmon primary
