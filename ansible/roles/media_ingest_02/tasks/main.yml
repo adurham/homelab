@@ -133,10 +133,25 @@
 - name: Find installed messages module
   ansible.builtin.find:
     paths: "{{ media_ingest_02_dir }}/venv/lib"
-    patterns: "{{ vault_media_ingest_02_scraper_pkg }}/data/api/messages.py"
+    # find matches the BASENAME only — a slash-containing pattern silently
+    # returns 0 files (and the `when` guard below then made this whole patch a
+    # silent no-op on a fresh venv). Recurse + match the module basename; the
+    # verify task below fails loudly if the file was not found. (Found
+    # 2026-10-02 while auditing the newer protected-download patch.)
+    patterns: "messages.py"
     file_type: file
+    recurse: true
   register: m02_messages_py
   changed_when: false
+  no_log: true
+
+- name: Fail if messages module not located (layout changed or venv missing)
+  ansible.builtin.fail:
+    msg: >-
+      messages.py not found under {{ media_ingest_02_dir }}/venv/lib — the
+      messages-endpoint patch cannot be applied (silent no-op would let the
+      scraper mark messages read again). Check that the venv is installed.
+  when: m02_messages_py.files | length == 0
   no_log: true
 
 - name: Patch messages module to use /media endpoint (no read marking)
