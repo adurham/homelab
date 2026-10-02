@@ -300,9 +300,9 @@ all:
         alloy_log_unit_allowlist: '^(ssh(@.*)?|cron|postfix(@.*)?|systemd-journald|kill-switch)\.service$'
         # Fleet log-retention audit 2026-09-10: this host's scraper.log
         # (M02_LOG_FILE, see roles/media_ingest_02) grew to 263MB with zero
-        # rotation. Separately, upstream scraper's own file-based logging (dated
+        # rotation. Separately, the upstream scraper's own file-based logging (dated
         # subdirectories under logging/, e.g.
-        # main_profile_2026-06-17/upstream scraper_*.log) had NO retention since
+        # main_profile_2026-06-17/*.log) had NO retention since
         # first deploy (2026-06-17) and grew to 2.3GB -- root cause of the
         # container hitting 75% disk usage (2026-09-10 incident). That tree
         # doesn't fit logrotate's rename/truncate model (unique filename

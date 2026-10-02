@@ -22,7 +22,7 @@ logrotate_configs: []
 
 # List of directory trees to age-prune daily, for logs that don't fit
 # logrotate's rename/truncate model (uniquely-named files, one per run,
-# in dated subdirectories — e.g. upstream scraper's
+# in dated subdirectories — e.g. the upstream scraper's
 # main_profile_YYYY-MM-DD/*.log tree). Empty by default; set
 # per-group/per-host in inventory/group_vars.
 #
