@@ -432,17 +432,24 @@ replacement strip needed.
   events (OB/OL transitions) so the next occurrence timestamps itself.
   Update this entry with the outcome.
 
-**Next occurrence, first moves (updated):** read `/root/lab_witness.log`
-on all three nodes for the drop ordering (node-side 1s witnesses are now the
-primary instrument), then Loki for the final lines, then compute the
-power-return time from `Startup finished` + boot_time. If a survivor shows a
-NIC blip again, that's the sag signature. Physical: inspect the strip and
-wall receptacle feeding the lab corner for discoloration/warmth (arcing =
-fire risk), reseat all plugs, and consider a cheap UPS+NUT piped into
-Loki/VM — it converts every invisible sag into a logged transfer event and
-mitigates it simultaneously; with the current cadence a verdict lands within
-days. Note the nodes share ONE strip (user, 2026-09-28) and pve02 is the
-most sensitive point.
+**CUTOVER NOTE (2026-10-02 00:01Z / Oct 1 19:01 CDT):** an all-three-node hard
+reset occurred at 00:01Z — this one was **USER-INITIATED**: the user was
+moving the lab corner's power onto the new UPS and cut the old feed. It is
+NOT a spontaneous occurrence and must NOT be counted in the event frequency
+(do not let it skew the "is it fixed?" clock — the clean-clock starts at the
+cutover, ~00:16Z). Two validations came out of it:
+1. The `pve_node_rebooted` Grafana alert FIRED as designed (3 instances
+   active by 00:04Z) — first live catch by the alerting pipeline.
+2. The just-shipped spam_scan mid-run checkpoint saved the scan's progress
+   through the reboot (749 OCR results + 120 candidates survived; the old
+   code would have lost the whole slice). Gallery self-recovered: all
+   services back, serve tmpfs reseeded from Drive in ~70s, manifest serving
+   0.12s.
+Post-cutover state: pve01/02/03 + GS108 + both studios all on UPS battery
+outlets. Clean-clock for the strip-vs-upstream verdict: starts 00:16Z.
+UPS USB monitoring: not yet wired — needs the UPS's USB cable plugged into
+one of the pve nodes (any; pve01 preferred) so NUT (usbhid-ups) can export
+input voltage / load / transfer events to VictoriaMetrics.
 
 Evidence gathered 2026-09-28 (VictoriaMetrics `node_boot_time_seconds`
 steps + Loki journals + HA per-circuit power):
