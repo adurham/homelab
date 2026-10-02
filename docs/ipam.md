@@ -462,20 +462,42 @@ Rewire window, as captured by both studios' labwatch/netwatch:
   counters ticked again from the pull: nvme0 = 121 (pve01) / 123 (pve02) /
   159 (pve03, known-stale) as of 19:16.
 
-**MONITORING GAP (open as of 19:19):** the UPS's USB data port is NOT
-connected to any host (re-verified 19:23 — no CyberPower HID device
-0764:* on pve01/02/03 or amd-workstation; NUT installed nowhere), so input
-voltage / OB-OL transfer events are NOT being logged yet. The UPS still
-mitigates, and "no further events while on battery-backed power" still
-discriminates, but it cannot timestamp the next disturbance until the USB
-is wired. Next step (user action): plug the UPS USB cable into the nearest
-always-on host (pve01 recommended — in the corner with the UPS, persistent
-journal; amd-workstation is the fallback if the cable reaches it), then
-wire NUT + VictoriaMetrics export + the Grafana transfer alert per the plan
-above. The in-box cable is a USB A-to-B; a standard one works if the
-open-box unit's cable is missing. (The GX1500U's own front LCD shows input
-voltage + load — a manual glance can confirm what the AC feed is doing
-before any host attachment, but nothing is logged until NUT is wired.)
+**MONITORING — DEPLOYED 2026-10-01 ~20:00 CDT (roles/nut_ups on pve01).**
+The USB cable went into pve01 at ~19:25 CDT and the full NUT chain is now
+live: `nut-driver@gx1500u` (usbhid-ups) + `nut-server` + `nut-monitor`
+(monitor-only: MINSUPPLIES 0 / powervalue 0 / SHUTDOWNCMD /bin/true —
+nothing ever auto-shuts down), with a 15s textfile dump
+(`/var/lib/node_exporter/textfile_collector/nut_ups.prom`) read by
+pve01's Alloy textfile collector (whose gate now ORs
+`smartctl_exporter_enabled` with the new `nut_ups_enabled`, same dir) and
+shipped to VictoriaMetrics as `nut_ups_*` series (scrape_success, info,
+status_bit, input_voltage, output_voltage, battery_charge/runtime/voltage,
+load, frequency, realpower). Two new Grafana rules provisioned and
+evaluating clean: `ups_on_battery_transfer` (Loki, upsmon's syslog
+"UPS %s on battery" string — the transfer timestamp) and
+`ups_monitor_stale` (VM, scrape_success==0 for 15m). Deploy playbook:
+`ansible/deploy_nut_ups.yml`; also wired into deploy_monitoring.yml as a
+gated play. upsd stays loopback-only (no new open ports, no firewall
+change); remote monitoring from the other nodes + any shutdown policy are
+documented extensions in roles/nut_ups/README.md, NOT deployed.
+
+Live readings at deployment (for the record): input 122V, status
+`OL CHRG LB`, load 18-19%, battery CHARGE 16% — the open-box unit arrived
+nearly flat and is charging (GX1500U manual: ~8h to full). **Until the
+battery is charged, a transfer would NOT be ridden out** — the mitigation
+is only complete once `ups.status` shows OL (CHRG cleared, LB gone) and
+battery.charge is high. Watch `nut_ups_battery_charge` to confirm it
+climbs; the UPS is still the measuring instrument meanwhile (upsmon logs
+the transfer regardless).
+
+Two deploy-day pitfalls fixed in the role itself (both would recur on a
+fresh host): (1) `maxretry` is an `[upsdrvctl]` global, NOT a per-driver
+variable — usbhid-ups fatal-errors on it; (2) the UPS was plugged in
+before nut-server landed, so the packaged 62-nut-usbups.rules never
+applied to the existing usb node (owner stayed root:root → libusb "Access
+denied" → endless driver restart loop); the role now runs
+`udevadm trigger --subsystem-match=usb --action=change` to apply the rule
+without a replug.
 
 **CUTOVER NOTE (2026-10-02 00:01Z / Oct 1 19:01 CDT):** an all-three-node hard
 reset occurred at 00:01Z — this one was **USER-INITIATED**: the user was
@@ -494,9 +516,9 @@ Post-cutover state (corrected 19:12 from the user + live-verified): pve01/02/03
 + GS108 + basement pod + amd-workstation are on UPS outlets; the two Mac
 Studios were NOT moved onto it (an earlier claim in this note that they were
 is superseded). Clean-clock for the strip-vs-upstream verdict: starts 00:16Z.
-UPS USB monitoring: not yet wired — needs the UPS's USB cable plugged into
-one of the pve nodes (any; pve01 preferred) so NUT (usbhid-ups) can export
-input voltage / load / transfer events to VictoriaMetrics.
+UPS USB monitoring: WIRED AND LIVE 2026-10-01 ~20:00 CDT — USB went into
+pve01, roles/nut_ups deployed (monitor-only), transfer-event alert armed.
+See the "MONITORING — DEPLOYED" block below for the details.
 
 Evidence gathered 2026-09-28 (VictoriaMetrics `node_boot_time_seconds`
 steps + Loki journals + HA per-circuit power):
