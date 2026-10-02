@@ -1,0 +1,100 @@
+---
+# ups_autoshutdown — orderly guest shutdown + auto-recovery driven by the
+# lab-corner CyberPower GX1500U. See README.md for the full design + safety
+# rationale before changing anything here.
+#
+# SCOPE: runs on the node that owns the UPS (pve01, nut_ups_enabled: true).
+# It talks to the rest of the cluster over pvesh/ha-manager (cluster-wide
+# from any node), so one instance covers all three nodes' guests.
+#
+# SAFETY DEFAULTS, DO NOT FLIP CASUALLY:
+#   * dry_run=true on first deploy. It logs/announces but never acts until a
+#     human flips it after watching a real event (or a staged test).
+#   * It NEVER shuts down a node — only guests. Nodes stay up on battery.
+#   * /var/lib/ups-autoshutdown/disabled exists => every cycle is a no-op.
+
+- name: Install python3 (runtime for the daemon)
+  ansible.builtin.apt:
+    name: python3
+    state: present
+    update_cache: true
+
+- name: Create role directories (bin + state + config)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ ups_autoshutdown_state_dir }}"
+    - /usr/local/lib/ups-autoshutdown
+    - "{{ ups_autoshutdown_config_path | dirname }}"
+
+- name: Install the ups-autoshutdown program
+  ansible.builtin.copy:
+    src: ups_autoshutdown.py
+    dest: /usr/local/lib/ups-autoshutdown/ups_autoshutdown.py
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the ups-autoshutdown CLI wrapper
+  ansible.builtin.copy:
+    dest: /usr/local/bin/ups-autoshutdown
+    owner: root
+    group: root
+    mode: '0755'
+    content: |
+      #!/bin/sh
+      # Managed by ansible — see roles/ups_autoshutdown.
+      exec python3 /usr/local/lib/ups-autoshutdown/ups_autoshutdown.py "$@"
+
+- name: Render config
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ ups_autoshutdown_config_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart ups-autoshutdown
+
+- name: Install systemd unit
+  ansible.builtin.template:
+    src: ups-autoshutdown.service.j2
+    dest: /etc/systemd/system/ups-autoshutdown.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart ups-autoshutdown
+
+- name: Flush handlers so config/unit changes apply before enable
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start ups-autoshutdown
+  ansible.builtin.systemd:
+    name: ups-autoshutdown.service
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Run the built-in scenario selftest (must pass on every deploy)
+  # The selftest uses an in-memory backend and temp dirs; it never touches the
+  # cluster. A failing selftest means the state machine regressed — fail the
+  # play rather than leave an untrusted automation armed.
+  ansible.builtin.command:
+    cmd: python3 /usr/local/lib/ups-autoshutdown/ups_autoshutdown.py selftest
+  register: uas_selftest
+  changed_when: false
+  failed_when: "'all scenarios passed' not in uas_selftest.stdout"
+
+- name: Show current evaluation (status)
+  ansible.builtin.command:
+    cmd: /usr/local/bin/ups-autoshutdown --config {{ ups_autoshutdown_config_path }} status
+  register: uas_status
+  changed_when: false
+  failed_when: false
+
+- name: Status output
+  ansible.builtin.debug:
+    msg: "{{ uas_status.stdout_lines | default(['(no output)']) }}"

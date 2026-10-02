@@ -1,0 +1,18 @@
+---
+# Deploy the UPS-driven guest autoshutdown (roles/ups_autoshutdown) to the
+# UPS-owning node. Runs the built-in selftest as part of the deploy.
+#
+# SAFE BY DEFAULT: the shipped config has dry_run=true, so the daemon starts,
+# evaluates, logs and writes metrics but takes no action. Flip with:
+#   ansible-playbook deploy_ups_autoshutdown.yml -e ups_autoshutdown_dry_run=false
+# (or edit roles/ups_autoshutdown/defaults/main.yml once it has proven itself).
+#
+# Run from the personal MacBook:
+#   cd ~/repos/homelab/ansible && ansible-playbook deploy_ups_autoshutdown.yml
+- name: Configure UPS-driven guest autoshutdown on the UPS-owning node
+  hosts: pve01
+  gather_facts: false
+  tasks:
+    - name: Install ups_autoshutdown
+      ansible.builtin.include_role:
+        name: ups_autoshutdown

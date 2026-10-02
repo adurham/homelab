@@ -79,6 +79,18 @@
         name: nut_ups
       when: nut_ups_enabled | default(false)
 
+- name: Install UPS-driven guest autoshutdown on the UPS-owning node
+  # Same gating as the NUT play above: the daemon needs NUT on the same host
+  # to read UPS state, and it only makes sense where the UPS cable is.
+  # Ships with dry_run=true (see roles/ups_autoshutdown/defaults/main.yml).
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Install ups_autoshutdown
+      ansible.builtin.include_role:
+        name: ups_autoshutdown
+      when: nut_ups_enabled | default(false)
+
 - name: Install Telemetry Agents
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster:!bwt_lab
   gather_facts: true

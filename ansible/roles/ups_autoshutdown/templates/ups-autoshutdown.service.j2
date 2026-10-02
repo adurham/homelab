@@ -1,0 +1,21 @@
+# Managed by ansible — see roles/ups_autoshutdown.
+[Unit]
+Description=UPS-driven orderly guest autoshutdown (lab corner)
+Documentation=file:/usr/local/lib/ups-autoshutdown/README.md
+After=nut-server.service nut-monitor.service pve-cluster.service
+Wants=nut-server.service
+# Deliberately NOT ordered before anything critical: this daemon must be able
+# to keep running while the cluster is degraded (that is when it matters).
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ups-autoshutdown --config /etc/ups-autoshutdown/config.json run
+Restart=always
+RestartSec=10
+# Modest resource use: it polls a local socket and occasionally asks pvesh.
+Nice=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

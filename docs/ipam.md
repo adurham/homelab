@@ -499,6 +499,29 @@ denied" → endless driver restart loop); the role now runs
 `udevadm trigger --subsystem-match=usb --action=change` to apply the rule
 without a replug.
 
+**AUTOSHUTDOWN — ARMED 2026-10-01 ~21:15 CDT (roles/ups_autoshutdown on
+pve01).** Orderly guest stop + auto-recovery is now live: when the corner
+is on battery ≥60s AND (charge ≤20% OR runtime ≤300s), the daemon stops
+guests gracefully (phase 1 = disposable `tc-*` fleet, phase 2 =
+everything else; HA guests via `ha-manager crm-command stop`, plain guests
+via the status API), force-stopping only after per-guest and whole-
+sequence deadlines. It never shuts down a NODE — nodes ride the battery,
+and the AC-loss path they already auto-recover from is the backstop.
+Recovery restarts exactly what it stopped once mains is stable 5 min (10
+if a recovery happened in the last 30 min). Safety: `state.json` on local
+disk is the source of truth, `/var/lib/ups-autoshutdown/disabled` is the
+kill switch, and 9 selftest scenarios run on every deploy.
+
+Validated by a staged LIVE test before arming: `stop --only 302,105` stopped
+tc-ubuntu24 (plain) + ntp-01 (HA) cleanly, `recover` brought both back
+(ntp-01 relocated to pve03 via the HA rebalance, chrony healthy).
+Thresholds are initial estimates — battery was still charging from the
+open-box 16% at arm time (31% and climbing), so this has NOT yet been
+through a real outage. Watch `ups_autoshutdown_lab_stopped` /
+`ups_autoshutdown_dryrun_would_stop`; the first genuine low-battery event
+is the real acceptance test, and the stop/runtime numbers may want tuning
+afterwards (record actuals here).
+
 **CUTOVER NOTE (2026-10-02 00:01Z / Oct 1 19:01 CDT):** an all-three-node hard
 reset occurred at 00:01Z — this one was **USER-INITIATED**: the user was
 moving the lab corner's power onto the new UPS and cut the old feed. It is
