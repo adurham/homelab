@@ -840,6 +840,153 @@ groups:
           severity: critical
         isPaused: false
 
+      - uid: ecobee_pairing_down
+        title: Ecobee HomeKit pairing down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # The ecobee<->HA HomeKit pairing (Edgewater Road config
+              # entry) carries the thermostat, every room sensor, and
+              # every door/window contact -- including
+              # binary_sensor.garage_door_contact, which the garage-lights
+              # automation triggers on. When the pairing drops, ALL of
+              # those go `unavailable` together (entity_available=0) and
+              # door-triggered automations go silently dead for the
+              # duration. The pairing flapped 101x 2026-09-24..09-30
+              # (median ~55s, max ~13min per episode) during the LAN/WiFi
+              # storms documented in docs/ipam.md; a recurrence would
+              # otherwise be invisible until a door event was missed.
+              #
+              # Backstop rationale (house pattern, same as
+              # smart_vent_controller_frozen): the HA-local watchdog
+              # (automations/ecobee_pairing_watchdog.yaml) self-heals via
+              # a config-entry reload within minutes; this rule is the
+              # independent, multi-channel-routed alert (HA push +
+              # Discord + email) for when the self-heal fails or HA
+              # itself can't notify.
+              editorMode: code
+              expr: min(homeassistant_entity_available{entity=~"binary_sensor.garage_door_contact|climate.ecobee_thermostat"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        # noDataState=Alerting (not OK) is deliberate, like the
+        # smart_vent_controller_frozen rule: if the metric stops being
+        # exported entirely (HA Prometheus exporter down, entities
+        # renamed, HA core down) that is ALSO a "no visibility into the
+        # pairing" condition and must page rather than go silent.
+        noDataState: Alerting
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "Ecobee HomeKit pairing has been unavailable for 10+ minutes"
+          description: "The Edgewater Road HomeKit pairing (thermostat + room sensors + all door/window contacts) has been unavailable for 10+ minutes -- door-triggered automations (garage/front/backyard) are degraded or dead while it is down. The HA watchdog (automations/ecobee_pairing_watchdog.yaml) should have reloaded the config entry already; if this is still firing, the self-heal didn't clear it. Check the network path to the thermostat (192.168.86.22, WiFi -- see docs/ipam.md) and the ecobee itself."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: ecobee_door_sensor_battery_low
+        title: Ecobee door/window sensor battery low
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              # The ecobee EBDWC01 door/window smart sensors are 915MHz
+              # devices that report to the THERMOSTAT (not directly to
+              # HA); HA sees them through the HomeKit pairing's battery
+              # characteristic. A weakening cell degrades the 915MHz
+              # hop before anything else shows symptoms -- i.e. missed
+              # door-open events exactly like the occasional miss
+              # investigated 2026-10-02 (light-stays-off class). The
+              # contact sensors drive door-triggered automations
+              # (garage lights, etc.), so catching a low cell early is
+              # the software-side prevention for that failure class.
+              # Same rationale as door_lock_battery_low above (early
+              # threshold, per-entity instances); 30% chosen because
+              # these CR2477 cells have a ~3-year nominal life and a
+              # flat discharge curve -- a 30% reading means months of
+              # notice, not days.
+              editorMode: code
+              expr: min by (entity) (homeassistant_sensor_battery_percent{entity=~"sensor.garage_door_battery_4|sensor.front_door_battery_5|sensor.backyard_door_battery"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [30]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "{{ '{{' }} $labels.entity {{ '}}' }} battery is below 30%"
+          description: "An ecobee door/window contact sensor (915MHz to the thermostat) is below 30% battery. A weakening cell misses door-open events -- the exact failure class (light stays off on an open) this replacement prevents. These are CR2477 cells with ~3-year nominal life; swap the battery at the next convenience and re-check the garage-lights automation afterward. Sensor: {{ '{{' }} $labels.entity {{ '}}' }}."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: frigate_api_down
         title: Frigate NVR API down
         condition: C
