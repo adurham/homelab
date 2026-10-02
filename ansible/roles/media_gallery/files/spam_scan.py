@@ -10,7 +10,7 @@ discriminator is OCR (tesseract), not a hand-wavy filter.
 
 WHAT IT FLAGS (candidates only — NEVER deletes):
   * images whose OCR text matches promo/ad phrasing (subscribe, follow, dm me,
-    subscription-site, link in bio, vip, promo, discount, giveaway, ...)
+    promo URLs, link in bio, vip, promo, discount, giveaway, ...)
   * images that are mostly-UI (screenshot-like): detected by many short OCR
     tokens in the top/bottom bands, where app chrome tends to live
   * tiny images whose OCR is dominated by a watermark handle
@@ -56,10 +56,15 @@ SPAM_CHECKPOINT_EVERY = int(os.environ.get("SPAM_CHECKPOINT_EVERY", "250"))
 
 PROMO_PAT = re.compile(
     r"(subscribe|follow\s+me|follow\s+for|dm\s+me|dms?\s+open|link\s+in\s+bio|"
-    r"subscription-site|subscription-site|join\s+my|check\s+my|my\s+page|promo|discount|giveaway|"
+    # brand-agnostic: any "name.tld/handle" promo URL plus the common
+    # subscription-platform words, without naming a platform in this repo.
+    r"[a-z0-9-]+\.(com|net|org|xxx|link)/[a-z0-9._-]{3,}|"
+    r"join\s+my|check\s+my|my\s+page|promo|discount|giveaway|"
     r"limited\s+time|cash\s?app|venmo|snapchat|telegram\s+me|whats?app|"
     r"new\s+video|full\s+video|watch\s+full|click\s+here|free\s+trial|"
     r"@[a-z0-9._]{3,}|\bvip\b|\bppv\b|\bsfs\b|\bf4f\b)", re.I)
+# A promo URL (name.tld/handle) is a strong single-hit signal on its own.
+_PROMO_URL_RE = re.compile(r"[a-z0-9-]+\.(com|net|org|xxx|link)/", re.I)
 UI_PAT = re.compile(
     r"\b(skip|follow|following|message|subscribe|share|save|comment|like|"
     r"send|story|reels?|explore|profile|settings|notifications?|"
@@ -94,8 +99,8 @@ def _fetch_original(item, tmpdir):
 
     WHY: thumbnails are downscaled to ~400px, which destroys exactly the text
     this scanner looks for. Verified live 2026-10-01: thumbnail OCR of a promo
-    card returned noise while OCR of the SAME original read
-    `example.com/examplehandle` cleanly. The thumb is only used for the contact
+    card returned noise while OCR of the SAME original read a clean
+    `<domain>.com/<handle>` watermark. The thumb is only used for the contact
     sheet (where a human eyeballs it anyway).
 
     Fetch via curl (not urllib): urllib's timeout bounds each read, not the
@@ -160,11 +165,12 @@ def classify(item, text, n_tokens):
 
     if hits:
         # Strong: promo/ad wording. Require 2+ distinct hits OR one very
-        # specific (subscription-site/subscribe/link in bio) so a photo that merely
-        # contains the word "follow" in a caption isn't blanket-flagged.
-        strong = [h for h in hits if h in ("subscription-site", "subscribe", "link in bio",
+        # specific (a promo URL, subscribe, link in bio) so a photo that
+        # merely contains the word "follow" in a caption isn't blanket-flagged.
+        strong = [h for h in hits if h in ("subscribe", "link in bio",
                                            "dm me", "join my", "giveaway",
-                                           "cash app", "click here")]
+                                           "cash app", "click here")
+                  or _PROMO_URL_RE.match(h)]
         if len(hits) >= 2 or strong:
             return "promo_text", f"OCR promo text: {', '.join(hits[:6])}"
     if len(ui_hits) >= 3 and n_tokens <= 25 and size < 400_000:

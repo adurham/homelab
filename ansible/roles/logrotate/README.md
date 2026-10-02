@@ -10,7 +10,7 @@ role).
 Fleet audit 2026-09-10: every host in the cluster had ONLY the stock
 OS-package logrotate entries. No app-level log producer (media-ingest
 scrapers, collectors, etc.) had any rotation/retention configured.
-media-ingest-02 hit this first in practice — its upstream scraper wrapper had
+media-ingest-02 hit this first in practice — its scraper wrapper had
 been writing unrotated logs since June, growing to 2.3GB (75% of the
 container's 8GB disk) before being noticed.
 
@@ -24,7 +24,7 @@ container's 8GB disk) before being noticed.
    restart.
 
 2. **Uniquely-named files in dated subdirectories, one new file per
-   run, never reopened** (e.g. upstream scraper's
+   run, never reopened** (e.g. the upstream scraper's
    `main_profile_YYYY-MM-DD/*.log` tree) — logrotate's rename/truncate
    model doesn't apply; there's nothing to "rotate", each file is
    already immutable once written. Handled instead by

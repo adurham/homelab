@@ -199,7 +199,7 @@ def test_spam_classifier_promo_and_ui():
         td = Path(d)
         ss = _fresh("spam_scan", td)
         # a real promo watermark caught live
-        img = {"stem": "examplehandle_539x699_abc", "chat": "examplehandle",
+        img = {"stem": "example_539x699_abc", "chat": "example",
                "size": 20000, "type": "image"}
         flag, why = ss.classify(img, "example.com/examplehandle", 1)
         if flag != "promo_text":
@@ -232,7 +232,7 @@ def test_spam_approve_never_deletes():
         ss.OUT = td / "spam_candidates.json"
         cand = {"candidates": [
             {"stem": "bad1", "chat": "cA", "size": 111, "flag": "promo_text",
-             "why": "OCR promo text: subscription-site"},
+             "why": "OCR promo text: example.com"},
         ]}
         p = td / "spam_candidates.json"
         p.write_text(json.dumps(cand))
