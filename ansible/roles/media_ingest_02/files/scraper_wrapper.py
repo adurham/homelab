@@ -65,6 +65,40 @@ logging.basicConfig(level=logging.INFO,
                     handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler(sys.stdout)])
 log = logging.getLogger("media-ingest-02")
 
+# ─── Exclusion ledger (gallery ground truth: stems the user deleted/deduped) ──
+# The collectors MUST NOT re-push stems in this set. The live Telegram collector
+# and reconcile both gate on it; this wrapper fetched it at sweep start but
+# never CONSULTED it during pushes (found 2026-10-01 while auditing the media
+# pipeline after a bulk dedupe reclaim). Today the scraper's own dupe-check DB
+# incidentally prevents re-download of deleted media, so no live leak — but
+# temp-media has no dupe-check entry (re-downloaded every sweep) and any DB
+# reset would re-push deleted content straight back into the gallery. Refresh
+# it on a short TTL so a delete mid-sweep takes effect promptly.
+_EXCLUDED = set()
+_EXCLUDED_TS = 0.0
+_EXCLUDED_TTL = 120.0  # refresh at most every 2 minutes
+
+
+def _refresh_excluded():
+    global _EXCLUDED, _EXCLUDED_TS
+    now = dt.datetime.now().timestamp()
+    if _EXCLUDED_TS and now - _EXCLUDED_TS < _EXCLUDED_TTL:
+        return _EXCLUDED
+    try:
+        _EXCLUDED = set(store_client.get_excluded())
+    except Exception as e:  # noqa: BLE001 — keep the last good set on failure
+        log.warning("excluded refresh failed (keeping %d cached): %s",
+                    len(_EXCLUDED), e)
+    _EXCLUDED_TS = now
+    return _EXCLUDED
+
+
+def _is_excluded(stem):
+    try:
+        return stem in _refresh_excluded()
+    except Exception:  # noqa: BLE001
+        return False
+
 # ─── Durable-merge redirect resolution (SEMANTIC COPY of
 #     roles/media_gallery/files/folder_redirect.py — the canonical module; it
 #     cannot be imported here because this host is a different box with its own
@@ -573,6 +607,21 @@ def _walk_and_push():
                 continue
             raw_stem = f"{folder}_{fpath.stem}"
             stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in raw_stem).strip("-") or "unknown"
+            # Exclusion gate (2026-10-01): the user deleted/deduped this stem in
+            # the gallery — never (re)push it, and drop the staged copy so it
+            # can't retry forever. The exclusion ledger is the gallery's ground
+            # truth; both collector paths already gate on it (live handler +
+            # reconcile), this wrapper was the gap: it fetched the ledger but
+            # never consulted it. See _refresh_excluded docstring.
+            if _is_excluded(stem) or _is_excluded(raw_stem):
+                skipped += 1
+                log.info("skip excluded stem=%s (deleted in gallery)", stem)
+                try:
+                    fpath.unlink()
+                except OSError:
+                    pass
+                _SEEN_SIZES.pop(key, None)
+                continue
             mtime = fpath.stat().st_mtime
             date_iso = dt.datetime.fromtimestamp(mtime).isoformat()
             try:
