@@ -365,8 +365,18 @@ def main():
                     chat = items[s].get("chat") or ""
                     f.write(f"{chat}/{s}.jpg\n")
             THUMB_LOCAL_CACHE.mkdir(parents=True, exist_ok=True)
+            # --no-traverse is REQUIRED here (2026-10-02): the crypt remote's
+            # directory tree contains duplicate dir entries (e.g. a model
+            # folder listed 5-9x). With normal traversal, --files-from silently
+            # resolves nothing for any path under a duplicated dir and rclone
+            # reports "There was nothing to transfer" (exit 0!) while the file
+            # demonstrably exists. That silently kept ~34.9K stems out of the
+            # hash cache — 18% of the image library was invisible to dedupe.
+            # --no-traverse uses the exact-path list without the dir walk.
+            # Verified live: 0 files transferred without it, 1/1 with it, on
+            # two different affected folders.
             r = rclone("copy", THUMBS, str(THUMB_LOCAL_CACHE),
-                       "--files-from", str(files_list),
+                       "--files-from", str(files_list), "--no-traverse",
                        "--transfers", "32", "--checkers", "32")
             if r.returncode != 0:
                 log("files-from thumb copy warning:", r.stderr[:300])
