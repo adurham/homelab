@@ -557,12 +557,12 @@ def _walk_and_push():
     .part EXCLUSION (2026-09-21, added alongside the OOM root-cause fix in
     store_client.py): the module docstring above says "there's no separate
     .part/.tmp name", which was true when written but is STALE for the
-    currently-pinned upstream scraper version (3.14.7) -- verified live during the
+    currently-pinned the scraper version (3.14.7) -- verified live during the
     2026-09-21 incident: the actual stuck/oversized file sat in this exact
     STAGING tree as `<...>.part` (both the plain main_download.py path and
     the DASH/DRM alt_download.py path write into a `<name>.part` temp file
     via tempFilePlaceholder, using the SAME save_location/staging root as the
-    final destination -- confirmed by reading upstream scraper's placeholder.py --
+    final destination -- confirmed by reading the scraper's placeholder.py --
     and only rename away the suffix after _size_checker/verify_media_integrity
     pass). The size-comparison gate above reduces but does not ELIMINATE the
     truncated-push race it was built to close: two consecutive 5s polls can
@@ -572,7 +572,7 @@ def _walk_and_push():
     costs nothing extra: the file is *never* complete while so named, by
     construction of both download paths, so skipping it here cannot lose data
     -- same bounded-delay "retried next tick" guarantee as everything else in
-    this function, and it naturally clears once upstream scraper's own rename lands.
+    this function, and it naturally clears once the scraper's own rename lands.
     """
     pushed = failed = skipped = 0
     if not STAGING.exists():
@@ -592,7 +592,7 @@ def _walk_and_push():
             if not fpath.is_file():
                 continue
             if fpath.suffix == ".part":
-                # Still being written by upstream scraper (or orphaned pending
+                # Still being written by the scraper (or orphaned pending
                 # _clear_stale_staging) -- never push, never count as seen,
                 # so it gets a fresh size baseline once it's renamed away.
                 continue
@@ -844,7 +844,7 @@ def _run_like_pass():
     if remaining <= 0:
         return
     # ISO format (YYYY-MM-DD) so `arrow` parses it directly. MM/DD/YYYY used
-    # to fail arrow.get() and fall into upstream scraper's humanize fallback parser,
+    # to fail arrow.get() and fall into the scraper's humanize fallback parser,
     # which has its own bug (missing \b before \minute in a regex) that threw
     # "re.error: bad escape \m" on every single daily-mode like attempt.
     yesterday = (dt.datetime.now() - dt.timedelta(days=1)).strftime("%Y-%m-%d")

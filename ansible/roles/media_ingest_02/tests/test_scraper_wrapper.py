@@ -168,7 +168,7 @@ def test_part_suffix_never_pushed_even_if_size_stable():
     """2026-09-21 root-cause incident: the size-comparison gate alone is not
     sufficient — a genuine mid-download stall (slow segment, throttled
     connection) can present the SAME byte count across two consecutive 5s
-    polls despite the file being nowhere near finished. upstream scraper writes to
+    polls despite the file being nowhere near finished. the scraper writes to
     a `<name>.part` path for the full duration of the download (both the
     plain and DASH/DRM code paths) and only renames it away once complete and
     integrity-checked. A `.part` file must never be pushed, no matter how
@@ -190,7 +190,7 @@ def test_part_suffix_never_pushed_even_if_size_stable():
             if p != 0:
                 raise AssertionError(f"expected pushed=0 for .part file, got {p}")
 
-        # Once upstream scraper renames it away (simulating download completion),
+        # Once the scraper renames it away (simulating download completion),
         # normal stability-gate behavior resumes: one skip tick, then pushed.
         final = model_dir / "big_video_12345.mp4"
         f.rename(final)

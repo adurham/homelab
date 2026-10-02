@@ -83,13 +83,13 @@ media_ingest_02_likes_per_model_cap: 50
 media_ingest_02_likes_per_model_timeout: 900  # 15 min in seconds
 
 # Defense-in-depth cap (bytes) on a single media item's size, wired into
-# config.json's download_options.file_size_limit. upstream scraper checks this in
+# config.json's download_options.file_size_limit. the scraper checks this in
 # _check_forced_skip() immediately AFTER the response opens but BEFORE any
 # body bytes are read (it only needs the Content-Length header), on both the
 # plain and DASH/DRM download paths, so an oversized item is never written to
 # the tmpfs staging dir at all — no orphaned partial, no 2x-heap push.
 #
-# ACCURACY NOTE (verified by reading the pinned upstream scraper 3.14.7 source, not
+# ACCURACY NOTE (verified by reading the pinned upstream package 3.14.7 source, not
 # assumed): the skip is NOT persisted. When _check_forced_skip trips on size
 # it sets ele.mediatype="Forced_skipped" and returns 0, and the caller's
 # `if ele.mediatype.capitalize() != "Forced_skipped": await self._force_download(...)`
@@ -130,7 +130,7 @@ media_ingest_02_likes_per_model_timeout: 900  # 15 min in seconds
 # well under the 14G tmpfs staging ceiling.
 #
 # CAVEAT: the cap can only act when the server reports a Content-Length. If a
-# response has no Content-Length the check can't run (upstream scraper reads that
+# response has no Content-Length the check can't run (the scraper reads that
 # header directly) and the download proceeds — which is precisely why the
 # streaming push fix, not this cap, is the primary defense.
 media_ingest_02_file_size_max_bytes: 8589934592  # 8 GiB
