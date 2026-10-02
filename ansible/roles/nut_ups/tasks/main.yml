@@ -75,6 +75,34 @@
   no_log: true
   notify: Restart nut-monitor
 
+- name: Remove any bogus driver unit generated from a non-device section
+  # nut-driver-enumerator(8) treats EVERY bracketed section in ups.conf as a
+  # DEVICE, so a global block written as `[upsdrvctl]` makes it generate
+  # `nut-driver@upsdrvctl.service`, which has no driver and restart-loops
+  # forever. Globals now live at the top of ups.conf (no section), but this
+  # task cleans up hosts that already ran the bad version.
+  # (Real bug, 2026-10-02: spammed 'Failed to start
+  # nut-driver@upsdrvctl.service' every ~15s and tripped the
+  # log_service_restart_loop alert.)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    changed=0
+    unit=nut-driver@upsdrvctl.service
+    if systemctl list-unit-files --no-legend "$unit" 2>/dev/null | grep -q .; then
+      systemctl disable --now "$unit" 2>/dev/null || true
+      systemctl reset-failed "$unit" 2>/dev/null || true
+      changed=1
+    fi
+    rm -f /etc/systemd/system/nut-driver@upsdrvctl.service.d/*.conf 2>/dev/null || true
+    rmdir /etc/systemd/system/nut-driver@upsdrvctl.service.d 2>/dev/null || true
+    # Ask the enumerator to re-sync so it forgets the stale instance.
+    /usr/libexec/nut-driver-enumerator.sh 2>/dev/null || true
+    systemctl daemon-reload
+    echo "cleaned=$changed"
+  register: nut_driver_cleanup
+  changed_when: "'cleaned=1' in nut_driver_cleanup.stdout"
+  failed_when: false
+
 - name: Sync NUT driver instances from ups.conf (enumerator)
   ansible.builtin.systemd:
     name: nut-driver-enumerator.service
