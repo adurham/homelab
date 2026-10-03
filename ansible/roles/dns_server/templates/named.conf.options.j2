@@ -36,7 +36,27 @@ options {
         version "none";
         hostname "none";
 
-        dnssec-validation auto;
+        # DNSSEC validation is enforced by the UPSTREAM (AdGuard Home;
+        # dnssec_enabled=true, verified live -- it SERVFAILs
+        # dnssec-failed.org), NOT at this layer. Keep it OFF here: AdGuard
+        # deliberately SYNTHESIZES unsigned responses in two routine
+        # cases, and a validating resolver rejects both with SERVFAIL:
+        #   1. disable_ipv6=true (AdGuard setting) -- every AAAA query for
+        #      a signed zone gets a synthetic NODATA carrying AdGuard's
+        #      unsigned fake-for-negative-caching.adguard.com SOA, which
+        #      cannot prove NODATA for a signed zone.
+        #   2. Ad/tracker-blocked domains -- synthesized NXDOMAIN/0.0.0.0.
+        # Measured 2026-10-03 before this change: 9 of 30 popular domains
+        # SERVFAILed on AAAA via this resolver (cloudflare.com,
+        # discord.com, healthchecks.io, ollama.com, ...) while the same
+        # query via AdGuard directly was NOERROR; `dig +cd` against THIS
+        # resolver also returned NOERROR, proving the validator was the
+        # rejecting layer. The resulting SERVFAIL churn took the
+        # healthchecks.io dead-man's-switch pings down ~15 min (the
+        # 2026-10-03 DNS incident). Do NOT re-enable without first making
+        # AdGuard's synthesized answers validatable (it can't) or removing
+        # disable_ipv6 + filtering (it won't).
+        dnssec-validation no;
         listen-on { any; };
         listen-on-v6 { any; };
 
