@@ -152,10 +152,15 @@ groups:
                 uid: victoriametrics
               editorMode: code
               # Both nodes report the cluster-wide runner count; max() keeps
-              # the alert alive if one node's scrape is missing. A crashed
-              # runner is re-placed by exo itself (~2 min reload), so this
-              # fires only when it stays down past that.
-              expr: max(exo_runners{job="exo", status="RunnerReady"}) or vector(0)
+              # the alert alive if one node's scrape is missing. Count ANY
+              # live runner state, not just RunnerReady: the per-node status
+              # series is REPLACED while a runner is busy (RunnerReady drops
+              # to absent and RunnerRunning takes its place -- observed live
+              # 2026-10-03, false-fired mid-generation while the cluster was
+              # healthy and serving). A crashed runner is re-placed by exo
+              # itself (~2 min reload), so this fires only when fewer than 2
+              # runners are alive past that.
+              expr: max(exo_runners{job="exo", status=~"RunnerReady|RunnerRunning|RunnerLoading|RunnerWarmingUp"}) or vector(0)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
