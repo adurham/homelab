@@ -1,6 +1,6 @@
 $TTL    604800
 @       IN      SOA     dns.chi.lab.amd-e.com. admin.chi.lab.amd-e.com. (
-                              5         ; Serial
+                              6         ; Serial
                          604800         ; Refresh
                           86400         ; Retry
                         2419200         ; Expire
@@ -16,6 +16,18 @@ $TTL    604800
 
 ; Name Servers
 dns     IN      A       {{ ip_dns_primary }}
+
+; Mail server — THIS is where mail.chi.lab-amd-e.com lives. The parent
+; zone (db.lab.amd-e.com.j2) carries the lab.amd-e.com MX record pointing
+; at mail.chi.lab-amd-e.com, but a matching A record placed THERE is
+; occluded: chi.lab-amd-e.com is its own zone, so BIND (the longest-zone
+; match) answers every *.chi.lab-amd-e.com query from THIS file and the
+; parent-zone copy is dead. Found live 2026-10-03: mail.chi resolved
+; NXDOMAIN, so postfix (AAAA first -> NXDOMAIN = "host not found") bounced
+; every pve-nightly root-mail notification ("Name service error for
+; name=mail.chi.lab-amd-e.com type=AAAA"). Keep this record here; the
+; parent template's copy is now just a comment pointing at this one.
+mail    IN      A       {{ ip_mail_server }}
 
 ; Proxmox Nodes (LAN IPs — defined inline in inventory/proxmox.yml; not
 ; on the private subnet so no ip_* var)
