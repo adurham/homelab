@@ -1,0 +1,11 @@
+# Managed by ansible — see roles/qga_disk_export/tasks/main.yml.
+[Unit]
+Description=Periodic QEMU guest (QGA) disk textfile dump
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ qga_disk_export_interval }}
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

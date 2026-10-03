@@ -1,0 +1,26 @@
+---
+# Re-apply JUST the qga_disk_export role to the Proxmox nodes, without
+# running the broad deploy_monitoring.yml (whose first play recreates the
+# monitoring CTs). Gives the running TanOS QEMU VMs real disk-usage
+# metrics via QGA (qm guest cmd get-fsinfo) with zero in-guest installs.
+# See roles/qga_disk_export/README.md.
+#
+# Run from the personal MacBook (~/repos/homelab/ansible). The pve nodes
+# are reachable directly over the LAN (192.168.86.11/.12/.13) from this
+# machine's own Tailscale-jump-free path, so no ProxyCommand is needed --
+# but the id_ansible key must be named explicitly since it is not the
+# default ssh key:
+#
+#   ansible-playbook ansible/deploy_qga_disk_export.yml \
+#     --vault-password-file .vault_pass
+#
+# (If your ssh-agent/default key is not id_ansible, add:
+#    -e 'ansible_ssh_common_args="-i /Users/adam.durham/.ssh/id_ansible -o StrictHostKeyChecking=accept-new"')
+- name: Export QEMU guest (TanOS VM) disk usage via QGA to the pve textfile collector
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Install qga_disk_export
+      ansible.builtin.include_role:
+        name: qga_disk_export
+      when: qga_disk_export_enabled | default(true)
