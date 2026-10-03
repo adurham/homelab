@@ -96,6 +96,32 @@ scrape_configs:
 {% endfor %}
 
   # ---------------------------------------------------------------------
+  # node_exporter (pull scrape, port 9100) for QEMU VM guests. Targets
+  # come from node_exporter_scrape_targets (roles/victoriametrics/
+  # defaults), same empty-by-default/populate-later pattern as
+  # exo_scrape_targets/windows_exporter_scrape_targets.
+  #
+  # Empty is correct and expected today: every QEMU VM is either a TanOS
+  # appliance (ts-*/tms-*/tzs-*, 200-205 -- runs NO custom software, see
+  # the top-of-file comment) or powered off with no static IP (usda-*/
+  # win-*/templates). General-purpose Linux VMs added later can instead
+  # be covered by Alloy's remote-write (same job="node_exporter" series
+  # shape) without touching this list -- see roles/victoriametrics/
+  # README.md. The disk_full rule needs NO change either way: its generic
+  # OR-branch already matches any node_filesystem_* under job=
+  # "node_exporter" (it filters only on the metric name + instance!~
+  # "tc-.*", not on job), so a new in-guest exporter on any VM is picked
+  # up automatically.
+  # ---------------------------------------------------------------------
+  - job_name: 'node_exporter'
+    static_configs:
+{% for target in node_exporter_scrape_targets | default([]) %}
+      - targets: ['{{ target.address }}']
+        labels:
+          instance: '{{ target.name }}'
+{% endfor %}
+
+  # ---------------------------------------------------------------------
   # Loki's own metrics. Loki exposes /metrics on the same port (3100) it
   # uses for the push API. Lets us alert on Loki's internal health
   # (ingestion errors, write failures) before logs stop flowing.
