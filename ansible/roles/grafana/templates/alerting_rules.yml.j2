@@ -200,6 +200,64 @@ groups:
           severity: critical
         isPaused: false
 
+      - uid: exo_runner_stuck_loading
+        title: exo runner stuck loading
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # Companion to exo_runners_not_ready: that rule counts Loading as
+              # "alive" (a reloading runner isn't down), which would mask a
+              # runner WEDGED mid-load. A normal MLX load of the ~20G shard set
+              # completes well inside 10m; still loading at 15m is stuck.
+              expr: max(exo_runners{job="exo", status="RunnerLoading"}) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        annotations:
+          summary: "exo: a runner has been stuck in RunnerLoading for 15+ minutes"
+          description: "At least one runner has reported RunnerLoading continuously for 15 minutes. A normal MLX load of the served model's shards finishes well inside that window, so this means a wedged load (stuck download, OOM during load, RDMA/node_network stall). The cluster may still be serving on the other runner or not at all -- check ~/exo.log on both macstudios for the load's last progress line, then consider a clean relaunch with ./start_cluster.sh."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: tanium_appliance_unreachable
         title: Tanium appliance unreachable
         condition: C
