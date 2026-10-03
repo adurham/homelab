@@ -1,0 +1,23 @@
+---
+# Re-apply JUST the dns_server role to dns-01 (named config + zone
+# templates). Exists because deploy_dns.yml is too broad for a
+# single-file fix: its first play (dns_host on pve02) provisions the CT
+# and its second includes the acme_sh role (cert registration/issuance)
+# -- neither is needed to change resolver options. This playbook targets
+# ONLY the dns_server group (dns-01), so it cannot touch the CT, certs,
+# or any other host. Restart-on-change handler reloads named only if a
+# template actually rendered new content.
+#
+# Run from the personal MacBook (the inventory's default ProxyCommand
+# points at that machine's own Tailscale IP 100.66.19.20, which loops
+# back to itself when executing from there -- override via hermes-gw-01):
+#
+#   ansible-playbook ansible/deploy_dns_server_config.yml \
+#     --vault-password-file .vault_pass \
+#     -e 'ansible_ssh_common_args="-i /Users/adam.durham/.ssh/id_ansible -o ProxyCommand=\"ssh -W %h:%p -q root@100.119.249.49\" -o StrictHostKeyChecking=accept-new"'
+#
+- name: Configure DNS Server (named options + zones)
+  hosts: dns_server
+  gather_facts: false
+  roles:
+    - dns_server
