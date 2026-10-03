@@ -48,7 +48,7 @@ model:
   provider: ollama-cloud
 {% else %}
 model:
-  default: deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
+  default: dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
   provider: exo
 {% endif %}
 
@@ -63,7 +63,7 @@ providers:
     api_mode: chat_completions
     discover_models: false
     models:
-      deepseek-ai/DeepSeek-V4-Flash-Vision-Exp:
+      dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw:
         context_length: 1048576
       mlx-community/Qwen3.6-35B-A3B-8bit:
         context_length: 262144
@@ -258,7 +258,7 @@ agent:
   reasoning_effort_by_model:
     claude-sonnet-5: max
     deepseek-v4.1-flash: xhigh
-    deepseek-ai/DeepSeek-V4-Flash-Vision-Exp: xhigh
+    dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw: xhigh
 
 # Anthropic server-side tool_search. With the CC-mimicry layer in
 # place (canonical CC tool names + x-anthropic-billing-header system
@@ -587,7 +587,7 @@ auxiliary:
       model: gemma4:31b
       provider: ollama-cloud
     compression:
-      model: deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
+      model: dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
       extra_body:
         service_tier: flex
     skills_hub:
