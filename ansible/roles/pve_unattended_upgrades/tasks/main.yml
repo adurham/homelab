@@ -29,8 +29,47 @@
     enabled: true
     state: started
 
+# 2026-10-03: these timers were disabled by hand on 2026-09-07 (write-wear
+# mitigation for the aging boot HDDs) and this role, deployed 2026-09-10,
+# never re-enabled them -- so the security-only config above was dead code
+# for 3 weeks and 15-17 pending security updates per node (openssl, glibc
+# bind9, curl...) sat unapplied with no signal anywhere. The dry-run below
+# CANNOT catch that: it invokes unattended-upgrade directly, bypassing the
+# systemd trigger entirely. The fix is this explicit enablement + the
+# assertion after it, so a plain redeploy always (re)arms the schedule and
+# fails loudly if anything disables it again behind ansible's back.
+- name: Enable apt-daily timers (the unattended-upgrades trigger)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Verify apt-daily.timer is durably enabled (not masked/disabled)
+  ansible.builtin.command: systemctl is-enabled apt-daily.timer
+  register: pve_uu_timer_apt
+  changed_when: false
+  failed_when: (pve_uu_timer_apt.stdout | trim) != 'enabled'
+
+- name: Verify apt-daily-upgrade.timer is durably enabled (not masked/disabled)
+  ansible.builtin.command: systemctl is-enabled apt-daily-upgrade.timer
+  register: pve_uu_timer_upg
+  changed_when: false
+  failed_when: (pve_uu_timer_upg.stdout | trim) != 'enabled'
+
 - name: Validate unattended-upgrades config with a dry run
+  # Tolerate the lock-busy case: enabling the timers (previous tasks) can
+  # immediately fire a real apt-daily run -- observed live 2026-10-03:
+  # enabling the timer launched a run within seconds, and this validation
+  # then false-failed with "Lock file is already taken". A busy lock is
+  # proof the mechanism is ALIVE, not a config error; only a real config
+  # failure should fail the deploy.
   ansible.builtin.command: unattended-upgrade --dry-run --debug
   register: uu_dryrun
   changed_when: false
-  failed_when: uu_dryrun.rc != 0
+  failed_when: >-
+    uu_dryrun.rc != 0 and
+    'Lock file is already taken' not in uu_dryrun.stdout and
+    'Lock file is already taken' not in uu_dryrun.stderr

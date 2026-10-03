@@ -11,8 +11,14 @@
 # Same exclusions as deploy_logrotate.yml (see that file for the
 # reasoning on each): tanium_cluster (vendor appliances, no custom
 # software), homeassistant (HAOS ships no apt/Python), localhost (not a
-# managed fleet member), bwt_lab (deleted 2026-08-05, inventory entries
-# remain but hosts don't exist). proxmox_nodes ALSO excluded here --
+# managed fleet member), bwt_servers + bwt_clients (deleted 2026-08-05,
+# inventory entries remain but hosts don't exist). NOTE 2026-10-03: the
+# old `!bwt_lab` exclusion also excluded **bwt-dhcp (CT 114), which is
+# still LIVE on pve01** (running, in the nightly backup list) -- it had
+# gone without any auto-patching (13 pending security updates, no
+# unattended-upgrades unit at all). Now scoped to the two actually-dead
+# subgroups so bwt-dhcp is covered like the rest of the CT fleet.
+# proxmox_nodes ALSO excluded here --
 # they already have their own more careful pve_unattended_upgrades role
 # (blacklists PVE kernel/cluster packages) and should not additionally
 # get this generic role layered on top.
@@ -37,7 +43,7 @@
 # old-distro compat test image, intentionally running an aged OS, so
 # not chasing this further tonight.
 - name: Install unattended security upgrades on CTs
-  hosts: all:!tanium_cluster:!homeassistant:!localhost:!bwt_lab:!proxmox_nodes:!tc-alma8:!tc-alma9:!tc-oracle8:!tc-oracle9:!tc-rhel8:!tc-rhel9:!tc-rocky8:!tc-rocky9:!tc-suse15:!tc-debian11
+  hosts: all:!tanium_cluster:!homeassistant:!localhost:!bwt_servers:!bwt_clients:!proxmox_nodes:!tc-alma8:!tc-alma9:!tc-oracle8:!tc-oracle9:!tc-rhel8:!tc-rhel9:!tc-rocky8:!tc-rocky9:!tc-suse15:!tc-debian11
   gather_facts: true
   roles:
     - unattended_upgrades

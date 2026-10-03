@@ -73,3 +73,20 @@
     owner: root
     group: root
     mode: "0644"
+
+# 2026-10-03: pve01's /etc/aliases.db was MISSING while /etc/aliases existed
+# -- postfix's alias_maps = hash:/etc/aliases then fails every local
+# delivery lookup ("alias database unavailable"), so all root mail (vzdump
+# notifications, smartd, cron) deferred in the queue for days. newaliases
+# rebuilt it and 46 stuck messages delivered immediately. Not worth
+# root-causing why dpkg lost the .db on that one node; ensuring it exists
+# is the durable fix and is cheap to keep idempotent.
+- name: Check postfix alias database exists
+  ansible.builtin.stat:
+    path: /etc/aliases.db
+  register: pve_aliases_db
+
+- name: Build /etc/aliases.db when missing (root mail defers without it)
+  ansible.builtin.command: newaliases
+  when: not pve_aliases_db.stat.exists
+  changed_when: true

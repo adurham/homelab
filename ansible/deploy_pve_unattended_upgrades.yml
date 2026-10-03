@@ -1,0 +1,13 @@
+---
+# Re-apply JUST roles/pve_unattended_upgrades to the Proxmox nodes.
+# Exists because deploy_proxmox.yml is too broad for a timer/config fix:
+# its proxmox_network play re-renders /etc/network/interfaces on all three
+# nodes (which silently dropped vmbr0.21 on 2026-09-11; see docs/ipam.md).
+#
+#   cd ansible
+#   ansible-playbook deploy_pve_unattended_upgrades.yml --vault-password-file .vault_pass
+- name: Configure unattended security upgrades on Proxmox nodes
+  hosts: proxmox_nodes
+  gather_facts: false
+  roles:
+    - pve_unattended_upgrades
