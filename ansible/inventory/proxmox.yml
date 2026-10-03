@@ -21,6 +21,15 @@ all:
           # disarm: `ups-autoshutdown disable` on the host, or set false here
           # and re-run deploy_ups_autoshutdown.yml.
           ups_autoshutdown_dry_run: false
+          # SMART textfile export added to pve01 2026-10-03: it is the node
+          # with the HEALTHY boot SSD, but its NVMe data drive (Samsung
+          # 980, the single device behind nvme-pool) deserves the same
+          # media-error/wear visibility the aging nodes get for their
+          # SATA drives. The role now emits NVMe health metrics too.
+          smartctl_exporter_enabled: true
+          smartctl_exporter_devices:
+            - /dev/sda
+            - /dev/nvme0n1
           # Nightly vzdump job (roles/proxmox_backup_jobs). Existing job id
           # 41c3b19b-20ea-4ba0-b760-52a79d1cb83a was hand-configured in the
           # Proxmox UI at some unknown point BEFORE this role existed --
@@ -35,9 +44,26 @@ all:
           # was written down. Keep this list in sync with reality --
           # `pct list` on the node is the source of truth for what SHOULD
           # be here, this var is just what ansible enforces IS here.
+          # 2026-10-03: the three per-node vmid lists were replaced by this
+          # SAME cluster-wide union of production LXC vmids (all three jobs
+          # carry an identical list now). Why: these jobs are node-scoped
+          # and silently SKIP any vmid not currently on their node -- so
+          # when Proxmox HA migrated a CT (mail-01/104, lb-01/103,
+          # dns-01/102, ntp-01/105), the lists went stale and those guests
+          # stopped being backed up for WEEKS with no error anywhere (found
+          # 2026-10-03; same silently-stale-list failure mode as frigate-01/
+          # bwt-dhcp on 2026-09-11). With one identical union list on all
+          # three jobs, whichever node currently hosts a guest backs it up
+          # exactly once per night and coverage follows HA migrations
+          # automatically. vm-01 (106) is deliberately NOT here -- it has
+          # its own encrypted GDrive DR (roles/vm_backup +
+          # vm-backup-watchdog.timer); tc-* test clients and the stopped
+          # TanOS/win/usda lab VMs are likewise excluded. The Grafana
+          # `guest_backup_missing` rule alerts if a production LXC drops
+          # out of this coverage again.
           pve_backup_job_id: "41c3b19b-20ea-4ba0-b760-52a79d1cb83a"
           pve_backup_schedule: "Mon..Sun 02:00"
-          pve_backup_vmids: [107, 113, 114, 117, 118, 170]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 107, 108, 113, 114, 115, 116, 117, 118, 170]
         pve02:
           ansible_host: 192.168.86.12
           pve_sync_vlan_ip: "172.20.0.12"
@@ -45,7 +71,8 @@ all:
           zfs_scrub_day_of_month: 8
           pve_backup_job_id: "08bcc363-a9bf-4de3-9c73-5c4581cc0b78"
           pve_backup_schedule: "Mon..Sun 02:30"
-          pve_backup_vmids: [101, 102, 103, 104, 105, 108, 115, 116]
+          # Same union vmid list as pve01 -- migration-proof; see the comment there.
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 107, 108, 113, 114, 115, 116, 117, 118, 170]
           # SMART textfile export (roles/smartctl_exporter) added
           # 2026-09-16 -- pve02's boot HDD (ST500LM034-2GH17A, 35k+
           # power-on hrs) has no spare to replace it with, so tracking
@@ -53,6 +80,12 @@ all:
           # smartd's unread local mail is the real mitigation. See
           # roles/smartctl_exporter/README.md.
           smartctl_exporter_enabled: true
+          # 2026-10-03: data NVMe added -- media_errors/percentage_used/
+          # available_spare now exported for the Samsung data drives too
+          # (same role, extended script); SATA boot disk stays tracked.
+          smartctl_exporter_devices:
+            - /dev/sda
+            - /dev/nvme0n1
         pve03:
           ansible_host: 192.168.86.13
           pve_sync_vlan_ip: "172.20.0.13"
@@ -60,11 +93,15 @@ all:
           zfs_scrub_day_of_month: 15
           pve_backup_job_id: "52cb07d6-1400-4437-9591-568cad479879"
           pve_backup_schedule: "Mon..Sun 03:00"
-          pve_backup_vmids: [100]
+          # Same union vmid list as pve01 -- migration-proof; see the comment there.
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 107, 108, 113, 114, 115, 116, 117, 118, 170]
           # Same as pve02 -- see comment there. pve03's boot HDD
           # (ST500LM021-1KJ152) is the one that actually corrupted
           # pve-cluster's config.db on 2026-09-10.
           smartctl_exporter_enabled: true
+          smartctl_exporter_devices:
+            - /dev/sda
+            - /dev/nvme0n1
       vars:
         ansible_user: root
         # Usage: ansible-playbook -i ansible/inventory/proxmox.yml ... --ask-pass
