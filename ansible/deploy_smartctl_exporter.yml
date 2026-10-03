@@ -1,0 +1,19 @@
+---
+# Re-apply JUST the smartctl_exporter role to the Proxmox nodes, without
+# running deploy_monitoring.yml (whose first play provisions the
+# monitoring CTs). Mirrors the deploy_qga_disk_export.yml pattern.
+# Exports SATA boot-disk SMART trends AND (since 2026-10-03) NVMe data
+# drive health (media_errors / percentage_used / available_spare /
+# critical_warning) to the Alloy textfile collector. See
+# roles/smartctl_exporter/README.md.
+#
+#   cd ansible
+#   ansible-playbook deploy_smartctl_exporter.yml --vault-password-file .vault_pass
+- name: Export SMART trends (SATA + NVMe) to the pve textfile collector
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Install smartctl_exporter
+      ansible.builtin.include_role:
+        name: smartctl_exporter
+      when: smartctl_exporter_enabled | default(false)

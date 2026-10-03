@@ -30,6 +30,14 @@ mkdir -p "$OUTDIR"
   echo "# TYPE smartctl_device_last_selftest_passed gauge"
   echo "# HELP smartctl_device_last_selftest_lba_error 1 if the most recent self-test reported a failing LBA."
   echo "# TYPE smartctl_device_last_selftest_lba_error gauge"
+  echo "# HELP smartctl_nvme_critical_warning NVMe critical-warning bitfield; non-zero means the controller is reporting a live problem (spare below threshold, temp, reliability degraded)."
+  echo "# TYPE smartctl_nvme_critical_warning gauge"
+  echo "# HELP smartctl_nvme_media_errors NVMe cumulative unrecovered data-integrity (media) errors; the NVMe analogue of reallocated_sector_ct."
+  echo "# TYPE smartctl_nvme_media_errors gauge"
+  echo "# HELP smartctl_nvme_percentage_used NVMe percentage of rated endurance consumed."
+  echo "# TYPE smartctl_nvme_percentage_used gauge"
+  echo "# HELP smartctl_nvme_available_spare NVMe remaining spare capacity as a percentage of the total."
+  echo "# TYPE smartctl_nvme_available_spare gauge"
 
   for dev in {{ smartctl_exporter_devices | join(' ') }}; do
     disk="$(basename "$dev")"
@@ -42,6 +50,28 @@ mkdir -p "$OUTDIR"
 
     passed=$(echo "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(1 if d.get("smart_status",{}).get("passed") else 0)' 2>/dev/null || echo -1)
     echo "smartctl_device_health_passed{disk=\"${disk}\"} ${passed}"
+
+    # NVMe health log -- only present on devices that speak NVMe (the
+    # Samsung data drives), absent on the SATA/ATA boot disks, which is
+    # what keeps this block a no-op for ATA and preserves their output
+    # unchanged. Every field uses .get() with a default because
+    # set -euo pipefail is active and a controller that omits one
+    # subfield (or reports the log entirely empty) must degrade to a 0
+    # reading, not kill the whole scrape and blank the textfile.
+    echo "$json" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+disk = sys.argv[1]
+log = d.get("nvme_smart_health_information_log")
+if log is not None:
+    for name, key in (
+        ("critical_warning", "critical_warning"),
+        ("media_errors", "media_errors"),
+        ("percentage_used", "percentage_used"),
+        ("available_spare", "available_spare"),
+    ):
+        print("smartctl_nvme_" + name + "{disk=\"" + disk + "\"} " + str(log.get(key, 0)))
+' "$disk" 2>/dev/null || true
 
     echo "$json" | python3 -c '
 import json, re, sys

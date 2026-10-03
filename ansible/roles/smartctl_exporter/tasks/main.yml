@@ -67,14 +67,50 @@
     owner: root
     group: root
     mode: '0644'
-  notify: Reload udev rules and apply SATA timeout
 
-- name: Verify SCSI command timeout applied
-  ansible.builtin.command: cat /sys/block/{{ item.split('/')[-1] }}/device/timeout
-  loop: "{{ smartctl_exporter_devices }}"
-  register: scsi_timeout_check
+- name: Apply and verify SCSI/SATA command timeout on this node's SATA disks
+  # Unconditional task, deliberately NOT a notify/handler pair. Two live
+  # bugs found 2026-10-03 made the old handler-driven flow silently
+  # useless: (1) the handler interpolated `item` but was notified from a
+  # non-loop task, so it crashed whenever it ran; (2) a handler only fires
+  # when the templated file CHANGES, so any run where the rule file was
+  # already present (e.g. after an interrupted first apply, or on a node
+  # added to this role later) skipped the udev trigger entirely and left
+  # /sys/block/sda/device/timeout at the 30s default -- observed live on
+  # pve01 (rule file on disk, timeout still 30). Reloading rules and
+  # re-triggering the matching devices is cheap and idempotent, so it runs
+  # every deploy and then asserts the sysfs value actually took.
+  #
+  # sd* only: NVMe has no /sys/block/<dev>/device/timeout attribute (that
+  # SCSI cmd-timeout knob doesn't apply to NVMe controllers), so the loop
+  # globs SATA devices and a mixed device list is fine.
+  ansible.builtin.shell: |
+    set -euo pipefail
+    udevadm control --reload-rules
+    found=0
+    for d in /dev/sd[a-z]; do
+      [ -e "$d" ] || continue
+      found=1
+      bn="$(basename "$d")"
+      udevadm trigger --name-match="$bn"
+      # udev processes the trigger ASYNCHRONOUSLY (verified live on pve01
+      # 2026-10-03: immediate read still 30, after ~1s 180), so poll
+      # briefly instead of reading once and false-failing.
+      t=""
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        t="$(cat /sys/block/$bn/device/timeout)"
+        [ "$t" = "{{ smartctl_exporter_scsi_timeout }}" ] && break
+        sleep 0.5
+      done
+      if [ "$t" != "{{ smartctl_exporter_scsi_timeout }}" ]; then
+        echo "timeout for $d is $t, expected {{ smartctl_exporter_scsi_timeout }}"
+        exit 1
+      fi
+      echo "$d timeout $t OK"
+    done
+    [ "$found" = "1" ] || echo "no SATA devices found"
+  register: scsi_timeout_result
   changed_when: false
-  failed_when: scsi_timeout_check.stdout | trim | int != smartctl_exporter_scsi_timeout
 
 # ----- Journald volatile storage -----
 # See templates/99-volatile-hdd-wear.conf.j2 for why. Uses its own
