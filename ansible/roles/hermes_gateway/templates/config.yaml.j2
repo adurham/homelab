@@ -583,72 +583,11 @@ auxiliary:
       timeout: 120
       extra_body: {}
       download_timeout: 30
-    web_extract:
-      model: gemma4:31b
-      provider: ollama-cloud
-    compression:
-      model: deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
-      extra_body:
-        service_tier: flex
-    skills_hub:
-      model: gemma4:31b
-      provider: ollama-cloud
-    approval:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    mcp:
-      model: gemma4:31b
-      provider: ollama-cloud
-    title_generation:
-      model: gemma4:31b
-      provider: ollama-cloud
-    tts_audio_tags:
-      model: gemma4:31b
-      provider: ollama-cloud
-    triage_specifier:
-      model: gemma4:31b
-      provider: ollama-cloud
-    kanban_decomposer:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    profile_describer:
-      model: gemma4:31b
-      provider: ollama-cloud
-    curator:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    monitor:
-      model: gemma4:31b
-      provider: ollama-cloud
-    memory_extraction:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    background_review:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    consult:
-      model: claude-fable-5-1
-      provider: claude-subscription-directsdk-experimental
-      fallback:
-        model: glm-5.3
-        provider: ollama-cloud
-      reasoning_effort: max
-      timeout: 300
-    goal_judge:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    memory_query_rewrite:
-      model: gemma4:31b
-      provider: ollama-cloud
-    moa_aggregator:
-      model: gemma4:31b
-      provider: ollama-cloud
-    moa_reference:
-      model: gemma4:31b
-      provider: ollama-cloud
-    pet_dialogue:
-      model: gemma4:31b
-      provider: ollama-cloud
+    # Task pins mirror hermes_routing_auxiliary_ollama_cloud_tasks (the table the ollama-cloud block renders from),
+    # as the MacBook's auxiliary.exo block mirrors its ollama-cloud block (2026-10-01). The block-level 'default'
+    # above is exo's own, so it is not rendered from that table.
+    # 'vision' is excluded too: the local-exo override above stays.
+{{ hermes_routing_auxiliary_ollama_cloud_tasks | dict2items | rejectattr('key', 'in', ['default', 'vision']) | list | items2dict | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
   anthropic:
     default: claude-haiku-4-5-20251001
     provider: anthropic
