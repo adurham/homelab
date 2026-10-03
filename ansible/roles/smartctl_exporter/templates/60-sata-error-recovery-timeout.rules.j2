@@ -16,6 +16,13 @@
 # give them the extra recovery time instead of yanking the link
 # mid-recovery. This is the real fix for that incident class, not a
 # retry/backoff mitigation.
-{% for dev in smartctl_exporter_devices %}
+#
+# NVMe devices are skipped: the ATTR{device/timeout} path this rule
+# targets is a SCSI/SATA attribute that simply doesn't exist under an
+# NVMe device's sysfs node, so an unguarded rule for /dev/nvme* matches
+# nothing at udev time (and would be a confusing dead rule if it did
+# ever resolve). NVMe has its own, much longer controller-driven error
+# handling and no SCT-ERC-vs-kernel-timeout problem to fix.
+{% for dev in smartctl_exporter_devices if dev.startswith('/dev/sd') %}
 ACTION=="add|change", KERNEL=="{{ dev.split('/')[-1] }}", SUBSYSTEM=="block", ATTR{device/timeout}="{{ smartctl_exporter_scsi_timeout }}"
 {% endfor %}
