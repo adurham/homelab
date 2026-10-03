@@ -2496,6 +2496,279 @@ groups:
         isPaused: false
 
       # ---------------------------------------------------------------------
+      # Backup coverage + ZFS pool health (added 2026-10-03). Motivated by a
+      # real find: Proxmox HA migrated dns-01/lb-01/mail-01/ntp-01 between
+      # nodes while the per-node vzdump jobs (hardcoded vmid lists) stayed
+      # put, so those guests silently stopped being backed up for weeks --
+      # no error, no alert, the jobs reported OK nightly. The job lists are
+      # now a single migration-proof union list (roles/proxmox_backup_jobs
+      # + inventory/proxmox.yml); these rules are the two independent
+      # safety nets: `guest_backup_missing` catches a guest dropping out
+      # of *job coverage* (exactly-once membership across all three jobs),
+      # and `guest_backup_stale` catches *execution* failures (job ran but
+      # a guest's archive is old / the job errored) which coverage alone
+      # cannot see.
+      # ---------------------------------------------------------------------
+      - uid: guest_backup_missing
+        title: Production guest is not covered by any backup job
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # pve_not_backed_up_info is 1 for any guest the union of all
+              # backup jobs fails to cover (sourced from PVE's own
+              # /cluster/backup-info/not-backed-up API). Restricted to
+              # production LXC guests: tc-* is the disposable Tanium test
+              # fleet (rebuilt at will, deliberately unbacked -- see the
+              # matching exclusion rationale on host_down), and vm-01
+              # backs itself up to encrypted GDrive via vm_backup
+              # (vm-backup-watchdog.timer watches it) rather than vzdump.
+              # The anchored regex is deliberate: an unanchored `vm-01`
+              # alternative would also exclude a future `vm-011`.
+              expr: 'max by (id) (pve_not_backed_up_info{id=~"lxc/.+"} == 1) * on (id) group_left(name) max by (id, name) (pve_guest_info{id=~"lxc/.+", name!~"^(tc-.*|vm-01)$"})'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 6h
+        annotations:
+          summary: "{{ '{{' }} $labels.name {{ '}}' }} ({{ '{{' }} $labels.id {{ '}}' }}) is not covered by any backup job"
+          description: "PVE reports no backup job covers {{ '{{' }} $labels.name {{ '}}' }}. This is the exact failure that left mail-01/lb-01/dns-01/ntp-01 unbacked for weeks after HA migrated them (2026-10-03) -- job coverage is checked against where guests ACTUALLY run, so a migration, a deleted vmid in the list, or a job lost in a pmxcfs hiccup all surface here. Fix: confirm the guest is in the union `pve_backup_vmids` list (inventory/proxmox.yml) and that all three nightly jobs carry it, then re-run `ansible-playbook ansible/deploy_pve_backup_jobs.yml`."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: guest_backup_stale
+        title: Nightly PVE backup job errored or produced no archive
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              # pvescheduler logs exactly one "Backup job finished" line per
+              # nightly run per node: "...finished successfully" or
+              # "...finished with errors". Scoped to unit="pvescheduler.service"
+              # DELIBERATELY: the scheduled nightly job runs under that unit,
+              # while manual/interactive vzdump invocations log under
+              # session-*.scope -- verified live 2026-10-03 (a synthetic
+              # `vzdump 99999` test produced an errors line under
+              # session-6150.scope, which this rule must NOT treat as a
+              # scheduled-job failure, and a real nightly run shows
+              # unit=pvescheduler.service). This also means the rule fires
+              # only for the actual nightly job, not for one-off manual runs.
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+", unit="pvescheduler.service"} |~ "Backup job finished with errors" [26h]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "Nightly backup job on {{ '{{' }} $labels.host {{ '}}' }} finished WITH ERRORS in the last 26h"
+          description: "At least one nightly vzdump run on {{ '{{' }} $labels.host {{ '}}' }} logged 'Backup job finished with errors' in the last 26 hours. One bad vmid in a job's list is enough to error the run while the rest still back up (verified 2026-10-03: a nonexistent vmid fails only its own entry -- the other guests in the same run complete normally). Check the newest task log: `pvesh get /nodes/{{ '{{' }} $labels.host {{ '}}' }}/tasks --typefilter vzdump` then read its log for the failing vmid and message (storage full, guest locked, vmid typo). Note: this covers EXECUTION failures; job-coverage drift is the separate guest_backup_missing rule."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: zfs_pool_not_online
+        title: ZFS pool not ONLINE on a Proxmox node
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1200
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # node_zfs_zpool_state emits one series per (zpool, state)
+              # pair with 1 only on the CURRENT state, from each pve node's
+              # node_exporter (Alloy). nvme-pool on every node is a
+              # SINGLE-DEVICE pool -- there is no redundancy, so any
+              # non-online state (degraded/faulted/offline/suspended/
+              # unavail) means that node's guest storage is at risk or
+              # gone. This is the only pool-state alert that existed
+              # nowhere before 2026-10-03. NOTE: a node that is fully DOWN
+              # also stops emitting the metric -- that is host_down's job
+              # (absent series can't fire this one).
+              expr: 'max by (instance, zpool, state) (node_zfs_zpool_state{instance=~"pve0[123]", state!="online"} == 1)'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "ZFS pool {{ '{{' }} $labels.zpool {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} is {{ '{{' }} $labels.state {{ '}}' }}"
+          description: "node_zfs_zpool_state reports {{ '{{' }} $labels.zpool {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} entered state '{{ '{{' }} $labels.state {{ '}}' }}'. Every pool here is a single NVMe device (no redundancy), so this is not a rebuild-someday warning -- if it is faulted/offline/suspended, that node's guests and local backup archives are at immediate risk. Check `zpool status -x` on the node and recent kernel logs for NVMe/controller errors (there is also a log_kernel_io_error rule)."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: nvme_data_drive_health
+        title: NVMe data drive health signal (media errors / wear)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 90000
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # Three independent NVMe health signals collapsed to a
+              # single firing condition via weight-multiply (the value
+              # itself encodes which check fired: 3=new media errors,
+              # 2=spare low, 1=wear high). Metrics come from the
+              # smartctl_exporter role's NVMe extension (added
+              # 2026-10-03 with this rule): every pve node's data NVMe
+              # is a SINGLE device holding all guest disks + the local
+              # backup archives -- no redundancy. Consumer-SSD caveat:
+              # a lone nonzero media_errors count can be benign, hence
+              # the INCREASE over 24h rather than absolute > 0 (only
+              # NEW errors page); available_spare below 20 and
+              # percentage_used above 90 are the standard early-wear
+              # lines (threshold ~10-20% spare remains until wear-out).
+              expr: '((increase(smartctl_nvme_media_errors[24h]) > 0) * 3) or ((smartctl_nvme_available_spare < 20) * 2) or ((smartctl_nvme_percentage_used > 90) * 1)'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "NVMe data drive on {{ '{{' }} $labels.instance {{ '}}' }} ({{ '{{' }} $labels.disk {{ '}}' }}) reports a health signal"
+          description: "Value 3 = new media errors in the last 24h (uncorrected data-integrity events on the device holding this node's guest disks AND its local backup archives — verify backups, watch for growth, consider `smartctl -a` and a `zpool scrub`); value 2 = available spare below 20% (wear-out approaching, plan replacement); value 1 = percentage_used above 90 (TBW near exhaustion). Single-digit transient media errors can be benign on consumer NVMe — this fires only on NEW errors within 24h. All pools are single-device: there is no ZFS redundancy to absorb a failure here."
+        labels:
+          severity: warning
+        isPaused: false
+
+      # ---------------------------------------------------------------------
       # Lab-corner UPS (roles/nut_ups on pve01). Added 2026-10-01 with the
       # CyberPower GX1500U install: the UPS both mitigates the recurring
       # deep-sag events AND is the measuring instrument for them -- upsmon

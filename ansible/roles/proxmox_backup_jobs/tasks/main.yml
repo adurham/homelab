@@ -65,3 +65,22 @@
     - pve_backup_job_parsed != {}
     - pve_backup_job_parsed['notes-template'] | default('') != pve_backup_notes_template
   changed_when: true
+
+- name: Re-read this node's backup job after the update (final state)
+  ansible.builtin.command:
+    cmd: "pvesh get /cluster/backup/{{ pve_backup_job_id }} --output-format json"
+  register: pve_backup_job_final
+  changed_when: false
+
+- name: Assert the job is still node-scoped and carries the declared vmid list
+  # Guards two silent-failure classes: (1) a job that lost its `node`
+  # property would run on EVERY node and back up every guest 3x/night,
+  # collapsing keep-last=3 retention to ~1 day; (2) a vmid list that
+  # drifted from inventory silently drops guests from coverage -- exactly
+  # the 2026-09-11 (frigate-01/bwt-dhcp) and 2026-10-03 (dns-01/lb-01/
+  # mail-01/ntp-01, after HA migrations) incidents.
+  ansible.builtin.assert:
+    that:
+      - (pve_backup_job_final.stdout | from_json).node | default('') == inventory_hostname
+      - (pve_backup_job_final.stdout | from_json).vmid | default('') == pve_backup_vmid_str
+    fail_msg: "Backup job {{ pve_backup_job_id }} on {{ inventory_hostname }} did not converge (node/vmid mismatch after deploy)."

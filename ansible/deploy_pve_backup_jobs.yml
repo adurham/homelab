@@ -1,0 +1,18 @@
+---
+# Re-apply JUST the proxmox_backup_jobs role (the per-node nightly vzdump
+# job config in /etc/pve/jobs.cfg) without running the broad
+# deploy_proxmox.yml, whose proxmox_network play re-renders
+# /etc/network/interfaces on all three nodes -- a much bigger blast radius
+# than a backup-list change needs (that play silently dropped vmbr0.21 on
+# 2026-09-11; see docs/ipam.md).
+#
+# Run from the personal MacBook; the pve nodes are reachable directly over
+# the LAN, no ProxyCommand needed:
+#
+#   cd ansible
+#   ansible-playbook deploy_pve_backup_jobs.yml --vault-password-file .vault_pass
+- name: Configure nightly vzdump backup jobs
+  hosts: proxmox_nodes
+  gather_facts: false
+  roles:
+    - proxmox_backup_jobs
