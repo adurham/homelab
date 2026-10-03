@@ -1,0 +1,8 @@
+# Managed by ansible — see roles/qga_disk_export/tasks/main.yml.
+[Unit]
+Description=Dump QEMU guest (QGA) filesystem usage to Prometheus textfile
+After=local-fs.target pve-guests.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/qga-disk-textfile.sh

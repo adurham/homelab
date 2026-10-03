@@ -64,6 +64,22 @@
         name: smartctl_exporter
       when: smartctl_exporter_enabled | default(false)
 
+- name: Export QEMU guest (TanOS VM) disk usage via QGA
+  # Agentless per-guest disk metrics for the TanOS appliance VMs, which
+  # can't run an in-guest exporter. `qm guest cmd ... get-fsinfo` only
+  # works on the hosting node, so this runs on every pve node (each node
+  # exports its own running guests). Same rationale as the smartctl play
+  # above: the first qga_disk.prom dump must exist before Alloy renders
+  # its textfile collector block and restarts. See
+  # roles/qga_disk_export/README.md.
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Install qga_disk_export
+      ansible.builtin.include_role:
+        name: qga_disk_export
+      when: qga_disk_export_enabled | default(true)
+
 - name: Install UPS monitoring (NUT) on the UPS-owning node
   # Only touches hosts with nut_ups_enabled: true set in
   # inventory/proxmox.yml (currently pve01 -- the node the lab-corner

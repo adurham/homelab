@@ -1,0 +1,21 @@
+---
+# qga_disk_export — periodic QEMU Guest Agent (QGA) disk-usage dump to a
+# Prometheus textfile, read by Alloy's prometheus.exporter.unix textfile
+# collector (see roles/alloy). Exists because the TanOS appliance VMs
+# cannot run any in-guest exporter (vendor appliances, no custom software
+# policy — see roles/qga_disk_export/README.md), but `qm guest cmd
+# <vmid> get-fsinfo` reaches their filesystems through QGA with zero
+# in-guest installs. This gives Grafana's existing `disk_full` rule real
+# node_filesystem_* series for those guests.
+
+qga_disk_export_textfile_dir: /var/lib/node_exporter/textfile_collector
+
+# systemd timer OnUnitActiveSec value. Keep in sync with the other
+# textfile exporters on the pve nodes (5min).
+qga_disk_export_interval: "5min"
+
+# Whether this role runs on a given pve node. Defaults true — every
+# proxmox node can host running QEMU VMs, and the script handles the
+# zero-running-VM case gracefully (still writes a valid empty-metric
+# file). Override to false per-host if a node should never export.
+qga_disk_export_enabled: true

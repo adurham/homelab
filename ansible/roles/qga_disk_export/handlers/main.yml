@@ -1,0 +1,6 @@
+---
+- name: Restart qga-disk-textfile timer
+  ansible.builtin.systemd:
+    name: qga-disk-textfile.timer
+    state: restarted
+    daemon_reload: true

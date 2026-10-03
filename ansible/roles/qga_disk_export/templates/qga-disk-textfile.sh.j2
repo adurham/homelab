@@ -1,0 +1,110 @@
+#!/bin/bash
+# Managed by ansible — see roles/qga_disk_export/tasks/main.yml.
+#
+# Dumps per-filesystem disk usage for every RUNNING local QEMU VM as
+# Prometheus textfile-collector metrics, so the TanOS appliance VMs show
+# up in Grafana's existing `disk_full` rule (roles/grafana/templates/
+# alerting_rules.yml.j2). Those appliances can't run an in-guest
+# node_exporter (vendor appliances, no custom software policy), but the
+# QEMU Guest Agent is already part of every VM and its get-fsinfo command
+# reports each mount's total/used bytes with ZERO in-guest installs.
+#
+# IMPORTANT: `qm guest cmd <vmid> ...` only works on the node actually
+# HOSTING the VM, so this must run on each pve node (one systemd timer per
+# node) and only sees that node's own running guests.
+#
+# The metric names deliberately reuse `node_filesystem_*` so the existing
+# disk_full rule's branch C (the node_exporter branch) covers these series
+# unchanged; the `guest` label carries the VM name so the rule can report
+# the guest instead of the hosting pve node. QGA exposes no f_bavail
+# (unprivileged-available) figure, so avail is approximated as
+# free = total - used and free == avail here — see README.md.
+#
+# Written atomically (tmp file + mv) since Alloy's textfile collector
+# scans this directory on every scrape and a partial write would be parsed
+# as corrupt/truncated metrics.
+set -euo pipefail
+
+OUTDIR="{{ qga_disk_export_textfile_dir }}"
+OUT="${OUTDIR}/qga_disk.prom"
+TMP="${OUT}.$$.tmp"
+HDR="${TMP}.hdr"
+BODY="${TMP}.body"
+
+mkdir -p "$OUTDIR"
+
+# Fixed HELP/TYPE header first; the metric body is sorted separately below
+# for stable, diff-friendly output (VM/QGA enumeration order is not stable).
+cat > "$HDR" <<'EOF'
+# HELP node_filesystem_size_bytes Filesystem size in bytes as reported by the QEMU Guest Agent (QGA get-fsinfo).
+# TYPE node_filesystem_size_bytes gauge
+# HELP node_filesystem_free_bytes Free space in bytes (total-used) as reported by the QEMU Guest Agent.
+# TYPE node_filesystem_free_bytes gauge
+# HELP node_filesystem_avail_bytes Space available in bytes. Approximated as free (total-used) because QGA exposes no f_bavail; total-used is the closest available figure.
+# TYPE node_filesystem_avail_bytes gauge
+# HELP qga_disk_scrape_success 1 if `qm guest cmd <vmid> get-fsinfo` returned data for this guest, else 0.
+# TYPE qga_disk_scrape_success gauge
+EOF
+
+: > "$BODY"
+
+# `qm list` columns: VMID NAME STATUS MEM PID. Only running VMs have a live
+# QGA channel; stopped ones would just time out (they are excluded here so
+# the script stays fast and never reports a stopped VM as a scrape failure).
+while read -r vmid name; do
+  [ -n "${vmid:-}" ] || continue
+
+  json="$(timeout 15 qm guest cmd "$vmid" get-fsinfo 2>/dev/null || true)"
+  if [ -z "$json" ]; then
+    echo "qga_disk_scrape_success{guest=\"${name}\"} 0" >> "$BODY"
+    continue
+  fi
+
+  printf '%s' "$json" | python3 -c '
+import json, sys
+name = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print("qga_disk_scrape_success{guest=\"" + name + "\"} 0")
+    sys.exit(0)
+if not isinstance(data, list):
+    print("qga_disk_scrape_success{guest=\"" + name + "\"} 0")
+    sys.exit(0)
+best = {}
+for e in data:
+    if not isinstance(e, dict):
+        continue
+    mp = e.get("mountpoint")
+    if mp is None or e.get("total-bytes") is None:
+        continue
+    total = int(e.get("total-bytes"))
+    used = int(e.get("used-bytes") or 0)
+    # Dedupe by mountpoint, keeping the largest total-bytes on a duplicate
+    # (a device can legitimately appear more than once, e.g. bind mounts).
+    cur = best.get(mp)
+    if cur is None or total > cur["total"]:
+        best[mp] = {"total": total, "used": used,
+                    "type": e.get("type", ""), "name": e.get("name", "")}
+for mp in sorted(best):
+    v = best[mp]
+    free = v["total"] - v["used"]
+    if free < 0:
+        free = 0
+    labels = ("guest=\"" + name + "\",mountpoint=\"" + mp +
+              "\",fstype=\"" + v["type"] + "\",device=\"" + v["name"] + "\"")
+    print("node_filesystem_size_bytes{" + labels + "} " + str(v["total"]))
+    print("node_filesystem_free_bytes{" + labels + "} " + str(free))
+    print("node_filesystem_avail_bytes{" + labels + "} " + str(free))
+print("qga_disk_scrape_success{guest=\"" + name + "\"} 1")
+' "$name" >> "$BODY" 2>/dev/null || echo "qga_disk_scrape_success{guest=\"${name}\"} 0" >> "$BODY"
+
+done < <(qm list | awk 'NR>1 && $3=="running" {print $1, $2}')
+
+{
+  cat "$HDR"
+  sort "$BODY"
+} > "$TMP"
+
+mv "$TMP" "$OUT"
+rm -f "$HDR" "$BODY"

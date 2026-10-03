@@ -1,0 +1,55 @@
+---
+# qga_disk_export — periodic QEMU Guest Agent disk-usage dump to a
+# Prometheus textfile for Alloy's node_exporter-style textfile collector.
+# See roles/qga_disk_export/README.md for why this exists.
+
+- name: Ensure textfile collector directory exists
+  ansible.builtin.file:
+    path: "{{ qga_disk_export_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Render QGA disk textfile dump script
+  ansible.builtin.template:
+    src: qga-disk-textfile.sh.j2
+    dest: /usr/local/bin/qga-disk-textfile.sh
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart qga-disk-textfile timer
+
+- name: Render qga-disk-textfile systemd service
+  ansible.builtin.template:
+    src: qga-disk-textfile.service.j2
+    dest: /etc/systemd/system/qga-disk-textfile.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart qga-disk-textfile timer
+
+- name: Render qga-disk-textfile systemd timer
+  ansible.builtin.template:
+    src: qga-disk-textfile.timer.j2
+    dest: /etc/systemd/system/qga-disk-textfile.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart qga-disk-textfile timer
+
+- name: Flush handlers so the timer picks up a fresh script/unit before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Start and enable qga-disk-textfile timer
+  ansible.builtin.systemd:
+    name: qga-disk-textfile.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Run one dump immediately so the textfile exists before Alloy's first scrape
+  ansible.builtin.systemd:
+    name: qga-disk-textfile.service
+    state: started
+  changed_when: false
