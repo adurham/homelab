@@ -1,0 +1,29 @@
+---
+# Re-apply JUST mail-01's firewall + postfix config (mail_host's firewall
+# render + mail_forwarder's main.cf/virtual/aliases), without
+# deploy_mail.yml's acme_sh step (cert re-issuance -- not needed for a
+# config fix). Exists because a 2026-10-03 mail-delivery investigation
+# found TWO layers of breakage in this path:
+#   1. /etc/pve/firewall/104.fw never allowed the pve nodes' private IPS
+#      (172.16.0.2/.3/.4) on :25 -- every pve root-mail notification
+#      bounced/deferred for weeks while graf-01's kept working.
+#   2. main.cf's subnet_pve_nodes listed 172.16.0.11/.12/.13, which are
+#      ntp-01/proxy-01 -- a stale list that (a) silently left pve's own
+#      relay submissions unauthorized at mail-01 AND (b) let two CTs
+#      relay that never should have been in mynetworks.
+# mail_host is safe to include when the CT already exists (its create
+# tasks are gated on ct_exists).
+#
+#   cd ansible
+#   ansible-playbook deploy_mail_config.yml --vault-password-file .vault_pass
+- name: Re-apply mail-01 firewall (pve nodes on :25)
+  hosts: pve01
+  gather_facts: false
+  roles:
+    - mail_host
+
+- name: Re-apply mail_forwarder config on mail-01
+  hosts: mail_server
+  gather_facts: false
+  roles:
+    - mail_forwarder

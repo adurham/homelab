@@ -20,5 +20,17 @@ IN ACCEPT -source 100.64.0.0/10 -p tcp -dport 22
 IN ACCEPT -source {{ ip_grafana }} -p tcp -dport 25
 IN ACCEPT -source {{ ip_authentik }} -p tcp -dport 25
 
+# The pve nodes' private-subnet IPs (172.16.0.2/.3/.4, from roles/
+# pve_private_ip defaults + docs/ipam.md). Their root mail (nightly
+# vzdump notifications, smartd, cron) relays through this box;
+# main.cf.j2's mynetworks has always listed these IPs, but the firewall
+# (added later, 2026-09-10-era) forgot them -- so every pve root mail
+# deferred/bounced for weeks while graf-01's kept working (found
+# 2026-10-03; live /dev/tcp connect from pve01:25 failed while graf-01
+# succeeded). Verified fix: opened here.
+IN ACCEPT -source 172.16.0.2 -p tcp -dport 25
+IN ACCEPT -source 172.16.0.3 -p tcp -dport 25
+IN ACCEPT -source 172.16.0.4 -p tcp -dport 25
+
 # pve-firewall's default INPUT policy drops unmatched, so anything not
 # whitelisted above is denied implicitly.
