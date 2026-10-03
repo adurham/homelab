@@ -2,6 +2,16 @@
 // Applies Debian security updates automatically; deliberately EXCLUDES
 // Proxmox's own kernel/package stack, which needs planned, staggered
 // reboots verified against cluster quorum -- never auto-updated blind.
+// #clear first: apt.conf.d scopes MERGE across files (lists can only be
+// cleared, never overridden -- apt.conf(5)). Debian's stock
+// /etc/apt/apt.conf.d/50unattended-upgrades (read BEFORE this file)
+// contributes "label=Debian" (the whole stable main archive) and
+// "label=Debian-Security" origins, which silently widened this role's
+// intended security-only policy to stable+security (observed live
+// 2026-10-03: the effective policy wanted ~70 packages, not the 17
+// security ones). This #clear erases everything accumulated so far and
+// the block below re-asserts EXACTLY the security-only pattern.
+#clear Unattended-Upgrade::Origins-Pattern;
 Unattended-Upgrade::Origins-Pattern {
         "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
 };
