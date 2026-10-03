@@ -187,6 +187,19 @@ re-tier a role or auxiliary task:
    auto-installed by anything yet). This step remains manual — the local
    session has no ansible/Jinja machinery of its own.
 
+The four `auxiliary` blocks are rendered from two tables:
+`auxiliary.anthropic` and `auxiliary.claude-subscription-directsdk-experimental`
+come from `hermes_routing_auxiliary_anthropic_tasks`; `auxiliary.ollama-cloud`
+and `auxiliary.exo` come from `hermes_routing_auxiliary_ollama_cloud_tasks`
+(exo keeps its own `provider`/`default` scalars and, in `config.yaml.j2` only,
+its gateway-local `vision` override). The two tables currently hold the same
+22 task pins, so an exo-main session sends its auxiliary tasks, compression
+included, to ollama-cloud like every other provider. Edit a task in both
+tables to keep the blocks equal. `hermes_config_sync.py` still mirrors only the
+`anthropic` and `ollama-cloud` blocks into the MacBook; the MacBook's
+`claude-subscription-directsdk-experimental` and `exo` blocks are kept equal to
+them by hand until the script learns them.
+
 One more var in the same file is not a per-role table:
 `hermes_routing_auto_route_providers`, rendered as
 `delegation.auto_route.providers` in both templates. The fork's delegation
