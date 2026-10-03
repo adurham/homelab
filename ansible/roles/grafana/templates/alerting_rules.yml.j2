@@ -1316,11 +1316,22 @@ groups:
               datasource:
                 type: prometheus
                 uid: victoriametrics
+              # Container rootfs datasets appear on the HOST's node_exporter
+              # as /nvme-pool/subvol-<vmid>-disk-N mounts -- and a replicated
+              # CT's dataset is mounted on ALL nodes, so one full container
+              # paged once per node under the NODE's name (read as "pve01 out
+              # of space"). Resolve subvol-<vmid> -> guest name via
+              # pve_guest_info (id lxc/<vmid>) and report the GUEST; keep
+              # only the node actually hosting the guest (replica copies
+              # dropped -- also kills stale-replica-quota false positives);
+              # prefer the in-guest node_exporter's own "/" when the guest
+              # ships one (unless-suppression), else the host-side subvol
+              # view. All row names land in $labels.display.
               # instance!~"tc-.*" excludes the disposable tanium_clients
               # test fleet -- see the matching exclusion + rationale on the
               # host_down rule above.
               editorMode: code
-              expr: 100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", instance!~"tc-.*"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", instance!~"tc-.*"} * 100)
+              expr: (label_replace((label_replace(100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", mountpoint=~".*subvol-[0-9]+-disk-[0-9]+"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", mountpoint=~".*subvol-[0-9]+-disk-[0-9]+"} * 100), "id", "lxc/$1", "mountpoint", ".*subvol-([0-9]+)-disk-[0-9]+") * on (id, instance) group_left(name) max by (id, instance, name) (label_replace(pve_guest_info{name!~"tc-.*"}, "instance", "$1", "node", "(.+)"))) unless on (name) (label_replace(node_filesystem_size_bytes{job="node_exporter", mountpoint="/"}, "name", "$1", "instance", "(.+)")), "display", "$1", "name", "(.+)")) or (label_replace((label_replace(100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", mountpoint=~".*subvol-[0-9]+-disk-[0-9]+"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", mountpoint=~".*subvol-[0-9]+-disk-[0-9]+"} * 100), "id", "lxc/$1", "mountpoint", ".*subvol-([0-9]+)-disk-[0-9]+")) unless on (id) max by (id) (pve_guest_info), "display", "$1", "instance", "(.+)")) or (label_replace(100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", instance!~"tc-.*", mountpoint!~".*subvol-[0-9]+-disk-[0-9]+"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs", instance!~"tc-.*", mountpoint!~".*subvol-[0-9]+-disk-[0-9]+"} * 100), "display", "$1", "instance", "(.+)"))
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -1354,8 +1365,8 @@ groups:
         execErrState: Error
         for: 10m
         annotations:
-          summary: "Disk on {{ '{{' }} $labels.instance {{ '}}' }} ({{ '{{' }} $labels.mountpoint {{ '}}' }}) is over 90% full"
-          description: "Filesystem {{ '{{' }} $labels.mountpoint {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} has been above 90% utilization for 10 minutes"
+          summary: "Disk on {{ '{{' }} $labels.display {{ '}}' }} ({{ '{{' }} $labels.mountpoint {{ '}}' }}) is over 90% full"
+          description: "Filesystem {{ '{{' }} $labels.mountpoint {{ '}}' }} on {{ '{{' }} $labels.display {{ '}}' }} has been above 90% utilization for 10 minutes"
         labels:
           severity: warning
         isPaused: false
