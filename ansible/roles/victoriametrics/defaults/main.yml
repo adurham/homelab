@@ -68,3 +68,27 @@ exo_scrape_targets:
 #     - name: win-tzs-01
 #       address: <vm-ip>
 windows_exporter_scrape_targets: []
+
+# In-guest node_exporter targets for QEMU VM guests (port 9100). Mirrors
+# the exo/windows_exporter scrape-target pattern above. Empty by default.
+#
+# Two ways a QEMU Linux VM gets disk coverage on the disk_full rule:
+#   1. Grafana Alloy (roles/alloy) -- the fleet's actual in-guest agent.
+#      It emits node_exporter-shape metrics under job="node_exporter" via
+#      remote-write, so the rule's generic OR-branch
+#      (node_filesystem_*{instance!~"tc-.*"}) already covers it with NO
+#      scrape entry here. Preferred for general-purpose Linux VMs.
+#   2. Pull scrape -- populate this list ONLY once each VM is booted, has
+#      a real static IP, and node_exporter is actually listening on :9100
+#      (the repo has no node_exporter install role; Alloy covers Linux,
+#      roles/windows_exporter covers Windows).
+#
+# NOT applicable to the TanOS appliances (ts-*/tms-*/tzs-*, VMIDs
+# 200-205): per explicit standing direction those are vendor appliances
+# that run NO custom software (node_exporter was retired from them
+# 2026-08-09 -- see cleanup_tanium_node_exporter.yml and the comment near
+# the top of templates/prometheus.yml.j2). Do not add them here.
+#   node_exporter_scrape_targets:
+#     - name: <vm-name>
+#       address: <vm-ip>:9100
+node_exporter_scrape_targets: []

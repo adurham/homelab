@@ -1,0 +1,34 @@
+---
+# Re-apply JUST the victoriametrics role to vm-01 (scrape config render +
+# service).
+#
+# Exists because deploy_monitoring.yml is too broad for a single-role fix:
+# its first play (hosts: pve01, "Provision Monitoring Containers") calls the
+# monitoring_host role to (re)create the vm-01/graf-01 CTs. This playbook
+# targets ONLY the victoriametrics inventory group (vm-01), so it cannot
+# touch any other host or recreate any container.
+#
+# Scope of `hosts: victoriametrics` -- read from inventory/proxmox.yml:
+# `monitoring.children.victoriametrics.hosts` contains exactly one host,
+# vm-01. So this play's blast radius is vm-01 alone. It renders
+# /etc/victoriametrics/prometheus.yml from prometheus.yml.j2 and, only if
+# that file actually changed, restarts the victoriametrics service (the
+# role's "Configure Scrape Targets" task notifies the Restart handler; the
+# role's other tasks are idempotent no-ops on an already-installed host).
+# A no-op render therefore does NOT restart the service.
+#
+# Run from the personal MacBook (the inventory's default ProxyCommand
+# points at that machine's own Tailscale IP 100.66.19.20, which loops back
+# to itself when executing from there -- override via hermes-gw-01):
+#
+#   ansible-playbook ansible/deploy_victoriametrics_scrape.yml \
+#     --vault-password-file .vault_pass \
+#     -e 'ansible_ssh_common_args="-o ProxyCommand=\"ssh -W %h:%p -q root@100.119.249.49\" -o StrictHostKeyChecking=accept-new"'
+#
+- name: Configure VictoriaMetrics (scrape config)
+  hosts: victoriametrics
+  gather_facts: true
+  tasks:
+    - name: Install victoriametrics
+      ansible.builtin.include_role:
+        name: victoriametrics
