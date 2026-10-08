@@ -142,8 +142,8 @@ def test_hash_overlap_below_threshold_excluded():
 def test_name_similarity_catches_typo():
     folders = ["acct_b", "acct_a", "TotallyDifferentName"]
     results = fda.signal_name_similarity(folders, already_flagged=set(), min_ratio=0.82)
-    # "acct_a" < "acct_b" alphabetically (5th char 'i' < 'r'), so the
-    # sorted pair key is (acct_a, acct_b), not (acct_b, acct_a).
+    # "acct_a" < "acct_b" alphabetically, so the sorted pair key is
+    # (acct_a, acct_b).
     check("near-identical names flagged", ("acct_a", "acct_b") in results)
     check("dissimilar name not flagged against either",
           not any("TotallyDifferentName" in p for p in results))
@@ -157,13 +157,13 @@ def test_name_similarity_skips_already_flagged():
 
 
 def test_name_similarity_length_gate():
-    # "acct_h" (4 chars) vs "acct_h_long_variant" (11 chars): diff/max = 7/11 = 0.636
-    # > 0.4 gate -> must be excluded even though "acct_h" is a substring.
+    # "ab" (4 chars) vs "ab_long_variant_name" (11 chars): diff/max = 7/11 = 0.636
+    # > 0.4 gate -> must be excluded even though "ab" is a substring.
     # This is the EXACT pair the user explicitly said NOT to merge last
     # session (kept both, they're unrelated) — regression guard.
-    folders = ["acct_h", "acct_h_long_variant"]
+    folders = ["ab", "ab_long_variant_name"]
     results = fda.signal_name_similarity(folders, already_flagged=set(), min_ratio=0.3)
-    check("acct_h vs acct_h_long_variant excluded by length gate (explicit prior non-merge)",
+    check("ab vs ab_long_variant_name excluded by length gate (explicit prior non-merge)",
           results == {})
 
 
@@ -171,7 +171,7 @@ def test_name_similarity_length_gate():
 def test_build_folder_index_basic():
     manifest = [
         {"stem": "1000000001_100", "chat": "acct", "size": 1000},
-        {"stem": "up_123_abc", "chat": "acct_d", "size": 2000},
+        {"stem": "up_123_abc", "chat": "person_13", "size": 2000},
     ]
     meta = {"redirects": {"name:acct-s": "acct", "user:acct-s": "acct"}}
     folder_stems, folder_chat_ids, folder_sizes, skip = fda.build_folder_index(manifest, meta)
@@ -179,10 +179,10 @@ def test_build_folder_index_basic():
     check("chat id extracted from numeric-prefixed stem",
           "1000000001" in folder_chat_ids["acct"])
     check("upload stem (up_) contributes no chat id",
-          folder_chat_ids["acct_d"] == set())
+          folder_chat_ids["person_13"] == set())
     check("already-merged-away folder name captured in skip",
           "acct-s" in skip)
-    check("folder byte totals summed", folder_sizes["acct_d"] == 2000)
+    check("folder byte totals summed", folder_sizes["person_13"] == 2000)
 
 
 def main():

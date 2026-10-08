@@ -2,8 +2,8 @@
 """
 Fleet-wide folder-duplicate audit for the media gallery.
 
-WHY: the 5 folder merges done 2026-09-12 (acct-s->acct, acct_x2->
-acct_x, acct_b->acct_a, acct_v->acct_l, person_1->acct_h) all started from
+WHY: the 5 folder merges done 2026-09-12 (person_3->person_4, person_5->
+person_6, person_10->person_9, person_2->person_8, person_1->person_11) all started from
 the user manually spotting duplicates by eye. There are ~370 other folders
 that were never systematically checked for the same issue. This script is
 that systematic check — READ-ONLY, reports candidates for human review, never
@@ -16,13 +16,13 @@ THREE independent signals, each catching a different real-world case:
   A. CHAT-ID OVERLAP (high confidence). Two folders whose item stems (or
      folder_meta.json's own chat_ids field) share a Telegram chat id are
      almost certainly the same source filed under two names — this is
-     exactly the acct-s/acct and acct_x2/acct_x pattern. Free to
+     exactly the person_3/person_4 and person_5/person_6 pattern. Free to
      compute: chat ids are recoverable from stems already in the manifest
      (folder_redirect.extract_chat_ids, the same helper the real /merge
      endpoint uses) or from folder_meta.json's curated list.
 
   B. PERCEPTUAL-HASH CROSS-FOLDER OVERLAP (high/medium confidence). Catches
-     the acct_b/acct_a case: two different scrape usernames (no shared
+     the person_10/person_9 case: two different scrape usernames (no shared
      chat id at all — scraper stems have no chat id, see extract_chat_ids'
      own docstring) that are actually the same real person, so their actual
      photos collide. Reuses dedup_scan.py's dHash cache (already computed
@@ -33,17 +33,17 @@ THREE independent signals, each catching a different real-world case:
      stems belong to different folders is evidence for THOSE folders being
      duplicates; tally per folder-pair and rank by overlap ratio against the
      smaller folder (so a stale PARTIAL scrape — a subset of a fuller one,
-     like acct_b was of acct_a — still surfaces as a strong signal even
+     like person_10 was of person_9 — still surfaces as a strong signal even
      though the ratio against the larger folder would look weak).
 
   C. NAME SIMILARITY (low confidence, manual-review-only). A pure string
      check for folders with NEITHER of the above signals — e.g. a
      near-identical typo'd scrape username with too little actual overlap
-     to trip signal B (acct_b/acct_a would likely ALSO be caught here
+     to trip signal B (person_10/person_9 would likely ALSO be caught here
      independently, since it's a one-character difference). This signal
      alone is not actionable; it exists to surface candidates a human should
      eyeball, matching how the user originally found some of the first 5
-     pairs (acct_v/acct_l, person_1/acct_h) with no automatic evidence at
+     pairs (person_2/person_8, person_1/person_11) with no automatic evidence at
      all — this script can't replace that judgment, only narrow where to
      look.
 

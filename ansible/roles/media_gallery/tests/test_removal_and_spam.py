@@ -210,7 +210,7 @@ def test_spam_classifier_promo_and_ui():
             raise AssertionError(f"expected a UI/promo flag, got {flag2}")
         # a normal photo's stray caption must NOT be flagged
         flag3, why3 = ss.classify(
-            {"stem": "acct_g_123_456", "chat": "acct_g", "size": 500000, "type": "image"},
+            {"stem": "person_7_123_456", "chat": "person_7", "size": 500000, "type": "image"},
             "me on the beach last summer", 6)
         if flag3 is not None:
             raise AssertionError(f"normal photo flagged as {flag3}: {why3}")

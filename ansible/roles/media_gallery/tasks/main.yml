@@ -348,7 +348,7 @@
 # the systemd oneshot unit below when convenient. Never merges/hides/moves
 # anything; only writes a report for a human to review, since the folder
 # name to KEEP when merging duplicates is a real judgment call the first 5
-# merges needed (e.g. acct_v->acct_l kept the smaller name per explicit
+# merges needed (e.g. person_2->person_8 kept the smaller name per explicit
 # user instruction, not a size/date heuristic) — this script surfaces
 # candidates, it does not decide for the user. Run by hand:
 #   ssh gallery-01, then as the media_gallery_user:
