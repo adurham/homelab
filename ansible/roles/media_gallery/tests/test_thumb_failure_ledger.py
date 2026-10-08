@@ -47,9 +47,9 @@ def _fresh_import(tmpdir):
     return tb
 
 
-def _cooldown_skip(tb, rec, now=None):
+def _cooldown_skip(tb, rec, cur_size=None, now=None):
     """Mirror of main()'s cooldown predicate, exercised directly so the
-    threshold/age logic is testable without running a live batch."""
+    threshold/age/size-change logic is testable without running a live batch."""
     import time as _t
     now = now if now is not None else _t.time()
     try:
@@ -57,6 +57,9 @@ def _cooldown_skip(tb, rec, now=None):
     except (TypeError, KeyError):
         return False
     if n < tb.FAIL_MAX:
+        return False
+    old_sz = rec.get("sz")
+    if old_sz is not None and cur_size is not None and old_sz != cur_size:
         return False
     return (now - t) < tb.RETRY_AFTER_DAYS * 86400
 
@@ -120,20 +123,28 @@ def test_ledger_roundtrip_and_threshold():
 def test_cooldown_threshold_and_auto_retry():
     """The skip decision: at/over the threshold AND recently attempted ->
     skip; below the threshold -> always attempt; at/over the threshold but
-    older than RETRY_AFTER_DAYS -> attempt again (the automatic safety net)."""
+    older than RETRY_AFTER_DAYS -> attempt again (the automatic safety net);
+    and a stem whose stored SIZE changed -> attempt again immediately, since
+    the old verdict was about different bytes."""
     with tempfile.TemporaryDirectory() as d:
         tb = _fresh_import(Path(d))
         import time as _t
         now = _t.time()
-        if not _cooldown_skip(tb, {"n": tb.FAIL_MAX, "t": now}, now):
+        if not _cooldown_skip(tb, {"n": tb.FAIL_MAX, "t": now}, now=now):
             raise AssertionError("at-threshold + fresh attempt must be skipped")
-        if _cooldown_skip(tb, {"n": tb.FAIL_MAX - 1, "t": now}, now):
+        if _cooldown_skip(tb, {"n": tb.FAIL_MAX - 1, "t": now}, now=now):
             raise AssertionError("below-threshold must NOT be skipped")
         stale = now - (tb.RETRY_AFTER_DAYS + 1) * 86400
-        if _cooldown_skip(tb, {"n": tb.FAIL_MAX + 5, "t": stale}, now):
+        if _cooldown_skip(tb, {"n": tb.FAIL_MAX + 5, "t": stale}, now=now):
             raise AssertionError("a stale verdict must be retried automatically")
-        if _cooldown_skip(tb, None, now):
+        if _cooldown_skip(tb, None, now=now):
             raise AssertionError("an absent ledger entry must never be skipped")
+        # size change invalidates the verdict (the stored bytes differ now)
+        rec = {"n": tb.FAIL_MAX, "t": now, "sz": 1000}
+        if _cooldown_skip(tb, rec, cur_size=2000, now=now):
+            raise AssertionError("a size change must invalidate the cooldown")
+        if not _cooldown_skip(tb, rec, cur_size=1000, now=now):
+            raise AssertionError("an unchanged size must keep the cooldown")
 
 
 def test_atomic_write_leaves_no_partial_on_failure():

@@ -297,28 +297,37 @@ def main():
         if f"{s}.jpg" in existing:  # stem has a thumb now -> verdict obsolete
             fail_ledger.pop(s, None)
 
-    def _skip_by_ledger(rec) -> bool:
+    def _skip_by_ledger(rec, cur_size=None) -> bool:
         """True when this stem is in permanent-failure cooldown: it has hit
         FAIL_MAX deterministic failures AND its last attempt is more recent
         than RETRY_AFTER_DAYS. Older entries are retried automatically (the
-        safety net), and entries below the threshold always are."""
+        safety net), and entries below the threshold always are. If the
+        stem's CURRENT byte size differs from the size recorded at failure
+        time, the stored object changed (re-ingest / re-encode / replaced
+        upload) — the old verdict no longer applies to these bytes, so the
+        stem is retried immediately rather than waiting out the cooldown."""
         try:
             n, t = rec["n"], rec["t"]
         except (TypeError, KeyError):
             return False
         if n < FAIL_MAX:
             return False
+        old_sz = rec.get("sz")
+        if old_sz is not None and cur_size is not None and old_sz != cur_size:
+            return False
         return (now - t) < RETRY_AFTER_DAYS * 86400
 
     if not args.retry_failed and fail_ledger:
         before = len(missing)
         missing = [it for it in missing
-                   if not _skip_by_ledger(fail_ledger.get(f"{it.get('chat') or ''}/{it['stem']}"))]
+                   if not _skip_by_ledger(
+                       fail_ledger.get(f"{it.get('chat') or ''}/{it['stem']}"),
+                       it.get("size"))]
         cooling = sum(1 for v in fail_ledger.values()
                       if isinstance(v, dict) and _skip_by_ledger(v))
         log(f"permanent-failure ledger: skipped {before - len(missing)} stems "
             f"({cooling} in cooldown, retried automatically after "
-            f"{RETRY_AFTER_DAYS:g}d; --retry-failed to force now)")
+            f"{RETRY_AFTER_DAYS:g}d or on size change; --retry-failed to force now)")
     if args.retry_failed and fail_ledger:
         log(f"--retry-failed: ignoring {len(fail_ledger)} ledger entries this run")
 
@@ -351,13 +360,13 @@ def main():
     # deterministic-vs-transient split, which is what keeps a service restart
     # from poisoning the ledger). Entries carry {n: count, t: last-attempt
     # epoch} so the cooldown check can retry stale verdicts automatically.
-    def note_failure(chat: str, stem: str, err: str):
+    def note_failure(chat: str, stem: str, err: str, size=None):
         if classify_failure(err):
             with _ledger_lock:
                 k = f"{chat}/{stem}"
                 rec = fail_ledger.get(k)
                 n = (rec.get("n", 0) if isinstance(rec, dict) else 0) + 1
-                fail_ledger[k] = {"n": n, "t": time.time()}
+                fail_ledger[k] = {"n": n, "t": time.time(), "sz": size}
         return
 
     # ----- Phase 1: VIDEO posters, bounded parallel HTTP workers -----
@@ -409,7 +418,7 @@ def main():
             else:
                 counters["failed"] += 1
                 log(f"  [{finished[0]}/{total}] {chat}/{stem}: {err}")
-                note_failure(chat, stem, err)
+                note_failure(chat, stem, err, size=it.get("size"))
             if finished[0] % 25 == 0 or finished[0] == total:
                 elapsed = time.time() - t0
                 rate = finished[0] / elapsed if elapsed > 0 else 0
@@ -467,7 +476,7 @@ def main():
                 else:
                     failed += 1
                     log(f"  {chat}/{stem}: {err}")
-                    note_failure(chat, stem, err or "unknown error")
+                    note_failure(chat, stem, err or "unknown error", size=it.get("size"))
         time.sleep(args.delay)
 
     done += counters["done"]
