@@ -1,0 +1,7 @@
+# Managed by Ansible — roles/media_ingest_02. Do not edit by hand.
+[Unit]
+Description=media-ingest-02 disk housekeeping (DB backup rings + apt cache)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/media-ingest-02-housekeeping

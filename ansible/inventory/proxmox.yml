@@ -357,6 +357,12 @@ all:
         logrotate_prune_paths:
           - path: /var/lib/media-ingest-02/logging
             days: 30
+          # The housekeeping timer's own log: append-only, one short line per
+          # 6h run, but unbounded for the same reason as every other file here
+          # (nothing rolls it). Same age-based prune as the scraper log tree.
+          - path: /var/log/media-ingest-02
+            days: 30
+            remove_empty_dirs: false
 
     # Personal-device MITM ad-stripping proxy (mitmproxy explicit HTTPS
     # proxy). Devices opt in individually via Wi-Fi proxy settings pointed

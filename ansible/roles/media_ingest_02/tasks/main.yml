@@ -357,6 +357,47 @@
     daemon_reload: true
   when: not m02_auth_authorized
 
+# ─── Disk housekeeping (2026-10-08) ─────────────────────────────────────────
+# Rootfs drifted to 78% used (5.4G free -> 1.8G free over ~70 days). Largest
+# reclaimable consumer: the upstream scraper's per-model SQLite backup rings
+# (one rotating copy per day per model; ~6G beyond each model's newest was
+# measured live) plus a never-pruned apt archive cache. housekeeping.sh keeps
+# the newest copy per model (age-gated at 3 days so it can never race an
+# in-flight sweep writing its backup), prunes stale apt archives, and logs
+# the reclaimed bytes. Installed as its own service+timer (every 6h).
+- name: Deploy Housekeeping Script
+  ansible.builtin.copy:
+    src: housekeeping.sh
+    dest: /usr/local/sbin/media-ingest-02-housekeeping
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Render Housekeeping Service Unit
+  ansible.builtin.template:
+    src: housekeeping.service.j2
+    dest: /etc/systemd/system/media-ingest-02-housekeeping.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Housekeeping Timer Unit
+  ansible.builtin.template:
+    src: housekeeping.timer.j2
+    dest: /etc/systemd/system/media-ingest-02-housekeeping.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Housekeeping Timer
+  ansible.builtin.systemd:
+    name: media-ingest-02-housekeeping.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
 - name: One-Time Login Reminder
   ansible.builtin.debug:
     msg: >-

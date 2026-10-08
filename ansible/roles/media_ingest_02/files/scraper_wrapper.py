@@ -35,6 +35,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -197,6 +198,7 @@ def _background_push(stop_event, label):
     while not stop_event.is_set():
         pushed, failed, skipped = _walk_and_push()
         total_pushed += pushed
+        _accumulate_pushes(pushed, failed)
         if pushed or failed:
             log.info("pass [%s] bg-push: pushed=%d failed=%d (running total=%d)",
                      label, pushed, failed, total_pushed)
@@ -204,6 +206,7 @@ def _background_push(stop_event, label):
     # Final flush after scrapers stop
     pushed, failed, skipped = _walk_and_push()
     total_pushed += pushed
+    _accumulate_pushes(pushed, failed)
     if pushed or failed:
         log.info("pass [%s] bg-push final: pushed=%d failed=%d (total=%d)",
                  label, pushed, failed, total_pushed)
@@ -520,6 +523,22 @@ def _run_scraper_pinned_parallel():
 # starts; see _run_scraper()/_run_scraper_discovered_pass()), so no lock
 # needed.
 _SEEN_SIZES = {}
+
+# Cumulative push accounting for the whole sweep. The background push thread
+# does the overwhelming majority of the work (it drains staging every 5s
+# during the passes), while the final walk in main() usually finds staging
+# already empty — so logging only the final walk's numbers reported
+# "pushed=0" on sweeps that actually pushed hundreds of items, which made
+# every sweep look like a silent failure. Both writers run in different
+# threads (the push thread and main), so the counters are lock-guarded.
+_PUSH_TOTALS = {"pushed": 0, "failed": 0}
+_PUSH_TOTALS_LOCK = threading.Lock()
+
+
+def _accumulate_pushes(pushed: int, failed: int):
+    with _PUSH_TOTALS_LOCK:
+        _PUSH_TOTALS["pushed"] += pushed
+        _PUSH_TOTALS["failed"] += failed
 
 
 def _walk_and_push():
@@ -935,7 +954,9 @@ def main():
             log.warning("free pass had failures/timeouts; pushing whatever landed in staging")
 
     pushed, failed, skipped = _walk_and_push()
-    log.info("sweep done: pushed=%d failed=%d skipped=%d", pushed, failed, skipped)
+    _accumulate_pushes(pushed, failed)
+    log.info("sweep done: pushed=%d failed=%d skipped=%d (cumulative: pushed=%d failed=%d)",
+             pushed, failed, skipped, _PUSH_TOTALS["pushed"], _PUSH_TOTALS["failed"])
 
     # Pass 5: like timeline posts from active subscriptions. Runs after all
     # downloads and pushes are complete. Only targets the manual model list

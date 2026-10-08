@@ -137,6 +137,25 @@ def get_excluded() -> set:
     return set(r.json().get("excluded", []))
 
 
+def have_stems(stems: list) -> set:
+    """Which of these stems does the gallery already account for? POST /have
+    returns stems it has ingested before (datemap) UNION stems it has
+    deliberately deleted (exclusion ledger — re-pushing those is waste too).
+    The reconcile sweep uses this to skip re-downloading and re-uploading
+    media that arrived long ago. Chunked so a large batch (history replay
+    after collector downtime) never builds one oversized request body."""
+    out = set()
+    stems = [str(s) for s in stems]
+    for i in range(0, len(stems), 200):
+        chunk = stems[i:i + 200]
+        r = requests.post(f"{GALLERY_BASE}/ingest/have",
+                          headers={**_auth_headers(), "Content-Type": "application/json"},
+                          json={"stems": chunk}, timeout=TIMEOUT)
+        r.raise_for_status()
+        out.update(r.json().get("have", []))
+    return out
+
+
 def get_folder_meta() -> dict:
     """Fetch {folder: {cover, chat_ids}} so the collector can route chat-ids to
     user-mapped folders (rename-safe)."""

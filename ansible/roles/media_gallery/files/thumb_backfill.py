@@ -91,6 +91,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -102,6 +103,78 @@ GALLERY = REMOTE + "gallery"
 SRC = REMOTE + "by-chat"
 THUMBS = REMOTE + "thumbs"
 THUMB_SERVICE_URL = os.environ.get("THUMB_SERVICE_URL", "http://172.16.0.46:8090")
+
+# ─── Failure ledger (2026-10-08) ─────────────────────────────────────────────
+# Some manifest items can NEVER produce a poster: protected/encrypted source
+# media ffmpeg cannot decode, files larger than the cache filesystem, etc.
+# Measured live before this existed: ~355 of every 400-item batch were the
+# SAME permanently-failing stems, re-attempted every run for weeks — the
+# batch spent ~35 minutes to produce ~40 real thumbnails. This ledger counts
+# DETERMINISTIC failures per stem and skips a stem once it has failed
+# FAIL_MAX times, until RETRY_AFTER_DAYS have passed since the last attempt
+# (an automatic low-frequency safety net — a stem that becomes generatable
+# again, e.g. one whose source finished uploading elsewhere, is retried
+# without anyone remembering to run a flag). Only deterministic failures
+# count (a 404 from the thumb endpoint carrying reason=deterministic is the
+# HTTP-surface form of a decode-level verdict; a connection-refused while the
+# service restarts must NOT poison the ledger). Entries self-clean: whenever
+# a stem gains a thumbnail it is dropped, so the file never grows stale.
+# Atomic writes (tmp+rename) so a kill mid-run cannot corrupt it.
+FAIL_LEDGER = Path(os.environ.get("THUMB_FAIL_LEDGER", "/var/lib/media-gallery/thumb_backfill_failed.json"))
+FAIL_MAX = int(os.environ.get("THUMB_FAIL_MAX", "3"))
+RETRY_AFTER_DAYS = float(os.environ.get("THUMB_FAIL_RETRY_DAYS", "7"))
+_ledger_lock = threading.Lock()
+
+
+def load_fail_ledger() -> dict:
+    try:
+        d = json.loads(FAIL_LEDGER.read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_fail_ledger(d: dict) -> None:
+    try:
+        FAIL_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+        tmp = str(FAIL_LEDGER) + ".tmp"
+        Path(tmp).write_text(json.dumps(d, separators=(",", ":")))
+        os.replace(tmp, FAIL_LEDGER)
+    except OSError as e:
+        log(f"fail-ledger save skipped: {e}")
+
+
+def classify_failure(err: str) -> bool:
+    """True when a thumb-generation failure should count toward the
+    permanent-failure ledger. Only DETERMINISTIC failures count: a 404/410
+    from the thumb endpoint is the HTTP-surface form of 'generation refused
+    this stem' (decode-level/unavailable). A URLError (connection refused,
+    timeout — e.g. the thumb service restarting mid-batch) or an HTTP 5xx is
+    TRANSIENT and must never count, or a 20-second restart window would
+    poison hundreds of healthy stems out of future batches."""
+    if not err:
+        return False
+    if err.startswith("HTTP "):
+        try:
+            code = err.split()[1]
+        except IndexError:
+            return False
+        return code in ("404", "410")       # gone / not generatable
+    if err.startswith("HTTPError: HTTP Error 404") or err.startswith("HTTPError: HTTP Error 410"):
+        return True
+    if err.startswith("download failed") or err.startswith("thumb upload failed"):
+        return False                          # rclone transport-level
+    if err.startswith("empty") or "empty" in err:
+        return False
+    if err.startswith("make_thumb produced no output"):
+        return True                           # decode produced nothing
+    if err.startswith("URLError") or "Connection refused" in err:
+        return False
+    # Pillow/ffmpeg decode verdicts surface as their exception names
+    if err.split(":")[0] in ("UnidentifiedImageError", "CalledProcessError",
+                             "SyntaxError", "OSError"):
+        return True
+    return False
 
 
 def log(*a):
@@ -184,6 +257,10 @@ def main():
                           "wall-clock of a video batch ~4x. Images keep their "
                           "serial local path + delay, which is a real "
                           "download/resize/upload round trip.")
+    ap.add_argument("--retry-failed", action="store_true",
+                     help="ignore the permanent-failure ledger and re-attempt "
+                          "stems that previously failed %d times (default: skip "
+                          "them). Use for the scheduled low-frequency retry sweep." % FAIL_MAX)
     args = ap.parse_args()
 
     work = Path(tempfile.mkdtemp(prefix="thumb_backfill_"))
@@ -209,6 +286,42 @@ def main():
                if f"{it.get('chat') or ''}/{it['stem']}.jpg" not in existing]
     log(f"missing thumbnails: {len(missing)}")
 
+    # Drop stems whose generation has already failed FAIL_MAX times in a row
+    # (permanently un-generatable: protected/encrypted sources, oversized
+    # files). Without this the batch spent ~90% of every run re-attempting
+    # the same dead stems. Entries whose stem now HAS a thumb are dropped so
+    # the ledger self-cleans; --retry-failed bypasses the filter entirely.
+    fail_ledger = load_fail_ledger()
+    now = time.time()
+    for s in list(fail_ledger):
+        if f"{s}.jpg" in existing:  # stem has a thumb now -> verdict obsolete
+            fail_ledger.pop(s, None)
+
+    def _skip_by_ledger(rec) -> bool:
+        """True when this stem is in permanent-failure cooldown: it has hit
+        FAIL_MAX deterministic failures AND its last attempt is more recent
+        than RETRY_AFTER_DAYS. Older entries are retried automatically (the
+        safety net), and entries below the threshold always are."""
+        try:
+            n, t = rec["n"], rec["t"]
+        except (TypeError, KeyError):
+            return False
+        if n < FAIL_MAX:
+            return False
+        return (now - t) < RETRY_AFTER_DAYS * 86400
+
+    if not args.retry_failed and fail_ledger:
+        before = len(missing)
+        missing = [it for it in missing
+                   if not _skip_by_ledger(fail_ledger.get(f"{it.get('chat') or ''}/{it['stem']}"))]
+        cooling = sum(1 for v in fail_ledger.values()
+                      if isinstance(v, dict) and _skip_by_ledger(v))
+        log(f"permanent-failure ledger: skipped {before - len(missing)} stems "
+            f"({cooling} in cooldown, retried automatically after "
+            f"{RETRY_AFTER_DAYS:g}d; --retry-failed to force now)")
+    if args.retry_failed and fail_ledger:
+        log(f"--retry-failed: ignoring {len(fail_ledger)} ledger entries this run")
+
     # 2026-09-30: process VIDEO posters FIRST. The manifest arrives newest
     # first, so the pre-fix order ground through images for days before it
     # ever reached the (previously 11.5K-strong) video backlog — which is
@@ -232,6 +345,20 @@ def main():
     done = failed = 0
     bytes_seen = 0
     t0 = time.time()
+
+    # Deterministic-failure counting for the permanent-failure ledger. Uses
+    # the module-level classify_failure() (see its docstring for the
+    # deterministic-vs-transient split, which is what keeps a service restart
+    # from poisoning the ledger). Entries carry {n: count, t: last-attempt
+    # epoch} so the cooldown check can retry stale verdicts automatically.
+    def note_failure(chat: str, stem: str, err: str):
+        if classify_failure(err):
+            with _ledger_lock:
+                k = f"{chat}/{stem}"
+                rec = fail_ledger.get(k)
+                n = (rec.get("n", 0) if isinstance(rec, dict) else 0) + 1
+                fail_ledger[k] = {"n": n, "t": time.time()}
+        return
 
     # ----- Phase 1: VIDEO posters, bounded parallel HTTP workers -----
     # These are I/O-bound range fetches against the local rclone serve (see
@@ -260,6 +387,16 @@ def main():
                 nbytes = len(data)
                 if resp.status != 200:
                     err = f"HTTP {resp.status}"
+        except urllib.error.HTTPError as he:
+            # The 404 carries X-Thumb-Reason: "deterministic" (decode-level —
+            # worth remembering) or "transient" (retry later, never counted).
+            # Fall back to the classic message when the header is absent
+            # (older service build), where 404 is the deterministic signal.
+            reason = (he.headers or {}).get("X-Thumb-Reason", "")
+            if reason == "transient":
+                err = f"URLError: transient 404 (reason=transient)"
+            else:
+                err = f"HTTPError: HTTP Error {he.code}: {he.reason}"
         except Exception as e:  # noqa: BLE001
             err = f"{type(e).__name__}: {e}"
         with ctr_lock:
@@ -267,9 +404,12 @@ def main():
             counters["bytes"] += nbytes
             if err is None:
                 counters["done"] += 1
+                with _ledger_lock:
+                    fail_ledger.pop(f"{chat}/{stem}", None)
             else:
                 counters["failed"] += 1
                 log(f"  [{finished[0]}/{total}] {chat}/{stem}: {err}")
+                note_failure(chat, stem, err)
             if finished[0] % 25 == 0 or finished[0] == total:
                 elapsed = time.time() - t0
                 rate = finished[0] / elapsed if elapsed > 0 else 0
@@ -306,27 +446,46 @@ def main():
                     else:
                         failed += 1
                         log(f"  {chat}/{stem}: HTTP {resp.status}")
+                        note_failure(chat, stem, f"HTTP {resp.status}")
             except Exception as e:  # noqa: BLE001
                 failed += 1
                 log(f"  {chat}/{stem}: {type(e).__name__}: {e}")
+                note_failure(chat, stem, f"{type(e).__name__}: {e}")
         else:
             leaf = os.path.basename(it.get("file") or "")
             if not leaf:
                 failed += 1
                 log(f"  {chat}/{stem}: no 'file' field in manifest item")
+                note_failure(chat, stem, "HTTP 404")  # unrecoverable metadata gap
             else:
                 ok, size, err = generate_thumb_local(chat, leaf, stem, work)
                 bytes_seen += size
                 if ok:
                     done += 1
+                    with _ledger_lock:
+                        fail_ledger.pop(f"{chat}/{stem}", None)
                 else:
                     failed += 1
                     log(f"  {chat}/{stem}: {err}")
+                    note_failure(chat, stem, err or "unknown error")
         time.sleep(args.delay)
 
     done += counters["done"]
     failed += counters["failed"]
     bytes_seen += counters["bytes"]
+
+    # Persist the failure ledger: stems past FAIL_MAX stay in cooldown and
+    # are retried automatically after RETRY_AFTER_DAYS. Atomic write, so a
+    # kill mid-batch can never corrupt it.
+    try:
+        trimmed = {k: v for k, v in fail_ledger.items()
+                   if isinstance(v, dict) and v.get("n", 0) > 0}
+        save_fail_ledger(trimmed)
+        perm = sum(1 for v in trimmed.values() if v.get("n", 0) >= FAIL_MAX)
+        log(f"failure ledger saved: {len(trimmed)} stems recorded, "
+            f"{perm} at/over the {FAIL_MAX}x cooldown threshold")
+    except Exception as e:  # noqa: BLE001
+        log(f"failure ledger not saved: {e}")
 
     log(f"DONE: {done} generated, {failed} failed, "
         f"{time.time()-t0:.0f}s elapsed, {bytes_seen/1024/1024:.0f} MB")

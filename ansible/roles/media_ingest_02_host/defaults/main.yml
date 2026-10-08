@@ -1,0 +1,13 @@
+---
+# Sizing for the media-ingest-02 LXC (vmid 117), applied by both the
+# provisioning play (pct create) and the idempotent re-apply path (pct
+# resize). Sourced here so a fresh CT and an existing one can never drift.
+#
+# rootfs: raised from 8G on 2026-10-08. The 8G disk had drifted to 78% used
+# (5.4G free -> 1.8G free over ~70 days) from the scraper's per-model SQLite
+# backup rings and its own per-run log tree; housekeeping now bounds both
+# growers (roles/media_ingest_02 housekeeping timer), and this headroom stops
+# the disk being a chronic hazard — same reasoning as the sibling gallery CT,
+# codified at 32G for the same class of failure (an 8G disk filled mid-upload).
+# `pct resize` only grows, so this is safe to re-apply against an existing CT.
+media_ingest_02_ct_rootfs_gb: 32

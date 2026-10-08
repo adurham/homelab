@@ -179,8 +179,15 @@ async def run(lookback, dialog_filters, dry_run):
     log.info("reconcile start: lookback=%d folder_meta=%d excluded=%d dry_run=%s",
              lookback, len(dynmap), len(excluded), dry_run)
 
+    # ─── Phase 1: enumerate candidates (metadata only, no downloads) ───────
+    # Collect every incoming media stem in the recent history window FIRST,
+    # then ask the gallery which of them it already accounts for. Without
+    # this pre-check the sweep re-downloaded and re-pushed the same recent
+    # items on every 20-minute run, forever — the gallery's stem-dedup made
+    # that a silent no-op at the destination, but every pass still paid a
+    # full source download + upload for media it had held for months.
+    candidates = []  # (stem, kind, folder, date_iso, entity)
     seen = set()
-    scanned = pushed = skipped = failed = 0
     async for d in client.iter_dialogs():
         if not d.is_user:  # private 1:1 only
             continue
@@ -196,38 +203,62 @@ async def run(lookback, dialog_filters, dry_run):
             kind = media_kind(msg)
             if not kind:
                 continue
-            scanned += 1
             stem = f"{d.id}_{msg.id}"
             if stem in seen:
                 continue
             seen.add(stem)
-            if stem in excluded:
-                skipped += 1
-                continue
             date_iso = msg.date.isoformat() if msg.date else ""
-            if dry_run:
-                log.info("WOULD push %s (%s) date=%s -> %s", stem, kind, date_iso, folder)
-                pushed += 1
+            candidates.append((stem, kind, folder, date_iso, msg))
+
+    # Ask the gallery which candidate stems it already accounts for (ingested
+    # previously, or deliberately deleted). Fail OPEN on any error — the old
+    # behavior (push everything), which the gallery's dedup absorbs — but
+    # structure the log line distinctly so a broken /have is alertable
+    # rather than silently restoring the full re-push burn.
+    have = set()
+    have_ok = True
+    if not dry_run and candidates:
+        try:
+            have = store_client.have_stems([c[0] for c in candidates])
+        except Exception as e:  # noqa: BLE001
+            have_ok = False
+            log.error("HAVE CHECK FAILED (%s: %s) — falling back to full push "
+                      "this sweep; gallery dedup absorbs it but the sweep is "
+                      "unoptimized until this recovers", type(e).__name__, e)
+
+    # ─── Phase 2: download + push only what's actually missing ────────────
+    scanned = pushed = skipped = failed = 0
+    for stem, kind, folder, date_iso, msg in candidates:
+        scanned += 1
+        if stem in excluded:
+            skipped += 1
+            continue
+        if have_ok and stem in have:
+            skipped += 1
+            continue
+        if dry_run:
+            log.info("WOULD push %s (%s) date=%s -> %s", stem, kind, date_iso, folder)
+            pushed += 1
+            continue
+        tmp = STAGING / stem
+        try:
+            path = await msg.download_media(file=str(tmp))
+            if not path or os.path.getsize(path) == 0:
+                log.warning("empty download %s", stem)
                 continue
-            tmp = STAGING / stem
-            try:
-                path = await msg.download_media(file=str(tmp))
-                if not path or os.path.getsize(path) == 0:
-                    log.warning("empty download %s", stem)
-                    continue
-                store_client.push_media(folder, path, stem, date_iso, is_out=False)
-                pushed += 1
-                log.info("PUSHED %s (%s) -> %s", stem, kind, folder)
-            except Exception as e:  # noqa: BLE001
-                failed += 1
-                log.error("push failed %s: %s: %s", stem, type(e).__name__, e)
-            finally:
-                for p in [str(tmp)] + glob.glob(str(tmp) + "*"):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        pass
-    log.info("reconcile done: scanned=%d pushed=%d skipped_excluded=%d failed=%d",
+            store_client.push_media(folder, path, stem, date_iso, is_out=False)
+            pushed += 1
+            log.info("PUSHED %s (%s) -> %s", stem, kind, folder)
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            log.error("push failed %s: %s: %s", stem, type(e).__name__, e)
+        finally:
+            for p in [str(tmp)] + glob.glob(str(tmp) + "*"):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+    log.info("reconcile done: scanned=%d pushed=%d skipped=%d failed=%d",
              scanned, pushed, skipped, failed)
     await client.disconnect()
 

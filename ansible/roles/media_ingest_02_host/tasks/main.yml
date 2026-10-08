@@ -31,7 +31,7 @@
     pct create 117 /var/lib/vz/template/cache/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
     --hostname media-ingest-02
     --cores 8 --memory 24576 --swap 512
-    --rootfs nvme-data:8
+    --rootfs nvme-data:{{ media_ingest_02_ct_rootfs_gb }}
     --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_media_ingest_02 }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
     --unprivileged 1
     --features nesting=1
@@ -43,29 +43,76 @@
   no_log: true
   when: pct_check.rc != 0
 
+# pct start/set/exec/resize are NODE-LOCAL and HA can migrate this CT to any
+# node. Verified live 2026-10-08: CT 117 had been migrated to pve01 while this
+# play targets pve02 — `pct start 117` on pve02 then fails with "Configuration
+# file 'nodes/pve02/lxc/117.conf' does not exist", which would break any full
+# re-run of this playbook. Discover the owning node cluster-wide (pmxcfs) and
+# dispatch there, falling back to the play's own host for the just-created
+# case. Applies to every pct call below.
+- name: Discover owning node for CT 117 (HA-safe dispatch)
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/resources --type vm --output-format json |
+      python3 -c 'import json,sys; print(next((r["node"] for r in json.load(sys.stdin) if r.get("vmid")==117), ""))'
+  register: m02_owner
+  changed_when: false
+  failed_when: false
+
+- name: Set effective CT 117 owner node
+  ansible.builtin.set_fact:
+    # inventory_hostname, NOT ansible_hostname: this play runs with
+    # gather_facts: false, so the gathered hostname fact is unavailable.
+    m02_owner_node: "{{ (m02_owner.stdout | default('') | trim) or inventory_hostname }}"
+
 - name: Ensure Media Ingest 02 Container is Running
-  ansible.builtin.command: pct start 117
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "root@{{ m02_owner_node }}" "pct start 117" 2>&1
   register: m02_start
-  failed_when: m02_start.rc != 0 and ("already running" not in m02_start.stderr and "already running" not in m02_start.stdout)
+  failed_when: >-
+    m02_start.rc != 0
+    and "already running" not in (m02_start.stdout + (m02_start.stderr | default("")))
   changed_when: m02_start.rc == 0
+  when: pct_check.rc == 0
+
+- name: Ensure Media Ingest 02 rootfs is at least the codified size
+  # Grow-only headroom (see defaults/main.yml): `pct resize` exits non-zero as
+  # a no-op when already at/above the target, so those cases are filtered.
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "root@{{ m02_owner_node }}" \
+      "pct resize 117 rootfs {{ media_ingest_02_ct_rootfs_gb }}G" 2>&1
+  register: m02_resize
+  changed_when: m02_resize.rc == 0
+  failed_when:
+    - m02_resize.rc != 0
+    - "'already at specified size' not in (m02_resize.stdout + (m02_resize.stderr | default('')))"
+    - "'shrink' not in (m02_resize.stdout + (m02_resize.stderr | default('')))"
+    - "'smaller' not in (m02_resize.stdout + (m02_resize.stderr | default('')))"
+  when: pct_check.rc == 0
 
 - name: Wait for Media Ingest 02 Container IP
   ansible.builtin.shell: |
     set -o pipefail
-    pct exec 117 -- ip a show eth0 | grep "inet " | grep -v "127.0.0.1"
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "root@{{ m02_owner_node }}" \
+      "pct exec 117 -- ip a show eth0" | grep "inet " | grep -v "127.0.0.1"
   register: ip_check
   until: ip_check.rc == 0
   retries: 20
   delay: 3
   changed_when: false
+  when: pct_check.rc == 0
 
 - name: Update Apt Cache in Media Ingest 02 Container
   ansible.builtin.command: pct exec 117 -- apt-get update
+  delegate_to: "{{ m02_owner_node }}"
   when: pct_check.rc != 0
   changed_when: true
 
 - name: Install Python3 in Media Ingest 02 Container
   ansible.builtin.command: pct exec 117 -- apt-get install -y python3
+  delegate_to: "{{ m02_owner_node }}"
   when: pct_check.rc != 0
   changed_when: true
 
@@ -76,12 +123,17 @@
     cat /root/.ssh/authorized_keys | pct exec 117 -- sh -c "cat > /root/.ssh/authorized_keys"
     pct exec 117 -- chmod 700 /root/.ssh
     pct exec 117 -- chmod 600 /root/.ssh/authorized_keys
+  delegate_to: "{{ m02_owner_node }}"
   when: pct_check.rc != 0
   changed_when: true
 
 - name: Ensure SSH is enabled and running
-  ansible.builtin.command: pct exec 117 -- systemctl enable --now ssh
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "root@{{ m02_owner_node }}" \
+      "pct exec 117 -- systemctl enable --now ssh"
   changed_when: false
+  when: pct_check.rc == 0
 
 - name: Add Media Ingest 02 Host to In-Memory Inventory
   # Reached over the private_subnet ProxyCommand (jump host = personal

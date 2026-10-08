@@ -80,6 +80,66 @@ LOCAL_CACHE.mkdir(parents=True, exist_ok=True)
 _locks = {}
 _locks_guard = threading.Lock()
 
+# ─── Negative cache for DETERMINISTIC generation failures (2026-10-08) ──────
+# Some stored media can never produce a poster: protected/encrypted source
+# video that ffmpeg cannot decode, or files larger than the cache filesystem
+# can ever hold. Retrying those costs a full cold generation attempt on EVERY
+# view (measured ~25s of ffmpeg per item) — and the batch backfill was
+# re-attempting the same ~360 permanently-dead stems twice a minute, burning
+# ~90% of its budget forever. A stem whose generation has DETERMINISTICALLY
+# failed is remembered here for NEG_TTL and fast-fails instead. Only
+# deterministic outcomes are recorded — a Drive fetch failure, a dropped
+# connection, or a restarted service is TRANSIENT and must never be cached,
+# or a temporary outage would blank real thumbnails for hours. The TTL (not
+# permanence) is deliberate: a re-ingested item can legitimately become
+# generatable later, and the backfill's retry pass relies on the entry
+# expiring. Entries are also cleared explicitly whenever generation succeeds.
+_neg = {}
+_neg_lock = threading.Lock()
+NEG_TTL = float(os.environ.get("THUMB_NEG_TTL_SEC", "21600"))  # 6h
+NEG_MAX = int(os.environ.get("THUMB_NEG_MAX", "50000"))
+
+
+def _neg_failed(chat: str, stem: str) -> bool:
+    """True iff this stem's generation failed DETERMINISTICALLY within NEG_TTL.
+    Pure read (no pruning) so it is safe to call on every request path."""
+    with _neg_lock:
+        ts = _neg.get(f"{chat}/{stem}")
+    return ts is not None and (time.time() - ts) < NEG_TTL
+
+
+def _neg_mark(chat: str, stem: str) -> None:
+    key = f"{chat}/{stem}"
+    now = time.time()
+    with _neg_lock:
+        if len(_neg) >= NEG_MAX:
+            # prune expired, then (if still full) drop the oldest entries
+            for k in [k for k, v in _neg.items() if now - v >= NEG_TTL]:
+                _neg.pop(k, None)
+            if len(_neg) >= NEG_MAX:
+                for k, _ in sorted(_neg.items(), key=lambda kv: kv[1])[: NEG_MAX // 4]:
+                    _neg.pop(k, None)
+        _neg[key] = now
+
+
+def _neg_clear(chat: str, stem: str) -> None:
+    with _neg_lock:
+        _neg.pop(f"{chat}/{stem}", None)
+
+
+# Per-request failure classification. thumb_service is a ThreadingHTTPServer,
+# so one thread handles one request end-to-end: a threading.local set by
+# ensure_thumb is visible to the Handler right after the call returns, letting
+# the 404 response carry WHY generation failed. Batch consumers (the backfill)
+# use that to decide whether a failure is worth remembering (deterministic
+# decode-level verdict) or must be retried later (transient transport). Values:
+# "deterministic" | "transient" | None (never attempted).
+_gen_reason = threading.local()
+
+
+def _set_reason(reason: str) -> None:
+    _gen_reason.value = reason
+
 # ─── manifest-backed filename index (see find_original's docstring) ────────
 # Avoids the expensive per-request full-folder `rclone lsf` by reusing the
 # leaf filename build_manifest.py already recorded for every item. Refreshed
@@ -313,14 +373,68 @@ def make_thumb(src_path: Path, dst_path: Path, is_video: bool):
             im.save(dst_path, "JPEG", quality=80)
 
 
-def _video_poster_http(chat: str, leaf: str, dst: Path) -> bool:
+_POSTER_TRANSIENT_MARKERS = (
+    "connection refused", "timed out", "timeout", "server returned 4",
+    "server returned 5", "network", "no route", "temporary failure",
+    "could not resolve",
+)
+# Markers that prove ffmpeg actually READ input bytes and rejected them —
+# a decode-level verdict that will not change on retry (typically protected/
+# encrypted source media the platform never served as decodable video).
+_POSTER_DECODE_MARKERS = (
+    "moov atom not found", "invalid data found when processing input",
+    "decode_slice_header", "encryption info", "not allocated",
+    "prediction is not allowed", "get_buffer() failed", "error while decoding",
+    "header missing", "no frame", "decoding error",
+)
+
+
+def _poster_err_is_deterministic(err: str) -> bool:
+    low = (err or "").lower()
+    if any(m in low for m in _POSTER_TRANSIENT_MARKERS):
+        return False
+    return any(m in low for m in _POSTER_DECODE_MARKERS)
+
+
+def _exc_is_deterministic(e: BaseException) -> bool:
+    """Classify an exception raised while generating a thumbnail from a
+    SUCCESSFULLY downloaded original. A decode-level rejection (ffmpeg says
+    the container/codec is unreadable; Pillow says the bytes are not an
+    image) is deterministic — retrying will fail identically, so it is worth
+    remembering. Anything else (rclone transport, OSError, permissions) is
+    transient and must never be cached."""
+    if isinstance(e, subprocess.CalledProcessError):
+        err = (e.stderr or b"")
+        if isinstance(err, bytes):
+            err = err.decode("utf-8", "replace")
+        return _poster_err_is_deterministic(str(err)) or not err
+    # Pillow raises UnidentifiedImageError (OSError subclass) for undecodable
+    # bytes; a bare OSError from PIL is likewise a decode verdict here.
+    try:
+        from PIL import UnidentifiedImageError
+        if isinstance(e, UnidentifiedImageError):
+            return True
+    except ImportError:
+        pass
+    if type(e).__name__ in ("UnidentifiedImageError", "SyntaxError"):
+        return True
+    return False
+
+
+def _video_poster_http(chat: str, leaf: str, dst: Path, class_out: dict | None = None) -> bool:
     """Generate a video poster via ffmpeg against the local rclone HTTP serve.
 
     Returns True when dst was written. ffmpeg issues HTTP range requests, so
     only the moov atom + the frame near the seek point cross the wire — a few
     MB even for a multi-GB file. `-ss 0` is the second attempt because some
     clips show a blank first frame at 1s; probesize/analyzeduration caps keep
-    ffmpeg from scanning deep into the file before decoding."""
+    ffmpeg from scanning deep into the file before decoding.
+
+    class_out (optional): a dict the caller supplies; on a FAILED generation
+    it receives class_out["deterministic"]=True/False so the caller can decide
+    whether the failure is worth remembering in the negative cache (see
+    _neg_mark: only decode-level failures where bytes were actually read are
+    deterministic; transport trouble is transient and must never be cached)."""
     url = f"{VIDEO_HTTP_BASE}/by-chat/{chat}/{leaf}"
     last_err = ""
     for seek in ("1", "0"):
@@ -339,6 +453,8 @@ def _video_poster_http(chat: str, leaf: str, dst: Path) -> bool:
         except Exception as e:  # noqa: BLE001
             last_err = f"{type(e).__name__}: {e}"
     print(f"[thumb] http video poster failed {chat}/{leaf}: {last_err}", flush=True)
+    if class_out is not None:
+        class_out["deterministic"] = _poster_err_is_deterministic(last_err)
     return False
 
 
@@ -385,9 +501,18 @@ def ensure_thumb(chat, stem) -> Path | None:
         r = rclone("copyto", f"{THUMBS}/{chat}/{stem}.jpg", str(local))
         if r.returncode == 0 and local.exists() and local.stat().st_size > 0:
             return local
+        # 1b) deterministic-failure fast path: if this exact stem's generation
+        # already failed for a reason that cannot change (see _neg_failed),
+        # skip the expensive generation attempt. Deliberately AFTER the Drive
+        # cache check above, so a thumb that appeared since the failure (e.g.
+        # the backfill generated it) is still served.
+        if _neg_failed(chat, stem):
+            _set_reason("deterministic")
+            return None
         # 2) generate from the original
         leaf = find_original(chat, stem)
         if not leaf:
+            _set_reason("transient")   # listing miss/failure: retry later
             return None
         ext = os.path.splitext(leaf)[1].lower()
         is_video = ext in VIDEO_EXT
@@ -403,20 +528,30 @@ def ensure_thumb(chat, stem) -> Path | None:
             # attempt 1: manifest's leaf; attempt 2: re-resolved leaf (a stale
             # manifest entry 404s the HTTP fetch just like it did the legacy
             # download — e.g. folder merged/renamed since the last rebuild).
-            if _video_poster_http(chat, leaf, local):
+            cls = {}
+            if _video_poster_http(chat, leaf, local, class_out=cls):
                 rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
+                _neg_clear(chat, stem)
                 return local
             fresh_leaf = _refresh_leaf(chat, stem, leaf, "stale manifest-index entry for")
             if fresh_leaf:
                 leaf = fresh_leaf
-                if _video_poster_http(chat, leaf, local):
+                if _video_poster_http(chat, leaf, local, class_out=cls):
                     rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
+                    _neg_clear(chat, stem)
                     return local
             # HTTP route failed (codec ffmpeg can't read? rclone serve down?).
             # Fall through to the legacy full-download path, which still
-            # refuses huge files.
+            # refuses huge files. If the failure was a decode-level verdict
+            # (not transport trouble), the fallthrough below can still clear
+            # it — but if it also declines, the stem is remembered as dead.
             total = remote_size(chat, leaf) or 0
             if total and total > VIDEO_FULL_MAX:
+                if cls.get("deterministic"):
+                    _neg_mark(chat, stem)
+                    _set_reason("deterministic")
+                else:
+                    _set_reason("transient")
                 return None
         # Reserve space for the full original BEFORE downloading, so concurrent
         # video requests can't collectively overflow the (RAM tmpfs) cache. The
@@ -438,6 +573,10 @@ def ensure_thumb(chat, stem) -> Path | None:
             if need and not res.ok:
                 # original is larger than the cache fs can ever hold -> can't
                 # thumbnail it here. Return None (gallery shows a placeholder).
+                # Deterministic by construction: the file's size is a property
+                # of the stored object, not of this moment — remember it.
+                _neg_mark(chat, stem)
+                _set_reason("deterministic")
                 return None
             try:
                 r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
@@ -454,13 +593,18 @@ def ensure_thumb(chat, stem) -> Path | None:
                         leaf = fresh_leaf
                         r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
                 if r.returncode != 0:
+                    # TRANSIENT (rclone/Drive transport) — never negative-cache.
                     print(f"[thumb] download original failed {chat}/{leaf}: "
                           f"rc={r.returncode} stderr={r.stderr[:300]!r}", flush=True)
+                    _set_reason("transient")
                     return None
                 make_thumb(tmp_src, local, is_video)
                 # 3) persist to encrypted Drive cache (best effort, async-ish)
                 rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
-                return local if local.exists() else None
+                if local.exists():
+                    _neg_clear(chat, stem)  # generation succeeded; drop any old verdict
+                    return local
+                return None
             except Exception as e:  # noqa: BLE001
                 # 2026-09-12: this used to swallow every failure silently
                 # (bare `return None`, zero output) -- a real incident (a
@@ -474,6 +618,15 @@ def ensure_thumb(chat, stem) -> Path | None:
                 # must never be indistinguishable from a real bug like this.
                 print(f"[thumb] generation failed {chat}/{stem}: "
                       f"{type(e).__name__}: {e}", flush=True)
+                # Only a DECODE-level failure (bytes were fetched, then
+                # rejected by Pillow/ffmpeg) is worth remembering. Transport /
+                # permissions / space errors stay un-cached so the next
+                # request retries normally.
+                if _exc_is_deterministic(e):
+                    _neg_mark(chat, stem)
+                    _set_reason("deterministic")
+                else:
+                    _set_reason("transient")
                 return None
             finally:
                 try:
@@ -502,9 +655,20 @@ class Handler(BaseHTTPRequestHandler):
         if ".." in chat or ".." in stem or "/" in stem:
             self.send_error(400)
             return
+        _gen_reason.value = None  # clear before ensure_thumb classifies the outcome
         thumb = ensure_thumb(chat, stem)
         if not thumb:
-            self.send_error(404)
+            # Report WHY generation failed so batch consumers (the backfill)
+            # can tell a permanent decode verdict from a transient hiccup.
+            # send_error() cannot carry custom headers, so build the 404 here.
+            reason = getattr(_gen_reason, "value", None) or "unknown"
+            body = json.dumps({"error": "thumb not available", "reason": reason}).encode()
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("X-Thumb-Reason", reason)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         data = thumb.read_bytes()
         self.send_response(200)

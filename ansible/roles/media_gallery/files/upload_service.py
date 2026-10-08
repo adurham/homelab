@@ -99,6 +99,46 @@ def load_excluded_cached() -> set:
         return _excl_cache["set"] or set()
 
 
+# ─── "Already have it" gate (2026-10-08) ────────────────────────────────────
+# The collector's periodic reconcile sweep re-scans recent private-chat
+# history and pushes anything it finds; it used to re-push everything,
+# relying on stem-dedup downstream to absorb the work. That made every sweep
+# re-DOWNLOAD from the source and re-UPLOAD to Drive stems the gallery had
+# held for months (observed: the same ten stems re-pushed every 20 minutes,
+# indefinitely). This answers the only question the sweep needs — "which of
+# these stems does the gallery already account for?" — built from the
+# datemap (every stem ever ingested) UNION the exclusion ledger (stems the
+# user deliberately deleted; re-pushing those is also pure waste). Rebuilt
+# only when the datemap file changes (ingests rewrite it via os.replace, so
+# its mtime is a reliable change flag) or after HAVE_TTL. A read failure
+# keeps the last good set — the gate must never silently fail OPEN into
+# "report everything as present" NOR closed into "re-push everything".
+_have_cache = {"set": None, "ts": 0.0, "mtime": 0.0}
+_have_lock = threading.Lock()
+HAVE_TTL = float(os.environ.get("INGEST_HAVE_TTL", "60"))
+HAVE_MAX_STEMS = int(os.environ.get("INGEST_HAVE_MAX_STEMS", "5000"))
+
+
+def load_have_cached() -> set:
+    with _have_lock:
+        now = time.time()
+        try:
+            mtime = DATEMAP_CACHE.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        c = _have_cache
+        if c["set"] is not None and now - c["ts"] < HAVE_TTL and mtime == c["mtime"]:
+            return c["set"]
+        try:
+            m = json.loads(DATEMAP_CACHE.read_text())
+            s = set(m.keys()) | load_excluded_cached()
+        except (OSError, ValueError) as e:
+            print(f"[upload] have-set reload failed (using cached): {e}", flush=True)
+            return c["set"] if c["set"] is not None else set()
+        c["set"], c["ts"], c["mtime"] = s, now, mtime
+        return s
+
+
 def load_folder_meta() -> dict:
     try:
         return json.loads(FOLDER_META_FILE.read_text())
@@ -310,6 +350,16 @@ def _pusher_worker():
                 pushed_any = True
                 with _push_lock:
                     _pending_count[0] = max(0, _pending_count[0] - len(files))
+                # Cosmetic cleanup: after a successful move the per-folder
+                # staging dir is empty but lingers (461 had accumulated by
+                # 2026-10-08). rmdir only AFTER the move succeeded, and only
+                # THIS folder — never a sweep of all empties, which would race
+                # a concurrent request that just created its dir. ENOENT and
+                # ENOTEMPTY are both fine (a new file landed mid-rmdir).
+                try:
+                    fdir.rmdir()
+                except OSError:
+                    pass
             # on failure, files stay in PENDING and retry next cycle
         if pushed_any:
             _dirty.set()  # rebuild only after files are actually in GDrive
@@ -637,6 +687,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._merge(p[len("/merge/"):])
             if p.startswith("/sethidden"):
                 return self._sethidden()
+            if p == "/have":
+                return self._have()
             self._json(404, {"error": "not found"})
         except Exception as e:  # noqa: BLE001 — surface the real error, don't bare-500
             import traceback
@@ -1069,6 +1121,33 @@ class Handler(BaseHTTPRequestHandler):
         _rebuild_now.set()  # structural change -> rebuild now, skip debounce
         self._json(200, {"moved": stem, "from": srcf, "to": destf,
                          "file": f"by-chat/{destf}/{leaf}"})
+
+    def _have(self):
+        """POST /have  body {"stems": [...]} -> {"have": [...]}
+
+        Answers "which of these stems does the gallery already account for?"
+        for the collector's reconcile sweep, so it can skip re-downloading
+        and re-uploading media the gallery has held for months. 'Accounted
+        for' = present in the ingest datemap (every stem ever ingested)
+        UNION the exclusion ledger (deliberately deleted — re-pushing those
+        is waste too, and the ledger must stay authoritative). Chunks the
+        lookup so a large batch (history replay after collector downtime)
+        stays within sane request sizes; a caller sending a huge list in one
+        body is bounded to HAVE_MAX_STEMS."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, OSError) as e:
+            return self._json(400, {"error": f"bad json body: {e}"})
+        stems = body.get("stems")
+        if not isinstance(stems, list) or not stems:
+            return self._json(400, {"error": "want non-empty 'stems' list"})
+        stems = stems[:HAVE_MAX_STEMS]
+        for s in stems:
+            if not isinstance(s, str) or not s or "/" in s or ".." in s:
+                return self._json(400, {"error": "invalid stem in list"})
+        have = load_have_cached()
+        return self._json(200, {"have": [s for s in stems if s in have]})
 
     def _sethidden(self):
         """POST /sethidden  body {"stems": [...], "hidden": bool}

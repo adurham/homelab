@@ -200,6 +200,25 @@ def test_part_suffix_never_pushed_even_if_size_stable():
             raise AssertionError(f"expected exactly 1 push after rename away from .part, got {pushed!r}")
 
 
+def test_cumulative_push_counters_reflect_all_writers():
+    """2026-10-08: the deployed sweep-log line reported only the FINAL walk's
+    numbers, but the background push thread does most of the work during the
+    passes — so real sweeps that pushed hundreds of items logged
+    'pushed=0', which read as a silent failure for weeks. _accumulate_pushes
+    must sum contributions from both the push thread and main."""
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        mod, pushed = _import_module_fresh(td)
+        # simulate: push thread contributed twice, final walk once
+        mod._accumulate_pushes(7, 0)
+        mod._accumulate_pushes(3, 1)
+        mod._accumulate_pushes(0, 0)
+        if mod._PUSH_TOTALS["pushed"] != 10:
+            raise AssertionError(f"expected cumulative pushed=10, got {mod._PUSH_TOTALS['pushed']}")
+        if mod._PUSH_TOTALS["failed"] != 1:
+            raise AssertionError(f"expected cumulative failed=1, got {mod._PUSH_TOTALS['failed']}")
+
+
 def main():
     print("test_scraper_wrapper: running")
     check("growing file is never pushed mid-download (the core regression)",
@@ -210,6 +229,8 @@ def main():
           test_seen_sizes_cleared_after_push_no_leak_on_reused_path)
     check(".part files are never pushed even with a stable size",
           test_part_suffix_never_pushed_even_if_size_stable)
+    check("cumulative push counters sum all writers",
+          test_cumulative_push_counters_reflect_all_writers)
     print(f"test_scraper_wrapper: ALL {PASS} TESTS PASSED")
     print("PASS")
     sys.exit(0)
