@@ -410,12 +410,14 @@ delegation:
   # renders before (2026-09-08).
   child_timeout_seconds: 0
   orchestrator_enabled: true
-  # Auto-approve dangerous-cmd prompts inside subagents. The Discord bot
-  # has no human-in-the-loop UI to resolve approvals, so the choice is
-  # auto-deny (children silently skip the cmd) or auto-approve (children
-  # run it). Bot operates in cloned repos via gh PR workflow — worst case
-  # is a bad commit on a feature branch you'd reject in review anyway.
-  subagent_auto_approve: true
+  # Dangerous-cmd prompts inside subagents: a child has no human-in-the-loop
+  # UI, so the choice is auto-deny (child gets a recoverable refusal) or
+  # auto-approve. Auto-approve also fires when the approval guardian itself
+  # fails or times out, i.e. a provider outage turns into approvals. Set to
+  # false 2026-10-08 (mirrors the MacBook, Adam's call after the Fable config
+  # review). Flip back to true only if bot children need to run flagged
+  # commands unattended.
+  subagent_auto_approve: false
   ruflo_path: ''
   # Per-provider subagent routing. This is the mechanism
   # tools/delegate_tool.py._resolve_delegation_credentials actually consults

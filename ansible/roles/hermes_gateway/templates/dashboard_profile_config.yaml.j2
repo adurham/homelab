@@ -303,7 +303,7 @@ delegation:
   max_concurrent_children: 3
   child_timeout_seconds: 0
   orchestrator_enabled: true
-  subagent_auto_approve: true
+  subagent_auto_approve: false
   ruflo_path: ''
   by_provider:
 {{ hermes_routing_delegation_by_provider | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
