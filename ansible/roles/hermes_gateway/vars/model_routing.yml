@@ -91,9 +91,6 @@ hermes_routing_model_by_role:
   sr-coder:
     model: claude-opus-5-5
     provider: claude-subscription-directsdk-experimental
-    fallback:
-      model: glm-5.3
-      provider: ollama-cloud
   coder:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
@@ -103,9 +100,6 @@ hermes_routing_model_by_role:
   consultant:
     model: claude-fable-5-1
     provider: claude-subscription-directsdk-experimental
-    fallback:
-      model: glm-5.3
-      provider: ollama-cloud
   researcher:
     model: glm-5.3-flash
     provider: ollama-cloud
@@ -248,9 +242,6 @@ hermes_routing_auxiliary_anthropic_tasks:
   consult:
     model: claude-fable-5-1
     provider: claude-subscription-directsdk-experimental
-    fallback:
-      model: glm-5.3
-      provider: ollama-cloud
     reasoning_effort: max
     timeout: 300
   tts_audio_tags:
@@ -344,9 +335,6 @@ hermes_routing_auxiliary_ollama_cloud_tasks:
   consult:
     model: claude-fable-5-1
     provider: claude-subscription-directsdk-experimental
-    fallback:
-      model: glm-5.3
-      provider: ollama-cloud
     reasoning_effort: max
     timeout: 300
   delegation_router: deepseek-v4.1-flash
