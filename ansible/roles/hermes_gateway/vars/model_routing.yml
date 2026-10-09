@@ -65,10 +65,10 @@
 
 hermes_routing_model_by_role:
   reviewer:
-    model: kimi-k2.7-code
+    model: glm-5.3-flash
     provider: ollama-cloud
     fallback:
-      model: claude-opus-5
+      model: claude-sonnet-5-5
       provider: claude-subscription-directsdk-experimental
   jr-coder:
     model: glm-5.3-flash
