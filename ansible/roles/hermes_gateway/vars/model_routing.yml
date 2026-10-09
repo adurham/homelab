@@ -125,11 +125,8 @@ hermes_routing_model_by_role:
       model: claude-sonnet-5
       provider: claude-subscription-directsdk-experimental
   arch-system-design:
-    model: glm-5.3
-    provider: ollama-cloud
-    fallback:
-      model: claude-opus-5
-      provider: claude-subscription-directsdk-experimental
+    model: claude-opus-5-5
+    provider: claude-subscription-directsdk-experimental
 # Per-role reasoning effort (every role explicit; delegation.reasoning_effort
 # stays max as the default for untyped dispatches). Adam, 2026-09-29.
 hermes_routing_reasoning_effort_by_role:
