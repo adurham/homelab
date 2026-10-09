@@ -96,8 +96,9 @@ ansible-playbook deploy_hermes_gateway.yml --limit hermes_gateway \
 (or edit the default in `defaults/main.yml` for a persistent change).
 The template change triggers the `Restart Hermes Gateway` and
 `Restart Hermes Serve` handlers automatically — no manual SSH needed.
-`delegation.*` and `auxiliary.vision` are provider-conditional in the
-template: exo gets the cheap-Qwen3.6-subagent routing, the other three
+`delegation.provider`/`model` are provider-conditional in the
+template (`auxiliary.*` is not -- it is one flat set of per-task pins since
+2026-10-08): exo gets the cheap-Qwen3.6-subagent routing, the other three
 leave `delegation.provider`/`model` empty so subagents inherit the
 parent model/credentials instead of being force-routed to a
 (possibly-down) exo cluster.
@@ -159,8 +160,8 @@ they come back healthy.
 
 The MacBook's local `~/.hermes/config.yaml` and this gateway's
 `templates/config.yaml.j2` both carry the same `delegation.model_by_role`
-(62 delegate_task personas), `delegation.by_provider`, and
-`auxiliary.anthropic`/`auxiliary.ollama-cloud` task-routing tables —
+(12 delegate_task roles), `delegation.by_provider`, and the flat
+`auxiliary.<task>` routing table (`hermes_routing_auxiliary_tasks`) —
 independently maintained, and they've drifted out of sync via manual
 copy-paste more than once (2026-09-04/07/08/12), including one real bug
 (`delegation.by_provider.anthropic` silently pinning `claude-sonnet-5` as
@@ -198,6 +199,13 @@ lists both providers the gateway itself runs under; `ollama-cloud` is
 deliberately absent because every ollama-cloud-primary pin already lands
 on the same credentials an unrouted child inherits, so listing it would
 change nothing.
+
+**Gateway = MacBook (2026-10-08):** the gateway mirrors the MacBook's routing
+exactly (roles, by_provider, auto_route, per-role effort, `delegation.reasoning_effort: high`,
+the flat `auxiliary` table). The only intended differences are the main
+model/provider, `delegation.max_concurrent_children` below, and host
+plumbing. `scripts/hermes_config_sync.py --check` exits 0 when the MacBook
+matches `vars/model_routing.yml`.
 
 **Deliberate delta (intentionally NOT synced):**
 `delegation.max_concurrent_children` is 10 on the MacBook and

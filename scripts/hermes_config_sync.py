@@ -18,29 +18,21 @@ persona / auxiliary task". The ansible role renders config.yaml.j2 from it
 directly; this script is the other half -- it applies the SAME data to a
 local, non-ansible-managed config.yaml.
 
-WHAT THIS SYNCS (routing decisions only)
------------------------------------------
-  - delegation.model_by_role.<role>.{model,provider,fallback}
+WHAT THIS SYNCS (routing decisions only; each entry replaced EXACTLY)
+-----------------------------------------------------------------------
+  - delegation.model_by_role / reasoning_effort_by_role / max_iterations_by_role
   - delegation.by_provider.<provider>.{model,provider}
-  - auxiliary.anthropic.<task>.{model,provider,fallback}
-  - auxiliary.ollama-cloud.<task>  (scalar model id, or the nested
-    consult.timeout dict)
+  - delegation.auto_route.providers
+  - auxiliary.<task>  (FLAT schema since 2026-10-08: one pin per task, the
+    old provider-keyed exo/anthropic/ollama-cloud/sdk blocks and `defaults`
+    were removed because all four copies were identical)
 
 WHAT THIS DELIBERATELY DOES NOT TOUCH
 ---------------------------------------
   - model.default / model.provider (which provider is MAIN on this host)
   - agent.max_turns / timeouts / system_prompt_mode (host-specific tuning)
-  - providers.ollama-cloud.* (the gateway hardcodes context_length overrides
-    with discover_models: false; the local config has no providers.ollama-
-    cloud block at all and gets correct context lengths via live
-    auto-discovery instead -- that already works, don't disturb it)
-  - Any reasoning_effort / timeout field on an auxiliary task that the
-    ansible vars file does not itself set. Local has per-task
-    reasoning_effort tuning the gateway config never carried; this script
-    preserves those local-only fields rather than deleting them just
-    because the source dict doesn't have the key. (auxiliary.anthropic.
-    consult.timeout is the one field BOTH sides set, so an actual value
-    change there DOES sync -- e.g. 180 -> 300.)
+  - providers.* (the gateway hardcodes context_length overrides)
+  - auxiliary keys that are not task pins (transient_retries, free_only, ...)
 
 USAGE
 -----
@@ -88,9 +80,21 @@ def dump_yaml(data, y):
     return buf.getvalue()
 
 
-def merge_task_entry(local_val, source_val):
+def plain(node):
+    """Detach a ruamel node from its source file: plain dict/list/scalars carry no
+    comments, so a comment above a vars key can't leak into the local config."""
+    if isinstance(node, dict):
+        return {k: plain(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [plain(v) for v in node]
+    return node
+
+
+def merge_task_entry(local_val, source_val, exact=True):
     """Merge one routing leaf. Scalars: source wins outright. Dicts: shallow
     merge, source keys win, local-only keys (e.g. reasoning_effort) survive."""
+    if exact:
+        return plain(source_val)
     if isinstance(source_val, dict):
         if not isinstance(local_val, dict):
             return dict(source_val)
@@ -154,10 +158,17 @@ def main():
                  source["hermes_routing_model_by_role"], changes, missing_locally, extra_locally)
     sync_subtree(config, ["delegation", "by_provider"],
                  source["hermes_routing_delegation_by_provider"], changes, missing_locally, extra_locally)
-    sync_subtree(config, ["auxiliary", "anthropic"],
-                 source["hermes_routing_auxiliary_anthropic_tasks"], changes, missing_locally, extra_locally)
-    sync_subtree(config, ["auxiliary", "ollama-cloud"],
-                 source["hermes_routing_auxiliary_ollama_cloud_tasks"], changes, missing_locally, extra_locally)
+    sync_subtree(config, ["delegation", "reasoning_effort_by_role"],
+                 source["hermes_routing_reasoning_effort_by_role"], changes, missing_locally, extra_locally)
+    sync_subtree(config, ["delegation", "max_iterations_by_role"],
+                 source["hermes_routing_max_iterations_by_role"], changes, missing_locally, extra_locally)
+    sync_subtree(config, ["auxiliary"],
+                 source["hermes_routing_auxiliary_tasks"], changes, missing_locally, extra_locally)
+    ar = config["delegation"].setdefault("auto_route", {})
+    want = plain(list(source["hermes_routing_auto_route_providers"]))
+    if list(ar.get("providers") or []) != want:
+        changes.append(("delegation.auto_route.providers", ar.get("providers"), want))
+        ar["providers"] = want
 
     new_text = dump_yaml(config, y)
 

@@ -364,7 +364,7 @@ delegation:
   # tools the parent turn already has configured.
   inherit_mcp_toolsets: true
   max_iterations: 500
-  reasoning_effort: max
+  reasoning_effort: high
   reasoning_effort_by_role:
 {{ hermes_routing_reasoning_effort_by_role | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
 {% if hermes_gateway_main_provider == 'exo' %}
@@ -490,172 +490,17 @@ compression:
   threshold_tokens: null
 
 auxiliary:
-  # PROVIDER-FIRST schema (top-level keys: defaults / exo / anthropic /
-  # ollama-cloud), copied verbatim from the MacBook's ~/.hermes/config.yaml
-  # auxiliary block (2026-09-07 full sync — replaces the prior task-first
-  # schema this file used before). hermes-agent auto-selects which
-  # provider block applies based on the LIVE main provider at runtime
-  # (agent/auxiliary_client.py _get_auxiliary_task_config /
-  # _aux_flatten_provider_first) — no Jinja branching needed here, unlike
-  # model:/delegation: above. Two deliberate gateway-specific deltas from
-  # the MacBook, both called out inline where they occur:
-  #   1. defaults.session_search — the gateway had a task-first
-  #      session_search pin (timeout/max_concurrency) the MacBook doesn't
-  #      carry; re-homed here under defaults (the schema's per-task
-  #      SETTINGS layer, consulted regardless of which provider block
-  #      matches) so the timeout/concurrency knobs keep working instead of
-  #      silently becoming dead config after the schema conversion.
-  #   2. exo.vision — local exo-cluster endpoint instead of the MacBook's
-  #      ollama-cloud/gemma4:31b (see the LOCAL VISION OVERRIDE comment
-  #      below and the file header for the full rationale).
-  defaults:
-    approval:
-      extra_body: {}
-      timeout: 180
-    compression:
-      extra_body: {}
-      timeout: 600
-    curator:
-      extra_body: {}
-      timeout: 600
-    kanban_decomposer:
-      extra_body: {}
-      timeout: 180
-    mcp:
-      extra_body: {}
-      timeout: 180
-    memory_extraction:
-      auto_commit_session_end: false
-      extra_body: {}
-      include_pre_compress: true
-      max_tokens_per_turn: 1024
-      max_tokens_session_end: 2048
-      timeout: 180
-    profile_describer:
-      extra_body: {}
-      timeout: 60
-    # GATEWAY-SPECIFIC ADDITION (not present on the MacBook): timeout +
-    # bounded concurrency for cross-session_search on the gateway, where
-    # the session DB can be larger and shared across more concurrent
-    # Discord/dashboard turns than a single-user MacBook session.
-    session_search:
-      timeout: 30
-      extra_body: {}
-      max_concurrency: 3
-    skills_hub:
-      extra_body: {}
-      timeout: 180
-    title_generation:
-      extra_body: {}
-      timeout: 180
-    triage_specifier:
-      extra_body: {}
-      timeout: 120
-    tts_audio_tags:
-      extra_body: {}
-      timeout: 30
-    vision:
-      download_timeout: 30
-      extra_body: {}
-      timeout: 120
-    web_extract:
-      extra_body: {}
-      timeout: 360
-  exo:
-    provider: exo
-    default: mlx-community/Qwen3.6-35B-A3B-8bit
-    # LOCAL VISION OVERRIDE (deliberate non-mirror — see file header):
-    # this gateway has a real local exo-cluster endpoint with a
-    # vision-capable model (Qwen3.6), so vision stays fully local/free
-    # when main=exo instead of following the MacBook's auxiliary.exo.vision
-    # (which points at ollama-cloud/gemma4:31b — the MacBook has no local
-    # vision endpoint of its own to mirror). All routing fields
-    # (provider/model/base_url/api_key/api_mode) live directly on this
-    # per-task entry and win over the block-level "auto" resolution
-    # (agent/auxiliary_client.py _aux_flatten_provider_first: per-task dict
-    # overrides are applied last).
-    vision:
-      provider: custom:exo
-      model: mlx-community/Qwen3.6-35B-A3B-8bit
-      base_url: {{ hermes_gateway_exo_base_url }}
-      api_key: not-needed
-      api_mode: chat_completions
-      timeout: 120
-      extra_body: {}
-      download_timeout: 30
-    web_extract:
-      model: gemma4:31b
-      provider: ollama-cloud
-    compression:
-      model: dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
-      extra_body:
-        service_tier: flex
-    skills_hub:
-      model: gemma4:31b
-      provider: ollama-cloud
-    approval:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    mcp:
-      model: gemma4:31b
-      provider: ollama-cloud
-    title_generation:
-      model: gemma4:31b
-      provider: ollama-cloud
-    tts_audio_tags:
-      model: gemma4:31b
-      provider: ollama-cloud
-    triage_specifier:
-      model: gemma4:31b
-      provider: ollama-cloud
-    kanban_decomposer:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    profile_describer:
-      model: gemma4:31b
-      provider: ollama-cloud
-    curator:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    monitor:
-      model: gemma4:31b
-      provider: ollama-cloud
-    memory_extraction:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    background_review:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    consult:
-      model: claude-fable-5-1
-      provider: claude-subscription-directsdk-experimental
-      reasoning_effort: max
-      timeout: 300
-    goal_judge:
-      model: deepseek-v4.1-flash
-      provider: ollama-cloud
-    memory_query_rewrite:
-      model: gemma4:31b
-      provider: ollama-cloud
-    moa_aggregator:
-      model: gemma4:31b
-      provider: ollama-cloud
-    moa_reference:
-      model: gemma4:31b
-      provider: ollama-cloud
-    pet_dialogue:
-      model: gemma4:31b
-      provider: ollama-cloud
-  anthropic:
-    default: claude-haiku-4-5-20251001
-    provider: anthropic
-{{ hermes_routing_auxiliary_anthropic_tasks | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
-  claude-subscription-directsdk-experimental:
-    default: claude-haiku-4-5-20251001
-    provider: claude-subscription-directsdk-experimental
-{{ hermes_routing_auxiliary_anthropic_tasks | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
-  ollama-cloud:
-{{ hermes_routing_auxiliary_ollama_cloud_tasks | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
+  # FLAT task-first schema (2026-10-08). One pin per task, identical on every
+  # main provider -- the old provider-keyed layer (exo / anthropic /
+  # ollama-cloud / claude-subscription-directsdk-experimental blocks plus a
+  # `defaults` block) held four byte-identical copies, so it was removed.
+  # Mirrors the MacBook's ~/.hermes/config.yaml; the single source is
+  # vars/model_routing.yml (hermes_routing_auxiliary_tasks). Per-task timeout /
+  # extra_body live inline on each task. A task with no pin follows the live
+  # main model. web_extract / skills_hub / session_search have no LLM call
+  # site in the code, so they are not pinned (the old gateway-only
+  # session_search timeout/concurrency pin was dead config).
+{{ hermes_routing_auxiliary_tasks | to_nice_yaml(indent=2, sort_keys=False) | indent(2, True) }}
 
 memory:
   memory_enabled: true
