@@ -169,6 +169,10 @@ def main():
     if list(ar.get("providers") or []) != want:
         changes.append(("delegation.auto_route.providers", ar.get("providers"), want))
         ar["providers"] = want
+    want_tiers = plain(source["hermes_routing_auto_route_tier_roles"])
+    if dict(ar.get("tier_roles") or {}) != dict(want_tiers):
+        changes.append(("delegation.auto_route.tier_roles", ar.get("tier_roles"), want_tiers))
+        ar["tier_roles"] = want_tiers
 
     new_text = dump_yaml(config, y)
 

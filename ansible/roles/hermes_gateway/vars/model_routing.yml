@@ -89,6 +89,9 @@ hermes_routing_model_by_role:
   sr-coder:
     model: claude-opus-5-5
     provider: claude-subscription-directsdk-experimental
+    fallback:
+      model: deepseek-v4.1-flash
+      provider: ollama-cloud
   coder:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
@@ -98,6 +101,9 @@ hermes_routing_model_by_role:
   consultant:
     model: claude-fable-5-1
     provider: claude-subscription-directsdk-experimental
+    fallback:
+      model: deepseek-v4.1-flash
+      provider: ollama-cloud
   researcher:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
@@ -125,6 +131,9 @@ hermes_routing_model_by_role:
   arch-system-design:
     model: claude-opus-5-5
     provider: claude-subscription-directsdk-experimental
+    fallback:
+      model: deepseek-v4.1-flash
+      provider: ollama-cloud
 # Per-role reasoning effort (delegation.reasoning_effort is 'high' for untyped
 # dispatches; only the roles listed here override it). Mirrors the MacBook, Adam 2026-10-08.
 hermes_routing_reasoning_effort_by_role:
@@ -133,6 +142,8 @@ hermes_routing_reasoning_effort_by_role:
   jr-coder: medium
   mid-coder: medium
   sr-coder: max
+  arch-system-design: max
+  consultant: max
 # Per-role iteration caps. Coding/real-work roles use the spawn-role default
 # (leaf 300 / orchestrator 500 -- round-2 coders needed 176-201 steps);
 # only utility (30) and ops/tooling (60) roles are capped lower.
@@ -152,6 +163,12 @@ hermes_routing_auto_route_providers:
   - anthropic
   - claude-subscription-directsdk-experimental
   - ollama-cloud
+# Tier -> role for the delegation auto-router (classifier picks the tier). Roles
+# with personas and run history, so a misrouted task still lands on a real role.
+hermes_routing_auto_route_tier_roles:
+  light: jr-coder
+  standard: mid-coder
+  deep: sr-coder
 hermes_routing_delegation_by_provider:
   anthropic:
     model: deepseek-v4.1-flash

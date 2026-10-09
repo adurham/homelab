@@ -466,9 +466,7 @@ delegation:
     providers:
 {{ hermes_routing_auto_route_providers | to_nice_yaml(indent=2, sort_keys=False) | indent(6, True) }}
     tier_roles:
-      light: researcher
-      standard: coder
-      deep: arch-system-design
+{{ hermes_routing_auto_route_tier_roles | to_nice_yaml(indent=2, sort_keys=False) | indent(6, True) }}
 
 # Compaction threshold. hermes-agent's built-in default is 0.50 (compact at
 # 50% of context) when this block is absent entirely, which this template
