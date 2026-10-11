@@ -63,6 +63,18 @@ jobs:
         with:
           args: check
 
+  # Owner directive (2026-10-11): the exo-served model must NEVER be a fallback
+  # for anything. scripts/check_exo_not_fallback.py fails on any exo reference
+  # inside a fallback context; non-fallback uses (model catalog, provider
+  # default, reasoning-effort map, by_provider routing, comments) are allowed
+  # by design — see the script docstring for the full allow-list.
+  exo-fallback-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Exo model must never be a fallback
+        run: python3 scripts/check_exo_not_fallback.py
+
   # Catches AWS keys, GitHub PATs, OAuth tokens, etc. that pre-commit's
   # detect-private-key check (PEM-only) misses. Ansible vault blocks are
   # encrypted and don't trigger gitleaks.

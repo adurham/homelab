@@ -71,9 +71,15 @@
 #          mcp / memory_extraction / moa_aggregator / triage_specifier
 # UNCHANGED: reviewer (glm-5.3-flash -> sonnet), jr-coder (-> haiku), sr-coder /
 # consultant / arch-system-design (opus/fable -> DS), curator (sonnet -> DS), and all
-# gemma pins. Mirrors the MacBook ~/.hermes/config.yaml edit of the same day (which
-# additionally retargeted its top-level fallback_providers to exo-only; the gateway /
-# dashboard main-loop fallback_providers here is a different direction and stays as-is).
+# gemma pins. Mirrors the MacBook ~/.hermes/config.yaml edit of the same day.
+# --- 2026-10-11 (2nd edit, same day): EXO MODEL REMOVED FROM THE MACBOOK FALLBACK CHAIN ----
+# Adam directive: the exo-provided model (dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw)
+# must NEVER be a fallback for anything. The MacBook top-level fallback_providers (left exo-only
+# by the 1st edit above) is now [] -- netless by design; an ollama-cloud blip fails/retries
+# instead of hopping. Gateway + dashboard main-loop fallback_providers (ollama-cloud DS) never
+# carried the exo model and stay as-is. Exo remains only in NON-fallback roles everywhere:
+# model catalog, reasoning-effort map, web.by_provider, delegation.by_provider, and the dormant
+# main-provider=exo branch. Guarded by scripts/check_exo_not_fallback.py (run in CI, lint.yml).
 # -----------------------------------------------------------------------------------
 hermes_routing_model_by_role:
   reviewer:
