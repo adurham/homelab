@@ -460,6 +460,9 @@ delegation:
   #     family from mid-coder, verified tool-calling capable)
   #   consultant -> deepseek-v4-pro:0813, fallback opus-5 (was glm-5.3 /
   #     fable-5-1 — Fable-priced fallback for a persona role was unjustified)
+  #   2026-10-11: sonnet fallbacks removed from every DSv4.1-flash pin (roles +
+  #   9 aux tasks; see the note in vars/model_routing.yml). reviewer / jr-coder /
+  #   sr-coder / consultant / arch-system-design fallbacks unchanged.
   model_by_role:
 {{ hermes_routing_model_by_role | to_nice_yaml(indent=2, sort_keys=False) | indent(4, True) }}
   max_iterations_by_role:

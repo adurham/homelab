@@ -61,6 +61,20 @@
 # as the coding-agency Discord bot").
 # ============================================================================
 
+# --- 2026-10-11: SONNET FALLBACKS REMOVED FROM DSv4.1-FLASH ROUTES -----------------
+# Adam directive ("remove sonnet as the fallback for DSv4.1 Flash" -- too many
+# ollama-cloud -> sonnet failover hops, each paying a cold prefill). Dropped the
+# claude-sonnet-5-5 fallback from EVERY deepseek-v4.1-flash pin below:
+#   roles: pm / coder / mid-coder / researcher / code-analyzer / tester /
+#          performance-benchmarker
+#   aux:   approval / background_review / compression / goal_judge / kanban_decomposer /
+#          mcp / memory_extraction / moa_aggregator / triage_specifier
+# UNCHANGED: reviewer (glm-5.3-flash -> sonnet), jr-coder (-> haiku), sr-coder /
+# consultant / arch-system-design (opus/fable -> DS), curator (sonnet -> DS), and all
+# gemma pins. Mirrors the MacBook ~/.hermes/config.yaml edit of the same day (which
+# additionally retargeted its top-level fallback_providers to exo-only; the gateway /
+# dashboard main-loop fallback_providers here is a different direction and stays as-is).
+# -----------------------------------------------------------------------------------
 hermes_routing_model_by_role:
   reviewer:
     model: glm-5.3-flash
@@ -77,15 +91,9 @@ hermes_routing_model_by_role:
   mid-coder:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
   pm:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
   sr-coder:
     model: claude-opus-5-5
     provider: claude-subscription-directsdk-experimental
@@ -95,9 +103,6 @@ hermes_routing_model_by_role:
   coder:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
   consultant:
     model: claude-fable-5-1
     provider: claude-subscription-directsdk-experimental
@@ -107,27 +112,15 @@ hermes_routing_model_by_role:
   researcher:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
   code-analyzer:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
   tester:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
   performance-benchmarker:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
   arch-system-design:
     model: claude-opus-5-5
     provider: claude-subscription-directsdk-experimental
@@ -189,25 +182,16 @@ hermes_routing_auxiliary_tasks:
   approval:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
     reasoning_effort: high
     timeout: 180
     extra_body: {}
   background_review:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
     reasoning_effort: high
   compression:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
     reasoning_effort: high
     timeout: 600
     extra_body: {}
@@ -235,34 +219,22 @@ hermes_routing_auxiliary_tasks:
   goal_judge:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
     reasoning_effort: high
   kanban_decomposer:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
     reasoning_effort: medium
     timeout: 180
     extra_body: {}
   mcp:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
     reasoning_effort: low
     timeout: 180
     extra_body: {}
   memory_extraction:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
     reasoning_effort: high
     timeout: 180
     auto_commit_session_end: false
@@ -280,9 +252,6 @@ hermes_routing_auxiliary_tasks:
   moa_aggregator:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
   moa_reference:
     model: gemma4:31b
     provider: ollama-cloud
@@ -324,9 +293,6 @@ hermes_routing_auxiliary_tasks:
   triage_specifier:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    fallback:
-      model: claude-sonnet-5-5
-      provider: claude-subscription-directsdk-experimental
     reasoning_effort: medium
     timeout: 120
     extra_body: {}
