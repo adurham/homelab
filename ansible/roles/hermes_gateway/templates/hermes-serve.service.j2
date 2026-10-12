@@ -63,6 +63,11 @@ ExecStart=/opt/hermes-agent/venv/bin/hermes -p dashboard dashboard --isolated --
 # dropped) are what actually gates inbound reachability here.
 Restart=on-failure
 RestartSec=5
+# 78 = fatal config error: park instead of crash-looping under
+# Restart=on-failure. Same exit-code contract as hermes-gateway.service
+# (gateway/restart.py) and hermes-gateway-dashboard.service. Added
+# 2026-10-12: `hermes update` flagged the missing directive on every run.
+RestartPreventExitStatus=78
 # Dashboard OIDC gate requires the same config.yaml (dashboard.oauth.self_hosted)
 # that this role renders — no extra env needed here beyond the shared .env.
 

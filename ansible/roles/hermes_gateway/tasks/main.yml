@@ -836,11 +836,36 @@
 # ourselves — keeps us aligned with the upstream PATH/working-dir/exec
 # logic, which evolves with the CLI. --run-as-user binds the unit to the
 # hermes account; --system writes to /etc/systemd/system.
-- name: Install Hermes Gateway Systemd Unit
+#
+# The generated definition EVOLVES with the code (2026-10-12: the unit
+# installed 2026-05-10 had drifted to miss RestartPreventExitStatus=78,
+# the ExecStop/ExecStopPost stop-marking hooks, and the managed-runtime
+# ExecStart/PATH — `hermes gateway status` flagged it "outdated" and
+# `hermes update` warned about it on every run). The old `creates:` guard
+# could only ever install the unit ONCE, so it never tracked those
+# changes. Probe the generator's own comparator as the guard instead:
+# install on a fresh host (no unit), refresh whenever the installed
+# definition is stale, converge (skip) once it matches. `systemd_unit_is_current`
+# reads HERMES_HOME from the installed unit itself (see its chokepoint
+# comment), so the probe is safe to run as root; verified generator output
+# is identical for root and the hermes user on hermes-gw-01.
+- name: Probe Installed Hermes Gateway Systemd Unit Definition
+  ansible.builtin.command:
+    chdir: /opt/hermes-agent
+    cmd: >-
+      /opt/hermes-agent/venv/bin/python -c "import sys; from hermes_cli.gateway
+      import systemd_unit_is_current; sys.exit(0 if systemd_unit_is_current(system=True) else 1)"
+  register: hermes_gateway_unit_current
+  changed_when: false
+  failed_when: false
+  # Read-only probe; must run for real under --check so the refresh guard
+  # below has a defined rc (ansible.builtin.command skips under check mode).
+  check_mode: false
+
+- name: Install/Refresh Hermes Gateway Systemd Unit
   ansible.builtin.command:
     cmd: /opt/hermes-agent/venv/bin/hermes gateway install --system --run-as-user hermes --force
-  args:
-    creates: /etc/systemd/system/hermes-gateway.service
+  when: hermes_gateway_unit_current.rc != 0
   notify: Restart Hermes Gateway
 
 # Systemd drop-in to override WorkingDirectory only. `hermes gateway
@@ -1127,19 +1152,35 @@
 # process a raw SIGTERM, which systemd treats as a clean external stop:
 # Restart=on-failure does NOT fire for that, so the service is left dead
 # with no local path back up. That exact scenario took hermes-serve.service
-# down until a human intervened (2026-09-08 incident).
+# down until a human intervened (2026-09-08 incident). This grant is also
+# what lets `hermes update`'s fleet-restart phase bounce all three units
+# itself instead of degrading to systemd's passive auto-restart.
 #
-# Scoped tightly to `restart` (not stop/start/enable/disable, not a
-# wildcard) on exactly these three units — hermes gets just enough rope to
-# self-heal its own processes, nothing broader.
+# SHAPES MATTER (found + fixed 2026-10-12): the original grant was only
+# `restart <unit>.service` (exact string, no flags) — but every modern
+# caller (update_cmd_fleet's restart path, `hermes gateway restart`,
+# serve-version recovery) invokes
+#     sudo -n systemctl --no-ask-password {reset-failed|start|restart} <unit>
+# on BARE unit names. sudoers matches argv exactly (per-argument globs), so
+# the old rules matched NOTHING the updater ran: every `hermes update`
+# printed "no root for an immediate restart", fell back to systemd's
+# Restart= respawn for gateway/dashboard, and could never restart
+# hermes-serve at all (no SIGUSR1 drain handler on that unit — the update
+# just told the user to do it by hand, leaving serve on old code).
+# Upstream documents this same grant shape in
+# website/docs/user-guide/messaging/index.md. Scope stays on the updater's
+# own three unit families (hermes-gateway* covers hermes-gateway +
+# hermes-gateway-dashboard; hermes-dashboard* is the code's third family;
+# extend here if new units are ever added).
 - name: Allow hermes user passwordless restart of its own services
   ansible.builtin.copy:
     content: |
       # Managed by Ansible — do not edit by hand.
       # Source: roles/hermes_gateway/tasks/main.yml
-      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl restart hermes-gateway.service
-      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl restart hermes-gateway-dashboard.service
-      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl restart hermes-serve.service
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-gateway*, /usr/bin/systemctl --no-ask-password start hermes-gateway*, /usr/bin/systemctl --no-ask-password restart hermes-gateway*
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-serve*, /usr/bin/systemctl --no-ask-password start hermes-serve*, /usr/bin/systemctl --no-ask-password restart hermes-serve*
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-dashboard*, /usr/bin/systemctl --no-ask-password start hermes-dashboard*, /usr/bin/systemctl --no-ask-password restart hermes-dashboard*
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl restart hermes-*
     dest: /etc/sudoers.d/hermes-service-restart
     owner: root
     group: root
