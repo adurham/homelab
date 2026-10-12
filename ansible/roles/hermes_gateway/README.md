@@ -190,6 +190,27 @@ investigation:**
    for interactive use). Upstream documents the same shape in
    `website/docs/user-guide/messaging/index.md`.
 
+   Also benign, seen on the same day: when the unit refresh runs as root
+   (this role does; the unit lives in `/etc`), the installer's own
+   dependency sub-step prints "source-update completion failed: refusing
+   to update /opt/hermes-agent: … owned by uid 999, not the current uid
+   0 … running with the previous dependencies" — the unit install still
+   completes (rc=0, "✓ System service installed and enabled"); the
+   dependency state is settled by the next hermes-run `hermes update`
+   (or, on fresh hosts, by the dedicated `Install Hermes Agent Editable`
+   pip task right after), not by this task.
+
+3. The updater's completion phase now also attempts `hermes gateway
+   migrate` (fold per-profile gateways into one multiplexed default
+   gateway) whenever it finds this box's two-gateway layout: on a
+   hermes-user run it prints the plan and REFUSES ("System gateway
+   migration requires root"). Keep it that way — applying it would
+   uninstall `hermes-gateway-dashboard.service`, flip
+   `gateway.multiplex_profiles: true` in the default config, and fight
+   this role's deliberate separate-unit topology on the next converge.
+   The STANDALONE-gateway banner and the per-run migration notice are
+   expected noise of the current upstream code.
+
 ## Model-routing config drift (MacBook vs this gateway)
 
 The MacBook's local `~/.hermes/config.yaml` and this gateway's
