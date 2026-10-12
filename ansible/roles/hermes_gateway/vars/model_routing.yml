@@ -184,6 +184,20 @@ hermes_routing_delegation_by_provider:
 # Flat per-task auxiliary pins (2026-10-08): one entry per task, no
 # provider-keyed blocks. Rendered under `auxiliary:` in both templates and
 # synced to the MacBook by scripts/hermes_config_sync.py (exact replace).
+#
+# --- 2026-10-12: background_review.reasoning_effort REMOVED ----------------------------
+# Adam directive ("fix that warning in hermes-agent code or in our config"). The code half
+# was fork commit f22d76c0b5 (corrected notice text); this is the config half. The ⚠
+# "reasoning_effort has no effect while the review runs on the main model" fires once per
+# session ONLY while this key is set. Dropping it is behavior-neutral: on the same-model
+# path the key never applied (the review fork inherits the conversation's reasoning config
+# for prompt-cache parity, upstream #30532), and on the routed path (Claude-main services)
+# it was equivalent — with no key the ollama-cloud profile sends no reasoning_effort and
+# the service runs thinking ON at the model default ("let the server default apply" in the
+# profile), and DSv4.1-Flash's default effort is 'high' (its card / chat template).
+# Restore this key only if BOTH change: (a) the review pin targets a model whose default
+# effort is lower than wanted, or (b) Hermes' handling of an absent effort changes.
+# ---------------------------------------------------------------------------------------
 hermes_routing_auxiliary_tasks:
   approval:
     model: deepseek-v4.1-flash
@@ -194,7 +208,6 @@ hermes_routing_auxiliary_tasks:
   background_review:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
-    reasoning_effort: high
   compression:
     model: deepseek-v4.1-flash
     provider: ollama-cloud
