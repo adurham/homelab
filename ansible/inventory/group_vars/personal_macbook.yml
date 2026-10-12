@@ -1,0 +1,23 @@
+---
+# Connection settings for the personal MacBook (group `personal_macbook` in
+# inventory/proxmox.yml). These must live HERE, not in the inventory file's
+# vars: block — inventory-file group vars rank below group_vars/all.yml,
+# which pins ansible_user: root (wrong for the Mac) and the Mac-only
+# /Users/adam.durham/.ssh/id_ansible key path (meaningless on hermes-gw-01).
+#
+# Transport: Tailscale's netcat. From hermes-gw-01 the plain forms are dead
+# ends — `ssh adam.durham@100.66.19.20` is refused (publickey) and
+# `tailscale ssh` needs a one-time host-key trust — while `tailscale nc %h
+# %p` works. Do NOT let this host inherit private_subnet's ProxyCommand:
+# that jump goes THROUGH the MacBook, and the MacBook cannot jump to itself.
+ansible_user: adam.durham
+ansible_ssh_common_args: '-o ProxyCommand="tailscale nc %h %p" -o StrictHostKeyChecking=accept-new'
+# The fleet's id_ansible key is authorized on the MacBook (verified
+# 2026-10-12). null = don't pin an identity file (mirrors the bwt_* groups):
+# the runtime ssh-agent — the hlxc wrappers load id_ansible into it — or an
+# explicit -e ansible_ssh_private_key_file override supplies it, bypassing
+# all.yml's Mac-only path.
+ansible_ssh_private_key_file: null
+# macOS interpreter discovery warns that a future python3 install could change
+# the meaning of the discovered path — pin the system CLT python.
+ansible_python_interpreter: /usr/bin/python3

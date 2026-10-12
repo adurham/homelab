@@ -239,10 +239,31 @@ all:
           # on that interface. ip_hermes_gateway (172.16.0.50) is still
           # used for templating LXC static-IP and iptables-self rules.
           ansible_host: hermes-gw-01.tail19c543.ts.net
+          # Reach it DIRECTLY over Tailscale. hermes_gateway is a child of
+          # private_subnet, whose group_vars ProxyCommand jumps through the
+          # personal MacBook — but this host peers directly on the tailnet, so
+          # the jump dies with `kex_exchange_identification` on any run that
+          # doesn't pre-override it (the same quirk gallery-01 was already
+          # fixed for). Override back to the fleet default; do not inherit
+          # the jump.
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
           vmid: 113
           target_node: pve02
       vars:
         ansible_user: root
+
+    # Adam's personal MacBook Pro M4 — a first-class Hermes TARGET (not a CT).
+    # Its hermes binary runs from the checkout at ~/.hermes/hermes-agent (the
+    # ~/.local/bin/hermes shim execs it); update_hermes_macbook.yml keeps that
+    # checkout current with the fork's main branch. Connection settings —
+    # Tailscale netcat transport and the fleet id_ansible key (authorized on
+    # the MacBook, verified 2026-10-12) — live in
+    # inventory/group_vars/personal_macbook.yml. This group must NOT inherit
+    # private_subnet's jump-through-the-MacBook ProxyCommand.
+    personal_macbook:
+      hosts:
+        personal-macbook:
+          ansible_host: adams-macbook-pro-m4-max.tail19c543.ts.net
 
     # The media gallery platform (content-agnostic encrypted media store +
     # viewer on GDrive). Hostname/paths keep the historical media-gallery-01

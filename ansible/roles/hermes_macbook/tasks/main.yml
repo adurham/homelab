@@ -1,0 +1,29 @@
+---
+# Keep the personal MacBook's Hermes install current with the fork's `main` —
+# the MacBook half of what hermes_gateway's "Clone Hermes Agent Repository"
+# task does for the gateway. No handlers: the MacBook runs hermes
+# interactively (no managed service on it), so a pulled checkout takes effect
+# for NEW hermes processes on their next launch.
+#
+# Deliberately NOT managed here: ~/.hermes/config.yaml on the MacBook is a
+# hand-maintained copy (routing syncs separately via
+# scripts/hermes_config_sync.py) — do not template it from this role, and do
+# not touch the ~/repos/hermes-agent dev clone.
+- name: Update the Hermes Agent checkout
+  ansible.builtin.git:
+    repo: https://github.com/adurham/hermes-agent.git
+    dest: "{{ hermes_macbook_checkout }}"
+    version: main
+    update: true
+    force: false
+  register: hermes_macbook_git
+
+- name: Read the resulting revision
+  ansible.builtin.command:
+    cmd: git -C {{ hermes_macbook_checkout }} rev-parse HEAD
+  changed_when: false
+  register: hermes_macbook_head
+
+- name: Report the resulting revision
+  ansible.builtin.debug:
+    msg: "MacBook hermes-agent checkout is at {{ hermes_macbook_head.stdout }}{{ ' (updated)' if hermes_macbook_git.changed else ' (already current)' }}"

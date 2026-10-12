@@ -1,0 +1,13 @@
+---
+# Keep the personal MacBook's Hermes install current with the fork's main
+# branch. The MacBook equivalent of deploy_hermes_gateway.yml's code task —
+# see roles/hermes_macbook/README.md for what is (and is not) managed.
+#
+# Run from hermes-gw-01 as usual (details in the role README):
+#   ansible-playbook update_hermes_macbook.yml
+#   ./scripts/hlxc-ansible-playbook.sh update_hermes_macbook.yml
+- name: Update Hermes on the personal MacBook
+  hosts: personal_macbook
+  gather_facts: false
+  roles:
+    - hermes_macbook

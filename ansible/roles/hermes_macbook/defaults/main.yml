@@ -1,0 +1,6 @@
+---
+# The MacBook's LIVE Hermes checkout — what the ~/.local/bin/hermes shim
+# execs (`exec ~/.hermes/hermes-agent/.hermes/bin/hermes "$@"`). The separate
+# ~/repos/hermes-agent clone is a dev workspace and is deliberately untouched
+# by this role.
+hermes_macbook_checkout: "/Users/{{ ansible_user }}/.hermes/hermes-agent"
