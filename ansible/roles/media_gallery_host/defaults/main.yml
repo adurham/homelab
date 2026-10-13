@@ -17,6 +17,20 @@ media_gallery_ct_cores: 2
 # media_gallery_thumbcache_tmpfs_size in the media_gallery role); the CT RAM must
 # exceed that tmpfs peak plus service overhead, hence 8 GiB. pve02 has ample
 # headroom (62 GiB total).
-media_gallery_ct_memory_mb: 8192
+#
+# RAM bumped 8192 -> 16384 (2026-10-13): 8 GiB proved under-provisioned in
+# practice. pve02's kernel log shows this CT's memcg OOM-killing processes at
+# the exact 8 GiB ceiling -- 10 kills on 2026-10-01, one on 2026-09-25, and
+# media-gallery-thumb.service on 2026-10-12 during an hourly refresh -- and
+# per-day MemAvailable sat below 20% on most days for weeks (swap 100% used).
+# Peak demand is the 6 GiB thumbcache tmpfs + resident service RSS (~3-4 GiB
+# with upload/manifest/spam-scan all running) + page cache for in-flight
+# originals, i.e. above 8 GiB -- consistent with this role's own rule above
+# ("the CT RAM must exceed that tmpfs peak plus service overhead"). `--memory`
+# is a cgroup CEILING, not a reservation, so raising it costs nothing at idle
+# (same reasoning as the 2026-09-11 dns/proxy/lb/tailscale-gw bumps). Swap
+# left at 1024: CT swap caps shared HOST swap and pve02's host swap already
+# runs near-full, so more swap would be the wrong lever (see dns_host comment).
+media_gallery_ct_memory_mb: 16384
 media_gallery_ct_swap_mb: 1024
 media_gallery_ct_rootfs_gb: 32

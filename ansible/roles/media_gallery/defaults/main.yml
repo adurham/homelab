@@ -78,7 +78,8 @@ media_gallery_serve_dir: /var/lib/media-gallery/serve
 # tmpfs size for that serve dir: manifest.json (~85MB today) + folders.json +
 # dedup.json (~26MB) + the SPA, with headroom for a transiently larger
 # manifest between publishes (temp file + rename). Keep well under CT RAM
-# (media_gallery_ct_memory_mb, 8 GiB) alongside the 6 GiB thumbcache.
+# (media_gallery_ct_memory_mb, 16 GiB since 2026-10-13) alongside the 6 GiB
+# thumbcache.
 media_gallery_serve_tmpfs_size: "512M"
 
 # Thumbnail cache tmpfs size (RAM-backed; decrypted thumbs + the transient
@@ -86,7 +87,8 @@ media_gallery_serve_tmpfs_size: "512M"
 # Must exceed the LARGEST original so big-video posters can be generated — at
 # 512M (the old value) any video >~485 MiB failed with "no space left on device".
 # Sized to comfortably hold the largest video (~3.4 GiB) plus working room. The
-# CT RAM (media_gallery_ct_memory_mb, 8 GiB) must stay above this peak.
+# CT RAM (media_gallery_ct_memory_mb, 16 GiB since 2026-10-13) must stay
+# above this peak.
 media_gallery_thumbcache_tmpfs_size: "6G"
 
 # Free-space safety margin (MiB) the thumb service keeps in the thumbcache tmpfs
