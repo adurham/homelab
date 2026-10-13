@@ -178,7 +178,15 @@ all:
           template: debian-12-standard_12.12-1_amd64.tar.zst
           net_private_ip: "{{ ip_frigate }}/24"
           vm_cores: 4
-          vm_memory: 8192
+          # 2026-10-13: RAM 8192->16384. frigate.capture grows to ~6-7 GiB
+          # (the known upstream embeddings/review-manager leak) and pve01's
+          # kernel log shows the LXC-level OOM killer killing it ~15 times in
+          # Sep-Oct -- each kill drops the NVR to its watchdog restart. 8 GiB
+          # left no headroom once Docker + system overhead is counted on top
+          # of capture's balloon; 16 GiB matches the frigate playbook's own
+          # "8GB or 16GB depending on load" line. Swap left at 512 (none of
+          # the OOMs came from swap exhaustion; CT swap caps shared host swap).
+          vm_memory: 16384
           vm_disk: 60
       vars:
         ansible_user: root

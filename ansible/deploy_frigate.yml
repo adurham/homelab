@@ -25,7 +25,10 @@
       # before it can see tags on anything inside. Without this, --tags
       # on the command line skips the whole include (and everything in
       # it) regardless of what's tagged inside frigate_host's tasks.
-      tags: [frigate_net0_fix]
+      # frigate_memory (2026-10-13): sizing-only path -- runs just the
+      # CT-exists check + owning-node lookup + the memory pct set, without
+      # re-rendering configs or touching the running NVR stack.
+      tags: [frigate_net0_fix, frigate_memory]
       vars:
         net_private_ip: "{{ hostvars['frigate-01']['net_private_ip'] }}"
         vmid: "{{ hostvars['frigate-01']['vmid'] }}"

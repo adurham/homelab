@@ -20,7 +20,7 @@
   register: ct_check
   failed_when: false
   changed_when: false
-  tags: [frigate_net0_fix]
+  tags: [frigate_net0_fix, frigate_memory]
 
 - name: Download Template
   ansible.builtin.command: pveam download local {{ template }}
@@ -61,7 +61,7 @@
   register: ct_owner
   changed_when: false
   when: ct_check.rc == 0
-  tags: [frigate_net0_fix]
+  tags: [frigate_net0_fix, frigate_memory]
 
 - name: Ensure CT uses internal DNS resolver
   ansible.builtin.shell: |
@@ -74,6 +74,41 @@
     executable: /bin/bash
   changed_when: false
   when: ct_check.rc == 0 and ct_owner.stdout | length > 0
+
+# Idempotent memory/cores sizing for an already-existing CT (the `pct create`
+# above only ever runs once). 2026-10-13: frigate.capture (~6-7 GiB, the known
+# upstream growth leak) kept hitting the 8 GiB LXC ceiling and getting
+# OOM-killed ~weekly; 8192 -> 16384 (see the inventory comment for the full
+# reasoning). pct set on memory is a hot cgroup resize -- no CT restart, no
+# Frigate interruption. Node-agnostic like the resolver tasks above (frigate
+# carries a non-strict pve01 affinity, but failover can still relocate it).
+# The [frigate_memory] tag exists so a sizing-only change can be applied with
+# `--tags frigate_memory` -- running the FULL role re-renders config.yml /
+# docker-compose.yml and runs `docker compose up -d`, which is unnecessary
+# risk when only the cgroup ceiling needs changing.
+- name: Read current CT memory config
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /nodes/{{ ct_owner.stdout }}/lxc/{{ vmid }}/config --output-format json |
+      python3 -c 'import json,sys; print(json.load(sys.stdin).get("memory",""))'
+  args:
+    executable: /bin/bash
+  register: frigate_mem_current
+  changed_when: false
+  when: ct_check.rc == 0 and ct_owner.stdout | length > 0
+  tags: [frigate_memory]
+
+- name: Ensure CT memory matches codified sizing
+  ansible.builtin.command: >
+    ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }}
+    pct set {{ vmid }} --memory {{ vm_memory }} --cores {{ vm_cores }}
+  register: frigate_mem_set
+  changed_when: frigate_mem_set.rc == 0
+  when:
+    - ct_check.rc == 0
+    - ct_owner.stdout | length > 0
+    - (frigate_mem_current.stdout | default('0')) | int != vm_memory | int
+  tags: [frigate_memory]
 
 # Push resolv.conf inside the running CT so the fix takes effect immediately
 # (pct set only writes it on next boot). Heredoc avoids the quote-mangling
