@@ -126,7 +126,7 @@
   when: ct_check.rc == 0 and ct_owner.stdout | length > 0
 
 # eth0 was DHCP (ip=dhcp in the pct create above) even though
-# frigate_lan_ip (192.168.86.85) is hardcoded as a fixed address in THREE
+# frigate_lan_ip (192.168.86.17) is hardcoded as a fixed address in THREE
 # separate consumers that all assume it never changes: HA's Frigate-API
 # reachability sensor (homeassistant/sensors.yaml), go2rtc's WebRTC
 # candidate binding (needed so Google's SDM API can reach it -- see
@@ -140,6 +140,14 @@
 # .45 instead of .85, and HA's "Frigate NVR API down" alert fired even
 # though `docker ps` showed frigate healthy the entire time. Converted to
 # a static IP here, same idempotent pvesh-hotplug pattern as CT 101.
+#
+# 2026-10-15: the static IP itself moved .85 -> .17. .85 sat INSIDE the
+# Nest router's DHCP pool (.20-.250) with no reservation, so the router
+# could hand .85 to a new device and collide -- the same silent-drift
+# failure class this block already exists to prevent. The `when` gates
+# below therefore fire on EITHER "was DHCP" OR "IP differs from
+# frigate_lan_ip", so a future IP move is a one-line defaults change
+# rather than a manual pvesh call.
 - name: Read current Frigate CT net0 config (cluster-API, node-agnostic)
   ansible.builtin.shell: |
     set -o pipefail
@@ -162,7 +170,7 @@
   when:
     - ct_check.rc == 0
     - ct_owner.stdout | length > 0
-    - "'ip=dhcp' in frigate_net0.stdout"
+    - "('ip=dhcp' in frigate_net0.stdout) or (frigate_lan_ip not in frigate_net0.stdout)"
   tags: [frigate_net0_fix]
 
 - name: Convert Frigate CT's net0 to a static LAN IP (was DHCP)
@@ -175,7 +183,7 @@
   when:
     - ct_check.rc == 0
     - ct_owner.stdout | length > 0
-    - "'ip=dhcp' in frigate_net0.stdout"
+    - "('ip=dhcp' in frigate_net0.stdout) or (frigate_lan_ip not in frigate_net0.stdout)"
   tags: [frigate_net0_fix]
 
 # The running dhclient inside the guest survives the veth swap (PVE
@@ -202,7 +210,7 @@
   when:
     - ct_check.rc == 0
     - ct_owner.stdout | length > 0
-    - "'ip=dhcp' in frigate_net0.stdout"
+    - "('ip=dhcp' in frigate_net0.stdout) or (frigate_lan_ip not in frigate_net0.stdout)"
   tags: [frigate_net0_fix]
 
 - name: Verify Frigate CT eth0 shows exactly the static IP (no leftover DHCP address)
@@ -215,7 +223,7 @@
   when:
     - ct_check.rc == 0
     - ct_owner.stdout | length > 0
-    - "'ip=dhcp' in frigate_net0.stdout"
+    - "('ip=dhcp' in frigate_net0.stdout) or (frigate_lan_ip not in frigate_net0.stdout)"
   tags: [frigate_net0_fix]
 
 # Only start right after creation. After that, HA owns the running-state of

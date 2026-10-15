@@ -67,7 +67,7 @@ MQTT_PORT = 1883
 MQTT_USER = "frigate"
 MQTT_TOPIC = "frigate/events"
 
-GO2RTC_FRAME = "http://192.168.86.85:1984/api/frame.jpeg?src={cam}"
+GO2RTC_FRAME = "http://192.168.86.17:1984/api/frame.jpeg?src={cam}"
 VLM_URL = "http://192.168.86.201:8090/v1/chat/completions"
 VLM_MODEL = "mlx-community/Qwen2.5-VL-7B-Instruct-4bit"
 

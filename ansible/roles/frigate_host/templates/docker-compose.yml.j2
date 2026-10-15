@@ -2,7 +2,7 @@
 # Frigate NVR — single container with a custom go2rtc binary, host networking.
 #
 # Host networking is REQUIRED for Nest WebRTC: go2rtc's WebRTC UDP listener
-# must bind to the LXC's LAN IP (192.168.86.85) so Google's SDM API can send
+# must bind to the LXC's LAN IP (192.168.86.17) so Google's SDM API can send
 # UDP packets back. Docker bridge networking binds to 172.18.0.x which is
 # unreachable from the internet — the WebRTC handshake completes but no video
 # data flows ("non-existing PPS" / "decode_slice_header error").
@@ -18,7 +18,7 @@
 # re-arms the timer in a loop (kept alive indefinitely). Binary lives at
 # {{ frigate_base_dir }}/go2rtc/go2rtc_patched.
 #
-# Ports are accessed directly on the LXC host IP (192.168.86.85):
+# Ports are accessed directly on the LXC host IP (192.168.86.17):
 #   - 5000: Frigate unauthenticated UI/API
 #   - 8971: Frigate authenticated UI
 #   - 1984: go2rtc API (frame.jpeg for pet-accident detector)

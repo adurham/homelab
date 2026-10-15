@@ -172,7 +172,7 @@ all:
     frigate_server:
       hosts:
         frigate-01:
-          ansible_host: 192.168.86.85
+          ansible_host: 192.168.86.17
           vmid: 170
           target_node: pve01
           template: debian-12-standard_12.12-1_amd64.tar.zst

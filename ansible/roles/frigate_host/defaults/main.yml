@@ -30,7 +30,7 @@ net_private_ip: "{{ ip_frigate }}/24"
 frigate_image: "ghcr.io/blakeblackshear/frigate:stable"
 # LAN IP of the LXC host — used for go2rtc WebRTC candidates so Google's SDM
 # API can send UDP packets back (Docker bridge IP is unreachable externally).
-frigate_lan_ip: "192.168.86.85"
+frigate_lan_ip: "192.168.86.17"
 # 7 cameras at 1080p need more shared memory than the 256mb default — Frigate
 # warns "/dev/shm (256 MB) should be increased to at least 498 MB". 512mb gives
 # headroom and avoids shm-pressure frame drops.

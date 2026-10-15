@@ -1111,7 +1111,7 @@ groups:
         for: 5m
         annotations:
           summary: "Frigate NVR API is unreachable"
-          description: "Frigate's own API (192.168.86.85:5000) has not responded for 5+ minutes -- Nest camera feeds are likely down. Check CT 170 (frigate-01) on pve01: `pct exec 170 -- docker ps -a`, and `systemctl status containerd docker` inside the CT. See the 2026-07-28 incident notes in the homelab repo (automations/frigate_watchdog.yaml header) for the containerd-corruption failure mode this already hit once."
+          description: "Frigate's own API (192.168.86.17:5000) has not responded for 5+ minutes -- Nest camera feeds are likely down. Check CT 170 (frigate-01) on pve01: `pct exec 170 -- docker ps -a`, and `systemctl status containerd docker` inside the CT. See the 2026-07-28 incident notes in the homelab repo (automations/frigate_watchdog.yaml header) for the containerd-corruption failure mode this already hit once."
         labels:
           severity: critical
         isPaused: false

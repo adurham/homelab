@@ -34,11 +34,11 @@ Current static allocations in the safe-outside-DHCP range:
 | `192.168.86.12` | `pve02` | |
 | `192.168.86.13` | `pve03` | |
 | `192.168.86.16` | `tailscale-gw` | eth0/vmbr0 -- was DHCP until 2026-09-10 (see Service CTs table below for why) |
-| `192.168.86.85` | `frigate-01` | eth0/vmbr0 -- was DHCP until 2026-09-18 (lease drifted to .45 after a cluster-wide reboot, breaking every hardcoded consumer of this IP; same failure class as tailscale-gw above). NOTE: this address is INSIDE the Nest router's DHCP pool (.20-.250), unlike the other static entries here -- accepted precedent already exists (lb-01 at .86, immediately adjacent) but if .85 ever gets DHCP-assigned to another device first, this will conflict. Consider migrating to a reservation or an out-of-pool IP if that ever happens. |
+| `192.168.86.17` | `frigate-01` | eth0/vmbr0 -- was DHCP until 2026-09-18 (lease drifted to .45 after a cluster-wide reboot, breaking every hardcoded consumer of this IP; same failure class as tailscale-gw above). Moved .85 -> .17 on 2026-10-15: .85 sat INSIDE the Nest router's DHCP pool (.20-.250) with no reservation, so the router could hand it to a new device and collide. .17 is out-of-pool and free (verified: no ping/HTTP/ARP). NOTE: `netgear-switch-01` (.51) and `lb-01` (.86) are still in-pool -- accepted precedent, but the same migration applies if either ever collides. |
 
 `.14`/`.15` also showed as live in the same nmap sweep — identity not
-confirmed, left alone. `.17`-`.19` still free if another static
-allocation is needed.
+confirmed, left alone. `.18`-`.19` still free if another static
+allocation is needed (`.17` taken by frigate-01 as of 2026-10-15).
 
 ## Physical switch chain (LAN, non-Proxmox)
 
@@ -1075,7 +1075,7 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | `media-ingest-01` | 116 | `172.16.0.47`   | -                  | Media collector (outbound-only)             |
 | `media-ingest-02` | 117 | `172.16.0.48`   | -                  | Secondary-source gallery collector (outbound-only) |
 | `adblock-proxy-01` | 118 | `172.16.0.49`  | DHCP (`192.168.86.x`) | mitmproxy explicit HTTPS proxy for personal-device Discord ad-stripping (Tailscale-only ingress, joins tailnet directly like hermes-gw-01) |
-| `frigate-01`    | 170  | `172.16.0.45`    | `192.168.86.85` (static) | Frigate NVR (Docker-in-LXC); eth0 on vmbr0 for RTSP/HA + eth1 on `private` |
+| `frigate-01`    | 170  | `172.16.0.45`    | `192.168.86.17` (static) | Frigate NVR (Docker-in-LXC); eth0 on vmbr0 for RTSP/HA + eth1 on `private` |
 
 `172.16.0.40` was previously assigned to **both** `mail-01` and `vm-01` (ARP race). Resolved 2026-05-01 — moved `vm-01` to `.42`. See commit `12bb4c2`.
 

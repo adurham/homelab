@@ -20,7 +20,7 @@
 - alias: "Infrastructure: Frigate NVR Watchdog"
   id: "infrastructure_frigate_watchdog"
   description: >-
-    Track Frigate's own API (192.168.86.85:5000) reachability with a
+    Track Frigate's own API (192.168.86.17:5000) reachability with a
     local persistent_notification. Push alerting for outages 5+ minutes
     is in Grafana (uid: frigate_api_down).
   mode: single

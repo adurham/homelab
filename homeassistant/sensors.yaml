@@ -43,7 +43,7 @@
 - platform: rest
   name: "Frigate API Reachable"
   unique_id: frigate_api_reachable
-  resource: http://192.168.86.85:5000/api/version
+  resource: http://192.168.86.17:5000/api/version
   scan_interval: 60
   timeout: 10
   value_template: "{{ value }}"

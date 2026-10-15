@@ -88,11 +88,11 @@
         message: "The mail truck just stopped at the mailbox."
         data:
           # Frigate is on the private 172.16.0.x subnet (not reachable from a
-          # phone off-LAN / off-Tailscale). Use frigate_lan_ip (192.168.86.85,
+          # phone off-LAN / off-Tailscale). Use frigate_lan_ip (192.168.86.17,
           # roles/frigate_host/defaults/main.yml) which is routable from the
           # home LAN a phone would normally be on. If the phone is OFF the
           # home wifi this image link will simply fail to load in the push
           # notification -- acceptable for a first cut, no VPN dependency.
-          image: "{{ 'http://192.168.86.85:5000/api/events/' ~ trigger.payload_json['after']['id'] ~ '/snapshot.jpg' }}"
+          image: "{{ 'http://192.168.86.17:5000/api/events/' ~ trigger.payload_json['after']['id'] ~ '/snapshot.jpg' }}"
           push:
             sound: default
