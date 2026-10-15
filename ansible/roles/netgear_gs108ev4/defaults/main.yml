@@ -1,6 +1,6 @@
 ---
 # NETGEAR GS108Ev4 switch config is managed MANUALLY via the switch's web
-# UI (http://192.168.86.62) -- NOT by this Ansible role. See
+# UI (http://192.168.86.51) -- NOT by this Ansible role. See
 # roles/netgear_gs108ev4/tasks/main.yml and docs/ipam.md "PVE Sync
 # network" for the current live config and why automation was
 # deliberately not pursued (password intentionally kept out of this
@@ -11,4 +11,4 @@
 # never runs by default) has something to point at if it's ever revived.
 # netgear_gs108ev4_password is deliberately NOT sourced from the vault --
 # pass it via -e on the CLI if you ever actually run the discover tag.
-netgear_gs108ev4_current_ip: "192.168.86.62"
+netgear_gs108ev4_current_ip: "192.168.86.51"

@@ -64,7 +64,7 @@
       - "Switch config (VLAN 20, port-based QoS, storm control, IGMP snooping)"
       - "is intentionally NOT managed by Ansible. See docs/ipam.md and this"
       - "role's tasks/main.yml header comment for the current state + why."
-      - "Login: http://192.168.86.62, password in 1Password ('NETGEAR GS108Ev4')."
+      - "Login: http://192.168.86.51, password in 1Password ('NETGEAR GS108Ev4')."
 
 # --- Historical discovery tooling, kept for reference only. NOT part of
 # the normal task flow (tagged 'never' so it only runs if explicitly
@@ -77,7 +77,7 @@
   ansible.builtin.command:
     cmd: >
       python3 {{ role_path }}/files/gs108ev4_client.py
-      --host {{ netgear_gs108ev4_current_ip | default('192.168.86.62') }}
+      --host {{ netgear_gs108ev4_current_ip | default('192.168.86.51') }}
       --password {{ netgear_gs108ev4_password }}
       --discover
   delegate_to: localhost

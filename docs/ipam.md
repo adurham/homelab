@@ -787,7 +787,7 @@ loss, ~2 ms to gateway) and at the BGW (0 Tx/Rx errors, only port 2
 live). Re-enable from DIAGNOSTICS → LOOP PREVENTION only if loop reports
 recur.
 
-**Status (2026-08-04):** switch reachable at `192.168.86.62` via a DHCP
+**Status (2026-08-04, IP corrected 2026-10-15):** switch reachable at `192.168.86.51` via a DHCP
 reservation (added directly in AdGuard, not yet mirrored into the Ansible
 role). Port mapping confirmed via live link-toggle tests (bring interface
 down/up on each host, watch for the corresponding port's traffic counters
