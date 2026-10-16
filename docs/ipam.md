@@ -1363,9 +1363,14 @@ was handling one of those crashing pythons (the 09:51 one faulted at
 crashes interpreters by design (test_run_tests_parallel.py generates a probe
 doing `os.kill(os.getpid(), signal.SIGSEGV)`; verified that signal-delivered
 SIGSEGV produces NO kernel dump, so the 8 dumps above are genuinely real
-faults). Prime suspect for the GC corruption: the custom PM python build
-(mimalloc/BOLT/tail-call are the nonstandard pieces). Package + fs integrity
-verified clean (`dpkg -V`), no MCE/thermal/disk events. The stuck Oct-9
+faults). PRIME SUSPECTS ARE CO-EQUAL (reference-model review): the custom PM
+python build (mimalloc/BOLT/tail-call are the nonstandard pieces; the PM
+toolchain python was first installed 2026-10-09 09:31 -- no clean-run history)
+vs marginal RAM/IMC instability flushed out by first heavy load (non-ECC
+DDR5: no MCE reporting exists, so "no MCEs" says nothing about RAM). No
+UMIP/insn-decoder fix identifiable in the 7.0.0-38 changelog, so the
+kernel-side bug's fix status is unconfirmed. Package + fs integrity
+verified clean (`dpkg -V`), no thermal/disk events. The stuck Oct-9
 apport crash file (from the deliberate-crash test) was removed, which also
 cleared the box's "degraded" systemd state.
 
@@ -1379,8 +1384,9 @@ Auto-recovery hardening deployed 2026-10-16 (all verified live):
   reboots, with an efi-pstore entry preserving the full trace.
 - kdump RESOLVED same day: the crashkernel reservation had actually
   succeeded (1 GiB at 0x58000000) -- the tool was just shipped with
-  USE_KDUMP=0; set to 1 + `kdump-config load` -> "ready to kdump". A future
-  panic now ALSO yields a full vmcore in /var/crash on top of the pstore
+  USE_KDUMP=0; set to 1 + `kdump-config load` -> "ready to kdump" (UNTESTED -- a deliberate crash-test to validate the
+  chain is pending owner go-ahead; until validated it is a small risk to
+  auto-recovery). A future panic now ALSO yields a full vmcore in /var/crash on top of the pstore
   trace.
 - smartmontools + nvme-cli installed. SMART: 0 media/data-integrity errors,
   100% spare, 1% used, 25 C; 53 unsafe shutdowns lifetime (Samsung 970 EVO
@@ -1390,3 +1396,22 @@ Auto-recovery hardening deployed 2026-10-16 (all verified live):
   one-shot systemd timer for 2026-10-17 02:00 CDT (self-disables after
   running; log -> /var/log/ramtest-*.log). Headless equivalent of a
   memtest86 pass; result pending.
+Extended to 8 h (02:00-10:00) after the reference-model review.
+
+Round-2 hardening same day (post reference-model review, 2026-10-16):
+- The reachability probe now uses the `ssh_banner` blackbox module (expects
+  the SSH version string) instead of a bare TCP connect -- a zombie PASSES
+  tcp_connect (the kernel completes the handshake), so the original probe
+  would have missed exactly this failure. The rule's NoData/Error states
+  now alert too (a dead probe cannot be silent).
+- New rules: `amd_workstation_rebooted` (boot-time change detector, so even
+  WATCHDOG SELF-HEAL REBOOTS page) and `amd_workstation_prev_boot_oops`
+  (kernel oops/segfault lines in the previous boot, fed by a boot oneshot
+  writing a node_exporter textfile metric). `host_down` now excludes
+  amd-workstation (dedicated rules instead). node_exporter installed on the
+  box + pull-scraped from vm-01 by tailnet IP -- first full metric coverage
+  for this host.
+- Watchdog: hardware FCH TCO (`sp5100_tco`, binds on this board) preferred
+  from next boot (`modules-load.d/10-sp5100_tco.conf`); softdog kept as
+  fallback. `crash_kexec_post_notifiers` added to GRUB so the kdump handoff
+  still runs kmsg_dump -> efi-pstore. `kernel.softlockup_panic=1` added.
