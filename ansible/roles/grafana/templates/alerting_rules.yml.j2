@@ -545,7 +545,9 @@ groups:
                 type: prometheus
                 uid: victoriametrics
               editorMode: code
-              expr: amd_workstation_prev_boot_oops
+              # Fires only within an hour of a boot that found previous-boot
+              # oops lines -- stale values never re-fire, and it self-resolves.
+              expr: (amd_workstation_prev_boot_oops > 0) and (time() - amd_workstation_boot_time_seconds < 3600)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -581,6 +583,60 @@ groups:
         annotations:
           summary: "amd-workstation's previous boot logged kernel oops/segfault lines"
           description: "Counts 'BUG: unable to handle / Oops: / segfault at' lines in the PREVIOUS boot's kernel log (persists until the next reboot). Any value >0 is the Oct-2026 zombie-incident class -- pull `journalctl -b -1 -k` on the box, check /var/lib/systemd/pstore and /var/crash."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: textfile_scrape_error
+        title: node_exporter textfile scrape failing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: node_textfile_scrape_error
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        annotations:
+          summary: "node_exporter textfile collector failing on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "A node_exporter textfile scrape is erroring -- metrics fed by .prom files (e.g. the amd-workstation boot-oops/boot-time signals) are stale or missing. Fix: check the collector's directory + the writing oneshot on that host."
         labels:
           severity: warning
         isPaused: false
