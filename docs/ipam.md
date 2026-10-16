@@ -1377,6 +1377,16 @@ Auto-recovery hardening deployed 2026-10-16 (all verified live):
 - `/etc/sysctl.d/90-lockup-recovery.conf`: `kernel.panic_on_oops=1`,
   `kernel.panic=20`, `kernel.hardlockup_panic=1` -- the next oops panics and
   reboots, with an efi-pstore entry preserving the full trace.
-- kdump is installed but reports "Not ready to kdump" (crashkernel
-  reservation did not take) -- fix pending if we want full vmcores.
-- smartmontools is NOT installed on the box (no SMART visibility yet).
+- kdump RESOLVED same day: the crashkernel reservation had actually
+  succeeded (1 GiB at 0x58000000) -- the tool was just shipped with
+  USE_KDUMP=0; set to 1 + `kdump-config load` -> "ready to kdump". A future
+  panic now ALSO yields a full vmcore in /var/crash on top of the pstore
+  trace.
+- smartmontools + nvme-cli installed. SMART: 0 media/data-integrity errors,
+  100% spare, 1% used, 25 C; 53 unsafe shutdowns lifetime (Samsung 970 EVO
+  500GB). The NVMe error log holds only benign "Invalid Field in Command"
+  entries (userspace tools polling unsupported log pages) -- no I/O fault.
+- RAM burn-in (stressapptest, 2 h / ~52 GB, memory+CPU only) scheduled as a
+  one-shot systemd timer for 2026-10-17 02:00 CDT (self-disables after
+  running; log -> /var/log/ramtest-*.log). Headless equivalent of a
+  memtest86 pass; result pending.
