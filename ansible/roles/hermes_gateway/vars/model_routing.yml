@@ -215,7 +215,10 @@ hermes_routing_auxiliary_tasks:
     timeout: 600
     extra_body: {}
   consult:
-    model: claude-opus-5-5
+    # 2026-10-16 (user-directed): consult stays on Fable per the standing
+    # rule (frontier Claude, never cost-swapped); it had drifted to
+    # opus-5-5 in the Oct-8 opus-tiering wave.
+    model: claude-fable-5-1
     provider: claude-subscription-directsdk-experimental
     reasoning_effort: max
     timeout: 300
