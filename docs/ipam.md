@@ -1415,3 +1415,26 @@ Round-2 hardening same day (post reference-model review, 2026-10-16):
   from next boot (`modules-load.d/10-sp5100_tco.conf`); softdog kept as
   fallback. `crash_kexec_post_notifiers` added to GRUB so the kdump handoff
   still runs kmsg_dump -> efi-pstore. `kernel.softlockup_panic=1` added.
+
+Round-3 (same day, after a second review served on claude-fable-5-1):
+- **Userland deadman deployed** (`/usr/local/bin/userland-deadman.sh` + 2-min
+  timer): checks local sshd banner + systemd responsive + fork/exec; 3
+  consecutive strikes -> `sysrq-c` so kdump captures a vmcore of the zombie
+  state. Covers the class the systemd watchdog does NOT: during the 10-09
+  zombie PID 1 was still being pinged while userland was dead. Inhibited
+  during scheduled RAM burn-ins (`/run/ramtest-inhibit`).
+- **TCO watchdog idea DROPPED** (`10-sp5100_tco.conf` removed): the hardware
+  TCO timer survives into the kdump crash kernel where nothing kicks it ->
+  it would reset the box mid-dump, truncating the vmcore. softdog is the
+  kexec-compatible choice; panic_on_oops + hardlockup_panic cover the
+  kernel-side classes.
+- `prev_boot_oops` alert now fires only within 1 h of a boot that found oops
+  lines (no stale re-fires); added a textfile-scrape-error alert.
+- **Crash-test prechecks done**: `kexec_crash_loaded=1`, state "ready to
+  kdump", /var/crash space fine. objdump of `visit_decref` shows ordinary
+  encodings (no exotic build-specific decoder trap). The 8 crash cores are
+  gone (only kdump's kexec_cmd remains) -- the single-bit-flip vs
+  fill-pattern discriminator is no longer runnable.
+- **PENDING OWNER GO**: deliberate `sysrq-c` crash test to validate
+  panic -> kdump/pstore -> reboot -> alerts end-to-end (box down ~2-5 min;
+  worst case needs a power-button press).
