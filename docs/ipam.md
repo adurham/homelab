@@ -1438,3 +1438,22 @@ Round-3 (same day, after a second review served on claude-fable-5-1):
 - **PENDING OWNER GO**: deliberate `sysrq-c` crash test to validate
   panic -> kdump/pstore -> reboot -> alerts end-to-end (box down ~2-5 min;
   worst case needs a power-button press).
+
+Round-4 (2026-10-16 evening): crash test VALIDATED + the original oops traces recovered.
+- Deliberate `sysrq-c` test PASSED end-to-end: panic 13:23:12 -> kexec crash
+  kernel 13:23:38 -> makedumpfile done 13:23:50 -> back online 13:24:17
+  (~65 s total downtime). Artifacts: /var/crash/202610161323/
+  (`dmesg.202610161323` ~116 KB, `dump.202610161323` vmcore ~356 MB); the
+  crash-kernel's own log persisted to the journal (boot -1 = a 12-second
+  kdump boot); kdump re-armed automatically after. The "amd-workstation
+  rebooted" alert fired (caveat: it also fires once when the metric series
+  first appears -- benign changes() artifact).
+- The ORIGINAL Oct-9 oops traces were recovered from **efi-pstore** (archived
+  by systemd-pstore at the 11:41 boot): `Oops#1` = kernel decoder fault in
+  `fixup_umip_exception` (insn_get_prefixes+0x198; not tainted; userspace #GP
+  from a dying python). `Oops#2` (fatal) = **`jbd2/dm-0-8`** (the ext4 journal
+  thread) wild-pointer read in `folio_mapping+0x9` at 0xfffff0a3bd888f33,
+  kernel TAINTED (G D) from Oops#1. Two DIFFERENT subsystems faulting on wild
+  pointers + the python GC crashes = systemic-corruption signature =>
+  RAM/IMC instability is now the PRIMARY suspect (custom python build
+  secondary). The 8-hour RAM burn-in tonight is the key discriminator.
