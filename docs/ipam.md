@@ -1347,3 +1347,36 @@ Durability added 2026-10-16: blackbox probe `blackbox_amd_workstation`
 capture the full oops (serial/pstore) and consider a memtest86 pass; the
 faulting code path is kernel-side, but a hardware cause is not fully
 excluded.
+
+### Deep-dive follow-up (2026-10-16, post-reboot forensics)
+
+Symbol-resolving the fault IPs against the suite's PM-built python (3.14.7,
+Clang/BOLT build with `--with-mimalloc`, `--with-tail-call-interp`) shows
+EVERY Oct-9 interpreter crash landed inside CPython's cyclic GC
+(`visit_decref` x3, `dict_traverse`, `meth_traverse`, `visit_reachable`,
+`tuple_dealloc`, `gc_collect_main`) -- the code that walks the object graph.
+That is the signature of a corrupted/dangling object in the process heap,
+not of random hardware faults. Both kernel oopses happened while the kernel
+was handling one of those crashing pythons (the 09:51 one faulted at
+`visit_decref+4` and went through the #GP/UMIP path; the 20:56:07 one landed
+2 s after three GC crashes and was fatal). NOTE: the suite ALSO deliberately
+crashes interpreters by design (test_run_tests_parallel.py generates a probe
+doing `os.kill(os.getpid(), signal.SIGSEGV)`; verified that signal-delivered
+SIGSEGV produces NO kernel dump, so the 8 dumps above are genuinely real
+faults). Prime suspect for the GC corruption: the custom PM python build
+(mimalloc/BOLT/tail-call are the nonstandard pieces). Package + fs integrity
+verified clean (`dpkg -V`), no MCE/thermal/disk events. The stuck Oct-9
+apport crash file (from the deliberate-crash test) was removed, which also
+cleared the box's "degraded" systemd state.
+
+Auto-recovery hardening deployed 2026-10-16 (all verified live):
+- softdog made persistent (`/etc/modules-load.d/softdog.conf`) and systemd
+  now runs `RuntimeWatchdogSec=60` (`/etc/systemd/system.conf.d/watchdog.conf`,
+  applied via `daemon-reexec`; `wdctl` confirms /dev/watchdog0 armed, 60 s).
+  A userland stall reboots the box instead of rotting for days.
+- `/etc/sysctl.d/90-lockup-recovery.conf`: `kernel.panic_on_oops=1`,
+  `kernel.panic=20`, `kernel.hardlockup_panic=1` -- the next oops panics and
+  reboots, with an efi-pstore entry preserving the full trace.
+- kdump is installed but reports "Not ready to kdump" (crashkernel
+  reservation did not take) -- fix pending if we want full vmcores.
+- smartmontools is NOT installed on the box (no SMART visibility yet).
