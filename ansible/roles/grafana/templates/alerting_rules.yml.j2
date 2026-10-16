@@ -420,6 +420,60 @@ groups:
           severity: critical
         isPaused: false
 
+      - uid: amd_workstation_unreachable
+        title: amd-workstation unreachable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: probe_success{job="blackbox_amd_workstation"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "amd-workstation is unreachable on the tailnet"
+          description: "blackbox TCP probe to {{ '{{' }} $labels.target {{ '}}' }} (SSH :22, tailnet) has failed for 5 minutes. Known failure mode: the box's kernel keeps answering locally while userland freezes (tailscaled/sshd dead, no IPv4) -- it requires a power-cycle (headless; hold power ~15 s, then press once), then pull `journalctl -b -1` on the box for kernel-oops signatures. See docs/ipam.md."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: https_endpoint_unreachable
         title: HTTPS endpoint unreachable
         condition: C

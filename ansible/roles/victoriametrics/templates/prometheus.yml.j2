@@ -219,6 +219,30 @@ scrape_configs:
       - target_label: __address__
         replacement: 127.0.0.1:9115
 
+  # TCP probe to SSH (:22) on the amd-workstation dev box, addressed by its
+  # STABLE tailnet IP (its LAN IP is DHCP; the tailnet address is its stable
+  # identity). Losing tailnet reachability IS the failure class that matters:
+  # the box's known "zombie" mode (2026-10-09 kernel page-fault oopses) freezes
+  # userland -- tailscaled/sshd stop responding while the kernel keeps acks
+  # locally -- and a 6-day silent outage went unnoticed because nothing probed
+  # it. vm-01 reaches 100.x targets via the tailscale-gw egress masquerade
+  # (same path the exo scrape uses).
+  - job_name: 'blackbox_amd_workstation'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets: ['100.66.90.53:22']
+        labels:
+          instance: 'amd-workstation'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
   # HTTPS probes to public-facing services. probe_ssl_earliest_cert_expiry
   # is exposed automatically; we alert when it gets close to now().
   # Targets come from blackbox_https_targets (roles/victoriametrics/defaults).

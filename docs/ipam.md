@@ -1319,3 +1319,31 @@ happen silently. The current pattern keeps them in lockstep.
    `private_subnet` parent group in `proxmox.yml` (directly or via a
    child group) so it inherits the work-MacBook ProxyCommand.
 6. Update this file with the new allocation.
+
+## INCIDENT 2026-10-09/16: amd-workstation "zombie" (6 days dark, powered on)
+
+The dev box vanished from the tailnet 2026-10-10 02:49:44 CDT and stayed
+invisible for 6 days **while powered on the whole time**. Its last boot's
+journal (Oct 1 19:07 -> Oct 9 20:56:07) shows two in-kernel page-fault oopses
+on 2026-10-09: 09:51:21 (RIP `insn_get_prefixes+0x198`, reached via
+`fixup_umip_exception` -- the kernel faulted while emulating a UMIP-trapped
+userspace instruction for a python process) and 20:56:07 (the fatal one;
+journald's last line IS that BUG and its trace was never flushed. Same
+window: 12,078 `im-config` process spawns from the day's test-suite churn +
+three python3.14 segfaults). Userland then decayed: tailscaled died 02:49,
+DHCP/mDNS stopped, sshd accepted TCP but almost never spawned a child -- no
+IPv4 anywhere, kernel-only life signs (TCP SYN-ACKs + IPv6 ND stayed up).
+No power event (UPS stayed OL throughout), no disk/thermal/MCE errors.
+
+Found via `ping6 ff02::1` + ssh-keyscan host-key match on IPv6 link-local
+(fe80::5a47:caff:fe78:cff7 = MAC 58:47:ca:78:cf:f7). Fixed by owner
+power-cycle 2026-10-16 11:41:27 (headless: hold power ~15 s, press once);
+came back on kernel 7.0.0-38 (the crashing boot ran -34), all services +
+RDP :3389 clean, no failed units.
+
+Durability added 2026-10-16: blackbox probe `blackbox_amd_workstation`
+(vm-01 -> 100.66.90.53:22 TCP) + Grafana rule `amd_workstation_unreachable`
+(severity warning, 5m for) -- verified live (probe_success=1). If it recurs:
+capture the full oops (serial/pstore) and consider a memtest86 pass; the
+faulting code path is kernel-side, but a hardware cause is not fully
+excluded.
