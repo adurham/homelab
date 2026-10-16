@@ -91,4 +91,11 @@ windows_exporter_scrape_targets: []
 #   node_exporter_scrape_targets:
 #     - name: <vm-name>
 #       address: <vm-ip>:9100
-node_exporter_scrape_targets: []
+# amd-workstation (dev box) pull-scraped by stable tailnet IP: it doesn't
+# run Alloy, and its node_exporter (installed 2026-10-16) feeds reboot
+# detection (boot_time changes) + the previous-boot oops textfile metric
+# that the 2026-10-09 zombie incident showed we needed. vm-01 reaches 100.x
+# via the tailscale-gw egress masquerade (same path as the exo scrape).
+node_exporter_scrape_targets:
+  - name: amd-workstation
+    address: 100.66.90.53:9100

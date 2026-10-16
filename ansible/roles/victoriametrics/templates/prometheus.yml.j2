@@ -230,7 +230,11 @@ scrape_configs:
   - job_name: 'blackbox_amd_workstation'
     metrics_path: /probe
     params:
-      module: [tcp_connect]
+      # ssh_banner, NOT tcp_connect: a zombie host's kernel completes the TCP
+      # handshake while its sshd never answers, so a bare connect probe would
+      # report success on exactly the failure we care about. This module
+      # requires the actual SSH version banner.
+      module: [ssh_banner]
     static_configs:
       - targets: ['100.66.90.53:22']
         labels:

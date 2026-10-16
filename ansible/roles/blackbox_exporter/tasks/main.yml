@@ -88,6 +88,18 @@
                 regexp: '(?i)deny'
               - header: Content-Security-Policy
                 regexp: "frame-ancestors[^;]*'none'"
+
+        # SSH banner check: TCP connect + require the server's SSH version
+        # string. A kernel-alive/userland-dead "zombie" host completes the
+        # TCP handshake (kernel does that) but never sends a banner -- it
+        # PASSES a bare tcp_connect probe yet fails this one. Added
+        # 2026-10-16 for the amd-workstation probe after the zombie incident.
+        ssh_banner:
+          prober: tcp
+          timeout: 5s
+          tcp:
+            query_response:
+              - expect: "^SSH-2.0-"
     owner: root
     group: blackbox_exporter
     mode: '0640'
