@@ -1694,6 +1694,24 @@ Round-13 (2026-10-17 midday): baseline repro CONFIRMED + first live self-recover
   On; Power Down Enable = Disabled; Memory Context Restore = Disabled; Secure Boot choice),
   then the SO-DIMM bisection.
 
+Round-14 (2026-10-17 ~11:35): BIOS session done + verified; watchdog made boot-persistent.
+
+- Owner BIOS session (monitor attached): "Ac Loss Control" = Always On; Secure Boot =
+  Disabled. Verified from Linux, byte-level: AmdSetupRPL @0x61 = 1 (Always On) ✓;
+  mokutil --sb-state = "SecureBoot disabled" ✓. NOTE: this firmware's UI HIDES "UMC Common
+  Options" (owner walked the CBS menu: CPU/CBIO/FCH/SMU only) — the two DDR toggles
+  (Power Down Enable, Memory Context Restore) are unreachable by hand; recorded as a
+  candidate for the remote HII-routing toolkit instead of a console task.
+- Watchdog boot persistence: the modules-load.d + install-line approach does NOT survive
+  systemd-modules-load (its blacklist flag wins over install-lines). Replaced with an
+  enabled unit /etc/systemd/system/sp5100-tco.service (ExecStart: modprobe
+  --ignore-install sp5100_tco + systemctl daemon-reexec). Verified armed live (SP5100 TCO,
+  60 s, KEEPALIVEPING) and enabled for future boots.
+- The "long-running process" the owner spotted = unattended-upgrades.service
+  (unattended-upgrade-shutdown --wait-for-signal) — an idle by-design Ubuntu waiter that
+  lives from boot to shutdown; ~0% CPU; no action needed.
+
+
 
 
 
