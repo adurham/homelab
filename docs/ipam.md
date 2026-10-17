@@ -1624,6 +1624,27 @@ Round-9 (2026-10-17): remote-BIOS-management options + the two requested setting
   Until then, all BIOS changes = the single monitor+keyboard visit (fold into the RAM
   reseat): reseat SO-DIMMs + Ac Loss Control=Always On + (optional) Power Down off/MCR off.
 
+Round-10 (2026-10-17): free remote-BIOS toolkit BUILT and staged (nothing activated).
+
+- ~/bios-remote on the box: src/bios-set.c + Makefile -> build/bios-set.efi (gnu-efi;
+  PE32+ EFI app, ~178 KB). Behavior: reads \bios-cmd.txt from the ESP ("EXTRACT <guid>" or
+  "ROUTE <config string>"), calls the firmware's HII Config Routing interface (the
+  interface the OS-side write is NOT protected against), writes \bios-result.txt, then
+  cold-resets back. apply-bios.sh stages a command + a one-shot BootNext (never reboots
+  by itself). keys/MOK-bios.{priv,crt,der} generated for the enroll-a-key-at-the-visit
+  option (backed up on the Mac). README.md has the runbook.
+- Build gotchas fixed: Ubuntu binutils 2.46 requires explicit
+  `objcopy -I elf64-x86-64 -O efi-app-x86_64 --subsystem=10` (format auto-detection
+  fails); and the classic gnu-efi section list MUST include `-j .rodata` or every
+  wide-string literal is silently dropped from the PE (caught before any boot use).
+- NOTHING activated: no boot entries, nothing on the ESP, no reboots. First live use is
+  gated on the visit (Secure Boot off OR MOK enrollment of our cert) plus an explicit go;
+  the first test will be flipping "Ac Loss Control" to Always On via HII routing, then
+  verifying byte 0x61 from Linux.
+- UEFI Shell (for a future remote flash) not yet sourced — tianocore's recent release
+  assets don't carry it; deferred until a flash is actually wanted.
+
+
 
 
 
