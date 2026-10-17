@@ -1883,6 +1883,24 @@ Round-21 (2026-10-17 ~18:00): warranty verification (both vendors' published ter
   then ONE claim with whichever vendor the bisection points at. Bisection still needs the
   hands-on session (smart plug will make its cold boots remote).
 
+Round-22 (2026-10-17 ~18:15): receipts read; MINISFORUM WARRANTY EXPIRES TOMORROW (Oct 18 2026).
+
+- Receipts (both archived ~/rma-evidence/receipt-*.pdf): Minisforum order MS46865 — BD790i
+  Mini-ITX 7945HX, $495.41 — confirmed Oct 10 2024, delivered Oct 18 2024 => 2-year warranty
+  (policy for orders placed before Mar 9 2026) EXPIRES Oct 18 2026; contact must happen within
+  the period => TODAY is the last full day. RAM: Best Buy order BBY01-806977127729, picked up
+  Oct 18 2024, 2x Corsair CMSX32GX5M1A4800C40 @ $89.03 each ($178.06 total) => Corsair
+  limited LIFETIME warranty, no deadline, receipt held as backup.
+- PROTECTIVE CLAIM: Minisforum inquiry drafted (~/rma-evidence/minisforum-claim-draft.txt,
+  to support@minisforum.com, confirmed as their tech-support address): order MS46865 + device
+  serial FRFXI794529B1030270 + hardware-fault description (memory corruption at bone-stock
+  JEDEC settings, reproducible, kernel panics, evidence available) + honest note that
+  RAM-vs-board isolation is in progress. Plan: file TODAY to preserve the deadline; close the
+  ticket if the bisection proves the RAM instead.
+- Note: receipt's ship-to = old Yorktown address; confirm current shipping address before any
+  hardware goes back. Draft signature uses email+phone only.
+
+
 
 
 
