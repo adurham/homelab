@@ -1660,6 +1660,19 @@ Round-11 (2026-10-17): hardening pass on the remote-BIOS toolkit + access paths.
   on request. (b) Agent forwarding to this box exposes the Mac's agent to a compromised
   box for the session's lifetime; a dedicated per-box key would bound that blast radius.
 
+Round-12 (2026-10-17): signing key moved into 1Password; plaintext copies scrubbed.
+
+- Stored as a Secure Note in the Personal vault: "amd-workstation BIOS signing key
+  (bios-remote MOK)" (item id w2x7ixugvnfj3xw4xcynwgajly) — private key + certificate +
+  usage/runbook text. Created via `op item create --template` with output suppressed; the
+  stored copy verified by SHA-256 against the source before any deletion.
+- Then scrubbed: the Mac's ~/.ssh/bios-mok/MOK-bios.priv, the scratch backup copy, and the
+  build-window working files (overwrite-with-urandom + delete). Public material that
+  remains: box keys/MOK-bios.crt|der (import material) + Mac ~/.ssh/bios-mok cert.
+- Signing workflow is now: `op read "op://Personal/<id>/notesPlain"` -> extract key ->
+  temp-sign-shred. Recorded in the box README (Option B section).
+
+
 
 
 
