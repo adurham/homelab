@@ -361,6 +361,9 @@ memory:
   # one memory instead.
   provider: 'holographic'
   auto_extract: true
+  # Full automation (2026-10-17) — same as the machine-root config: writes that
+  # would be staged for review apply directly (see config.yaml.j2's memory block).
+  auto_apply: true
   # Parity with the machine-root config + the MacBook (see config.yaml.j2's
   # memory block for the auto-feedback caveat under a memory provider).
   auto_feedback: true

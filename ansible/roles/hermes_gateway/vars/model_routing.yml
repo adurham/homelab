@@ -259,7 +259,11 @@ hermes_routing_auxiliary_tasks:
     provider: ollama-cloud
     reasoning_effort: high
     timeout: 180
-    auto_commit_session_end: false
+    # 2026-10-17 (owner-directed full automation): a headless gateway has no
+    # review step, so session-end extracted entries commit directly instead of
+    # cycling in the per-session buffer forever. Paired with memory.auto_apply in
+    # both config templates (which governs the always-stage write paths).
+    auto_commit_session_end: true
     extra_body: {}
     include_pre_compress: true
     max_tokens_per_turn: 1024

@@ -528,10 +528,16 @@ memory:
   provider: 'holographic'
   nudge_interval: 10
   flush_min_turns: 6
+  # Fork (2026-10-17, owner-directed full automation): writes that would be
+  # staged for review — the background review's hot-tier consolidations, and any
+  # session-exit proposals that route to the staging store — apply directly.
+  # An explicit write_approval: true still wins; a failed apply stages instead.
+  auto_apply: true
   # Phase 2 auto-extraction: watch turns + compression + session-end and
-  # propose new warm-tier entries via Haiku. The CLI confirm prompt is N/A
-  # on a headless gateway; auto_commit_session_end stays false (above) so
-  # extracted entries land in proposals only, never silently committed.
+  # propose new warm-tier entries via Haiku. Headless surfaces have no review
+  # step, so extracted entries commit directly at session end
+  # (auxiliary.memory_extraction.auto_commit_session_end above); CONTRADICTION
+  # verdicts from that path still come back uncommitted by design.
   auto_extract: true
   # PARITY WITH THE MACBOOK (2026-09-25): trust auto-updates on recalled facts.
   # NOTE — with memory.provider set, the model-facing warm-tier recall that
