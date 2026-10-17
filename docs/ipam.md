@@ -1534,4 +1534,31 @@ established; the burn-in's outcome is now fully explained.
   /etc/modprobe.d/55-softdog-unblacklist.conf (install-line override) + module load +
   daemon-reexec; verified with wdctl.
 
+Round-7 (2026-10-17): BIOS-settings-from-Linux — fully investigated: READ yes, WRITE no.
+
+- Read path SOLVED without /dev/mem: the official firmware image
+  (https://pc-file.s3.us-west-1.amazonaws.com/895D7/BIOS/DRFXI_1.17_260828A.7z — the exact
+  version this box runs) was extracted with UEFIExtract (A75) + IFRExtractor-RS 1.6.1.
+  The AMD CBS catalog (module CbsSetupDxeRPL) declares its target store outright:
+  VarStore Guid 3A997502-647A-4C82-998E-52EF9486A247, Size 0x6D5 — byte-for-byte the live
+  "AmdSetupRPL" efivar (1749 B payload). Full question->offset map for the memory menu,
+  e.g. Memory Context Restore @0x263 and Power Down Enable @0x16F (each 0=Disabled,
+  1=Enabled, 255=Auto), plus memory interleaving @0x36/0x37, map inversion @0x38,
+  Chipselect Interleaving @0x174, BankSwapMode @0x177, PDA Enumerate @0x261.
+- Live decode today: Memory Context Restore = Auto, Power Down Enable = Auto.
+- WRITES: firmware-blocked. All three setup stores (AMD_PBS_SETUP, AmdSetupRPL,
+  AodSetupRpl) return EROFS (EFI_WRITE_PROTECTED) on OS writes even with the efivarfs
+  immutable flag cleared; only non-setup vars (e.g. BootOrder) accept writes. The earlier
+  "AmdSetupRPL: WRITE-OK" reading was an artifact — its backup step silently wrote an
+  EMPTY file (cp(1) can't lseek efivarfs; see pitfall) and the 0-byte write was
+  meaningless. uefisettings' `set` would hit the same wall; disabling Secure Boot would
+  only unblock /dev/mem READS, never writes. => any real BIOS change still needs the
+  BIOS screen (combine with the RAM reseat visit).
+- PITFALL: cp(1) cannot read efivars (lseek -> "Illegal seek", EMPTY destination). Use
+  cat/dd/python/tar for efivar reads. For writes: chattr -i + one single write
+  (python/tee) + chattr +i; only works on firmware-writable vars.
+- Useful consequence: BIOS settings can be READ, dumped, diffed and POST-VISIT VERIFIED
+  from Linux anytime (no monitor) — including whether a manual BIOS change actually took.
+
+
 
