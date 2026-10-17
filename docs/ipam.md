@@ -1672,6 +1672,29 @@ Round-12 (2026-10-17): signing key moved into 1Password; plaintext copies scrubb
 - Signing workflow is now: `op read "op://Personal/<id>/notesPlain"` -> extract key ->
   temp-sign-shred. Recorded in the box README (Option B section).
 
+Round-13 (2026-10-17 midday): baseline repro CONFIRMED + first live self-recovery; watchdog fully armed.
+
+- Baseline repro (stressapptest -s 1500 -M 52000 -W --pause_delay 120 --pause_duration 15):
+  first miscompare at 258 s (~4.3 min, first load-spike cycles), then a burst until death at
+  10:56:41 — 1,888 error lines in ~8 s ('walkingInvOnes~32', 'OneZero~256': whole 256-byte
+  regions read as all-ones where zeros expected, reread ALSO wrong this time). Kernel oops
+  10:56:35 (journal tail), panic, efi-pstore record written (archived this boot as
+  /var/lib/systemd/pstore/1792252601). With kdump unloaded for the stress window, panic=20
+  did its job: the box REBOOTED ITSELF — back up at 10:57:11, ~33 s after the oops, no human
+  intervention. First live proof of the auto-recovery chain.
+- Watchdog gap re-opened and CLOSED: the morning's modules-load.d/sp5100_tco.conf was
+  silently EMPTY (casualty of the known heredoc-write mangling) and sp5100_tco is also
+  kernel-package deny-listed (line 62, next to softdog's 61). Reinstalled byte-exact via
+  scp+install, plus an install-line override in /etc/modprobe.d/55-sp5100-unblacklist.conf.
+  Loaded + armed NOW without a reboot: /dev/watchdog0 = "SP5100 TCO timer", 60 s,
+  KEEPALIVEPING=1 (systemd feeding it). kernel.panic=15 applied (the morning's 91-panic-15
+  drop-in was empty for the same reason; re-installed from a byte-exact source).
+- Posture: panic -> 15 s -> auto-reboot; hard freeze -> hardware TCO reset <= 60 s; stress
+  runs unload/re-arm kdump via ~/stress-run.sh. Next: BIOS session (Ac Loss Control = Always
+  On; Power Down Enable = Disabled; Memory Context Restore = Disabled; Secure Boot choice),
+  then the SO-DIMM bisection.
+
+
 
 
 
