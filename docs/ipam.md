@@ -1457,3 +1457,50 @@ Round-4 (2026-10-16 evening): crash test VALIDATED + the original oops traces re
   pointers + the python GC crashes = systemic-corruption signature =>
   RAM/IMC instability is now the PRIMARY suspect (custom python build
   secondary). The 8-hour RAM burn-in tonight is the key discriminator.
+
+Round-5 (2026-10-17 morning): the burn-in ran — and within 11 minutes it caught the
+machine corrupting memory; then the box hard-froze and stayed dead ~7 h until a
+physical power-cycle.
+
+- 02:00:00 `ramtest-overnight.service` started (`stressapptest -s 28800 -M 52000 -W
+  --printsec 600`). The wrapper touches `/run/ramtest-inhibit` (deadman no-op during
+  burn-ins) and only disarms the timer AFTER a completed run.
+- 02:10:19 (619 s in), immediately after the deliberate power-spike phase (15 s
+  thread pause, then resume): the first Hardware Errors — 11+ `miscompare`s within
+  one second, sprayed across cores (16, 18, 29, 1, 13, 2, 13(<-19) ...), patterns
+  `OneZero32` (e.g. read 0xffffffff00001000 vs expected 0xffffffff00000000 — one
+  stuck bit), `walkingInvOnes~32`, `Checker8b10b32`. This is real data corruption
+  in the memory path under load (non-ECC DDR5 — nothing else in the system can
+  catch or correct it).
+- Same second (02:10:19): the KERNEL began dumping crash records to firmware
+  storage — systemd-pstore archived 41 part-files (~20 chained dumps, incl.
+  002/dmesg.txt) this boot to `/var/lib/systemd/pstore/1792221019/{001,002}`.
+  Root-only; NOT yet read. Working hypothesis: the kernel panicked (panic_on_oops=1)
+  and then recursively faulted inside its own crash-handling path.
+- Then silence, everywhere: kern.log's last kernel line is 02:08:48, journald flush
+  stops 02:09:38, no oops/panic/MCE in any readable log, no kdump vmcore in
+  /var/crash, no reboot, no console output. The NMI hardlockup detector was enabled
+  (hardlockup_panic=1) and never fired either — the freeze was below every
+  software/NMI recovery layer. Box dead until the 09:28:16 power-cycle boot.
+- 09:28 recovery (owner power-cycle): box up 09:28:16; kdump re-armed
+  (kexec_crash_loaded=1), userland-deadman timer active (2-min), node_exporter +
+  blackbox probe green, `amd-workstation unreachable` alert resolved.
+- FINDING — the watchdog is NOT armed; the Round-2 "wdctl confirms /dev/watchdog0
+  armed, 60 s" claim is WRONG. softdog is blacklisted by the kernel package's own
+  kmod deny-list (`/lib/modprobe.d/blacklist_linux_7.0.0-38-generic.conf:61`
+  `blacklist softdog`, same in the -34 file): every boot logs `Module 'softdog' is
+  deny-listed (by kmod)` and `Failed to open any watchdog device before the initial
+  transaction completed`; `/dev/watchdog0` does not exist. RuntimeWatchdogSec=60
+  has therefore never actually been armed. Fix path (pending): /etc/modprobe.d
+  override with `install softdog /sbin/modprobe --ignore-install softdog`
+  (install-lines beat blacklists), keep /etc/modules-load.d/softdog.conf, then
+  `systemctl daemon-reexec` and verify `wdctl` shows /dev/watchdog0 armed.
+- FINDING — the burn-in timer is not one-shot in practice: `ramtest-overnight.timer`
+  is `OnCalendar=*-*-* 02:00:00` with `Persistent=no`; the wrapper self-disarms only
+  at the END of a completed run, so a mid-run death leaves it armed. It is NOW armed
+  for 2026-10-18 02:00 (would re-kill the box). Disarm pending owner:
+  `sudo systemctl disable --now ramtest-overnight.timer` (this box's sudo is
+  interactive-only).
+- Pending: copy `/var/lib/systemd/pstore/1792221019/` to a user-readable dir (needs
+  root) and mine the ~20 chained crash dumps for the actual panic trace.
+
