@@ -1847,6 +1847,26 @@ Round-19 (2026-10-17 ~17:00): box back up at 16:00 (owner press); FULL audit of 
   BIOS/settings proofs. Box state: idle, v2 watchdog unit installed+enabled, TCO armed on
   the current boot.
 
+Round-20 (2026-10-17 ~17:30): remote-power plan (owner is buying a smart switch) + fix-path runbook.
+
+- OWNER DECISION: buying a smart power switch for amd-workstation so the "effectively off"
+  death class can be cleared remotely (toggle off/on -> box boots itself thanks to BIOS
+  "Ac Loss Control = Always On", verified earlier today). Wiring: UPS outlet -> smart plug ->
+  box's power brick (no extra outlet needed; the 6 UPS outlets stay full). Spec requirements:
+  local control preferred (Shelly-class / HA-integratable; NOT cloud-only), and
+  POWER-ON-STATE = ON must be configured (defaults often come up OFF after an outage).
+- FOLLOW-ON DESIGN (once installed): HA-side liveness watchdog -> if amd-workstation is
+  unreachable (blackbox probe / ping) for 3-5 min, power-cycle the plug once, wait, verify;
+  max 2 attempts per hour then notify-and-stop (never loop on a dead part); with a manual
+  "maintenance mode" so it never fires while someone is deliberately working on/inside the box.
+  This closes the recovery gap the in-box layers cannot (they cannot act when the box is off).
+- Fix path (the actual fix = hardware): session runbook written to
+  ~/bios-remote/rma-session-runbook.md (Mac + box): photo DIMM labels/slots + BIOS pages,
+  2x2 stick/slot bisection with cold boots between configs, verdict rules mapping to
+  Corsair (stick/kit) vs Minisforum (slot/board) RMA; reseat + slot inspection while open.
+  The smart plug also makes the between-config COLD BOOTS remote (AC-off = plug off).
+
+
 
 
 
