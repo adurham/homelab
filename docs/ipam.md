@@ -1644,6 +1644,23 @@ Round-10 (2026-10-17): free remote-BIOS toolkit BUILT and staged (nothing activa
 - UEFI Shell (for a future remote flash) not yet sourced — tianocore's recent release
   assets don't carry it; deferred until a flash is actually wanted.
 
+Round-11 (2026-10-17): hardening pass on the remote-BIOS toolkit + access paths.
+
+- bios-set.efi now ROUTE-allowlists this board's three settings stores (AmdSetupRPL /
+  Setup / AMD_PBS_SETUP); anything else is refused ("denied-guid" in the result file).
+  Rebuilt; allowlist strings verified present in the binary.
+- MOK signing PRIVATE key custody: removed from the box (only MOK-bios.crt + .der remain
+  there as import material). The private key now lives ONLY on the Mac, durably at
+  ~/.ssh/bios-mok/ (0600, outside the scratch pruner); signing = copy in, sbsign, shred.
+  README updated (Privileges & teardown section).
+- Verified dormant: ESP has no staged files; boot entries remain Ubuntu-only; nothing is
+  active until apply-bios.sh is invoked (one-shot BootNext; never self-reboots).
+- Open items for the owner: (a) /etc/security/authorized_keys (sudo-via-key) holds 5 keys
+  — key1 = the Mac's RSA (in use); keys 2-5 (1x RSA-2048 + 3x ed25519) look legacy; prune
+  on request. (b) Agent forwarding to this box exposes the Mac's agent to a compromised
+  box for the session's lifetime; a dedicated per-box key would bound that blast radius.
+
+
 
 
 
