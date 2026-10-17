@@ -1729,6 +1729,36 @@ Round-15 (2026-10-17 ~11:50): remote-BIOS WRITE path live-tested — REFUSED by 
   ~/bios-remote/records/, /tmp tidied; settings verified intact (Ac Loss Control=1,
   PowerDown=255, MCR=255). README carries the STATUS note.
 
+Round-16 (2026-10-17 ~12:00): kill + substitute consult + RMA evidence bundle.
+
+- Killed the owner-flagged process properly: unattended-upgrade-shutdown --wait-for-signal
+  (the boot-time idle waiter) killed AND its unit disabled so it stays dead across boots;
+  the actual update timers (apt-daily / apt-daily-upgrade) remain scheduled. Undo:
+  systemctl enable unattended-upgrades.service.
+- Fable's local consult route returned empty twice (unavailable; looks like the known
+  Anthropic session/route issue). Per the fable-consult-remote skill's fallback order, one
+  explicit-override retry through the consult tool was made with a strong substitute
+  (deepseek-v4-pro @ ollama-cloud). SUBSTITUTE RULING (attribution: not Fable; re-surface at
+  final sign-off): (A) remote-BIOS write question is CLOSED — EFI_WRITE_PROTECTED post-
+  EndOfDxe is exactly the standard AMI/EDK2 VariableLock behavior; capsules are update-only
+  transport; no supported settings path exists beyond the setup UI; the defaults-not-live
+  export quirk further evidences intentional runtime closure. (B) The region-level
+  corruption (whole 256-byte blocks, reread-wrong) is not a single-cell/data-line fault —
+  it points to an undriven/deselected rank or a failed write/address path: SoC/UMC,
+  board/DIMM interconnect, and PMIC/PDN rail move ABOVE DRAM cell/row. Bisection remains the
+  right next step, refined: keep --pause_delay 120; 30 min/stick suffices (baseline fails
+  at ~4 min); S1-in-A, S2-in-A; if both pass alone, ALSO run swapped dual-stick
+  (S1-in-B/S2-in-A) because the original failure may require dual-DIMM load. Fails-follows-
+  stick => Corsair RMA; follows-slot/board or dual-only => Minisforum unit RMA. (C) Evidence
+  checklist before opening the case: dmidecode memory + DIMM labels/serials; full stressapptest
+  log with command line; journalctl -k boot->panic incl. MCE/EDAC; both pstore records off-box;
+  sensors log during a stress run; BIOS screenshots of stock JEDEC/1.1 V. (D) Same root cause
+  escalating, not a second failure mode.
+- Evidence bundle assembled at ~/rma-evidence (box + Mac): dmidecode memory/system/serials,
+  SMART (unsafe shutdown count), lscpu, kernel log of the crash boot, MCE/EDAC scan, both
+  pstore crash records, and the captured 1,888-error stress log.
+
+
 
 
 
