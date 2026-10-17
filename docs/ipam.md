@@ -1711,6 +1711,25 @@ Round-14 (2026-10-17 ~11:35): BIOS session done + verified; watchdog made boot-p
   (unattended-upgrade-shutdown --wait-for-signal) — an idle by-design Ubuntu waiter that
   lives from boot to shutdown; ~0% CPU; no action needed.
 
+Round-15 (2026-10-17 ~11:50): remote-BIOS WRITE path live-tested — REFUSED by firmware; scaffolding removed.
+
+- Boot 1 (EXPORT): tool ran, rc=0, wrote an 89 KB configuration dump; our store present in
+  the firmware's own dialect (GUID=<memory-order-hex>&NAME=<utf16-hex>&PATH=<device-path>
+  &OFFSET=0&WIDTH=6d5&VALUE=<full 1749-byte block>). QUIRK: the exported block carries
+  DEFAULTS, not live values (952/1749 bytes differ from the live efivar) — efivar reads
+  remain the source of truth for settings.
+- Boot 2 (ROUTE, true no-op replaying the live bytes verbatim): rc=0x8 =
+  EFI_WRITE_PROTECTED, progress = the full string (nothing applied); var hash-identical
+  afterwards. CONCLUSION: this firmware locks its settings stores after the setup UI
+  closes — the lock covers the HII Config Routing path too — so no post-boot software can
+  write them. Remote BIOS setting changes on this board: impossible; the setup screen (or a
+  KVM) is the only route. The toolkit remains a read/dump asset and is portable to boards
+  that do not lock their stores.
+- Cleanup: test boot entry removed, ESP payloads removed + archived to
+  ~/bios-remote/records/, /tmp tidied; settings verified intact (Ac Loss Control=1,
+  PowerDown=255, MCR=255). README carries the STATUS note.
+
+
 
 
 
