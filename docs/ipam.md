@@ -1758,6 +1758,45 @@ Round-16 (2026-10-17 ~12:00): kill + substitute consult + RMA evidence bundle.
   SMART (unsafe shutdown count), lscpu, kernel log of the crash boot, MCE/EDAC scan, both
   pstore crash records, and the captured 1,888-error stress log.
 
+Round-17 (2026-10-17 ~12:15): REAL Fable verdict obtained (remote route; local route down)
++ forensic refinements to the corruption analysis.
+
+- Remote route fix: `claude-fable-5` 404s now on the work MacBook; the working id is
+  `claude-fable-5-1` (skill patched accordingly).
+- FABLE VERDICTS (binding): (A) Remote-BIOS writes CLOSED — standard AMI/EDK2 VariableLock;
+  the "export returns defaults" quirk is NOT evidence of intent (common artifact). Two
+  supported vendor paths remain, both "ask the vendor": (1) request a 1.17 build from
+  Minisforum with the AMD CBS/UMC menus unhidden (done for other boards); (2) AMI's own
+  AMISCE/SCEWIN tooling (SMI-based, so outside the DXE lock; OEM-licensed).
+  (B) CORRECTION to the substitute ruling: don't carry "SoC/UMC + rails above DRAM" into the
+  case narrative. Corruption bounded to <=256-B granules = a PER-CHANNEL fault (256 B is
+  the DF interleave granule): stick PMIC/training margin ~ slot PHY/traces > a single UMC
+  instance >> board rails/fabric. Cell/row stays down as a suspect. (D) One fault, "now
+  reproducible on demand" — "escalating" is unproven (the pause recipe is simply a far more
+  sensitive detector).
+- OUR FORENSICS per Fable's test (raw 944 parsed errors): pattern-name suffixes are pattern
+  VARIANTS (confirmed in pattern.cc), not region sizes — but the ADDRESS analysis shows
+  real contiguous runs topping out at EXACTLY 256 B (32 qwords); classification: 419
+  stale/other-pattern reads (dropped/misdirected writes — dominant), 218 whole-word
+  inversions, 94 clean single-bit flips (the original bit-12 signature persists), 213 other
+  (incl. split-word values like 0x55555555aaaaaaaa = two pattern generations in one qword).
+- FABLE'S FINAL BISECTION DESIGN: full 2x2 (each stick in each slot, 30 min/config,
+  ~2 h): `stressapptest -s 1800 -M 26000 -W --pause_delay 120 --pause_duration 15` AS ROOT,
+  FULL AC-off cold boot (unplug 30 s) at every change (forces retrain; record
+  dmidecode -t 17 speed), temp logging each run; a "passing" suspect stick needs a second
+  cold-boot run; then dual-swapped, then original dual config (if original now passes =>
+  reseating/contact is the finding). Decision: stick-fails-both-slots-and-other-passes =>
+  Corsair RMA; both-fail-one-slot => Minisforum; both-fail-both => tiebreak on a known-good
+  4800 SO-DIMM before blaming anyone; all-singles-pass + dual-fails => Minisforum.
+- FABLE'S PRE-CASE LIST: (1) run a NO-PAUSE control (30 min steady, same -M) — passing
+  steady while failing in 4 min with pauses is the single most persuasive line for either
+  warranty desk; (2) confirm BIOS >1.17 exists (1.17 appears latest; verify), else bisect on
+  1.17 then update + re-run the 4-min dual repro once; (3) optional C-state-capped run
+  (mitigation probe, not a discriminator); (4) don't volunteer memtest86 (no load step, gives
+  the desk an excuse); lead with the stressapptest log; (5) DIMM label photos + slot mapping
+  at the visit.
+
+
 
 
 
