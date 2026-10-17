@@ -1560,5 +1560,46 @@ Round-7 (2026-10-17): BIOS-settings-from-Linux — fully investigated: READ yes,
 - Useful consequence: BIOS settings can be READ, dumped, diffed and POST-VISIT VERIFIED
   from Linux anytime (no monitor) — including whether a manual BIOS change actually took.
 
+Round-8 (2026-10-17): Fable consult #2 on next-step options + remote survivability step done.
+
+- Fable's reframing (new evidence): the flipped-bit LANES VARY across events — bit 12 (user
+  data), bit 36 (waitqueue pointer), bit 45 (in the bad PTE) — so NOT a single bad DQ
+  pin/trace; it is read-path marginality collapsing under the idle->load transient. Two
+  shared-rail candidates fit: the DDR5 on-module PMIC (per stick; VDD/VDDQ load-step
+  response) and board/SoC VDDIO/VSOC droop (shared). The bisection is designed to split
+  those two.
+- STEP 0 EXECUTED (remote, today): survivability first — sp5100_tco (hardware FCH
+  watchdog) replaces softdog as the systemd watchdog from next boot
+  (/etc/modules-load.d/{sp5100_tco,softdog}); tco verified binding on this kernel
+  (MMIO 0xfeb00000, heartbeat 60 s, /dev/watchdog1 now, will be watchdog0 after reboot);
+  kernel.panic=15 set; kdump now unloaded ONLY during stress runs via ~/stress-run.sh
+  (availability > extra vmcores; the old TCO-vs-kdump objection is thereby retired for
+  test runs).
+- PLAN (Fable-ranked): (1) attended baseline repro at stock AS-IS:
+  `stressapptest -s 1500 -M 52000 -W --pause_delay 120 --pause_duration 15` (~11
+  transients, first one warm; reproduced = >=1 miscompare). Reseat-first and suite-first
+  both rejected as information-destroying/weaker detectors. (2) Remote discriminator:
+  cpuidle capped to C1 + performance governor, same recipe — flips vanish => the
+  idle->load transient is the trigger (and a software workaround exists); persist =>
+  DRAM power-down exit suspect. (3) ONE physical visit, in order: single-stick/slot
+  bisection (-M 26000, --pause_delay 90, >=30 min per config; configs S1-in-A, S2-in-A,
+  failed-stick-in-B) -> PSU brick swap ONLY if bisection points shared-rail -> BIOS
+  session: Power Down Enable=Disabled + Memory Context Restore=Disabled first, then
+  DRAM 4000 as margin PROBE, then VDDIO_MEM/VSOC +50 mV if the CBS map exposes them.
+- RMA: fault follows a stick => Corsair (lifetime; attach dmidecode JEDEC proof +
+  miscompare logs + slot-swap evidence; keep the kernel-oops story out). Follows the slot
+  / both-pass-alone / dual-fails => Minisforum (expect friction). Fastest discriminator:
+  a known-good 2x32 GB kit.
+- EXTRA found + available: the DIMM SPD hubs are visible on SMBus (spd5118 hwmon4/5,
+  /dev/i2c-0..3 after i2c-piix4) — PMIC under-voltage/status flags are readable if they
+  latch during a repro (near-conclusive, free). memtest86+ = RMA paperwork only (no
+  idle->load transient).
+- Acceptance (post-reproduction): >=3 strong-trigger runs totalling >=100 transients
+  (cold-start AND after 1 h hot), zero miscompares; original 8 h recipe clean; 24 h of the
+  real test suite with zero kernel warnings; then two weeks production with the hardware
+  WDT armed and no resets. Anything only achievable with a downclock or C1-cap is recorded
+  as a MITIGATED BOARD FAULT, not a fix.
+
+
 
 
