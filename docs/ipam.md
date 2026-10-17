@@ -1600,6 +1600,31 @@ Round-8 (2026-10-17): Fable consult #2 on next-step options + remote survivabili
   WDT armed and no resets. Anything only achievable with a downclock or C1-cap is recorded
   as a MITIGATED BOARD FAULT, not a fix.
 
+Round-9 (2026-10-17): remote-BIOS-management options + the two requested settings.
+
+- WATCHDOG (owner ask #1): DONE. Hardware FCH watchdog (sp5100_tco) configured as the
+  systemd watchdog from the next reboot (verified binding now: MMIO 0xfeb00000,
+  heartbeat 60 s); panic=15 + panic_on_oops give automatic reboots for kernel panics;
+  hard freezes reset via the TCO; userland deadman covers zombie states. (Verify after
+  next reboot: wdctl should show "SP5100/SB800 TCO" on /dev/watchdog0.)
+- AC-LOSS (owner ask #2): the setting EXISTS — AMD CBS -> FCH Common Options ->
+  "Ac Power Loss Options" -> question "Ac Loss Control", AmdSetupRPL VarOffset 0x61,
+  options 0="Always Off" (factory default), 1="Always On" (+1 more). LIVE value decoded
+  today = 0 ("Always Off"): after a power cut the box stays OFF. Changing it needs the
+  BIOS screen (writes blocked) or a KVM-over-IP.
+- REMOTE BIOS MANAGEMENT (owner ask #3): (a) Serial/SOL: NOT possible on this board — no
+  BMC/IPMI, no exposed UART. (b) fwupd DOES expose a "System Firmware" capsule device
+  (ESRT present) but Minisforum publishes no Linux capsules -> no remote BIOS update
+  today; the official flasher package (DRFXI_x.xx .7z with AfuEfix64.efi) runs from a UEFI
+  shell -> needs a local screen or a KVM. (c) The real solution for a headless board with
+  no BMC = a KVM-over-IP device (JetKVM / NanoKVM / GL.iNet Comet / PiKVM): HDMI + USB-HID
+  + optional ATX power header control; gives remote BIOS menus, remote BIOS flashing
+  (virtual USB), and remote power cycles. Pair with a smart plug for hard power cycling
+  (needs "Ac Loss Control: Always On" set once). Physical install = one 10-minute session.
+  Until then, all BIOS changes = the single monitor+keyboard visit (fold into the RAM
+  reseat): reseat SO-DIMMs + Ac Loss Control=Always On + (optional) Power Down off/MCR off.
+
+
 
 
 
