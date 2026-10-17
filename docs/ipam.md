@@ -1914,6 +1914,34 @@ Round-23 (2026-10-17 ~17:10): MINISFORUM CLAIM SENT (within the warranty window)
   CURRENT shipping address before any hardware goes back (order's ship-to = old Yorktown one).
 - RAM/Corsair path untouched and deadline-free (lifetime).
 
+Round-24 (2026-10-17 ~17:30): BREAKTHROUGH — the faulty DIMM is localized from logs alone (no case opening).
+
+- Method: on this platform the 256B channel-interleave means a faulting address's bit 8 (and
+  the whole low 12 bits) are physically identical to DRAM-side addressing, so the corrupted
+  256B granules map to a CHANNEL purely from the userspace log. Granule parity = channel side.
+- Repro run (10:56, boot -6, 915 unique fault addresses, 123 pages): corrupted regions are
+  199/199 fully contained inside single 256B granules (never crossing a boundary); granule
+  index histogram: g0=749, g1=88, g2..g14 (even only)=6-18 each, ALL odd granules >=3 = ZERO
+  hits; bit-8 parity = 827 even / 88 odd (90.4%); per-page: 115/123 pages parity-PURE (even),
+  8 mixed pages are exactly the ones with g0+g1 co-hits. Fault classes on the even side =
+  single-bit flips (94) + stale/other-pattern reads (632) + all-ones (130); the 88 odd-side
+  hits are 100% all-ones, co-located with heavy g0 damage (secondary spill, noted).
+- Burn-in run (02:10, boot -7, ramtest-20261017-0200.log, now archived): 7/7 fault addresses
+  EVEN parity, granules {4,6,8,10,14} only, and 7/7 errors are PURE single-bit flips =
+  xor 0x1000 = BIT 12 every time (e.g. read 0xffffffff00001000 vs expected 0xffffffff00000000).
+- CONCLUSION: corruption is localized to ONE channel => with 1 DIMM per channel, ONE STICK is
+  the culprit (two independent boots agree). The clean-mode signature (bit 12 = one data lane,
+  likely DQ4 of an x8 chip) says one weak DQ lane on that module; the burst modes = the same
+  module failing under load transitions (~18-19 s after each load-dip resume in both runs;
+  0 errors in the no-pause control). Board/IMC is NOT implicated by these datasets (still
+  formally testable via the 2x2: suspect stick must ALSO fail in the other slot before we
+  blame the DIMM; the runbook's order now = test the even-channel stick FIRST).
+- Case-session impact: one swap likely decides it (2x2 remains the canonical proof).
+  Corsair claim (lifetime) becomes the primary path; the Minisforum ticket stays filed and
+  gets closed/answered with the outcome. Channel->physical-slot mapping isn't observable from
+  software; resolve at the case via dmidecode bank-locators + silkscreen photos.
+
+
 
 
 
