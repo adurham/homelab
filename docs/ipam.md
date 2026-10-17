@@ -1504,3 +1504,34 @@ physical power-cycle.
 - Pending: copy `/var/lib/systemd/pstore/1792221019/` to a user-readable dir (needs
   root) and mine the ~20 chained crash dumps for the actual panic trace.
 
+Round-6 (2026-10-17, later morning): crash records recovered and READ; root access path
+established; the burn-in's outcome is now fully explained.
+
+- ACCESS (cost an hour to pin down): key-based sudo works on this box via
+  pam_ssh_agent_auth + a forwarded agent (`ssh -A`). GOTCHA: `sudo -n` BYPASSES the PAM
+  key auth entirely — "a password is required", the pam module never even runs (no
+  logs). Use plain `sudo cmd </dev/null` over `ssh -A`. Verified live: unauthenticated
+  `sudo -k; sudo true` succeeds via the Mac's RSA key, with and without a tty.
+- Done via that path: ramtest timer disarmed; crash records published to
+  ~/pstore-crash-20261017 (41 parts = two record groups, plain text, ~96 KB total).
+- Crash log content (uptime 45973.6s = 02:10:19):
+  * Oops#1: `BUG: unable to handle page fault for address: ffff9b5e997761c8` in
+    `remove_wait_queue` (poll_freewait <- do_sys_poll <- ppoll) — the faulting pointer
+    differs from its sibling (RAX ffff9b5e997761c8 vs RDX ffff8b5e997761c8) by ONE BIT
+    (bit 36): the same single-bit signature, now in KERNEL memory (a corrupted wait-queue
+    pointer in a ppoll wait).
+  * Panic#2: repeated `BUG: Bad page map in process stressapptest
+    pte:800020002523d867` / `pte:80002009d4d2d867` during /proc/self/pagemap reads —
+    corrupted PTEs; panic_on_oops -> panic -> kdump handoff never completed -> freeze.
+- Hardware (dmidecode -t 17): 2x32GB Corsair CMSX32GX5M1A4800C40 SO-DIMM; Speed 4800
+  MT/s, Configured 4800 MT/s at 1.1 V => STOCK JEDEC, no EXPO/XMP enabled. The
+  "turn off the memory overclock" branch is therefore moot. Next: reseat both
+  SO-DIMMs, then single-stick bisection with the short stressapptest repro (errors
+  appeared at 619 s in the burned run).
+- BIOS-from-Linux: uefisettings v0.1.5 built on the box (~/.cargo/bin), Hii backend
+  detected (AMI 1.17); root now reachable for it via the sudo path above.
+- Safety net: softdog was kmod-deny-listed (never armed). Fixed via
+  /etc/modprobe.d/55-softdog-unblacklist.conf (install-line override) + module load +
+  daemon-reexec; verified with wdctl.
+
+
