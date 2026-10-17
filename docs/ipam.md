@@ -1900,6 +1900,21 @@ Round-22 (2026-10-17 ~18:15): receipts read; MINISFORUM WARRANTY EXPIRES TOMORRO
 - Note: receipt's ship-to = old Yorktown address; confirm current shipping address before any
   hardware goes back. Draft signature uses email+phone only.
 
+Round-23 (2026-10-17 ~17:10): MINISFORUM CLAIM SENT (within the warranty window).
+
+- Sent 17:08 CDT from AMDNative@gmail.com -> support@minisforum.com with the invoice attached;
+  verified in Gmail's Sent Mail (recipient + attachment on the newest copy). The desk will see
+  TWO identical copies 41 s apart: my first send actually succeeded, but my verification looked
+  in the app-level `sent mailbox` (= iCloud's, not Gmail's) and read it as failed, so the
+  instrumented retry duplicated it. No correction email sent (extra noise would be worse);
+  duplicate treatment is trivial for support desks. Lessons recorded in a new skill
+  `email/macos-mail-send` (per-account Sent verification; never blind-retry).
+- Awaiting their reply (their portal + email; check spam). If they ask for evidence: crash
+  records (3), stressapptest logs, dmidecode/SPD are all staged in ~/rma-evidence. Confirm the
+  CURRENT shipping address before any hardware goes back (order's ship-to = old Yorktown one).
+- RAM/Corsair path untouched and deadline-free (lifetime).
+
+
 
 
 
