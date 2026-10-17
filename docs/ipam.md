@@ -1820,6 +1820,34 @@ Round-18 (2026-10-17 ~13:15): SILENT DEATH #2 + watchdog-coverage gap (audit pen
   fails). Order when the box is back: audit why the arm failed (prev-boot journal +
   sp5100-tco.log), deploy v2, run the live test, THEN decide on any further testing.
 
+Round-19 (2026-10-17 ~17:00): box back up at 16:00 (owner press); FULL audit of the 12:37 death.
+
+- CORRECTION to Round-18: the watchdog did NOT fail to arm — it WAS armed on the dead boot
+  (prev-boot journal: sp5100-tco initialized 11:47:07; systemd "Using hardware watchdog
+  /dev/watchdog0: SP5100 TCO timer ... hardware timeout of 1min"; unit finished OK). My
+  "the auto-arm didn't take" assumption was wrong.
+- THE DEATH, fully mapped: control run healthy; 12:30:31 a kernel WARNING in node_alloc
+  (mm/vmalloc.c:1971, from prometheus-node = pre-panic corruption symptom); stressapptest's
+  progress output stops 12:37:30 (its threads/output stalled) while the SYSTEM stayed alive
+  — deadman OK at 12:38:46, blackbox-probe sshd sessions answered every 15s through
+  12:40:08, sysstat ran 12:40:01; then at ~12:40:31-36 the kernel PANICKED: "Fatal exception"
+  in kernfs_dop_revalidate+0x2b (CR2 ffffab1934fc9800 — another wild pointer, same
+  corruption class), new efi-pstore record (1792258831, 37 files, archived to
+  ~/rma-evidence). The machine then stopped COMPLETELY: the panic=15 auto-reboot did NOT
+  fire AND the armed 60 s TCO never reset it. Dead 3h20m until a physical press at 16:00.
+- INTERPRETATION: both recovery layers (panic-reboot + hardware timer) were defeated by this
+  death. Consistent with the machine ending in a powered-off/S5-like state (no timer runs
+  there) rather than a classical freeze; cannot be distinguished further without a KVM or
+  serial console. The controlled watchdog test (needs a human at the box) will confirm the
+  TCO itself works; regardless, THE AUTO-RECOVERY AMBITION FOR THIS DEATH CLASS IS LIKELY
+  DEAD-ENDED without remote power hardware. Operational rule meanwhile: do NOT leave
+  unattended long runs (esp. memory stress) on this box until the RAM is fixed.
+- Evidence archive now: 3 crash records (0210, 1056, 1240), the 1,888-error run, the
+  17-min-clean control run, the death-window journal, MCE/EDAC scans, SMART, dmidecode,
+  BIOS/settings proofs. Box state: idle, v2 watchdog unit installed+enabled, TCO armed on
+  the current boot.
+
+
 
 
 
