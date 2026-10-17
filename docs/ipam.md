@@ -1796,6 +1796,31 @@ Round-17 (2026-10-17 ~12:15): REAL Fable verdict obtained (remote route; local r
   the desk an excuse); lead with the stressapptest log; (5) DIMM label photos + slot mapping
   at the visit.
 
+Round-18 (2026-10-17 ~13:15): SILENT DEATH #2 + watchdog-coverage gap (audit pending).
+
+- The no-pause control run (owner GO) ran CLEAN for 17 minutes — zero miscompares, no error
+  of any kind (log captured off-box) — then the box died SILENTLY at ~12:37:30: no error
+  burst, no log trail, no panic record yet, and NO self-recovery (>=40 min dead as of this
+  writing). Fully dead on LAN/link-local/tailnet — same full-death class, but unlike every
+  previous incident there was no corruption burst first. This is a NEW death flavor and is
+  now the second no-recovery occurrence today.
+- WATCHDOG GAP (honest record): the 10:57 recovery was the PANIC path (soft), not the
+  hardware TCO. The sp5100_tco auto-arm unit (installed ~11:22) was verified live on the
+  09:28-era boot, but NOT individually verified on any of the post-BIOS boots (11:35/42/44/47)
+  — and this death suggests it did not take. The "freeze-proof" promise is UNPROVEN.
+- NO REMOTE POWER PATH exists on this box: no BMC/IPMI, no KVM, no smart plug (and the unit
+  is on the UPS, so a plug alone could not cut power anyway), and WoL is moot (Wi-Fi only,
+  unknown sleep state). A silent death therefore always requires a human at the case. The
+  owner was away from the box when this one died, so it stays down until someone is home.
+- PREP FOR THE NEXT VISIT (built while the box is down): (1) improved auto-arm unit
+  (/etc/systemd/system/sp5100-tco.service v2: retrying modprobe, After=multi-user.target,
+  and it appends wdctl + /dev/watchdog state to /var/log/sp5100-tco.log for instant audits);
+  (2) watchdog-livetest.sh — deliberate freeze-recovery proof (wdctl -s 10 with systemd
+  feeding every 30s -> chipset reset in <=40s; run with a human able to press power if it
+  fails). Order when the box is back: audit why the arm failed (prev-boot journal +
+  sp5100-tco.log), deploy v2, run the live test, THEN decide on any further testing.
+
+
 
 
 
