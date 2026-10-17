@@ -1866,6 +1866,24 @@ Round-20 (2026-10-17 ~17:30): remote-power plan (owner is buying a smart switch)
   Corsair (stick/kit) vs Minisforum (slot/board) RMA; reseat + slot inspection while open.
   The smart plug also makes the between-config COLD BOOTS remote (AC-off = plug off).
 
+Round-21 (2026-10-17 ~18:00): warranty verification (both vendors' published terms + our identifiers).
+
+- Corsair DRAM (matches both sticks, confirmed from their SPD chips over nvmem: P/N
+  CMSX32GX5M1A4800C40 in slots A and B): LIMITED LIFETIME warranty per Corsair's own
+  warranty page (all DRAM modules) and the SKU listing. RMA is serial-driven (stick labels);
+  receipt normally not required. RAM bought from Amazon (invoice available as backup).
+- Minisforum board: bought DIRECTLY from store.minisforum.com. Policy: purchases Aug 1 2026+
+  => 24 months from delivery (the 36-month promo required purchase Mar 9-Jul 31 2026);
+  box in use by Sep 7 2026 => deep in warranty to ~2028, and inside the 31-180-day window
+  => "Return & Exchange (replacement with an identical NEW product), shipping fully borne by
+  MINISFORUM". Requirements: order number (MS...), device serial (have it:
+  FRFXI794529B1030270, DMI + white label), written description of the fault (our logs).
+  Claim must be framed as HARDWARE failure (their policy excludes software crashes).
+- Still to obtain: Minisforum order number (user's email) + stick label photos (case visit);
+  then ONE claim with whichever vendor the bisection points at. Bisection still needs the
+  hands-on session (smart plug will make its cold boots remote).
+
+
 
 
 
