@@ -67,7 +67,7 @@ with `Redirect URI Error` (400). All four callbacks are now registered:
 - `http://192.168.86.2:8123/auth/oidc/callback`
 - `http://homeassistant.local:8123/auth/oidc/callback`
 - `https://homeassistant.chi.lab.amd-e.com/auth/oidc/callback`
-- `https://REDACTED-NABU-CASA-HOST.ui.nabu.casa/auth/oidc/callback`
+- `https://<nabu-casa-remote-host>/auth/oidc/callback`
 
 The provider also had **no policy binding**, so SSO was password-only (the
 stock `default-authentication-flow` only asks for a second factor when the user

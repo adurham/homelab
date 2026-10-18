@@ -35,7 +35,7 @@
         matching_mode: "strict"
       - url: "https://homeassistant.chi.lab.amd-e.com/auth/oidc/callback"
         matching_mode: "strict"
-      - url: "https://{{ ha_nabu_casa_host | default('REDACTED-NABU-CASA-HOST.ui.nabu.casa') }}/auth/oidc/callback"
+      - url: "https://{{ vault_ha_nabu_casa_host }}/auth/oidc/callback"
         matching_mode: "strict"
 
 - name: Get Existing Home Assistant OIDC Provider
