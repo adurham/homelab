@@ -1941,6 +1941,72 @@ Round-24 (2026-10-17 ~17:30): BREAKTHROUGH — the faulty DIMM is localized from
   gets closed/answered with the outcome. Channel->physical-slot mapping isn't observable from
   software; resolve at the case via dmidecode bank-locators + silkscreen photos.
 
+Round-25 (2026-10-17 ~17:45): FABLE REVIEW of Round-24 — corrections; two free tests run.
+
+- Fable (local consult route WORKS again): the bit-8 asymmetry is statistically real, but
+  "parity = channel" is UNVERIFIED (AMD DF typically XORs the channel-select bit with upper
+  bits => per-page parity purity survives but cross-page aggregation breaks; alternatively
+  bit 8 is a column/bank-group bit, not the channel). VERIFY via DF config dump
+  (lspci -xxxx -s 00:18.0-7 + amd_atl/DF4 register layout) and CBS -> DF Common -> Memory
+  Addressing. **HE ALSO RATED THE 199/199 GRANULE-CONFINEMENT AS NON-EVIDENCE** (regions are
+  ~4.6 words; any cache-line fault fits in 256B — drop from the argument) and flagged that
+  g0=749/915 is a page-offset bias no lane/cell fault produces: run A = write-path loss at
+  page heads (possibly NOT module-confined), run B = classic single-DQ flip => TWO signatures,
+  treat separately. Note 0xFFFF..FF is itself a stressapptest pattern (JustOne), so the
+  "all-ones" class is probably stale-pattern, not bus-float.
+- TEST 1 (his bit-6 = 32-bit-subchannel test, run now): Run A single-bit flips = 94, flipped
+  bit positions {12, 13, 40}, bit-6 parity SPLIT 43/51; run B = 7, all bit 12, bit-6 split
+  2/5. => Splits, so under his rule this does NOT support "one x8 chip's lane"; favors
+  PHY/UMC/board/shared IF bit 6 is the subchannel selector (still gated on the DF granularity
+  dump). bit-8 parity of the single-bit class: run A 94/94 even, run B 7/7 even (channel-
+  consistent).
+- TEST 2 (his "off by exactly 0x1000?" test on the pstore oops register pairs): NO. Kernel
+  kills are single-bit flips at OTHER positions: remove_wait_queue pair ffff9b5e.. vs
+  ffff8b5e.. = bit 44; __kmalloc pair RSI ffff9e47.. vs siblings ffff8e47.. = bit 44;
+  kernfs pair ffffab19.. vs ffff8b19.. = bit 45. So the bit-12 userspace lane does NOT
+  explain the kernel deaths — multiple bit positions fail => broader than one weak lane.
+- FABLE'S REVISED PLAN (adopted): (1) FIRST RUN = both sticks installed, SWAP THE STICKS
+  BETWEEN SLOTS, rerun the identical dip-trigger test — parity flips => module confirmed +
+  channel mapping validated; no errors => seating/contact; same parity => slot/board/UMC.
+  (2) Only then the minimum 3-run single-stick matrix (X in A fails, Y in A passes, X in B
+  fails => RMA X; both fail in A => board). (3) EVERY run must include >=10 dip cycles (steady
+  load is a known null). (4) Corsair framing: lead with the simple slot matrix + "single-bit
+  flips at data bit 12"; run MemTest86 on the suspect stick alone (Corsair usually asks; if it
+  passes, say it fails under load-cycling). Don't mention reseating/panics/board claim.
+  (5) Do NOT let the Minisforum claim lapse — TCO/panic-recovery failure + the load-dip
+  trigger are not DIMM-swap-fixable; if the stick passes in the other slot it's the board.
+- BLOCKER (new, external): 1Password auto-locked => its SSH agent lists keys but refuses to
+  sign ("agent refused operation") => box unreachable + key-sudo dead until the user unlocks
+  1Password. DF config dump and the next runs are gated on that.
+
+Round-26 (2026-10-17 ~20:50): watchdog PROVEN in the field + channel bit empirically settled.
+
+- FREEZE-RECOVERY NOW PROVEN: the box froze silently at 19:53:23 (journal ends abruptly between
+  blackbox probes, no panic, NO new pstore record) and came back at 19:54:29 = 66 s later,
+  unattended. Kernel on the new boot: "x86/amd: Previous system reset reason [0x02000800]:
+  hardware watchdog timer expired" => the SP5100 TCO fired and reset the box. Coverage ledger
+  is now: kernel panic -> panic=15 reboot (proven 10:57, 33 s); silent freeze -> hardware TCO
+  (proven tonight, 66 s); post-panic wedged/effectively-off state (12:40) -> ONLY removable by
+  cutting AC = the smart plug the owner is adding (Shelly planned, power-on-state=ON).
+  The v2 unit's per-boot log (/var/log/sp5100-tco.log) confirms re-arming on every boot.
+- CHANNEL BIT EMPIRICALLY CONFIRMED (settles Fable's hashing caveat, no datasheet needed):
+  built chanprobe (bandwidth-contention probe; C, source archived in ~/rma-evidence/chanprobe.c):
+  8 threads streaming ONLY granules of one parity. Result (median of 3): 256B granules =>
+  same-parity 34.08 GiB/s vs mixed 54.89 GiB/s (ratio 0.62); 512B/1KB/2KB => ratios ~1.0.
+  => the 256B granule IS the channel interleave unit, bit 8 = channel, no hashing on that bit.
+  Round-24's "granule parity = channel" is VALIDATED by measurement (results archived). The
+  localization (corruption confined to ONE channel; 90.4% / burn-in 7-of-7) therefore stands.
+- DF config space dumped for the record (lspci -xxxx 00:18.0-7 + 00:00.0, archived
+  ~/rma-evidence/df-config/). amd_atl module exists but no per-channel perf counters are
+  exposed (data_fabric PMU has only aggregate dram_read/write events), which is why the
+  bandwidth-contention method was used.
+- Diagnostic state: ONE channel is faulty; within it there are two signatures (run A page-head
+  write-path loss + run B bit-12 single-bit lane flips). Stick vs slot still open => Fable's
+  slot-swap run remains the decider. Claims unchanged (Corsair if it follows the stick;
+  Minisforum ticket stays alive).
+
+
+
 
 
 
