@@ -2051,6 +2051,24 @@ Round-28 (2026-10-17 ~22:00): SINGLE-STICK TEST PASSES -> the pulled module is t
   Corsair RMA with serial A534T4312CDC8M (lifetime warranty; draft ready). The box is currently
   IDLE and USABLE on the single good stick (single-channel, 32 GB) while this plays out.
 
+Round-29 (2026-10-17 ~22:05): MIRROR TEST RESULT = the suspect module PANICS AT BOOT.
+
+- Serials confirmed from labels (SPD serials are zero on this SKU): A534T4312CDC8M = SUSPECT
+  (was the first stick pulled), A534T4312CD0JC = GOOD. Both CMSX32GX5M1A4800C40, Taiwan, same
+  batch prefix A534T4312CD.
+- Suspect module installed ALONE (channel A): the box does NOT boot - kernel panic (seen on the
+  monitor; same class as the swapped-pair panic earlier: stack-protector / acpi_idle_enter_bm
+  idle-path corruption). Owner requested a plug power-cycle to confirm reproducibility.
+- Result matrix is now decisive: GOOD stick alone = boots + 25 min PASS (0 errors); SUSPECT
+  stick alone = boot panic (reproduced); the pair = ~4.3 min corruption burst under the dip
+  recipe. => A534T4312CDC8M is the defective module; the Corsair lifetime claim is the fix.
+- Claim draft updated (~/rma-evidence/corsair-claim-draft.txt) with the full matrix, both
+  serials, and the evidence list.
+- NEXT (physical, ~2 min): install ONLY the good stick (A534T4312CD0JC) so the box is usable,
+  boot it, pull the pstore records of the suspect stick's boot panics into ~/rma-evidence, then
+  file the Corsair RMA. Replacement arrives => restore 2x32 GB.
+
+
 
 
 
