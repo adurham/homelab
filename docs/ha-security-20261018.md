@@ -1,0 +1,67 @@
+# Home Assistant security pass — 2026-10-18
+
+State changes made after auditing the live instance (HA Green, core 2026.10.2).
+
+## 1. Login rate limiting
+
+`login_attempts_threshold` was `-1` (disabled) while `ip_ban_enabled` was on, so
+brute force was never blocked. Now `5`.
+
+Note on how it was applied: `http/config/configure` accepted the change and
+returned `restart: true`, but after a Supervisor restart the value stayed
+`pending` instead of promoting to `stable`. Fixed by stopping-and-editing
+`/config/.storage/http` (stable block set to 5, pending cleared) and restarting
+core through `POST /api/services/homeassistant/restart`. Old file kept at
+`/config/.storage/http.bak.20261018`.
+
+## 2. Long-lived access tokens
+
+Two stale tokens existed:
+
+| name   | created    | action  |
+|--------|------------|---------|
+| Claude | 2026-03-07 | revoked |
+| Hermes | 2026-05-10 | revoked |
+
+Replaced by a single token created 2026-10-18 named
+`hermes+ansible (2026-10-18 rotation)`, lifespan 3650 days. It is stored in:
+
+- the ansible vault var `homeassistant_token` (`ansible/inventory/group_vars/all.yml`)
+- `homeassistant/ha_config.env` (gitignored)
+
+Remaining refresh tokens are per-device sessions (iOS app + browsers), left
+alone.
+
+## 3. OIDC / break-glass split
+
+The Authentik OIDC user (`Adam Durham`, id `f16a85006353405ab9d6aff393ec0898`)
+was in `system-users`; promoted to `system-admin` so day-to-day admin work can
+use the SSO path (and whatever policy/MFA Authentik enforces). The local owner
+account stays owner + `system-admin` as break-glass.
+
+## 4. Google Assistant exposure
+
+`homeassistant.expose_new_entities` is `false` for `cloud.google_assistant`, and
+402 entities are explicitly exposed. That is already an allow-list model: a new
+entity is not exposed until someone flips it on. No change needed.
+
+## 5. Offsite backups
+
+HA keeps ~16 backups locally in `/backup` (automatic full backups are ~1.4 GB
+each, plain tar — not encrypted by HA). They are now mirrored offsite:
+
+- script: `~/bin/ha-backup-offsite.sh`
+- schedule: launchd `com.adam.ha-backup-offsite`, daily 07:30
+- destination: rclone remote `tgcrypt:ha-backups` (crypt over the `tgdrive`
+  Google shared drive), newest 3 kept
+- restore: needs `rclone.conf` (crypt password) — store a copy of it somewhere
+  safe; without it the uploaded blobs cannot be decrypted
+
+## 6. Still open
+
+- **TOTP on the owner account is not enabled.** No API exists for the setup
+  flow; it must be done in the UI (Profile → Security → Enable TOTP) with an
+  authenticator app.
+- Nabu Casa remote UI is enabled — the Nabu Casa account itself should have 2FA.
+- HA login page is LAN/tailnet only (`homeassistant.chi.lab.amd-e.com` is not in
+  public DNS).
