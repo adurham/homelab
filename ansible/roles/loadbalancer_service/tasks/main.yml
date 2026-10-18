@@ -197,6 +197,24 @@
     line: "{{ ip_authentik }} auth.chi.lab.amd-e.com"
     state: present
 
+# Throwaway cert for the catch-all default server (nginx 1.18 has no
+# ssl_reject_handshake). Non-identifying CN on purpose: a bare-IP scan used to get the
+# Tanium vhost's real cert and SAN list.
+- name: Generate throwaway TLS cert for the catch-all default server
+  ansible.builtin.command: >-
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650
+    -subj "/CN=invalid"
+    -keyout /etc/nginx/ssl/default.key -out /etc/nginx/ssl/default.crt
+  args:
+    creates: /etc/nginx/ssl/default.crt
+
+- name: Restrict the throwaway key
+  ansible.builtin.file:
+    path: /etc/nginx/ssl/default.key
+    mode: '0600'
+    owner: root
+    group: root
+
 - name: Deploy Nginx Configuration
   ansible.builtin.template:
     src: nginx.conf.j2

@@ -51,6 +51,29 @@ map $http_upgrade $connection_upgrade {
     ''      "";
 }
 
+# BEGIN auth-throttle (http level) -- also extracted verbatim by the throwaway-nginx test
+# Rate limits for the PUBLIC Authentik login (auth.chi). Keyed on the real client IP:
+# lb-01 is the only hop that sees it (Authentik logs 172.16.0.30 for every client, so an
+# Authentik-side reputation policy would lock out everyone at once).
+# Internal sources (LAN / private SDN / Tailscale) get an EMPTY key, and nginx does not
+# count empty keys -- so SSO token exchanges from HA/Grafana/Proxmox are never throttled.
+map $is_internal $limit_key {
+    1       "";
+    default $binary_remote_addr;
+}
+# Credential submission only: POSTs to the flow executor (identification, password, MFA).
+# GETs of challenges and static assets are NOT counted here, so a normal login with a
+# couple of typos, or MFA self-enrolment, stays well inside the budget.
+map "$request_method:$uri" $login_key {
+    default                                 "";
+    "~^POST:/api/v3/flows/executor/"        $limit_key;
+}
+limit_req_zone $limit_key zone=auth_general:10m rate=50r/s;
+limit_req_zone $login_key zone=auth_login:10m   rate=10r/m;
+limit_req_status 429;
+limit_req_log_level warn;
+# END auth-throttle
+
 # least_conn (not ip_hash): the Tailscale subnet router does SNAT, so
 # every Tailscale peer arrives at lb-01 with source {{ net_private_gw }}.
 # Under ip_hash that pinned every Tailscale user to the same upstream
@@ -130,6 +153,42 @@ upstream tanium_servers {
 # result per-session for a few seconds collapses that storm to ~1 check/session.
 proxy_cache_path /var/cache/nginx/auth levels=1:2 keys_zone=auth_cache:10m
                  max_size=64m inactive=60s use_temp_path=off;
+
+# Catch-all servers. nginx 1.18 has no ssl_reject_handshake, so the TLS default uses a
+# throwaway self-signed cert with a non-identifying CN and then drops the connection
+# (444). Before this, any unknown Host/SNI or bare-IP request fell through to the FIRST
+# server block (Tanium) and answered with its cert and headers.
+# Logged separately (with Host + SNI) so scanner noise is visible and Tanium/other clients
+# that relied on the old fall-through show up immediately.
+log_format default_drop '$remote_addr [$time_local] "$request" host=$host sni=$ssl_server_name proto=$server_protocol';
+server {
+    listen 80 default_server;
+    server_name _;
+    access_log /var/log/nginx/default_server.log default_drop;
+    return 444;
+}
+server {
+    listen 443 ssl http2 default_server;
+    server_name _;
+    ssl_certificate /etc/nginx/ssl/default.crt;
+    ssl_certificate_key /etc/nginx/ssl/default.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    access_log /var/log/nginx/default_server.log default_drop;
+    return 444;
+}
+
+# Plain-HTTP redirects. auth.chi and whoami.chi used to be redirected only because they fell
+# through to the Tanium :80 block; with a real default server that would become a drop.
+server {
+    listen 80;
+    server_name auth.chi.lab.amd-e.com;
+    return 301 https://$host$request_uri;
+}
+server {
+    listen 80;
+    server_name whoami.chi.lab.amd-e.com;
+    return 301 https://$host$request_uri;
+}
 
 server {
     listen 80;
@@ -359,10 +418,16 @@ server {
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
 
     location / {
+        # Public login: throttle per real client IP (see auth-throttle map at the top).
+        limit_req zone=auth_general burst=150 nodelay;
+        limit_req zone=auth_login   burst=15  nodelay;
+
         proxy_pass https://{{ ip_authentik }};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Public edge: OVERWRITE, never append -- a client-supplied X-Forwarded-For must not
+        # reach Authentik, which trusts proxy headers from RFC1918 sources.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
