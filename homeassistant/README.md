@@ -154,6 +154,18 @@ Disk pressure matters here because the backup transient, a HA Core update
 1.2–1.7 GB free. `automations/disk_space_watchdog.yaml` pages at 3 GB /
 10 min, and Grafana rule `ha_host_disk_low` is the push channel.
 
+Side effect worth knowing: because the nightly is a *partial* backup and
+shark2mqtt is excluded, HA's `no_current_backup` check (it wants at least
+one backup of type `full` — homeassistant + **all** add-ons + all folders)
+reports a `create_full_backup` suggestion in Settings → System → Repairs.
+That is cosmetic here, and was true before the 2026-10-18 change as well:
+`/share` and `/media` are effectively empty, so a "full" backup would add
+nothing a restore needs. Do **not** "fix" it by putting shark2mqtt back in
+the nightly — the real fix, if the suggestion is annoying enough, is to
+publish the add-on as a prebuilt `arm64` image (a prebuilt image is pulled
+on restore instead of being exported into the archive, which is why
+ESPHome's member is 0 bytes), after which it can be included again for free.
+
 Inspecting space on the host:
 
 ```bash
