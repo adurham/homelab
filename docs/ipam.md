@@ -2005,6 +2005,28 @@ Round-26 (2026-10-17 ~20:50): watchdog PROVEN in the field + channel bit empiric
   slot-swap run remains the decider. Claims unchanged (Corsair if it follows the stick;
   Minisforum ticket stays alive).
 
+Round-27 (2026-10-17 ~21:10): RAM swap done; box dark = the new Shelly plug, not the RAM.
+
+- Owner swapped the two DIMMs (cold boot) and put a Shelly plug inline. The box then appeared
+  OFF: no LAN host, no tailnet. Cause established: the new Shelly is in FACTORY state (not on
+  wifi - LAN scan shows only the four existing shelly1minig3s + one 1PM mini; no unknown
+  Shelly hosts) and Shelly plugs ship with the relay OFF => the plug is holding the box's power
+  off. Nothing to conclude about the RAM yet; the swap test is blocked on plug provisioning.
+- HA access established for the later steps: token pulled from the vaulted inventory
+  (ansible/inventory/group_vars/all.yml homeassistant_token; note ansible-vault view/decrypt
+  does NOT work on that file - it is plain YAML with an inline !vault scalar; resolve via
+  `ansible homeassistant -i inventory -c local -m debug -a var=homeassistant_token`).
+  API works: /api/config + /api/states (1,239 entities; Shelly integration loaded; existing
+  relays shelly1minig3_* + shelly1pmminig3_d0cf13cbfc28, all currently off).
+- PLUG PROVISIONING IS USER-SIDE: first-time pairing is over the plug's own BLE/AP (phone +
+  Shelly app, 2.4 GHz wifi), not reachable from the Mac. Owner instructed.
+- PREP WRITTEN (ready to deploy the moment the plug is online): HA automation draft
+  homeassistant/automations/amd_workstation_power_recovery.yaml (ping sensor 5 min -> plug
+  off/on, 10 min rate limit, maintenance boolean, alert-and-stop if still down after 90 s;
+  entity ids finalize on discovery) + ~/bios-remote/shelly-amd-plug-setup.sh (RPC: power-on
+  default ON, name, relay ON, status).
+
+
 
 
 
