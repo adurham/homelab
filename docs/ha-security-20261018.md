@@ -59,9 +59,9 @@ each, plain tar — not encrypted by HA). They are now mirrored offsite:
 
 ## 6. Still open
 
-- **TOTP on the owner account is not enabled.** No API exists for the setup
-  flow; it must be done in the UI (Profile → Security → Enable TOTP) with an
-  authenticator app.
+- **TOTP: enabled 2026-10-18** on the owner account (`auth_module.totp` holds the
+  user's secret; the 1Password item "HA root user" carries the same secret —
+  verified by recomputing the 6-digit code for the moment it was added).
 - Nabu Casa remote UI is enabled — the Nabu Casa account itself should have 2FA.
 - HA login page is LAN/tailnet only (`homeassistant.chi.lab.amd-e.com` is not in
   public DNS).
