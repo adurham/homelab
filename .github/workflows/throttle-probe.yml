@@ -1,0 +1,24 @@
+name: throttle-probe
+on:
+  push:
+    branches: [tmp/throttle-probe]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit the public Authentik login from an outside IP
+        run: |
+          set -u
+          H=auth.chi.lab.amd-e.com
+          E=/api/v3/flows/executor/default-authentication-flow/?query=
+          J=$(mktemp)
+          echo "runner egress ip: $(curl -s -m 10 https://api.ipify.org)"
+          printf "reachable from outside: "; curl -s -o /dev/null -m 15 -w "%{http_code}\n" https://$H/
+          curl -s -c $J -o /dev/null https://$H$E
+          C=$(awk '/authentik_csrf/{print $7}' $J)
+          codes() { sort | uniq -c | sort -rn | awk '{printf "%s x%s  ", $2, $1}'; echo; }
+          printf "5 GETs of the flow (not counted)      : "; for i in 1 2 3 4 5; do curl -s -b $J -o /dev/null -w '%{http_code}\n' https://$H$E; done | codes
+          printf "30 credential POSTs, same IP          : "; for i in $(seq 30); do curl -s -b $J -o /dev/null -w '%{http_code}\n' -H "X-authentik-CSRF: $C" -H 'Content-Type: application/json' -d "{\"component\":\"ak-stage-identification\",\"uid_field\":\"ext-probe-$i\"}" https://$H$E; done | codes
+          printf "GET of the flow while POSTs throttled : "; curl -s -b $J -o /dev/null -w '%{http_code}\n' https://$H$E
+          printf "login page itself while throttled     : "; curl -s -o /dev/null -w '%{http_code}\n' https://$H/if/flow/default-authentication-flow/
+          printf "bare-IP scan (expect dropped)         : "; curl -sk -o /dev/null -m 8 -w '%{http_code}' https://108.88.208.88/ || true; echo " (000 = dropped)"
