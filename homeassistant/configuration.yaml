@@ -17,7 +17,7 @@ auth_oidc:
 # NOTE: lb-01's trusted-proxy config for the homeassistant.chi.lab.amd-e.com
 # vhost (X-Forwarded-For/-Proto/-Host trust so client IPs in the
 # frontend/logbook and auth flows are correct — lb-01 reaches HA via its LAN
-# NIC 192.168.86.86, not the SDN IP 172.16.0.30) now lives in HA's
+# NIC 192.168.86.34, not the SDN IP 172.16.0.30) now lives in HA's
 # storage-backed network config (Settings > System > Network), NOT here.
 #
 # As of HA core 2026.8 stable, the `http:` YAML block is a one-time import
@@ -26,7 +26,7 @@ auth_oidc:
 # works correctly. On 2026-08-06 the pending YAML `http:` block was
 # confirmed migrated and *promoted* to stable via the http/config
 # websocket API (use_x_forwarded_for: true, trusted_proxies:
-# ["192.168.86.86/32"]) and verified live through the reverse proxy
+# ["192.168.86.34/32"]) and verified live through the reverse proxy
 # (200 from https://homeassistant.chi.lab.amd-e.com/api/). Do not re-add an
 # `http:` block here — HA repairs will flag "yaml_still_present_after
 # migration" and it stops working entirely in 2027.2.0. Manage trusted

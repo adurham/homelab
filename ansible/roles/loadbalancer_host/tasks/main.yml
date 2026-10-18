@@ -81,24 +81,26 @@
   when: not lb_exists
 
 # lb-01 is DUAL-HOMED: net0 = private SDN (backends), net1 = LAN ingress.
-# It IS the internet ingress — Google Home forwards :80/:443 to its LAN IP, and
-# it runs the No-IP DDNS updater. The backends (gallery/vm/graf) are private-
+# It IS the internet ingress — Google Home forwards :80/:443 to it, and it
+# runs the No-IP DDNS updater. The backends (gallery/vm/graf) are private-
 # only, but the load balancer itself must straddle LAN+SDN or external access
-# (auth.chi, tanium.chi, etc.) breaks. net1 uses a STATIC LAN IP set directly
-# at the Proxmox net1 config (ip=<lb_lan_ingress_ip>/24, no gw) — NOT
-# ip=dhcp. History: this used to be ip=dhcp with the static address applied
-# only inside the CT via loadbalancer_service's eth1.network — but the guest's
-# own systemd-networkd DHCP client would still race for/hold a lease
-# alongside the static address (observed live 2026-08-16: eth1 carried BOTH
-# a stale DHCP lease at .94 as primary and .86 as a secondary address after a
-# `pct set` NIC recreate changed the MAC and broke the AdGuard static-lease
-# binding — HA's http.trusted_proxies only trusts .86/32, so every proxied
-# request 400'd until the DHCP lease was manually cleared). Setting the
-# static IP at the Proxmox net1 level removes the DHCP client from the
-# picture entirely, so there's no lease to drift onto. in-CT eth1.network
-# (loadbalancer_service role) still sets the address too, redundantly, and
-# deliberately has NO gateway so default egress stays via the private SDN
-# gateway (no asymmetric-routing 502s).
+# (auth.chi, tanium.chi, etc.) breaks.
+#
+# net1 is ip=dhcp with a Google Home DHCP reservation (lb_lan_ingress_ip,
+# keyed on the NIC's MAC, pinned below via hwaddr=). Decided 2026-10-18: the
+# old static .86 sat inside the Nest's DHCP pool (.20-.250) where the router
+# could lease it to another device, and a static host never appears in the
+# Home app's device picker, so a port-forward to it could not be created.
+#
+# Two things must stay true or ingress breaks:
+#   1. The MAC must not change. Recreating the NIC (`pct set` without hwaddr=)
+#      generates a new MAC and orphans the reservation (seen 2026-08-16, when
+#      eth1 landed on a stray lease at .94).
+#   2. HA's http.trusted_proxies must contain lb_lan_ingress_ip, or every
+#      proxied request to homeassistant.chi 400s.
+# In-CT routing (loadbalancer_service): no default route or DNS from the LAN
+# side, plus a policy-routing table so replies to port-forwarded traffic leave
+# via the Nest instead of the SDN gateway.
 - name: Check if Net1 (LAN ingress) exists
   delegate_to: "{{ lb_node }}"
   ansible.builtin.shell: |

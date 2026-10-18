@@ -122,4 +122,6 @@ net_bwt_gw: "10.99.0.1"
 net_bwt_bridge: "bwt"
 net_bwt_vlan_tag: 200
 net_bwt_mtu: 1450  # VXLAN overhead, same as `private`
-lb_lan_ingress_ip: "192.168.86.86"  # lb-01 LAN ingress (DHCP: Google Home reservation for MAC BC:24:11:8B:07:28; Home app forwards :80/:443 to this device)
+# lb-01 LAN ingress: DHCP client, Google Home reservation for MAC BC:24:11:8B:07:28 pins it to .34;
+# the Home app forwards :80/:443 to it. (.86 was the old static address, retired 2026-10-18.)
+lb_lan_ingress_ip: "192.168.86.34"
