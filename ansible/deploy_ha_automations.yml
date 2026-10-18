@@ -163,6 +163,17 @@
       register: scp_config
       changed_when: scp_config.rc == 0
 
+    # Helper scripts called from command_line (e.g. the Shelly digest-auth
+    # RPC client). /config/bin/ already exists for the speedtest wrapper.
+    - name: Copy /config/bin helpers
+      ansible.builtin.shell: >-
+        scp -P {{ ansible_port }} {{ ssh_opts }}
+        {{ ha_root }}/bin/*.py
+        {{ ansible_user }}@{{ ansible_host }}:/config/bin/
+      delegate_to: localhost
+      register: scp_bin
+      changed_when: scp_bin.rc == 0
+
     - name: Copy apps/apps.yaml
       ansible.builtin.shell: >-
         scp -P {{ ansible_port }} {{ ssh_opts }}

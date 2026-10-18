@@ -77,16 +77,23 @@ plug's `.57`, so that one must not move without a config deploy.
 
 - **Cloud**: off on all 7. No vendor cloud, no Shelly app control.
 - **Remote path**: HA only (Nabu Casa).
-- **Local surface is NOT HA-only.** All 7 report `auth_en:false` and serve
-  unauthenticated HTTP RPC on port 80; `curl http://<ip>/rpc/Shelly.GetDeviceInfo`
-  returns 200 from any LAN client, and the same endpoint accepts
-  `Switch.Set`/`Cover.*`. Setting a device password (`Shelly.SetAuth`) blocks
-  that, but CoAP (what the HA Shelly integration uses) stays open, so a password
-  raises the bar rather than sealing it. True enforcement needs an IoT
-  VLAN/SSID that can reach only HA — the Nest Wi-Fi cannot do that (guest
-  network would cut HA off too).
-- **Matter**: commissioned to HA only (`num_fabrics:1`). Any other controller
-  would need the device's pairing code and physical access to the label.
+- **Device login is ON (2026-10-18).** `Shelly.SetAuth` with user `admin`,
+  realm = device id and `ha1 = SHA256("admin:<device-id>:<password>")`. All 7
+  now answer `401` to unauthenticated HTTP/WS (and CoAP) RPC — verified from a
+  laptop on the LAN. The shared password is `shelly_device_password` in the
+  ansible vault and in HA's `/config/secrets.yaml`.
+- **HA authenticates**: each Shelly config entry was re-created with the
+  password (delete + re-add with credentials; aioshelly implements the
+  SHA-256 digest). Entity IDs were unchanged across the re-pair.
+- **command_line path** (`switch.amd_workstation_power`, plug power sensor):
+  urllib cannot do SHA-256 digest, so it calls `/config/bin/shelly_rpc.py`
+  (repo: `homeassistant/bin/shelly_rpc.py`, pushed by the deploy playbook).
+- **MQTT is exempt from device auth by design** — the broker credentials are
+  the gate there. Anyone holding the `shelly` broker login could still command
+  a relay over MQTT. To close that too, set `Mqtt.SetConfig enable_control:false`
+  (keeps status/telemetry, drops remote control).
+- **Matter**: commissioned to HA only (`num_fabrics:1`); another controller
+  would need the setup code.
 
 ## Reboot behavior
 
@@ -126,6 +133,14 @@ ansible localhost -i ansible/inventory/hosts --vault-password-file .vault_pass \
   above, `Cloud.SetConfig enable:false`, `Matter.SetConfig enable:true`, reboot,
   and commission with `Matter.GetSetupCode` → HA `matter/commission`. MQTT
   config changes need a reboot to take effect (`restart_required:true`).
+- **Enable/refresh the device login**: compute
+  `ha1 = sha256("admin:<device-id>:<password>")` and call
+  `Shelly.SetAuth {user:"admin", realm:<device-id>, ha1:<ha1>}` (send `ha1:null`
+  to clear it). Then in HA remove the Shelly config entry and re-add it, giving
+  the password at the credentials step — reconfigure alone will not prompt,
+  because `Shelly.GetDeviceInfo` is exempt from auth. The password lives in the
+  vault (`shelly_device_password`) and in `/config/secrets.yaml` for the
+  `command_line` helper.
 
 ## Firmware
 

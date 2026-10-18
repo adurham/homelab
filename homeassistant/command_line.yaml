@@ -55,17 +55,17 @@
 - switch:
     name: "amd-workstation power"
     unique_id: amd_workstation_power
+    # Device login is enabled on the Shelly fleet (HTTP digest, SHA-256), which
+    # urllib cannot do natively; /config/bin/shelly_rpc.py does the
+    # challenge/response. Password comes from secrets.yaml
+    # (shelly_device_password).
     command_on: >-
-      python3 -c 'import urllib.request as u; r=u.Request("http://192.168.86.57/rpc/Switch.Set",
-      data=b"{\"id\":0,\"on\":true}", headers={"Content-Type":"application/json"}, method="POST");
-      print(u.urlopen(r, timeout=6).read().decode())'
+      python3 /config/bin/shelly_rpc.py http://192.168.86.57/rpc/Switch.Set '{"id":0,"on":true}'
     command_off: >-
-      python3 -c 'import urllib.request as u; r=u.Request("http://192.168.86.57/rpc/Switch.Set",
-      data=b"{\"id\":0,\"on\":false}", headers={"Content-Type":"application/json"}, method="POST");
-      print(u.urlopen(r, timeout=6).read().decode())'
+      python3 /config/bin/shelly_rpc.py http://192.168.86.57/rpc/Switch.Set '{"id":0,"on":false}'
     command_state: >-
-      python3 -c 'import json,urllib.request as u; d=json.load(u.urlopen(
-      "http://192.168.86.57/rpc/Switch.GetStatus?id=0", timeout=5)); print(str(d["output"]).lower())'
+      python3 /config/bin/shelly_rpc.py 'http://192.168.86.57/rpc/Switch.GetStatus?id=0'
+      | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["output"]).lower())'
     value_template: "{{ value == 'true' }}"
     scan_interval: 30
 
@@ -73,8 +73,8 @@
     name: "amd-workstation plug power"
     unique_id: amd_workstation_plug_power
     command: >-
-      python3 -c 'import json,urllib.request as u; d=json.load(u.urlopen(
-      "http://192.168.86.57/rpc/Switch.GetStatus?id=0", timeout=5)); print(d["apower"])'
+      python3 /config/bin/shelly_rpc.py 'http://192.168.86.57/rpc/Switch.GetStatus?id=0'
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["apower"])'
     unit_of_measurement: "W"
     device_class: power
     state_class: measurement
