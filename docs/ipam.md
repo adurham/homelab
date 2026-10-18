@@ -2170,3 +2170,25 @@ Round-33 (2026-10-18 ~00:20): CORRECTION - the box is currently running the DEFE
 - Action: swap in the good module and (in the BIOS) set VDDIO = Auto and Global C-states = Auto
   (the good module's 25-min clean pass was at STOCK settings, so no shim is needed on it). Until the
   swap, treat the box as unsuitable for anything whose corruption you could not detect.
+
+Round-34 (2026-10-18 ~10:15): overnight run on the defective module = userspace carnage; OS hardening installed.
+
+- The box stayed POWERED overnight on the defective module (boot 23:38, up 10.5 h) but did not stay
+  healthy: /var/crash shows wireplumber SIGSEGV x2 (22:49, 23:37), whoopsie crash (00:07), a pytest
+  crash (17:00), and **dbus-daemon segfaulted ~23:37** - after which every systemctl/journalctl call
+  hung (stale socket present, no listener) and **apport spun at 100% CPU for 10 hours** trying to
+  write the report. Killed apport; restarted dbus (systemctl responsive again, system state clean,
+  no failed units). Old duplicate dbus-daemon still resident until the next reboot.
+- Crash artifacts archived to ~/rma-evidence/crash-artifacts-20261018/ (another evidence pile for the
+  Corsair claim: multiple userspace daemons SIGSEGV with a defective DIMM installed).
+- OS HARDENING DEPLOYED (Fable's list, all reversible): memcanary.service (1.5 GiB resident pattern,
+  per-chunk blake2b verification every 300 s, logs /var/log/memcanary.log + logger warning; verified
+  clean passes at 1.44 s each), git-fsck.timer (nightly 03:30, all ~/repos, logs PROBLEM lines to
+  /var/log/git-fsck.log), thp-madvise.service (THP=madvise), /etc/sysctl.d/95-integrity.conf
+  (panic_on_oops=1, dirty_expire_centisecs=300, dirty_background_bytes=64M, swappiness=10),
+  sleep/suspend/hibernate targets masked, and GRUB cmdline staged with
+  "processor.max_cstate=1 idle=halt" (applies at next reboot; /etc/default/grub backed up).
+- NOT installed deliberately: zram (Fable: a flipped bit in a compressed page destroys the whole page).
+- Pending: owner installs BOTH modules (64 GB is the requirement) + reboot; then the test ladder
+  4800 (baseline) -> 4000 MT/s -> fan profile max -> DIMM VDD 1.15 -> 3600, stopping at 0 incidents on
+  two consecutive runs, panic = revert, max 6 runs.
