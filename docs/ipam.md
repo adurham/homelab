@@ -2139,3 +2139,23 @@ Round-31 (2026-10-17 ~23:00-00:10): BIOS mitigation sweep completed; Fable verdi
 - Verification note: the good module's clean 25-min pass was at STOCK settings (C-states Auto) - so
   the shim is only needed if the bad module is installed; C-states can go back to Auto on the next
   BIOS trip once the machine runs the good stick only.
+
+Round-32 (2026-10-18 ~00:05): Corsair RMA request FILED (email channel; chat is Cloudflare-walled).
+
+- Filed: email to support@corsair.zendesk.com (confirmed as Corsair's real Zendesk support mailbox;
+  their help.corsair.com chat widget + request form are behind a Cloudflare bot challenge that blocks
+  both curl and the automated browser, so email is the headless-viable channel). Sent from
+  AMDNative@gmail.com with the Best Buy invoice attached; verified in Gmail's Sent Mail (one copy,
+  recipient + attachment present). Body archived at ~/rma-evidence/corsair-claim-body.txt; the chat
+  paste version at corsair-chat-paste.txt.
+- Claim contents: defective S/N A534T4312CDC8M (partner S/N A534T4312CD0JC known good), Best Buy
+  order BBY01-806977127729, full diagnostic matrix (pair = 4.3-min corruption bursts -> panics;
+  module alone = boot panic in acpi_idle_enter_bm; partner alone = 25-min clean), request for a
+  REPLACEMENT PART (same model or similar function/capacity), explicit "do not process as refund or
+  store credit", Advanced-RMA question, and a note that MemTest86 results are pending.
+- Watch for: their reply (ticket/RMA number). If they insist on the web chat, that needs a logged-in
+  browser session the user drives (Cloudflare blocks automation).
+- Still owed (Fable's list): MemTest86 run on the defective module (USB boot, physical session);
+  data-integrity audit of the workstation (git fsck / debsums / fsck / preserve old backups);
+  optional 4000 MT/s + fan-on-module experiments if chasing 64 GB; Minisforum ticket kept alive with
+  "diagnosis ongoing, RAM RMA pending" and no hardware shipped.
