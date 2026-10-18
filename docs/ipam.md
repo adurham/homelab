@@ -2159,3 +2159,14 @@ Round-32 (2026-10-18 ~00:05): Corsair RMA request FILED (email channel; chat is 
   data-integrity audit of the workstation (git fsck / debsums / fsck / preserve old backups);
   optional 4000 MT/s + fan-on-module experiments if chasing 64 GB; Minisforum ticket kept alive with
   "diagnosis ongoing, RAM RMA pending" and no hardware shipped.
+
+Round-33 (2026-10-18 ~00:20): CORRECTION - the box is currently running the DEFECTIVE module.
+
+- The good module A534T4312CD0JC was NEVER reinstalled after the mirror/VDDIO tests; the machine is
+  currently on A534T4312CDC8M (the defective one) at 32 GB with the shim (C-states off; VDDIO may
+  still be at the last-tested 1000 mV; owner to revert).
+- Software cannot distinguish the modules (SPD serials are zero on this SKU) - which module is
+  installed is a physical fact; do not assume the swap happened.
+- Action: swap in the good module and (in the BIOS) set VDDIO = Auto and Global C-states = Auto
+  (the good module's 25-min clean pass was at STOCK settings, so no shim is needed on it). Until the
+  swap, treat the box as unsuitable for anything whose corruption you could not detect.
