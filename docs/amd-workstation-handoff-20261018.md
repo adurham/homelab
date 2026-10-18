@@ -5,6 +5,10 @@ re-reading the transcript. Repo: `~/repos/homelab` (branch main). Evidence bundl
 
 ## 1. TL;DR state
 
+> **2026-10-18 afternoon: the 64 GB pair is NOT usable.** Both modules installed and booted, but the
+> pair panics in ~2 min at 4800 and produced 1910 miscompares in 3 min at 4000 before dying. Speed is
+> closed as a lever. Read §10 before acting on anything below.
+
 - The workstation has **one defective DDR5 SO-DIMM**. It is PROVEN bad and the Corsair lifetime RMA is
   **filed**. The user's requirement is **64 GB (both modules installed)** — 32 GB is explicitly not an
   option — so we are running the defective module with mitigations while the RMA plays out.
@@ -148,3 +152,65 @@ Known-good reference numbers (single defective module, shim): VDDIO Auto = 9 inc
 - Tools: `~/bios-remote/` (bios-set EFI toolkit + records, `rma-session-runbook.md`, `memcanary.py`,
   units, `shelly-amd-plug-setup.sh`, `watchdog-livetest.sh`, `upon-return.sh`).
 - Records: `~/repos/homelab/docs/ipam.md` rounds 5-34 (this campaign).
+
+## 10. 2026-10-18 afternoon — physical swap, BIOS pass, pair verdict (12:00–13:40 CDT)
+
+### 10.1 Physical
+Both modules now installed: good `A534T4312CD0JC` in **P0 Channel A**, defective `A534T4312CDC8M` in
+**P0 Channel B**. Confirmed from `dmidecode`: 32 GB per channel, both `CMSX32GX5M1A4800C40`.
+60 GiB usable (1 GB UMA + reserved). GRUB shim is live (`processor.max_cstate=1 idle=halt`).
+
+### 10.2 BIOS pass — every page walked, two bytes changed
+Verified by dumping `AmdSetupRPL` and diffing against `~/bios-remote/records/bios-result-last.txt`
+(the 2026-10-17 11:47 dump). Exactly two bytes moved:
+
+| offset | before | after | meaning |
+|---|---|---|---|
+| `0x29` | `0x03` | `0x00` | Global C-State: **Auto → Disabled** (confirmed by UI before/after) |
+| `0x47` | `0x08` | `0x04` | **Unattributed** — either Power Down Enable→Disabled or UMA 2G→1G. Needs the IFR map to resolve. |
+| `0x61` | `0x01` | `0x01` | Ac Loss Control: Always On, unchanged |
+
+Corrections to the earlier record: **the doc's claim that C-state was already Disabled was wrong** — the
+live byte was `0x03` (Auto) until this pass. `VDDIO Ctrl` was already **Auto** (doc said it was left at
+1000 mV; the recorded dump has no voltage byte differing, so it was Auto all along).
+`UMA Frame Buffer Size` was **2G**, not 1G (doc stale; 60 GiB total corroborates 2G). Set back to 1G.
+
+Everything else left alone: Secure Boot (still Enabled), Re-Size BAR Enabled, SR-IOV Disabled, PSS/NX
+Enabled, IOMMU Enabled in firmware (but the kernel exposes **zero IOMMU groups** — IOMMU is not
+actually active), NVMe RAID Disabled, ERP Disabled, WoL Enabled, all DDR drive-strength/ODT on Auto,
+PBO/VDDG/VDDP/SoC all Auto.
+
+**Secure Boot has a real cost**: memtest86+ is unsigned, so the GRUB "memory test" entry refuses to load
+with `bad shim lock signature`. Disabling Secure Boot (Security tab — it is NOT on the Trusted
+Computing page) fixes both the memtest route and the `bios-set` toolkit route.
+
+### 10.3 Runs and outcomes
+- **Pair @4800**, run 1 started 12:14:40 → **dead 12:16:38** (2 min). Journal stops mid-tick, no panic
+  line. `efi-pstore` variables for this event are **0 bytes** — a hard stop, no crash record.
+- Next boot 12:17:45 → **dead after 8 s**: page fault inside the page allocator,
+  `get_page_from_freelist → rmqueue.isra.0`, userspace RIP, "Disabling lock debugging due to kernel taint".
+- Boot 12:34:25 (after 4000 was set) → **dead after 4 s** during service startup.
+- **memtest86+ @4000**: ran past 69 % of pass 1 with **0 errors**, then exited/rebooted to Ubuntu.
+  Completion was never observed at 100 % — record as a **partial clean run only**.
+- **Pair @4000**, run started 13:28:55 → **1910 miscompares by 13:32:18**, box dead by 13:34.
+  Log: `/tmp/stress-out-20261018-132855.log` — **the strongest Corsair artifact produced so far**
+  (9 incidents in 25 min was the old best-config reference).
+
+### 10.4 Conclusions
+- The 64 GB pair is unusable at **both 4800 and 4000**. Dropping frequency made it dramatically worse,
+  not better, so **speed is closed as a lever** and the remaining ladder steps (fan, DIMM VDD) can only
+  buy margin on a working lane — they cannot rescue a failing one.
+- Clean memtest vs. Linux dying in 2-4 s is the live contradiction: the array holds patterns under
+  steady load but the kernel dies almost immediately. Consistent with a transition-triggered fault, and
+  it is why memtest cannot exonerate these modules.
+- The machine idles fine at 4000 (8+ min, no errors) — failures need load or a boot-time reservation.
+
+### 10.5 Next
+1. Pull the defective module, run **good-alone 25 min** (`-M 26000`) — not as a 32 GB answer, only to
+   prove the board is still healthy. Clean → RAM claim carries everything; dirty → Minisforum claim
+   becomes primary.
+2. Preserve `/tmp/stress-out-20261018-132855.log` into `~/rma-evidence/` before anything wipes it.
+3. Secure Boot: disable it next time the box is open — required for both memtest and `bios-set`.
+4. **Blocker at 13:35**: the Shelly plug at 192.168.86.57 pings but its HTTP RPC returns nothing
+   (300 ms avg / 590 ms peak latency) — no remote power control until it recovers or is power-cycled.
+
