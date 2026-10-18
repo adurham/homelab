@@ -1,22 +1,21 @@
-# amd-workstation: auto power-cycle if unreachable  (DRAFT - entity ids finalize on plug discovery)
-# Repo path is the deploy source; deploy via ansible/deploy_ha_automations.yml after filling ids.
+# amd-workstation auto power-cycle (Shelly Plug US Gen4, 192.168.86.57)
+# Liveness = binary_sensor.amd_workstation_reachable (SSH-port probe, 30 s poll).
+# MAINTENANCE MODE = disable this automation (e.g. while working inside the box).
 - id: amd_workstation_power_recovery
   alias: "amd-workstation: auto power-cycle if unreachable"
   description: >
-    If amd-workstation is unreachable for 5 minutes, power-cycle the Shelly plug.
-    Rate-limited to one cycle per 10 minutes; skipped while maintenance mode is on.
-    If the box is still down 90 s after the cycle, stop and alert (never loop on a dead part).
+    If amd-workstation stops answering on SSH for 5 minutes, power-cycle its Shelly plug.
+    Rate-limited to one cycle per 10 minutes. To suspend auto-recovery, DISABLE THIS
+    AUTOMATION. If the box is still down 90 s after a cycle it stops and notifies instead
+    of looping on a dead part.
   mode: single
   max_exceeded: silent
   trigger:
     - platform: state
-      entity_id: binary_sensor.amd_workstation_ping   # ping integration -> 100.66.90.53
+      entity_id: binary_sensor.amd_workstation_reachable
       to: "off"
       for: "00:05:00"
   condition:
-    - condition: state
-      entity_id: input_boolean.amd_workstation_maintenance
-      state: "off"
     - condition: template
       value_template: >
         {{ state_attr('this', 'last_triggered') is none
@@ -24,31 +23,26 @@
   action:
     - action: switch.turn_off
       target:
-        entity_id: switch.amd_workstation_plug        # Shelly relay (renamed on discovery)
+        entity_id: switch.amd_workstation_power
     - delay: "00:00:15"
     - action: switch.turn_on
       target:
-        entity_id: switch.amd_workstation_plug
+        entity_id: switch.amd_workstation_power
     - delay: "00:01:30"
     - choose:
         - conditions:
             - condition: state
-              entity_id: binary_sensor.amd_workstation_ping
+              entity_id: binary_sensor.amd_workstation_reachable
               state: "off"
           sequence:
-            - action: notify.persistent_notification
+            - action: persistent_notification.create
               data:
                 title: "amd-workstation did not come back"
                 message: >-
-                  Power-cycled the plug and the box is still unreachable. Auto-recovery
-                  stopped - needs a manual look.
+                  Power-cycled the plug; the box is still unreachable. Auto-recovery stopped
+                  and will not retry for 10 minutes - needs a manual look.
       default:
-        - action: notify.persistent_notification
+        - action: persistent_notification.create
           data:
             title: "amd-workstation recovered"
             message: "Auto power-cycle worked; the box is back."
-# Prerequisites once the plug is in HA:
-#  1. binary_sensor.amd_workstation_ping   -> ping integration, host 100.66.90.53
-#  2. input_boolean.amd_workstation_maintenance -> helper (manual maintenance switch)
-#  3. switch.amd_workstation_plug          -> Shelly relay, entity renamed
-#  4. Shelly device setting: power-on default = ON (so AC restore boots the box)

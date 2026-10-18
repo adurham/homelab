@@ -43,3 +43,50 @@
       - external_ip
       - result_url
       - timestamp
+
+# ---------------------------------------------------------------------------
+# amd-workstation AC power — Shelly Plug US Gen4 (S4PL-00116US, 192.168.86.57)
+# Added 2026-10-17.  The native Shelly integration does not auto-discover this
+# Gen4 model yet, so the plug is surfaced here (repo-managed, no UI-only state).
+# The relay IS the box's AC supply; power-on default is ON so an AC restore
+# boots the box (BIOS "Ac Loss Control = Always On").
+# NEVER toggle this while a test is running on the box.
+# ---------------------------------------------------------------------------
+- switch:
+    name: "amd-workstation power"
+    unique_id: amd_workstation_power
+    command_on: >-
+      python3 -c 'import urllib.request as u; r=u.Request("http://192.168.86.57/rpc/Switch.Set",
+      data=b"{\"id\":0,\"on\":true}", headers={"Content-Type":"application/json"}, method="POST");
+      print(u.urlopen(r, timeout=6).read().decode())'
+    command_off: >-
+      python3 -c 'import urllib.request as u; r=u.Request("http://192.168.86.57/rpc/Switch.Set",
+      data=b"{\"id\":0,\"on\":false}", headers={"Content-Type":"application/json"}, method="POST");
+      print(u.urlopen(r, timeout=6).read().decode())'
+    command_state: >-
+      python3 -c 'import json,urllib.request as u; d=json.load(u.urlopen(
+      "http://192.168.86.57/rpc/Switch.GetStatus?id=0", timeout=5)); print(str(d["output"]).lower())'
+    value_template: "{{ value == 'true' }}"
+    scan_interval: 30
+
+- sensor:
+    name: "amd-workstation plug power"
+    unique_id: amd_workstation_plug_power
+    command: >-
+      python3 -c 'import json,urllib.request as u; d=json.load(u.urlopen(
+      "http://192.168.86.57/rpc/Switch.GetStatus?id=0", timeout=5)); print(d["apower"])'
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    scan_interval: 30
+
+- binary_sensor:
+    name: "amd-workstation reachable"
+    unique_id: amd_workstation_reachable
+    # SSH-port probe, not ICMP: a zombie (kernel up, sshd dead) must read as DOWN.
+    command: >-
+      bash -c 'timeout 4 bash -c "exec 3<>/dev/tcp/100.66.90.53/22" 2>/dev/null && echo 1 || echo 0'
+    device_class: connectivity
+    payload_on: "1"
+    payload_off: "0"
+    scan_interval: 30

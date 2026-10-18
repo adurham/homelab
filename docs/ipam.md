@@ -2026,6 +2026,32 @@ Round-27 (2026-10-17 ~21:10): RAM swap done; box dark = the new Shelly plug, not
   entity ids finalize on discovery) + ~/bios-remote/shelly-amd-plug-setup.sh (RPC: power-on
   default ON, name, relay ON, status).
 
+Round-28 (2026-10-17 ~22:00): SINGLE-STICK TEST PASSES -> the pulled module is the suspect.
+
+- Shelly Plug US Gen4 (S4PL-00116US, 192.168.86.57, MAC e8f60a7e1528) provisioned by the owner
+  over BLE, then configured here: name "amd-workstation", power-on default = ON, CLOUD DISABLED
+  (fleet local-only convention), relay verified (RPC Switch.Set/GetStatus), 29 C, power metering
+  working. It is now the box's AC path.
+- HA side: native Shelly integration does NOT offer this Gen4 model (discovery empty; WS flow
+  start not exposed in 2026.9.3 - only config_entries/flow/progress|subscribe exist), so the
+  plug is surfaced via the repo's command_line pattern (house style): switch.amd_workstation_power
+  + power sensor + SSH-port liveness binary_sensor (a zombie reads DOWN) + the auto-recovery
+  automation. DEPLOY BLOCKED: the HA Terminal & SSH addon rejects the repo deploy key
+  (id_ansible, ed25519 AAAA...07); pre-existing, needs the pubkey added to the addon's
+  authorized_keys. Functionally nothing is blocked (plug controlled over RPC directly).
+- Power-cycle evidence from the plug: original order booted; swapped pair PANICKED
+  ("stack-protector: Kernel stack is corrupted in: acpi_idle_enter_bm+0x200/0x240" - idle/
+  power-state entry path, matching the 18-19 s-post-resume timing and the write-path signature).
+  Removing one stick then booted fine.
+- SINGLE-STICK TEST (installed stick, CHANNEL A, 32 GB, -M 26000, full dip recipe, 1500 s):
+  **PASS - 0 hardware incidents, 0 errors, 20.5 GB/s, ~12 dip cycles**. kdump re-armed after.
+  => the installed module is healthy on the exact recipe that kills the pair in ~4.3 min; the
+  PULLED module (serial A534T4312CDC8M) is the prime suspect.
+- NEXT: mirror test - pulled stick alone, same recipe (~25 min); expect FAIL = proof. Then
+  Corsair RMA with serial A534T4312CDC8M (lifetime warranty; draft ready). The box is currently
+  IDLE and USABLE on the single good stick (single-channel, 32 GB) while this plays out.
+
+
 
 
 
