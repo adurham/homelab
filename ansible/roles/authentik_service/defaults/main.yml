@@ -18,7 +18,7 @@ authentik_image: "ghcr.io/goauthentik/server"
 # bump it here (and re-run deploy_authentik.yml) for every future
 # Authentik upgrade, sequential-hop or otherwise, so the live version and
 # this repo can never silently diverge again.
-authentik_tag: "2026.8.0"
+authentik_tag: "2026.8.4"
 
 # Postgres major version is coupled to Authentik's supported range; bump
 # the major only after confirming Authentik release notes support it.

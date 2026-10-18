@@ -184,8 +184,21 @@
     - { src: "amd_enterprises_logo.svg", dest: "logo.svg" }
     - { src: "amd_enterprises_favicon.svg", dest: "favicon.svg" }
     - { src: "amd_enterprises_flow_bg.svg", dest: "flow_bg.svg" }
-  # Notifies per CHANGED item only (a handler fires once per notifying item, with
-  # that item's result bound to `item`), which is what the previous
-  # register + loop over .results + when: item.changed did by hand. Files rarely
-  # change once set; only re-push when the source SVG's checksum actually differs.
-  notify: Push staged branding SVG into the running container's media volume
+  # Registered (not notify'd): Ansible handlers do NOT get the notifying loop item bound,
+  # so the old `notify:` + handler using `item.item.dest` failed with "'item' is undefined"
+  # and left the play red whenever a branding file changed (hit during the 2026.8.4 upgrade).
+  # The task below loops over these results and only re-pushes files that actually changed.
+  register: authentik_branding_copy
+
+- name: Push changed branding SVGs into the running container's media volume
+  ansible.builtin.shell: |
+    set -e
+    CID=$(docker compose ps -q server)
+    docker cp /tmp/authentik_branding_{{ item.item.dest }} "$CID":/media/public/brand/{{ item.item.dest }}
+  args:
+    chdir: /opt/authentik
+  loop: "{{ authentik_branding_copy.results }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  when: item.changed
+  changed_when: true
