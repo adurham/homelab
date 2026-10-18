@@ -108,34 +108,45 @@
   failed_when: false
   changed_when: false
 
-- name: Ensure LAN ingress interface (net1 on vmbr0, static IP)
+# LAN ingress: lb-01's eth1 (vmbr0) is a DHCP client with a Google Home
+# reservation for {{ lb_lan_ingress_ip }} keyed on this NIC's MAC.
+#
+# Why DHCP and not a static IP: the Nest's DHCP pool is .20-.250, and .86 sits
+# inside it. A static address is invisible to the router, so it can be leased
+# to another device at any time (this is exactly what broke frigate-01 at .85
+# on 2026-10-18). A reservation makes the address the router's responsibility
+# and makes the NIC visible in the Home app, which is required because its
+# port-management UI is device-picker only — no way to type an IP.
+#
+# No gateway on this NIC: default egress must stay via the private SDN.
+- name: Ensure LAN ingress interface (net1 on vmbr0, DHCP + router reservation)
   delegate_to: "{{ lb_node }}"
   ansible.builtin.command: >
     pct set {{ lxc_id }} --net1
-    name=eth1,bridge=vmbr0,ip={{ lb_lan_ingress_ip }}/24,firewall=1
+    name=eth1,bridge=vmbr0,ip=dhcp,firewall=1
   when: lb_exists and net1_check.rc != 0
   changed_when: true
 
-# Idempotent re-assert: if net1 already exists but somehow drifted back to
-# dhcp (manual pct set, NIC recreate, etc.), correct it back to static on
-# every run rather than only on first creation.
-- name: Detect net1 drifted to DHCP
+# Idempotent re-assert: if net1 drifted back to a static address (manual
+# pct set, NIC recreate, etc.), put it back on DHCP so the router reservation
+# is what assigns the address.
+- name: Detect net1 drifted to a static address
   delegate_to: "{{ lb_node }}"
   ansible.builtin.shell: |
     set -o pipefail
-    pct config {{ lxc_id }} | grep '^net1' | grep -q 'ip=dhcp'
-  register: net1_dhcp_check
+    pct config {{ lxc_id }} | grep '^net1' | grep -qv 'ip=dhcp'
+  register: net1_static_check
   failed_when: false
   changed_when: false
   when: lb_exists and net1_check.rc == 0
 
-- name: Correct net1 back to static IP if drifted to DHCP
+- name: Correct net1 back to DHCP if drifted to static
   delegate_to: "{{ lb_node }}"
   ansible.builtin.shell: |
     set -o pipefail
     MAC=$(pct config {{ lxc_id }} | grep '^net1' | grep -oE 'hwaddr=[0-9A-Fa-f:]+' | cut -d= -f2)
-    pct set {{ lxc_id }} --net1 name=eth1,bridge=vmbr0,hwaddr=${MAC},ip={{ lb_lan_ingress_ip }}/24,firewall=1
-  when: lb_exists and net1_check.rc == 0 and net1_dhcp_check.rc == 0
+    pct set {{ lxc_id }} --net1 name=eth1,bridge=vmbr0,hwaddr=${MAC},ip=dhcp,firewall=1
+  when: lb_exists and net1_check.rc == 0 and net1_static_check.rc == 0
   changed_when: true
 
 - name: Ensure private gateway on net0

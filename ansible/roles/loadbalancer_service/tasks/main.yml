@@ -10,27 +10,85 @@
     update_cache: true
     cache_valid_time: 3600
 
-# LAN ingress: lb-01's eth1 (vmbr0) gets a STATIC IP so Google Home can
-# port-forward :80/:443 to a stable target. Static (not DHCP) because
-# systemd-networkd won't reliably hold a DHCP lease on this CT and AdGuard
-# (the LAN DHCP server) reservations are an extra dependency. CRITICAL: no
-# Gateway= here — default egress must stay via the private SDN gateway on eth0,
-# or lb-01's return traffic to backends takes the LAN path and causes
-# asymmetric-routing 502s (the bug we hit when first adding this NIC).
-- name: Configure LAN ingress interface (static, no default route)
+# LAN ingress: lb-01's eth1 (vmbr0) is a DHCP client with a Google Home
+# reservation for {{ lb_lan_ingress_ip }} keyed on this NIC's MAC.
+#
+# DHCP (not static) because .86 lives inside the Nest's DHCP pool (.20-.250):
+# a static address is invisible to the router and can be handed to another
+# device at any time (the frigate-01 .85 collision, 2026-10-18). The
+# reservation also makes the NIC appear in the Home app, which the
+# port-management UI requires (device picker, no manual IP entry).
+#
+# Implemented as a systemd-networkd DROP-IN, not a replacement for
+# eth1.network: Proxmox regenerates eth1.network ("autoconfigured by PVE")
+# whenever the CT's net config or the container itself starts, which would
+# silently discard a full-file override. Drop-in files survive that.
+#
+# CRITICAL: UseRoutes=false — default egress must stay via the private SDN
+# gateway on eth0, or lb-01's return traffic to backends takes the LAN path and
+# causes asymmetric-routing 502s (the bug we hit when first adding this NIC).
+# UseDNS=false for the same reason: DNS must follow eth0's SDN config.
+- name: Ensure systemd-networkd drop-in dir for the LAN ingress interface
+  ansible.builtin.file:
+    path: /etc/systemd/network/eth1.network.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure LAN ingress interface (DHCP, no routes, no DNS)
   ansible.builtin.copy:
-    dest: /etc/systemd/network/eth1.network
+    dest: /etc/systemd/network/eth1.network.d/10-lan-ingress.conf
     owner: root
     group: root
     mode: '0644'
     content: |
-      [Match]
-      Name = eth1
-
+      # Managed by ansible (loadbalancer_service). Do not edit by hand.
+      # LAN ingress: DHCP with a Google Home reservation; never take the
+      # default route or DNS from the LAN side.
       [Network]
-      Description = LAN ingress (Google Home forwards :80/:443 here) — static
-      Address = {{ lb_lan_ingress_ip | default('192.168.86.86') }}/24
+      DHCP = yes
       IPv6AcceptRA = false
+
+      [DHCPv4]
+      UseRoutes = false
+      UseDNS = false
+      SendHostname = yes
+      ClientIdentifier = mac
+
+      # Return path for port-forwarded traffic. Inbound arrives on eth1 from
+      # the Nest, but the main table's default route points at the SDN
+      # gateway, so replies left via eth0 and the Nest's DNAT conntrack never
+      # saw them -> every external connection timed out (diagnosed 2026-10-18
+      # by tcpdump on pve01: SYNs arrived, no SYN-ACK ever left).
+      # Any packet sourced from the LAN leg uses table 100, which points back
+      # at the Nest. Traffic sourced from 172.16.0.30 (backend connections)
+      # never matches this rule, so asymmetric-routing 502s stay fixed.
+      # NOTE: a `systemctl restart systemd-networkd` is required after editing
+      # this file — `networkctl reconfigure eth1` alone does not pick up the
+      # routing-policy sections.
+      [Route]
+      Destination = 0.0.0.0/0
+      Gateway = 192.168.86.1
+      Table = 100
+
+      [Route]
+      Destination = 192.168.86.0/24
+      Scope = link
+      Table = 100
+
+      # LAN-sourced traffic to the private SDN must still use the main table
+      # (eth0); without this, table 100's default would send it to the Nest.
+      [RoutingPolicyRule]
+      From = 192.168.86.0/24
+      To = 172.16.0.0/24
+      Table = main
+      Priority = 900
+
+      [RoutingPolicyRule]
+      From = 192.168.86.0/24
+      Table = 100
+      Priority = 1000
   notify: Restart systemd-networkd
 
 - name: Create SSL Directory
