@@ -2092,3 +2092,20 @@ Round-29 (2026-10-17 ~22:05): MIRROR TEST RESULT = the suspect module PANICS AT 
 
 
 
+
+Round-30 (2026-10-17 ~22:10): optimized defaults + a power-level dropout captured with the bad stick.
+
+- Owner loaded BIOS "Optimized Defaults" in the session -> box still panicked at boot with the
+  defective module (A534T4312CDC8M) => the failure is NOT a tuning artifact. NOTE: optimized
+  defaults also reverted "Ac Loss Control" (-> Always Off) and Secure Boot (-> Enabled), so the
+  Shelly plug can currently only KILL the box, not power it on, until Ac Loss Control is set back
+  to Always On in the BIOS.
+- POWER TIMELINE from the plug during that boot (10 s samples): 59->72->68 W (POST/training),
+  27 W (idle-ish), then a momentary 0.0 W DROPOUT, back to 41->75 W, then 26 W steady = the halted
+  panic screen. So with the defective module the box shows POWER-LEVEL dropouts (rail loss, not
+  just a kernel hang) - consistent with the 12:40 death class that no timer could reset (the box
+  was effectively unpowered). Recording it as the strongest evidence yet for the power/rail
+  component of the failure.
+- Box was then powered DOWN via the plug (owner has no reset button; plug = the only kill switch)
+  and the owner will restart with the case power button, set Ac Loss Control = Always On, and
+  install only the good module (A534T4312CD0JC).
