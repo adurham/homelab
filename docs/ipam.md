@@ -2109,3 +2109,33 @@ Round-30 (2026-10-17 ~22:10): optimized defaults + a power-level dropout capture
 - Box was then powered DOWN via the plug (owner has no reset button; plug = the only kill switch)
   and the owner will restart with the case power button, set Ac Loss Control = Always On, and
   install only the good module (A534T4312CD0JC).
+
+Round-31 (2026-10-17 ~23:00-00:10): BIOS mitigation sweep completed; Fable verdict = run the good module only.
+
+- Sweep (all runs: bad module alone, -M 26000, 1500 s dip recipe):
+    * stock (C-states Auto, power-down Auto, VDDIO 1.1):  boot panics (alone) / pair dies 4.3 min
+    * C-states Disabled + power-down Disabled + VDDIO Auto:  COMPLETES 1500 s, 9 incidents (all in the
+      final verification pass)   <== BEST
+    * + VDDIO 1.2 V:  929 error lines in a 34 s burst at 17 min, kernel oops, panic, auto-reboot
+    * + VDDIO 1.0 V:  547 incidents from ~13 min, completes, no panic
+  => 1.1 V (Auto) is a narrow optimum; both directions are markedly worse. Reverted by owner to Auto.
+- Access note for the future: the firmware's advanced menus (UMC Common Options / DF Common Options /
+  SMU Common Options incl. PPT) are suppressed by the internal "Combo CBS" value (Q9 @0x20, currently
+  0x03; 0xFF would unhide). Stores are write-protected post-boot (EFI_WRITE_PROTECTED) => unreachable
+  from software; the UI does not show them. Reachable copies live under AMD Overclocking.
+- FABLE VERDICT (accepted): operate on the GOOD module alone (32 GB single-channel). Do NOT run the
+  defective module day-to-day: the 9 "residual" incidents are silent corruption caught late, real
+  workloads have MORE idle/burst transitions than the stress recipe, no partial-capacity carve-out is
+  possible (256B interleave puts the bad module's bytes in every page), and its power path may be what
+  produced the 0.0 W rail dropout (board/PSU risk inside a board we may need to RMA).
+- Fable-required follow-ups: (1) data-integrity audit - git fsck on repos, debsums, fsck, DB checks,
+  keep older backup generations (the module was in service for days); (2) two last experiments if we
+  chase 64 GB - DRAM 4000 MT/s on the bad stick with the shim, and a fan-on-module run during the dip
+  test (18 s post-resume lag suggests thermal); then stop tuning; (3) RMA filed now with a MemTest86
+  run on the bad stick (pre-empt "passes bench" NTF), insist on same SKU, check the Advanced-RMA hold
+  amount; keep the Minisforum ticket alive ("diagnosis ongoing, RAM RMA pending") without shipping
+  hardware; (4) nothing user-serviceable fixes a DQ lane - isopropyl on the contacts once, no
+  heat-spreader/SPD touching (warranty).
+- Verification note: the good module's clean 25-min pass was at STOCK settings (C-states Auto) - so
+  the shim is only needed if the bad module is installed; C-states can go back to Auto on the next
+  BIOS trip once the machine runs the good stick only.
