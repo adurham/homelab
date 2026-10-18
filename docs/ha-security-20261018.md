@@ -57,11 +57,38 @@ each, plain tar — not encrypted by HA). They are now mirrored offsite:
 - restore: needs `rclone.conf` (crypt password) — store a copy of it somewhere
   safe; without it the uploaded blobs cannot be decrypted
 
-## 6. Still open
+## 6. SSO hardening (2026-10-18)
+
+The Authentik OIDC provider for Home Assistant only accepted the LAN IP and
+`homeassistant.local` as redirect URIs — logging in through
+`https://homeassistant.chi.lab.amd-e.com` or the Nabu Casa remote URL failed
+with `Redirect URI Error` (400). All four callbacks are now registered:
+
+- `http://192.168.86.2:8123/auth/oidc/callback`
+- `http://homeassistant.local:8123/auth/oidc/callback`
+- `https://homeassistant.chi.lab.amd-e.com/auth/oidc/callback`
+- `https://REDACTED-NABU-CASA-HOST.ui.nabu.casa/auth/oidc/callback`
+
+The provider also had **no policy binding**, so SSO was password-only (the
+stock `default-authentication-flow` only asks for a second factor when the user
+happens to have a device). The shared **Require MFA** expression policy is now
+bound to the `home-assistant` application (order 10, not negated). Verified with
+Authentik's policy tester: `adam.durham` passes, `test.user` (no devices) is
+denied.
+
+Codified in `ansible/roles/authentik_provider/tasks/home_assistant.yml`:
+- `ha_oidc_redirect_uris` fact holds all four callbacks (create + update tasks)
+- new tasks look up the app id, find the Require MFA policy and bind it if it
+  is not already bound
+
+## 7. Still open
 
 - **TOTP: enabled 2026-10-18** on the owner account (`auth_module.totp` holds the
   user's secret; the 1Password item "HA root user" carries the same secret —
   verified by recomputing the 6-digit code for the moment it was added).
-- Nabu Casa remote UI is enabled — the Nabu Casa account itself should have 2FA.
+- Nabu Casa remote UI is enabled and **Nabu Casa does not offer MFA** (their
+  support page: feature "currently not available"). Mitigations: long unique
+  password, HA's own TOTP still gates the remote login page, and the cloud
+  backup copy is encrypted (`protected: true`).
 - HA login page is LAN/tailnet only (`homeassistant.chi.lab.amd-e.com` is not in
   public DNS).

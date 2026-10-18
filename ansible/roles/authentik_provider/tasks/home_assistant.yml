@@ -22,6 +22,22 @@
 # Authentik-side provider + application wiring.
 # -------------------------------------------------------------------------
 
+# Redirect URIs must include every URL the login page can be reached on:
+# the LAN IP + mDNS name (day-to-day), the lb-01 FQDN, and the Nabu Casa
+# remote host. Anything not registered here fails with "Redirect URI Error"
+# at Authentik's authorize endpoint (verified 2026-10-18).
+- name: Define Home Assistant OIDC redirect URIs
+  ansible.builtin.set_fact:
+    ha_oidc_redirect_uris:
+      - url: "http://{{ ip_homeassistant }}:8123/auth/oidc/callback"
+        matching_mode: "strict"
+      - url: "http://homeassistant.local:8123/auth/oidc/callback"
+        matching_mode: "strict"
+      - url: "https://homeassistant.chi.lab.amd-e.com/auth/oidc/callback"
+        matching_mode: "strict"
+      - url: "https://{{ ha_nabu_casa_host | default('REDACTED-NABU-CASA-HOST.ui.nabu.casa') }}/auth/oidc/callback"
+        matching_mode: "strict"
+
 - name: Get Existing Home Assistant OIDC Provider
   ansible.builtin.uri:
     url: "{{ authentik_url }}/api/v3/providers/oauth2/?search={{ 'Home Assistant' | urlencode }}"
@@ -42,11 +58,7 @@
       authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
       authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
       invalidation_flow: "{{ grafana_invalidation_pk }}"
-      redirect_uris:
-        - url: "http://{{ ip_homeassistant }}:8123/auth/oidc/callback"
-          matching_mode: "strict"
-        - url: "http://homeassistant.local:8123/auth/oidc/callback"
-          matching_mode: "strict"
+      redirect_uris: "{{ ha_oidc_redirect_uris }}"
       signing_key: "{{ signing_cert.json.results[0].pk }}"
       sub_mode: "hashed_user_id"
       include_claims_in_id_token: true
@@ -80,11 +92,7 @@
     headers: "{{ headers }}"
     body_format: json
     body:
-      redirect_uris:
-        - url: "http://{{ ip_homeassistant }}:8123/auth/oidc/callback"
-          matching_mode: "strict"
-        - url: "http://homeassistant.local:8123/auth/oidc/callback"
-          matching_mode: "strict"
+      redirect_uris: "{{ ha_oidc_redirect_uris }}"
       property_mappings: >-
         {{ scope_mappings.json.results
            | selectattr('managed', 'defined')
@@ -108,3 +116,58 @@
     body:
       provider: "{{ ha_oidc_provider_id | int }}"
     status_code: [200]
+
+# --- Require MFA for the Home Assistant application -----------------------
+#
+# Without a policy binding, the HA provider used Authentik's stock
+# default-authentication-flow, which only prompts for a second factor if the
+# user happens to have a device enrolled — i.e. a password-only SSO path,
+# weaker than HA's own local login (which now has TOTP). Binding the shared
+# "Require MFA" expression policy makes Authentik deny anyone without a
+# confirmed TOTP/WebAuthn/static device.
+#
+# Note: the flow's MFA validation stage still runs; this binding is what makes
+# enrolment mandatory rather than optional.
+
+- name: Look up the Home Assistant application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/core/applications/home-assistant/"
+    method: GET
+    headers: "{{ headers }}"
+  register: ha_app_lookup
+
+- name: Remember the Home Assistant application id
+  ansible.builtin.set_fact:
+    ha_app_pk: "{{ ha_app_lookup.json.pk }}"
+
+- name: Look up the Require MFA policy
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/policies/all/?search={{ 'Require MFA' | urlencode }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: ha_require_mfa_policy
+
+- name: Get existing policy bindings on the Home Assistant app
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/policies/bindings/?target={{ ha_app_pk }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: ha_app_bindings
+
+- name: Bind Require MFA to the Home Assistant application
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/policies/bindings/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      target: "{{ ha_app_pk }}"
+      policy: "{{ ha_require_mfa_policy.json.results[0].pk }}"
+      enabled: true
+      order: 10
+      negate: false
+    status_code: [200, 201]
+  when:
+    - ha_require_mfa_policy.json.results | length > 0
+    - ha_require_mfa_policy.json.results[0].pk
+      not in (ha_app_bindings.json.results | map(attribute='policy') | select('string') | list)
