@@ -15,7 +15,6 @@ Password: read from $SHELLY_PW if set, else from secrets.yaml
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import sys

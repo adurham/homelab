@@ -515,14 +515,6 @@
   register: get_mfa_validate
   when: create_mfa_validate.status != 201
 
-  ansible.builtin.set_fact:
-    stage_mfa_validate_id: >-
-      {{
-        (create_mfa_validate.json.pk
-          if (create_mfa_validate is defined and create_mfa_validate.status == 201)
-          else get_mfa_validate.json.results[0].pk)
-      }}
-
 - name: Capture MFA Validate Stage ID
   ansible.builtin.set_fact:
     stage_mfa_validate_id: >-

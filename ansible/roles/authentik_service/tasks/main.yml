@@ -190,7 +190,7 @@
   # The task below loops over these results and only re-pushes files that actually changed.
   register: authentik_branding_copy
 
-- name: Push changed branding SVGs into the running container's media volume
+- name: Push changed branding SVGs into the running container's media volume  # noqa: no-handler
   ansible.builtin.shell: |
     set -e
     CID=$(docker compose ps -q server)
