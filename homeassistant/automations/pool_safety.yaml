@@ -98,7 +98,7 @@
           normal is ~924 W). Likely a tripped breaker or relay fault. The pump
           has been forced OFF. Check the breaker / Shelly relay, then re-run by
           toggling Pool Season off and back on.
-    - service: notify.mobile_app_adams_iphone_16
+    - service: notify.mobile_app_adams_iphone_18_pro
       data:
         title: "Pool pump fault - forced OFF"
         message: >
@@ -153,7 +153,7 @@
           prime / clogged suction with no water moving. The pump has been forced
           OFF to protect the seal and motor. Check valves, water level, and the
           pump / skimmer baskets, then re-run by toggling Pool Season.
-    - service: notify.mobile_app_adams_iphone_16
+    - service: notify.mobile_app_adams_iphone_18_pro
       data:
         title: "Pool pump fault - low flow, forced OFF"
         message: >
@@ -197,7 +197,7 @@
           killed off a stale value, but it also isn't being protected by the
           power watchdog until the sensor recovers. No action needed unless
           you suspect a real fault - check the pump visually if unsure.
-    - service: notify.mobile_app_adams_iphone_16
+    - service: notify.mobile_app_adams_iphone_18_pro
       data:
         title: "Pool pump power sensor stale"
         message: >

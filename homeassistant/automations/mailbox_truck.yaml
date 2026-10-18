@@ -82,7 +82,7 @@
            or (now() - this.attributes.last_triggered).total_seconds() > 300 }}
 
   action:
-    - service: notify.mobile_app_adams_iphone_16
+    - service: notify.mobile_app_adams_iphone_18_pro
       data:
         title: "Mailbox"
         message: "The mail truck just stopped at the mailbox."
