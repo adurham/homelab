@@ -5,10 +5,13 @@
 | Device | Integration | IP Address | Status | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **HPWH** | Rheem EcoNet | `192.168.86.x` | ✅ Optimized | Logic: 35% enter, 60% exit High Demand. |
-| **Circ. Pump** | Shelly | `192.168.86.24`| ✅ Aligned | Water-heater circulator. Cooldown: 30 minutes. |
-| **Pool Pump** | Shelly | `192.168.86.8`| ✅ Mapped | Shelly 1 Mini G3. |
-| **Garage (Left)**| Shelly | `192.168.86.45`| ✅ Mapped | Shelly relay control (`cover.left_garage_door`). |
-| **Garage (Mid)** | Shelly | `192.168.86.44`| ✅ Mapped | Shelly relay control (`cover.middle_garage_bay_door`). |
+| **Circ. Pump** | Shelly | `192.168.86.4`| ✅ Aligned | Water-heater circulator. Cooldown: 30 minutes. Static. |
+| **Pool Pump** | Shelly | `192.168.86.25`| ✅ Mapped | Shelly 1 Mini G3. DHCP — reservation pending. |
+| **Basement Exhaust**| Shelly | `192.168.86.5`| ✅ Mapped | Shelly 1PM Mini G3. Static. |
+| **Garage (Right)**| Shelly | `192.168.86.6`| ✅ Mapped | Shelly relay control (`cover.right_garage_bay_door`). Static. |
+| **Garage (Mid)** | Shelly | `192.168.86.7`| ✅ Mapped | Shelly relay control (`cover.middle_garage_bay_door`). Static. |
+| **Garage (Left)**| Shelly | `192.168.86.9`| ✅ Mapped | Shelly relay control (`cover.left_garage_door`). Static. |
+| **amd-workstation plug**| Shelly | `192.168.86.57`| ✅ Mapped | Shelly Plug US Gen4 (`switch.amd_workstation`). DHCP — reservation pending. |
 | **Living Room TV**| Sony Bravia | `192.168.86.195`| ✅ REST API | Optimized for performance. |
 | **PS5** | Hue Sync Box | `192.168.86.x` | ✅ Intelligent | Restores previous scene/state on power off. |
 | **Nest Doorbell**| Nest SDM | `192.168.86.28`| ✅ Active | Real-time chime and motion events. |
