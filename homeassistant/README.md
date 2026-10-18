@@ -122,6 +122,65 @@ stale entity left behind from a deleted automation. Use
 `python3 homeassistant/prune_orphan_entities.py --list-all` to inspect, and
 the same script with `--apply --i-know-what-im-doing` to remove.
 
+## Backups
+
+The host is a HA Green (28 GB eMMC, one partition backing `/config`,
+`/data`, `/backup`, `/share`, ...). A nightly automatic backup runs at
+~05:17 local with **retention 3** local copies (encrypted) and also targets
+the Nabu Casa **cloud** agent. Scope is HA-side config
+(Settings → System → Backups → Automatic backups, persisted in
+`/config/.storage/backup`), not a file in this repo:
+
+- folders `homeassistant` (config + recorder DB) and `ssl`
+- every add-on **except** `f5b120c9_shark2mqtt`
+
+Shark2MQTT is excluded deliberately (2026-10-18). It is a locally built
+add-on, so the Supervisor exports its whole Docker image into the backup:
+0.556 GB of every tar plus ~1.6 GB of `/data/tmp` staging during each run,
+while its own data directory is 12 KB. Excluding it cut a nightly backup
+from 1.45 GB / ~27 min to 0.88 GB / ~5 min and removed the multi-GB
+transient entirely (a real run measured free space never dropping below
+6.1 GiB, against 0.2 GiB during the 2026-10-18 05:18 run that fired the
+disk alert).
+
+After a restore, re-add it from
+`https://github.com/adurham/shark2mqtt-addon` (the `adurham` fork is
+what's deployed) and re-enter its options from 1Password — the Shark
+account credentials and seed tokens are **not** in the backup or this repo.
+
+Disk pressure matters here because the backup transient, a HA Core update
+(2.3 GB image pull) and add-on rebuilds all need free scratch on the same
+28 GB partition; historically `ha store apps install` starts failing around
+1.2–1.7 GB free. `automations/disk_space_watchdog.yaml` pages at 3 GB /
+10 min, and Grafana rule `ha_host_disk_low` is the push channel.
+
+Inspecting space on the host:
+
+```bash
+# Free/used as the Supervisor sees it (and what the watchdog reads).
+ssh -p 2222 root@homeassistant.local 'ha host info'    # disk_free/disk_used/disk_total
+ssh -p 2222 root@homeassistant.local 'du -d 1 /'       # visible: /backup, /config, addon_configs
+ssh -p 2222 root@homeassistant.local 'ha backups list'
+
+# Per-item sizes inside a backup — neither the ha CLI nor the websocket API
+# reports them; the outer tar does (one .tar.gz per add-on + homeassistant).
+ssh -p 2222 root@homeassistant.local 'tar -tvf /backup/<slug>.tar'
+```
+
+`du` in that shell (the `core-ssh` add-on) only sees the bind mounts, ~8 GB
+of the ~20 GB in use. The rest is `/data` (Supervisor + add-on data + Docker
+images/layers), reachable through the normally **stopped** `Advanced SSH &
+Web Terminal` add-on (`a0d7b954_ssh` — unprotected, `docker_api: true`,
+host network, key from 1Password):
+
+```bash
+ssh -p 2222 root@homeassistant.local 'ha apps start a0d7b954_ssh'
+ssh -p 22 hassio@homeassistant.local                 # note: user is hassio, not root
+sudo -n docker system df
+sudo -n docker exec hassio_supervisor du -d 1 /data      # /data/backup, /data/homeassistant, /data/apps
+ssh -p 2222 root@homeassistant.local 'ha apps stop a0d7b954_ssh'
+```
+
 ## Secrets
 
 `secrets.yaml` lives only on the Home Assistant host (`/config/secrets.yaml`)
