@@ -499,7 +499,7 @@
     body_format: json
     body:
       name: "MFA-Validation"
-      not_configured_action: "skip"
+      not_configured_action: "deny"
       device_classes:
         - static
         - totp
@@ -515,6 +515,14 @@
   register: get_mfa_validate
   when: create_mfa_validate.status != 201
 
+  ansible.builtin.set_fact:
+    stage_mfa_validate_id: >-
+      {{
+        (create_mfa_validate.json.pk
+          if (create_mfa_validate is defined and create_mfa_validate.status == 201)
+          else get_mfa_validate.json.results[0].pk)
+      }}
+
 - name: Capture MFA Validate Stage ID
   ansible.builtin.set_fact:
     stage_mfa_validate_id: >-
@@ -523,6 +531,26 @@
           if (create_mfa_validate is defined and create_mfa_validate.status == 201)
           else get_mfa_validate.json.results[0].pk)
       }}
+
+# The login page is on the public internet. "configure" (the old value here was "skip", the
+# live one "configure") lets ANY account that passes the password step enrol its own
+# authenticator at login, so a guessed password alone was a full session. "deny" makes MFA
+# mandatory: an account with no usable device is refused at this stage. Enforced on every run,
+# because the create task above only applies the body when the stage does not exist yet.
+# Before adding a login account, enrol its MFA device out-of-band (ak shell / admin UI).
+- name: Enforce MFA on the validation stage (deny accounts with no device)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/stages/authenticator/validate/{{ stage_mfa_validate_id }}/"
+    method: PATCH
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      not_configured_action: "deny"
+      device_classes:
+        - static
+        - totp
+        - webauthn
+    status_code: [200]
 
 # -------------------------------------------------------------------------
 # Cleanup / Conflict Resolution
