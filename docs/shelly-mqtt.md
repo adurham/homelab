@@ -63,11 +63,13 @@ open/closed sensors (`binary_sensor.<left|middle|right>_garage_bay_garage_door`)
 The plug is a Shelly Plug US Gen4 (S4PL-00116US), `initial_state: on`.
 
 **Addressing.** The earlier IPs (.8/.24/.42/.43/.44/.45) are dead — everything
-drifted into the Nest DHCP pool (.20-.250). All 7 devices are DHCP by owner
-preference; the fix is DHCP reservations in the Google Home app (Nest has no
-API; not scriptable), keyed on the MACs above. A static-IPv4 pin via
-`Wifi.SetConfig` was tried and reverted 2026-10-18. Note that HA's Shelly
-integration follows an IP change on its own (zeroconf), and MQTT/Matter are
+drifted into the Nest DHCP pool (.20-.250). All 7 devices are DHCP with **DHCP
+reservations set in the Google Home app** (2026-10-18), so the addresses below
+are now sticky. Reservation names match the device names: `Shelly Pool Pump` .25,
+`Shelly Circulator Pump` .222, `Shelly Exhaust Fan` .24, `Shelly Right Garage Bay
+Door` .211, `Shelly Middle Garage Bay Door` .21, `Shelly Left Garage Bay Door`
+.216, `Shelly Workstation Plug` .57. If a reservation is ever changed, HA's
+Shelly integration follows the IP by itself (zeroconf) and MQTT/Matter are
 IP-agnostic — but `homeassistant/command_line.yaml` hardcodes the workstation
 plug's `.57`, so that one must not move without a config deploy.
 
