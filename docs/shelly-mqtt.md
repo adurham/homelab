@@ -94,6 +94,13 @@ plug's `.57`, so that one must not move without a config deploy.
   (keeps status/telemetry, drops remote control).
 - **Matter**: commissioned to HA only (`num_fabrics:1`); another controller
   would need the setup code.
+- **Internet exposure (tested 2026-10-18)**: every device holds a global IPv6
+  address (`2600:1702:768c:9cf::/64`, EUI-64), but inbound connections are
+  dropped. Verified from an external IPv6-capable host (W3C validator, proven
+  to reach an IPv6 literal — it got a real 404 from `[2607:f8b0:4009:811::200e]`):
+  all 7 Shellys answered `Connect Timeout` on port 80. No cloud, no port
+  forwards (UDP/5683 was not separately tested, but the same default-deny
+  firewall applies).
 
 ## Reboot behavior
 
