@@ -5,6 +5,9 @@ re-reading the transcript. Repo: `~/repos/homelab` (branch main). Evidence bundl
 
 ## 1. TL;DR state
 
+> **2026-10-18 evening: the suspect module FAILS ON ITS OWN** (MemTest86, 10,000 errors, bits 8/9/12/15) --
+> the good module's 4-pass control run is in flight, ETA ~01:05 Oct 19. See section 11.
+>
 > **2026-10-18 afternoon: the 64 GB pair is NOT usable.** Both modules installed and booted, but the
 > pair panics in ~2 min at 4800 and produced 1910 miscompares in 3 min at 4000 before dying. Speed is
 > closed as a lever. Read §10 before acting on anything below.
@@ -214,3 +217,39 @@ Computing page) fixes both the memtest route and the `bios-set` toolkit route.
 4. **Blocker at 13:35**: the Shelly plug at 192.168.86.57 pings but its HTTP RPC returns nothing
    (300 ms avg / 590 ms peak latency) — no remote power control until it recovers or is power-cycled.
 
+## 11. 2026-10-18 evening — MemTest86 control runs (16:45-17:30 CDT)
+
+### 11.1 Suspect module alone: FAIL (module identity confirmed by the owner: "just the 1 suspect stick")
+- PassMark MemTest86 V11.7 Free, **x1 channel, 30.7 GB tested**, DDR5 3168 MT/s (Auto), 71 C CPU / 52 C RAM.
+- Aborted itself at the 10,000-error cap after **2:45:41**, at 66 % of pass 2.
+- **Bits in error: mask 0x9300 = bits 8, 9, 12, 15**; 4 distinct bits; never more than 1 bit per word;
+  errors span 19 MB -> 19,453 MB; all 8 test CPUs saw errors; 31/32 tests passed.
+- **Pass 1 was clean and errors only began in pass 2.** A clean first pass on the good module therefore
+  proves nothing -- it must run all 4 passes.
+- Screens archived in `~/rma-evidence/`: `memtest86-suspect-alone-FAIL-screen-20261018.png`,
+  `memtest86-suspect-alone-result-summary-20261018.png`, plus the pair run (`memtest86-pair-20261018.png`).
+  The HTML report is on the USB stick, not yet copied to the Mac.
+
+### 11.2 Good module control run (in progress)
+- Started ~16:50; **the Shelly plug was power-cycled at 17:02:31-17:03:18 CDT (47 s off)**, so the run
+  restarted from pass 1 at 17:03:18. Attribution: an HA long-lived-token service call (context
+  `f16a8500...`, no user or automation) -- i.e. one of the parallel agent sessions toggling the plug
+  during Shelly hardening, NOT the HA automation (`last_triggered` = 13:16).
+- 4 passes at that rate = ~8 h -> **ETA ~01:05 CDT on Oct 19**.
+- Live proof the run is alive without touching the box: the plug draws a steady **120-126 W** (all-core
+  load); SSH is down and `binary_sensor.amd_workstation_reachable` has been off since 15:40, which is
+  expected while MemTest86 owns the machine.
+
+### 11.3 Guard rails changed for the duration
+- `automation.amd_workstation_auto_power_cycle_if_unreachable` is **OFF (maintenance mode)** -- any
+  liveness-sensor flap would power-cycle the box and destroy the run. **Re-enable it the moment Linux
+  boots again.**
+- The plug's direct HTTP RPC now returns **401** (authentication was enabled during the Shelly hardening
+  session). Control it through HA instead of raw `/rpc`: `switch.turn_off`/`turn_on` on
+  `switch.amd_workstation`, and read `sensor.amd_workstation_power` for load.
+
+### 11.4 Pending
+1. Good-module 4-pass run -> then copy both HTML reports off the USB to `~/rma-evidence/`.
+2. Corsair follow-up with the FAIL screen + result summary + pair photo: **held** until the good-stick
+   result is in (batch everything), unless told to send sooner.
+3. Still owed from 10.5: preserve `/tmp/stress-out-20261018-132855.log`, disable Secure Boot.
