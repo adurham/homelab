@@ -421,3 +421,26 @@ reads. Both branches verified: the served copy passes `sh -n`, GET/POST/nc all t
   it, the SSD is what hangs the boot and the data is still readable in another machine.
 - OPEN QUESTION that must be answered physically: **which module is installed right now** (good `D0JC` vs
   suspect `C8M`). SPD serials are zero on this SKU, so software cannot tell them apart.
+
+## 16. 2026-10-19 00:15 — post-crash state: box cold, the memtest was cut short
+
+- The MacBook panicked again at **23:55:55** (same DCPEXT1 / `iomfb axi_rd_err`, third of the evening) and
+  took this campaign's session with it. State below recovered from the transcript, not from the box.
+- **The box is off at the plug.** Relay opened **23:54** by a websocket client (HA), Shelly reads
+  `output: false`, **0.0 W**. Nothing is frozen; the next boot is a cold one. Deliberately left off —
+  the owner is done at the bench for the night.
+- **Correction to §15 — tonight's MemTest86 run is not a clean result.** It booted **22:57:52** and the
+  stick was swapped at **~23:47**: 50 minutes against a 70-75 minute pass. Pass 1 never completed, so it
+  is **zero evidence** and the good module is **not exonerated tonight**.
+- **§15's open question is answered:** the good module (S/N `...CD0JC`) is the one in the box.
+- Freeze point pinned: GRUB prints `Loading Linux 7.0.0-34-generic` / `Loading initial ramdisk`, then
+  nothing — the frame never leaves those two lines while the plug holds **94-110 W**.
+- Do **not** read that as "the kernel died before it touched any device": with `nomodeset` and no
+  earlycon there is simply no console until fbcon takes over, so the same frozen frame covers both a
+  dead kernel and one hanging mid-enumeration. The NVMe pull therefore stays a live discriminator.
+- Order for the next bench session (one boot each, stop at the first change):
+  1. Debian GRUB `e` → `nomodeset acpi=off noapic nolapic maxcpus=1` (ACPI/APIC/SMP).
+  2. Same stick, **NVMe physically pulled** (PCIe link / device-probe hang; the installer never mounts
+     the SSD, so this isolates enumeration).
+  3. Both hang → the memory path / SoC is what's left and Minisforum becomes the primary claim.
+- No remote path exists to the box while it has no booting OS; the only instrument is the plug.
