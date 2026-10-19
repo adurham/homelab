@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+"""
+yk-agent-proxy - one ssh-agent socket that offers the YubiKey first and
+1Password second.
+
+Why this exists: OpenSSH builds its public-key attempt list as
+    agent keys  ->  PKCS#11  ->  on-disk IdentityFile keys
+so an on-disk sk key can never be tried before a key held by 1Password's
+agent, no matter how ~/.ssh/config is ordered.  The only way to get
+"try the token, then fall back to 1Password inside the SAME connection" is
+to make both keys agent keys, in one identity list, token first.
+
+This process does that and nothing else:
+  * it owns a child Homebrew ssh-agent holding the resident ed25519-sk key
+    (Homebrew's agent, unlike Apple's or 1Password's, signs sk keys);
+  * REQUEST_IDENTITIES returns [token, ...1Password identities];
+  * SIGN_REQUEST is routed by key blob to whichever backend owns the key.
+
+If a server rejects the token, or the token cannot sign because it was
+pulled, the agent returns FAILURE for that key; ssh logs it and tries the
+next identity (1Password) in the same connection.
+
+Env overrides (for testing):
+  YK_PROXY_SOCK   default ~/.hermes/run/yk-agent.sock
+  YK_SK_SOCK      default ~/.hermes/run/sk-agent.sock
+  YK_SK_KEY       default ~/.ssh/id_ed25519_sk_yk
+  YK_ONEPW_SOCK   default 1Password agent socket
+"""
+
+import os
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+HOME = os.path.expanduser("~")
+SSH_BIN = "/opt/homebrew/opt/openssh/bin"
+SSH_AGENT = os.path.join(SSH_BIN, "ssh-agent")
+SSH_ADD = os.path.join(SSH_BIN, "ssh-add")
+
+PROXY_SOCK = os.environ.get("YK_PROXY_SOCK", os.path.join(HOME, ".hermes", "run", "yk-agent.sock"))
+SK_SOCK = os.environ.get("YK_SK_SOCK", os.path.join(HOME, ".hermes", "run", "sk-agent.sock"))
+SK_KEY = os.environ.get("YK_SK_KEY", os.path.join(HOME, ".ssh", "id_ed25519_sk_yk"))
+ONEPW_SOCK = os.environ.get(
+    "YK_ONEPW_SOCK",
+    os.path.join(HOME, "Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"),
+)
+
+MAXMSG = 256 * 1024
+IDENT_TIMEOUT = 3.0
+SIGN_TIMEOUT = 60.0
+
+SSH2_AGENTC_REQUEST_IDENTITIES = 11
+SSH2_AGENT_IDENTITIES_ANSWER = 12
+SSH2_AGENTC_SIGN_REQUEST = 13
+SSH2_AGENT_FAILURE = 5
+
+
+def log(msg):
+    sys.stdout.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
+    sys.stdout.flush()
+
+
+# ---------------------------------------------------------------- framing
+
+def be32(n):
+    return struct.pack(">I", n)
+
+
+def send_msg(sock, payload):
+    sock.sendall(be32(len(payload)) + payload)
+
+
+def recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise EOFError("peer closed")
+        buf += chunk
+    return buf
+
+
+def recv_msg(sock):
+    (ln,) = struct.unpack(">I", recv_exact(sock, 4))
+    if ln == 0 or ln > MAXMSG:
+        raise EOFError("bad message length %d" % ln)
+    return recv_exact(sock, ln)
+
+
+def read_string(buf, off):
+    (ln,) = struct.unpack_from(">I", buf, off)
+    off += 4
+    if off + ln > len(buf):
+        raise ValueError("truncated string")
+    return buf[off:off + ln], off + ln
+
+
+def agent_call(path, payload, timeout):
+    """One request/reply against a unix-socket agent. Raises on any error."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(path)
+        send_msg(s, payload)
+        return recv_msg(s)
+    finally:
+        s.close()
+
+
+# ------------------------------------------------------------- identities
+
+def parse_identities(reply):
+    if not reply or reply[0] != SSH2_AGENT_IDENTITIES_ANSWER:
+        return []
+    (n,) = struct.unpack_from(">I", reply, 1)
+    off = 5
+    out = []
+    for _ in range(n):
+        blob, off = read_string(reply, off)
+        comment, off = read_string(reply, off)
+        out.append((blob, comment))
+    return out
+
+
+def build_identities(ids):
+    body = b"".join(be32(len(b)) + b + be32(len(c)) + c for b, c in ids)
+    return bytes([SSH2_AGENT_IDENTITIES_ANSWER]) + be32(len(ids)) + body
+
+
+def sk_identities(timeout=IDENT_TIMEOUT):
+    try:
+        return parse_identities(agent_call(SK_SOCK, bytes([SSH2_AGENTC_REQUEST_IDENTITIES]), timeout))
+    except Exception as exc:  # agent down/slow: no token this round
+        log("sk agent unavailable: %r" % (exc,))
+        return []
+
+
+def onepw_identities(timeout=IDENT_TIMEOUT):
+    try:
+        return parse_identities(agent_call(ONEPW_SOCK, bytes([SSH2_AGENTC_REQUEST_IDENTITIES]), timeout))
+    except Exception as exc:
+        log("1Password agent unavailable: %r" % (exc,))
+        return []
+
+
+def merged_identities():
+    """Token first, then 1Password, de-duplicated by key blob."""
+    sk = sk_identities()
+    seen = set(b for b, _ in sk)
+    out = list(sk)
+    for blob, comment in onepw_identities():
+        if blob in seen:
+            continue
+        seen.add(blob)
+        out.append((blob, comment))
+    return out
+
+
+# ------------------------------------------------------------------- sign
+
+def sign_message(msg):
+    """Route a SIGN_REQUEST by key blob. Returns the reply payload."""
+    try:
+        key_blob, off = read_string(msg, 1)
+    except Exception:
+        return bytes([SSH2_AGENT_FAILURE])
+
+    sk_blobs = set(b for b, _ in sk_identities())
+    if key_blob in sk_blobs:
+        target, name = SK_SOCK, "token"
+    else:
+        target, name = ONEPW_SOCK, "1password"
+
+    try:
+        reply = agent_call(target, msg, SIGN_TIMEOUT)
+    except Exception as exc:
+        log("sign via %s failed: %r" % (name, exc))
+        return bytes([SSH2_AGENT_FAILURE])
+
+    if not reply:
+        return bytes([SSH2_AGENT_FAILURE])
+    if reply[0] == SSH2_AGENT_FAILURE:
+        log("sign via %s refused (ssh will try the next identity)" % name)
+    else:
+        log("sign via %s ok" % name)
+    return reply
+
+
+# ------------------------------------------------------------ connection
+
+def handle(conn):
+    try:
+        conn.settimeout(SIGN_TIMEOUT + 5)
+        while True:
+            try:
+                msg = recv_msg(conn)
+            except (EOFError, socket.timeout, ConnectionResetError, OSError):
+                return
+            if not msg:
+                return
+            mtype = msg[0]
+            if mtype == SSH2_AGENTC_REQUEST_IDENTITIES:
+                reply = build_identities(merged_identities())
+            elif mtype == SSH2_AGENTC_SIGN_REQUEST:
+                reply = sign_message(msg)
+            else:
+                # Extension (session-bind, query), lock/unlock, add/remove:
+                # pass to 1Password so behaviour matches what ssh saw before.
+                try:
+                    reply = agent_call(ONEPW_SOCK, msg, 5.0)
+                except Exception:
+                    reply = bytes([SSH2_AGENT_FAILURE])
+            send_msg(conn, reply)
+    finally:
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+
+# ------------------------------------------------------- sk agent owner
+
+_sk_proc = None
+
+
+def start_sk_agent():
+    """(Re)start our private Homebrew ssh-agent and load the token key."""
+    global _sk_proc
+    if _sk_proc is not None and _sk_proc.poll() is None:
+        # still alive: make sure the key is loaded
+        if sk_identities(timeout=2.0):
+            return True
+    try:
+        os.unlink(SK_SOCK)
+    except OSError:
+        pass
+    try:
+        _sk_proc = subprocess.Popen(
+            [SSH_AGENT, "-D", "-a", SK_SOCK],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        log("cannot start sk agent: %r" % (exc,))
+        return False
+
+    for _ in range(50):
+        if os.path.exists(SK_SOCK):
+            break
+        time.sleep(0.05)
+
+    env = dict(os.environ, SSH_AUTH_SOCK=SK_SOCK)
+    try:
+        res = subprocess.run(
+            [SSH_ADD, SK_KEY], env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, timeout=20,
+        )
+        if res.returncode != 0:
+            log("ssh-add failed rc=%d: %s" % (res.returncode, res.stdout.decode(errors="replace").strip()))
+            return False
+    except Exception as exc:
+        log("ssh-add error: %r" % (exc,))
+        return False
+    log("sk agent up on %s with %s" % (SK_SOCK, os.path.basename(SK_KEY)))
+    return True
+
+
+def supervisor():
+    while True:
+        time.sleep(5)
+        try:
+            if not sk_identities(timeout=2.0):
+                log("sk agent lost the key; restarting")
+                start_sk_agent()
+        except Exception as exc:
+            log("supervisor error: %r" % (exc,))
+
+
+# ------------------------------------------------------------------- main
+
+def main():
+    for path in (os.path.dirname(PROXY_SOCK), os.path.dirname(SK_SOCK)):
+        if path and not os.path.isdir(path):
+            os.makedirs(path, mode=0o700)
+
+    start_sk_agent()
+    threading.Thread(target=supervisor, daemon=True).start()
+
+    try:
+        os.unlink(PROXY_SOCK)
+    except OSError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(PROXY_SOCK)
+    os.chmod(PROXY_SOCK, 0o600)
+    srv.listen(64)
+    log("listening on %s (token=%s, fallback=%s)" % (PROXY_SOCK, SK_KEY, ONEPW_SOCK))
+
+    def shutdown(signum, _frame):
+        log("signal %d, exiting" % signum)
+        try:
+            os.unlink(PROXY_SOCK)
+        except OSError:
+            pass
+        if _sk_proc is not None and _sk_proc.poll() is None:
+            _sk_proc.terminate()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+
+    while True:
+        conn, _ = srv.accept()
+        threading.Thread(target=handle, args=(conn,), daemon=True).start()
+
+
+if __name__ == "__main__":
+    main()
