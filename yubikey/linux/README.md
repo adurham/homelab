@@ -73,6 +73,9 @@ addresses, so root@peer keeps working while root from anywhere else is refused.
 `/etc/pve/priv/` symlink some PVE versions use) and was reduced to the three
 inter-node keys only; the personal keys now live in `/home/amd/.ssh/`.
 
-Known pre-existing gap, not caused by this change: pve02 and pve03 have no
-known_hosts entries for their peers, so `ssh root@pve03` *from* pve02 hits
-"Host key verification failed" — it was already that way before the conversion.
+Peer known_hosts (fixed 2026-10-19, pre-existing gap): pve02 and pve03 had no
+known_hosts entries for their peers, so `ssh root@pve03` *from* pve02 hit "Host
+key verification failed" even though root auth was fine. Seeded with
+`ssh-keyscan -t ed25519,rsa,ecdsa pve01 pve02 pve03 <the three node IPs>` run as
+root on each node (backups: `/root/.ssh/known_hosts.bak-*`). All six inter-node
+directions now resolve; `pvecm status` stays quorate.
