@@ -1177,10 +1177,13 @@
     content: |
       # Managed by Ansible — do not edit by hand.
       # Source: roles/hermes_gateway/tasks/main.yml
-      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-gateway*, /usr/bin/systemctl --no-ask-password start hermes-gateway*, /usr/bin/systemctl --no-ask-password restart hermes-gateway*
-      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-serve*, /usr/bin/systemctl --no-ask-password start hermes-serve*, /usr/bin/systemctl --no-ask-password restart hermes-serve*
-      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-dashboard*, /usr/bin/systemctl --no-ask-password start hermes-dashboard*, /usr/bin/systemctl --no-ask-password restart hermes-dashboard*
-      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl restart hermes-*
+      # Explicit unit names only, bare and .service form. A grant here is
+      # privileged action WITHOUT the token, so it must name exactly the units
+      # the updater bounces — no hermes-* wildcard (removed 2026-10-19).
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-gateway, /usr/bin/systemctl --no-ask-password reset-failed hermes-gateway.service, /usr/bin/systemctl --no-ask-password start hermes-gateway, /usr/bin/systemctl --no-ask-password start hermes-gateway.service, /usr/bin/systemctl --no-ask-password restart hermes-gateway, /usr/bin/systemctl --no-ask-password restart hermes-gateway.service
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-gateway-dashboard, /usr/bin/systemctl --no-ask-password reset-failed hermes-gateway-dashboard.service, /usr/bin/systemctl --no-ask-password start hermes-gateway-dashboard, /usr/bin/systemctl --no-ask-password start hermes-gateway-dashboard.service, /usr/bin/systemctl --no-ask-password restart hermes-gateway-dashboard, /usr/bin/systemctl --no-ask-password restart hermes-gateway-dashboard.service
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-serve, /usr/bin/systemctl --no-ask-password reset-failed hermes-serve.service, /usr/bin/systemctl --no-ask-password start hermes-serve, /usr/bin/systemctl --no-ask-password start hermes-serve.service, /usr/bin/systemctl --no-ask-password restart hermes-serve, /usr/bin/systemctl --no-ask-password restart hermes-serve.service
+      hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed hermes-dashboard, /usr/bin/systemctl --no-ask-password reset-failed hermes-dashboard.service, /usr/bin/systemctl --no-ask-password start hermes-dashboard, /usr/bin/systemctl --no-ask-password start hermes-dashboard.service, /usr/bin/systemctl --no-ask-password restart hermes-dashboard, /usr/bin/systemctl --no-ask-password restart hermes-dashboard.service
     dest: /etc/sudoers.d/hermes-service-restart
     owner: root
     group: root
