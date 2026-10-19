@@ -146,13 +146,18 @@ Two things surfaced during the run:
   adblock-proxy-01 has failed 1370 times in 7 days — it gets HTTP 403 on the
   Home Assistant websocket handshake at 192.168.86.2. Separate fix.
 
-**Still pending:** the three PVE nodes (81 packages each, including 4 from the
-corosync / pve-cluster / pve-manager family) and the 12 remaining Tanium test
-clients (35–104 each).
+**PVE nodes — done 2026-10-19**, one at a time, install only, `NEEDRESTART_MODE=l`:
+pve01 → pve02 → pve03, each `apt-get dist-upgrade` rc=0, then verified quorate,
+`pveproxy`/`pvedaemon`/`pve-ha-lrm`/`corosync` all active, 0 failed units, and
+all three now report `pending=0`. Fencing stayed armed throughout and no node
+was fenced; the CRM master moved pve03 → pve01 during the run as expected.
+Kernel `7.0.14-25-pve` is installed on all three but they still boot
+`7.0.14-15-pve` — reboot pending, owner's call.
 
-Blocker on PVE: `ha-manager status` shows the LRM active with watchdog on
-pve02/pve03. A corosync restart with HA enabled can watchdog-fence (reboot) a
-node, which is a reboot without the owner's word. So PVE installs wait for a
-maintenance window; kernels land but take effect only at the next reboot, which
-is also his call.
+**Tanium test clients — blocked, not a security gap.** Ten of the eleven can't
+reach their package repos: `tc-ubuntu24` gets "Unable to connect to
+archive.ubuntu.com", `tc-rocky9` "Couldn't resolve host mirrors.rockylinux.org".
+The Tanium lab segment has no direct egress (it is documented as going through
+proxy-01), so their 35–104 pending updates cannot be fetched without a network
+policy change. Only `tc-oracle8` (the canary) and `tc-oracle9` reached 0.
 
