@@ -575,3 +575,52 @@ the address range.
 - Nothing else on the workstation can be advanced remotely while it sits in memtest: the box has no
   network by design (memtest has no stack), so the plug is the only instrument.
 
+## 19. 2026-10-19 15:17 — the matrix lands: the module is bad AND Channel A is bad
+
+Owner-reported cells (screen-observed; artifacts still to be pulled):
+
+| cell | module | slot | instrument | result |
+|---|---|---|---|---|
+| 2 | good `…CD0JC` | **B** | memtest, 4 passes | **PASS** |
+| 1 | good `…CD0JC` | **B** | Debian, rescue | **BOOTS** |
+| 3 | suspect `…DC8M` | **B** | Debian, rescue | **BOOTS** |
+| 4 | suspect `…DC8M` | **B** | memtest | **running** (same-session control) |
+
+Together with the already-recorded cells (suspect @ B memtest **FAIL** 10 000 errors / 2:45:41 /
+bits 8,9,12,15; good @ A memtest **PASS** 48/48 / 4:51:16; good @ A kernel **HANG** at
+`Loading initial ramdisk`), this closes the two questions in opposite directions:
+
+1. **The module is bad, in either slot.** The suspect has now failed memtest standing in B, which is the
+   slot the good module passes in — so the earlier FAIL was not a slot artifact. The Corsair claim stands
+   on its own and does not need the board to be at fault.
+2. **The boot fault is Channel A, not the module.** One module, one stick, same BIOS bytes: `…CD0JC`
+   boots a kernel in **B** and hangs in **A**, while passing 4/4 passes of memtest in both. Both modules
+   boot in B. That is a board/CPU-side fault in the A path (slot, trace, or UMC channel), and it is
+   Minisforum's.
+3. **Consequence for the requirement:** the owner needs 64 GB, which needs both channels, which needs
+   Channel A. **The box cannot be a 64 GB machine until the board is fixed** — so the Minisforum RMA is
+   now on the critical path, not an insurance policy.
+
+### 19.1 Plug timeline for the afternoon (verified from the recorder + the plug's energy meter)
+
+- 10:18:49 power-on → memtest (good @ B) runs **4 h 51 m**, ending ~15:09:49 — exactly the 4-pass
+  duration this stick produced on 2026-10-18 (4:51:16). Only the HTML can *prove* 4 passes; the duration
+  is consistent, not proof, so cell 2 stays "owner-reported PASS" until the report is parsed.
+- 15:11:48-15:12:51 at 55.8-57.1 W = a short boot (the Debian rescue cell, good @ B).
+- **15:14:19: 0.0 W** — the only power interruption of the day, ~30-60 s: the module swap.
+- 15:14:48: 55.2 → 74.6 → 78.9 W over ~60 s = a second short boot (the Debian rescue cell, suspect @ B).
+- 15:16:18 onward: 118-123 W = memtest at heavy test load (cell 4).
+
+The boot windows are only ~90 s each, which is why the plug cannot tell a Debian rescue boot from a
+memtest reboot into the USB menu by power alone — the screen is what distinguishes them, and that is why
+cells 1 and 3 are recorded as owner-observed. If Minisforum needs more than the cross-slot argument, the
+cheap artifact is one photo of the B-slot rescue prompt (or the A-slot hang) from the same session.
+
+### 19.2 Expectation for cell 4
+
+Last time the suspect was in B it was clean through pass 1 and died in **test 8 of pass 3**, hitting the
+10 000-error cap at **2:45:41** (~17:59 if it repeats on the same schedule). A clean 4-pass run would be
+the surprise and would mean the earlier FAIL was not reproducible — in which case the module verdict is
+unstable and the Corsair claim has to be re-argued before anything ships.
+
+
