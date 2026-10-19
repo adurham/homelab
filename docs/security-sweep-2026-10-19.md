@@ -62,8 +62,8 @@ internet-facing P1s. That was wrong: both carry the `$is_internal` ACL, so they
 | :-- | :-- | :-- |
 | `PasswordAuthentication yes` | adblock-proxy-01, authentik, dns-01, frigate-01, graf-01, hermes-gw-01, lb-01, mail-01, ntp-01, proxy-01, tailscale-gw, vm-01 | **Fixed 2026-10-19** — `harden_ssh_password_auth.yml` writes `/etc/ssh/sshd_config.d/00-no-password.conf` (PasswordAuthentication/KbdInteractive/PermitEmptyPasswords no), validates with `sshd -t`, reloads, then asserts `sshd -T`. Verified on all 12: `passwordauthentication no`, and a password-only client gets `Permission denied (publickey)`. |
 | Key hygiene | 7 containers + 3 PVE nodes: `amd` held the three inter-node `root@pveNN` keys and a duplicated ansible key | **Fixed 2026-10-19** — `prune_amd_authorized_keys.yml` (backup, temp file, refuses to install unless the sk key and ansible key survive). Now 2–3 keys per host: sk, ansible, and 1Password RSA where it existed. |
-| Unknown authorized keys left in place | pve01/02/03 `amd`: `Tanium Macbook` (RSA-2048, fingerprint tscpVpoF…); pve01 also an uncommented ECDSA key (ZGPKFcc4…) | No matching private key on this Mac. Left in place pending an owner call — likely the work laptop. |
-| Pending updates | 35–104 per host | Open. Highest: tc-oracle8 104, media-ingest-02 94, tc-ubuntu24 87, pve01/02/03 77, hermes-gw-01 64. |
+| Unknown authorized keys | pve01/02/03 `amd` | **Dropped 2026-10-19** on owner's word: the `Tanium Macbook` RSA on all three nodes and the uncommented ECDSA on pve01. Each node keeps exactly three keys (sk, 1Password RSA, ansible). Backups `authorized_keys.bak-keydrop-*`. |
+| Pending updates | fleet + 3 PVE | **Done 2026-10-19** for every service host and all three PVE nodes (0 pending). Only the Tanium test clients remain, blocked by segment egress (`Could not resolve host` / `Unable to connect`), not by policy. |
 | No host firewall | 12 containers (`ufw` inactive), studios' macOS firewall off | Matches the documented "trusted SDN" model; the PVE per-CT firewall covers 9 CTs and pve-firewall is enabled/running. Studio firewall left alone — a live exo session is using those boxes. |
 | Unknown bot key | tailscale-gw `amd`: `hft-bot-direct-no-1password` | Intentional — the private half is `~/.ssh/hft_bot_direct` on this Mac. Owner call whether it still needs to sit on the perimeter host. |
 | No fail2ban/sshguard | everywhere | Open (low). SSH brute force is bounded by the perimeter + key-only auth now. |
@@ -142,9 +142,19 @@ Two things surfaced during the run:
   from the vault (`vault_grafana_renderer_token`) so a redeploy reproduces the
   working state. Health 200, only the two benign boot-time unit failures remain
   (`nvmf-autoconnect`, `openipmi`).
-- **Pre-existing, not caused by the patch:** `adguard-log-shipper` on
-  adblock-proxy-01 has failed 1370 times in 7 days — it gets HTTP 403 on the
-  Home Assistant websocket handshake at 192.168.86.2. Separate fix.
+- **`adguard-log-shipper` on adblock-proxy-01 — fixed 2026-10-19.** Root cause
+  chain: the HA long-lived token in
+  `/etc/adguard-log-shipper/hass_token` was the pre-rotation one (the refresh
+  token behind it no longer exists after the 2026-10-18 rotation), so every run
+  failed auth; after five failures HA banned the container's LAN leg
+  `192.168.86.41`, and from then on *every* request from that host — even with a
+  valid token — got `403: Forbidden` from the ban middleware. Fix: removed the
+  stale ban from `/config/ip_bans.yaml` (backup taken) and reloaded HA core, then
+  replaced the token file with a valid JWT for the live refresh token. Loki now
+  has fresh `job="adguard"` streams. Note: HA long-lived tokens are HS256 JWTs
+  whose `iss` is the refresh-token id and whose signing key is that entry's
+  `jwt_key` in `.storage/auth`, so a valid token can be minted offline without
+  the UI.
 
 **PVE nodes — done 2026-10-19**, one at a time, install only, `NEEDRESTART_MODE=l`:
 pve01 → pve02 → pve03, each `apt-get dist-upgrade` rc=0, then verified quorate,
