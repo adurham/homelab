@@ -5,8 +5,9 @@ re-reading the transcript. Repo: `~/repos/homelab` (branch main). Evidence bundl
 
 ## 1. TL;DR state
 
-> **2026-10-18 evening: the suspect module FAILS ON ITS OWN** (MemTest86, 10,000 errors, bits 8/9/12/15) --
-> the good module's 4-pass control run is in flight, ETA ~01:05 Oct 19. See section 11.
+> **2026-10-18 night: RAM question CLOSED.** Suspect module FAILS alone in MemTest86 (10,000-error cap,
+> bits 8/9/12/15); the good module PASSES 48/48 tests over 4 passes in 4:51:16 with zero errors.
+> Full HTML reports pulled off the USB and the Corsair ticket updated with both. See sections 11-12.
 >
 > **2026-10-18 afternoon: the 64 GB pair is NOT usable.** Both modules installed and booted, but the
 > pair panics in ~2 min at 4800 and produced 1910 miscompares in 3 min at 4000 before dying. Speed is
@@ -253,3 +254,49 @@ Computing page) fixes both the memtest route and the `bios-set` toolkit route.
 2. Corsair follow-up with the FAIL screen + result summary + pair photo: **held** until the good-stick
    result is in (batch everything), unless told to send sooner.
 3. Still owed from 10.5: preserve `/tmp/stress-out-20261018-132855.log`, disable Secure Boot.
+
+## 12. 2026-10-18 night — good module PASSES, evidence shipped to Corsair (22:14-22:25 CDT)
+
+### 12.1 Both MemTest86 HTML reports pulled off the USB (official reports, not photos)
+Copied to `~/rma-evidence/` with their run logs:
+`memtest86-suspect-alone-report-20261018.html`, `memtest86-good-module-PASS-report-20261018.html`,
+`memtest86-suspect-alone-run.log`, `memtest86-good-module-run.log`.
+(Note: MemTest86 timestamps inside the reports are UTC; the filenames are UTC too. Local = UTC-5.)
+
+**Suspect S/N A534T4312CDC8M alone — FAIL** (start 14:15:23, end 17:02:08 local; 2:45:42 elapsed)
+- 1 module, 31,513 MB, DDR5 3168->4800 MT/s, 40-40-40-77, 1.100 V, BIOS 1.17, Meigao DRFXI.
+- Aborted at the 10,000-error cap, 32/48 tests (66 %), 31/32 passed.
+- Bits-in-error mask 0x9300 (bits 8, 9, 12, 15); 4 bits; max contiguous 1;
+  lowest error 0x131E954 (19 MB) -> highest 0x4BFD9A998 (19,453 MB); CPUs {0,2,4,6,8,10,12,14}.
+- **Every single error is in Test 8 [Random number sequence]**; tests 0-7, 9, 10, 13 clean.
+- Last-errors XOR confirms single-bit flips in bits 12 and 15 (e.g. 634BC382->634BD382 = 0x1000).
+
+**Good S/N A534T4312CD0JC alone — PASS** (start 17:03:52, end 22:14:18 local; **4:51:16 elapsed**)
+- **48/48 tests passed, 4/4 passes, zero errors**, all 12 test types clean every pass.
+- Same board/BIOS/settings/1-module configuration. CPU 46-80 C, RAM 31-56 C.
+- This is the A/B that closes the RAM question: the fault follows the module, not the slot or the board.
+
+### 12.2 Corsair ticket updated (sent, verified)
+- Sent 2026-10-18 22:19:58 from amdnative@gmail.com as a reply on ticket **2009654822**
+  ("Re: [Corsair] Warranty RMA request - ... S/N A534T4312CDC8M defective").
+- Body archived: `corsair-followup-body-20261018-v3.txt` (supersedes `-v2`/`-v1`; the v1 mid-run
+  version went out at 16:49 as "Re: [Request received]").
+- Four attachments, sizes verified in Sent Mail: suspect FAIL HTML (23,946 B), suspect FAIL screen PNG
+  (3,476,282 B), good-module PASS HTML (23,946 B), pair-run PNG (3,708,452 B).
+  Sent Mail count went 808 -> 809: **exactly one copy, no duplicate**. (Mail's AppleScript attachment
+  name list is misaligned - trust the byte sizes, not the names.)
+- Minisforum ticket still needs the "RAM verdict final, this is the memory not the board" update.
+
+### 12.3 Box state after the run
+- MemTest86 finished and the machine is **powered off**: plug switch ON but drawing **3.2 W**, SSH down.
+- `automation.amd_workstation_auto_power_cycle_if_unreachable` is still **OFF**; re-enable it as soon
+  as the box is up in Linux, otherwise there is no crash self-recovery.
+
+### 12.4 Next (needs the box booted on the good module)
+1. Boot Linux on the good module alone -> re-enable the auto power-cycle automation.
+2. `bash ~/stress-run.sh -s 1500 -M 26000 -W --pause_delay 120 --pause_duration 15` (25 min, single
+   module) to prove the host/OS path is healthy on a known-good module now that MemTest86 has.
+3. Harvest `/tmp/stress-out-20261018-132855.log` (the 1,910-miscompare pair log) into `~/rma-evidence/`
+   if it survived - it is the strongest pair-run artifact.
+4. Secure Boot still Enabled -> must be disabled while the box is open (blocks memtest86+ and `bios-set`).
+5. Update the Minisforum ticket with the A/B result; do not ship hardware until Corsair's RMA is settled.
