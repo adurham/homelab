@@ -1,6 +1,6 @@
 $TTL    604800
 @       IN      SOA     dns.chi.lab.amd-e.com. admin.chi.lab.amd-e.com. (
-                              6         ; Serial
+                              7         ; Serial
                          604800         ; Refresh
                           86400         ; Retry
                         2419200         ; Expire
@@ -66,6 +66,24 @@ homeassistant   IN      A       {{ ip_loadbalancer }} ; HA has its own auth (loc
 ; Both resolve to the LB VIP; nginx routes by server_name to hermes-gw-01.
 hermes          IN      A       {{ ip_loadbalancer }}
 hermes-api      IN      A       {{ ip_loadbalancer }}
+
+; Host names for the boxes we actually address by name
+; (added 2026-10-19: every container was reachable by IP but several had no
+; record at all, or a stale one from the router's DNS, so `ssh <name>` broke).
+; lb-01 IS the load-balancer VIP.
+lb-01           IN      A       {{ ip_loadbalancer }}
+dns-01          IN      A       {{ ip_dns_primary }}
+proxy-01        IN      A       {{ ip_proxy }}
+media-ingest-01 IN      A       {{ ip_media_ingest }}
+media-ingest-02 IN      A       {{ ip_media_ingest_02 }}
+gallery-01      IN      A       {{ ip_media_gallery }}
+tg-harvester-01 IN      A       {{ ip_media_gallery }}
+hermes-gw-01    IN      A       {{ ip_hermes_gateway }}
+adblock-proxy-01 IN     A       {{ ip_adblock_proxy }}
+tailscale-gw    IN      A       {{ ip_tailscale_gw_lan }}
+; frigate-01 has eth1 on the private SDN (ip_frigate) but only its DHCP LAN
+; address answers SSH, so the name points at the LAN side on purpose.
+frigate-01      IN      A       192.168.86.17
 
 ; Wildcard (Optional - helps with subdomains)
 ; Wildcard (Optional - helps with subdomains)
