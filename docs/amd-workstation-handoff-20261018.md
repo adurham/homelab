@@ -541,6 +541,15 @@ already holds this; no live watcher is needed — read it back after the fact):
 - Elapsed at 13:12: **2 h 53 m**. On the 73 min/pass baseline: pass 2 ended ~12:44, pass 3 ~13:57,
   **4 passes ~15:10-15:20** if it stays clean.
 
+**13:38 re-check — and how to read a sensor gap correctly.** The power sensor skipped 3.4 min at
+13:33 (the plug's WiFi link is weak: ping averages ~800 ms, and the native Gen4 entities gap for 2-12
+min at a time). That gap is in the *measurement path*, not the rail: the plug's own cumulative energy
+meter, recorded every minute, steps by 0.000953-0.001072 kWh right through the window (2.395783 ->
+2.399952 kWh, 13:33 -> 13:37), which is exactly 60-64 W × 1 min. So the box drew continuous load
+across the gap and did not reset. **Use the energy counter for continuity; use apower for behaviour.**
+Elapsed at 13:38: 3 h 19 m, still cycling 58-84 W / 105-134 W.
+
+
 ### 18.3 Reading the result: `scripts/hardware/memtest_report.py`
 
 PassMark's HTML is UTF-16 with label/value pairs split across `<td>`s, which is why grep keeps coming up
