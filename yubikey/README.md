@@ -1,9 +1,11 @@
 # YubiKey-backed sudo, SSH and git signing (personal MacBook)
 
 Everything here runs on the MacBook that drives the homelab. The token is the
-unattended identity; 1Password is the human fallback. Nothing here gates
-privilege on the Linux boxes yet — those are still reached as root over SSH
-(see "Gap" at the bottom).
+unattended identity; 1Password is the human fallback. The Linux fleet (13
+containers + 3 PVE nodes) runs the same model with `pam_ssh_agent`: login as
+`amd`, sudo authenticates a forwarded token signature, root SSH is closed — see
+`linux/README.md`. The Mac Studios carry the module inertly (no sensor, key
+never goes there); their sudo still goes through the forwarded 1Password agent.
 
 ## Components
 
@@ -52,9 +54,13 @@ named as an `IdentityFile` so it survives the proxy being down), except
   --touch-policy never 9a /tmp/9a.pem`), replace `PINNED_KEY` with the 65-byte
   X9.63 point, then run `install.sh`.
 
-## Gap: the Linux fleet is root over SSH
+## Linux fleet — gated (2026-10-19)
 
-`ssh root@<box>` gives root with no sudo in the path, so the token is the only
-control. Closing that means a non-root login user plus a sudo gate (the
-`amd-workstation` pattern: forwarded agent + `pam_ssh_agent_auth`, plain
-`sudo`, never `sudo -n`), then `PermitRootLogin no` once proven.
+`ssh root@<box>` no longer works from the LAN on the 13 containers or the 3 PVE
+nodes. They run a non-root login user (`amd`), sudo authenticates a signature
+from the forwarded agent (token only — the sudo key file never holds the
+1Password RSA), and root SSH is disabled, scoped by `Match Address` on the PVE
+nodes so corosync/migration keep working. Full rollout, ansible changes and
+rollback notes: `linux/README.md`. The Mac Studios are the exception: the module
+sits there inertly (no Touch ID sensor, the token never goes to them) and their
+sudo still authenticates through the forwarded 1Password agent.
