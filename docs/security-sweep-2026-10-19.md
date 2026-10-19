@@ -14,41 +14,47 @@ Coverage: 35 hosts audited, 3 Macs, HA, edge. 17 hosts unreachable (see bottom).
 ## Internet-facing surface
 
 Public IPv4 108.88.208.88 (No-IP) forwards only 80/443 to `lb-01`; 22 and 8006
-are closed from the WAN. Only `auth.` and `tanium.` are in public DNS, but nginx
-routes on `Host`, so every 443 server block is reachable from the internet:
+are closed from the WAN. Only `auth.` and `tanium.` resolve in public DNS.
 
-| Host name | Gate |
-| :-- | :-- |
-| auth | Authentik login, rate-limited 10 r/min per IP (`auth_login` zone) |
-| whoami, victoriametrics, gallery, hermes-api | Authentik forward-auth |
-| tanium | own console login; credential POST blocked unless source is LAN/SDN/Tailscale (`$is_internal`) |
-| homeassistant | HA's own login only — **no Authentik, no MFA, no ip_ban** |
-| grafana | own login + generic_oauth (Authentik), 401 without a session |
-| hermes | dashboard's own login (`/auth/login?provider=self-hosted`) |
-| proxmox | PVE login — **no Authentik, no rate limit, no TFA on root@pam** |
+Every 443 server block except the Authentik login and Tanium carries an explicit
+ACL at the top of the block:
+
+```
+# ACL: Block external access
+if ($is_internal = 0) { return 403; }
+```
+
+`$is_internal` (geo map) = LAN 192.168.86.0/24, SDN 172.16.0.0/24, Tailscale
+100.64.0.0/10, localhost. So the public surface is exactly two names:
+
+| Host name | Gate | External check |
+| :-- | :-- | :-- |
+| auth | Authentik login; `auth_login` rate limit 10 r/min per real IP | public by design |
+| tanium | console reachable; credential endpoints `/auth` and `/api/v2/session` return 403 unless internal | verified 403 from check-host nodes in DE and JP |
+| proxmox, homeassistant, grafana, hermes, whoami, victoriametrics, gallery, hermes-api | `$is_internal` ACL → 403 from the WAN; app-level auth behind it | config verified in live `nginx -T` |
 
 TLS: Let's Encrypt wildcard `*.chi.lab.amd-e.com`, valid to 2027-01-16.
 HSTS present; TLS 1.2/1.3 only.
 
-### P1 — Proxmox console
+### Correction (same day)
 
-`proxmox.chi.lab.amd-e.com` reaches PVE 8006 with no forward-auth and no nginx
-rate limit. `pveum user list` shows `root@pam` enabled with a password hash;
-`pveum user tfa list root@pam` returns no TFA entries. That is a public
-password-login form in front of the hypervisor: brute force plus any PVE auth
-CVE is full control. Fix: either put `auth_request` in front of the console
-(like `whoami`), or restrict the server block to `$is_internal`, and enrol TFA
-for `root@pam`. The OIDC user `adam.durham@lab.amd-e.com` already exists, so the
-internal path is to use it and disable `root@pam` login.
+An earlier draft of this document called the Proxmox and Home Assistant blocks
+internet-facing P1s. That was wrong: both carry the `$is_internal` ACL, so they
+403 from the WAN. The mistake came from two bad checks — a substring scan of
+`nginx -T` that looked for `allow`/`auth_request`/`limit_req` and never for the
+`if ($is_internal = 0)` form, and grepping `configuration.yaml` for HA's
+`ip_ban_enabled` when HA's `http:` config lives in `.storage/http` (it is set:
+`ip_ban_enabled: true`, `login_attempts_threshold: 5`,
+`trusted_proxies: 192.168.86.34/32`, i.e. lb-01's LAN leg). Corrected here.
 
-### P1 — Home Assistant
+### Residual (internal / tailnet scope, not public)
 
-`homeassistant.chi.lab.amd-e.com` proxies straight to `192.168.86.2:8123`. HA
-has 6 users; the two real ones (`root` [owner] and `Adam Durham`) have **no MFA
-credentials**, and `configuration.yaml` has no `ip_ban_enabled` /
-`login_attempts_threshold`, so password guessing is unbounded. Fix: enable
-`http.ip_ban_enabled: true` + `login_attempts_threshold: 5`, enrol TOTP for both
-accounts, and add the Authentik gate at nginx once HA SSO is set up.
+- PVE `root@pam` has no TFA entry and a usable password. Reachable from LAN,
+  SDN and the tailnet only.
+- HA: 6 users; the two real ones (`root` [owner], `Adam Durham`) have no MFA
+  credentials. Login is IP-banned after 5 failures, internal-only at the edge.
+- Authentik does have MFA: `akadmin` has a TOTP device, `adam.durham` a
+  WebAuthn device.
 
 ## Host findings
 
