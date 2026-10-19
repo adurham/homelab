@@ -431,16 +431,22 @@ reads. Both branches verified: the served copy passes `sh -n`, GET/POST/nc all t
   the owner is done at the bench for the night.
 - **Correction to §15 — tonight's MemTest86 run is not a clean result.** It booted **22:57:52** and the
   stick was swapped at **~23:47**: 50 minutes against a 70-75 minute pass. Pass 1 never completed, so it
-  is **zero evidence** and the good module is **not exonerated tonight**.
+  is **zero evidence** — it neither adds nor subtracts. The module's §12 record stands: **48/48 tests,
+  4/4 passes, 4:51:16, zero errors**, so the RAM is not the thing to re-litigate.
 - **§15's open question is answered:** the good module (S/N `...CD0JC`) is the one in the box.
 - Freeze point pinned: GRUB prints `Loading Linux 7.0.0-34-generic` / `Loading initial ramdisk`, then
   nothing — the frame never leaves those two lines while the plug holds **94-110 W**.
 - Do **not** read that as "the kernel died before it touched any device": with `nomodeset` and no
   earlycon there is simply no console until fbcon takes over, so the same frozen frame covers both a
   dead kernel and one hanging mid-enumeration. The NVMe pull therefore stays a live discriminator.
-- Order for the next bench session (one boot each, stop at the first change):
-  1. Debian GRUB `e` → `nomodeset acpi=off noapic nolapic maxcpus=1` (ACPI/APIC/SMP).
-  2. Same stick, **NVMe physically pulled** (PCIe link / device-probe hang; the installer never mounts
+- Order for the next bench session (one change each, stop at the first change):
+  1. BIOS: **undo tonight's two bytes** — Global C-State back to **Auto** (0x29 → `0x03`) and UMA back to
+     **2G** (0x47 → `0x08`). Nothing else has changed between the last Linux boot and now except those
+     two bytes and the DIMM swap, and it costs two minutes with no case work. Expect DDR5 retraining
+     afterwards (black screen, elevated draw, do not power-cycle).
+  2. Debian GRUB `e` → `nomodeset acpi=off noapic nolapic maxcpus=1` (ACPI/APIC/SMP).
+  3. Same stick, **NVMe physically pulled** (PCIe link / device-probe hang; the installer never mounts
      the SSD, so this isolates enumeration).
-  3. Both hang → the memory path / SoC is what's left and Minisforum becomes the primary claim.
+  4. All three hang → the SoC memory path is what is left: Minisforum becomes the primary claim, and the
+     good module goes into **P0 Channel B** for their deciding cell.
 - No remote path exists to the box while it has no booting OS; the only instrument is the plug.
