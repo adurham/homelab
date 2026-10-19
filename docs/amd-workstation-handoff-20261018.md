@@ -281,6 +281,13 @@ Copied to `~/rma-evidence/` with their run logs:
 - **48/48 tests passed, 4/4 passes, zero errors**, all 12 test types clean every pass.
 - Same board/BIOS/settings/1-module configuration. CPU 46-80 C, RAM 31-56 C.
 - This is the A/B that closes the RAM question: the fault follows the module, not the slot or the board.
+  **Correction 2026-10-19: that sentence overclaims — see below.**
+- What this run actually closes: the machine is not broken in general — this CPU with this module in
+  Channel A executed 4:51:16 of heavy pattern work with zero errors.
+- What it does **not** close: module vs slot. The two runs used different channels (suspect in **B**, good
+  in **A**), so "the fault follows the module" is confounded with "Channel B is bad". That is exactly the
+  open deciding cell in §13.3. Nor does a clean memtest say anything about the kernel-boot path (§14.2),
+  or about reserved ranges the tester never touches. **Do not quote this line to a vendor as proof.**
 
 ### 12.2 Corsair ticket updated (sent, verified)
 - Sent 2026-10-18 22:19:58 from amdnative@gmail.com as a reply on ticket **2009654822**
@@ -449,4 +456,11 @@ reads. Both branches verified: the served copy passes `sh -n`, GET/POST/nc all t
      the SSD, so this isolates enumeration).
   4. All three hang → the SoC memory path is what is left: Minisforum becomes the primary claim, and the
      good module goes into **P0 Channel B** for their deciding cell.
+- **Module-vs-board, decided without memtest** (the owner's objection, 2026-10-19: on a suspect board a
+  memtest PASS does not exonerate anything). Use the kernel as the instrument instead:
+  - good module in **Channel B** → boots: the fault sits in the Channel A path / board, and Channel B is
+    cleared; hangs: board either way, slot irrelevant.
+  - if it boots in B, put the **suspect** module in **Channel A** → fails: the module really is bad and
+    the Corsair claim stands; boots: the module was never bad and the Corsair claim must be walked back
+    **before** anything ships.
 - No remote path exists to the box while it has no booting OS; the only instrument is the plug.
