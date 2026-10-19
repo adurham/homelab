@@ -254,7 +254,31 @@ vault_noip_password: !vault |
           6330
 
 # Global Access Configuration
-ansible_user: root
+# Token-gated hosts (2026-10-19): login as the non-root user and escalate with
+# sudo, whose PAM stack authenticates a signature from the forwarded ssh-agent
+# (the MacBook's YubiKey). Root SSH is disabled on these hosts. Everything else
+# (PVE nodes, tanium, bwt, monitoring) still logs in as root.
+yd_gated_hosts:
+  - lb-01
+  - dns-01
+  - proxy-01
+  - mail-01
+  - ntp-01
+  - authentik
+  - frigate-01
+  - tailscale-gw
+  - hermes-gw-01
+  - gallery-01
+  - media-ingest-01
+  - media-ingest-02
+  - adblock-proxy-01
+ansible_user: "{{ 'amd' if inventory_hostname in yd_gated_hosts else 'root' }}"
+ansible_become: "{{ inventory_hostname in yd_gated_hosts }}"
+# sudo 1.9.13+ adds -n to the become invocation when no password is set, and the
+# PAM module does not satisfy sudo's non-interactive path on those builds. With
+# a password set ansible drops -n; pam_ssh_agent authenticates first, so this
+# value is never actually used (a failure here means the token is not signing).
+ansible_become_password: "unused-token-gated-sudo"
 ansible_ssh_private_key_file: /Users/adam.durham/.ssh/id_ansible
 
 # Shelly local device login (user admin) -- set 2026-10-18

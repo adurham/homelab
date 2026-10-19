@@ -1,0 +1,11 @@
+#%PAM-1.0
+# Token-gated sudo (Linux): pam_ssh_agent must sign a challenge with the
+# YubiKey key listed in /etc/security/sudo_keys/<user>. Success is silent;
+# failure (no agent, token out, or an unlisted key) falls through to the
+# normal password stack below. Never add pam_deny here.
+auth     sufficient  pam_ssh_agent.so file=/etc/security/sudo_keys/%u
+session  required    pam_env.so readenv=1 user_readenv=0
+session  required    pam_env.so readenv=1 envfile=/etc/default/locale user_readenv=0
+@include common-auth
+@include common-account
+@include common-session-noninteractive
