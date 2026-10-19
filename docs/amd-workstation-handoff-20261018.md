@@ -513,14 +513,14 @@ Design choices fixed now so tonight's numbers stay comparable:
 - Read the result off the USB report (UTF-16 HTML), not the screen; a mid-run **reset is evidence**, not
   completion.
 
-## 18. 2026-10-19 13:20 — MacBook's second crash (unrelated); cell 2 still clean; report parser built
+## 18. 2026-10-19 13:12 — MacBook's second crash (unrelated); cell 2 still clean; report parser built
 
 ### 18.1 The MacBook crash at 13:04 is not the display panic and not a kernel reboot
 
 - Boot time is still **2026-10-18 23:55:33**: the kernel never went down. This is the GUI dying, not the
   machine.
 - `JetsamEvent-2026-10-19-130432.ips`: **`bb-gpu` held 12.09 GiB** and `bb-probe` 1.92 GiB, with
-  WindowServer at 2.76 GiB and ~650 MB free. Jetsam killed at 13:04:32.
+  WindowServer at 2.76 GiB and ~0.7 GB free (41 602 pages of 16 KiB). Jetsam killed at 13:04:32.
 - `WindowServer-2026-10-19-130515.ips`: **EXC_BAD_ACCESS / SIGSEGV** (`KERN_INVALID_ADDRESS at
   0x2222222222222e`) at 13:05:15 — WindowServer died of its own allocation failure, taking every GUI app,
   kitty included, and with it the agent session that was running in that terminal.
@@ -538,7 +538,7 @@ already holds this; no live watcher is needed — read it back after the fact):
   restart of the phase pattern; there is none, and nothing near 0 W.
 - Draw alternates **58-84 W** (light test phases) with **105-134 W** (heavy phases) — normal MemTest86
   test cycling, not a fault.
-- Elapsed at 13:10: **2 h 52 m**. On the 73 min/pass baseline: pass 2 ended ~12:44, pass 3 ~13:57,
+- Elapsed at 13:12: **2 h 53 m**. On the 73 min/pass baseline: pass 2 ended ~12:44, pass 3 ~13:57,
   **4 passes ~15:10-15:20** if it stays clean.
 
 ### 18.3 Reading the result: `scripts/hardware/memtest_report.py`
