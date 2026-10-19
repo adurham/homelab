@@ -56,12 +56,23 @@ Two traps:
 - Hosts that use ssh socket activation (`ssh.socket`, no `ssh.service`) need no
   reload: each connection starts a fresh sshd and reads the new config.
 
-## PVE nodes — not converted yet
+## PVE nodes — converted 2026-10-19
 
-The three Proxmox nodes are still `ssh root`, and that is deliberate for now:
-the cluster runs `ssh root@peer` for migration/replication, so a blanket
-`PermitRootLogin no` breaks corosync. When they are converted, the cluster
-addresses need a `Match Address <cluster IPs>` block that keeps
-`prohibit-password` for them, `sudo` has to be installed first (PVE has none),
-and `/root/.ssh/authorized_keys` is a symlink into `/etc/pve/priv/` — cluster
-shared, so it must never be managed as a plain file.
+The three Proxmox nodes follow the same model, with one cluster-safe difference:
+
+```
+# /etc/ssh/sshd_config.d/00-no-root.conf on pve01-03
+PermitRootLogin no
+Match Address 192.168.86.11,192.168.86.12,192.168.86.13
+    PermitRootLogin prohibit-password
+```
+
+The cluster's corosync ring0 and pvecm/migration SSH both run over the node LAN
+addresses, so root@peer keeps working while root from anywhere else is refused.
+`/root/.ssh/authorized_keys` on these nodes is a plain per-node file (not the
+`/etc/pve/priv/` symlink some PVE versions use) and was reduced to the three
+inter-node keys only; the personal keys now live in `/home/amd/.ssh/`.
+
+Known pre-existing gap, not caused by this change: pve02 and pve03 have no
+known_hosts entries for their peers, so `ssh root@pve03` *from* pve02 hits
+"Host key verification failed" — it was already that way before the conversion.

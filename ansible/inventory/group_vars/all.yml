@@ -259,6 +259,9 @@ vault_noip_password: !vault |
 # (the MacBook's YubiKey). Root SSH is disabled on these hosts. Everything else
 # (PVE nodes, tanium, bwt, monitoring) still logs in as root.
 yd_gated_hosts:
+  - pve01
+  - pve02
+  - pve03
   - lb-01
   - dns-01
   - proxy-01
