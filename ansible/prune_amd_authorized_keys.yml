@@ -1,0 +1,63 @@
+---
+# Least-privilege cleanup of the `amd` login key file (sweep 2026-10-19).
+#
+# The fleet conversion copied root's key file to `amd`, which left:
+#   - the three inter-node `root@pveNN` cluster keys (amd never needs them),
+#   - a duplicate copy of the same ed25519 ansible key.
+# Kept: the YubiKey sk key, one 1Password RSA (human fallback), the ansible key.
+#
+# Safety: backs the file up, writes a temp file, refuses to install it unless it
+# still holds the token key and the ansible key, and keeps >= 3 keys. The
+# ansible key is what ansible connects with, so access cannot be lost by this.
+- name: Prune stale keys from amd's authorized_keys
+  hosts:
+    - adblock-proxy-01
+    - authentik
+    - dns-01
+    - frigate-01
+    - hermes-gw-01
+    - lb-01
+    - mail-01
+    - media-ingest-01
+    - media-ingest-02
+    - proxy-01
+    - pve01
+    - pve02
+    - pve03
+  gather_facts: false
+  tasks:
+    - name: Rewrite the key file without cluster keys or duplicates
+      ansible.builtin.shell: |
+        set -eu
+        f=/home/amd/.ssh/authorized_keys
+        cp -p "$f" "$f.bak-$(date +%Y%m%d-%H%M)"
+        tmp=$(mktemp)
+        awk '{ if ($0 ~ /root@pve0[123]/) next; if (seen[$0]++) next; print }' "$f" > "$tmp"
+        grep -q 'no-touch-required' "$tmp"
+        grep -q 'Adams-MacBook-Pro-M1' "$tmp"
+        n=$(grep -cE '^(no-touch-required|ssh-|ecdsa-|sk-)' "$tmp" || true)
+        [ "$n" -ge 2 ]
+        install -o amd -g amd -m 600 "$tmp" "$f"
+        rm -f "$tmp"
+      args:
+        executable: /bin/bash
+      register: prune
+      changed_when: prune.rc == 0
+
+    - name: Show the resulting key set
+      ansible.builtin.command: ssh-keygen -lf /home/amd/.ssh/authorized_keys
+      register: keys
+      changed_when: false
+
+    - name: Count the token key lines
+      ansible.builtin.command: grep -c '^no-touch-required' /home/amd/.ssh/authorized_keys
+      register: sk_count
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the cluster keys are gone and the token key survives
+      ansible.builtin.assert:
+        that:
+          - "'root@pve' not in keys.stdout"
+          - sk_count.stdout | trim == '1'
+          - (keys.stdout_lines | length) >= 2

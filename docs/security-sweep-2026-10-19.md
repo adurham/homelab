@@ -58,14 +58,15 @@ internet-facing P1s. That was wrong: both carry the `$is_internal` ACL, so they
 
 ## Host findings
 
-| Finding | Hosts | Notes |
+| Finding | Hosts | Status |
 | :-- | :-- | :-- |
-| `PasswordAuthentication yes` | adblock-proxy-01, authentik, dns-01, frigate-01, graf-01, hermes-gw-01, lb-01, mail-01, ntp-01, proxy-01, tailscale-gw, vm-01 | Not exploitable today: the only non-root human account (`amd`) is locked (`!`), and root login is `no` (gated) or `prohibit-password`. Still one password-set away from a hole. |
-| Pending updates | 35–104 per host | Highest: tc-oracle8 104, media-ingest-02 94, tc-ubuntu24 87, pve01/02/03 77, hermes-gw-01 64. |
-| No host firewall | 12 containers (`ufw` inactive), studios' macOS firewall off | Matches the documented "trusted SDN" model; the PVE per-CT firewall covers 9 CTs and pve-firewall is enabled/running. Flagged, not treated as a defect. |
-| Unknown authorized key | tailscale-gw `amd`: `ssh-ed25519 … hft-bot-direct-no-1password` | Persistent login that is neither the token nor 1Password. Confirm it is still needed. |
-| Key hygiene | 7 containers + 3 PVE nodes: `amd` holds the three inter-node `root@pveNN` keys and a duplicated `ssh-rsa … Macbook` | Left over from the root-era key copy; remove for least privilege. |
-| No fail2ban/sshguard | everywhere | SSH brute force is only bounded by the perimeter. |
+| `PasswordAuthentication yes` | adblock-proxy-01, authentik, dns-01, frigate-01, graf-01, hermes-gw-01, lb-01, mail-01, ntp-01, proxy-01, tailscale-gw, vm-01 | **Fixed 2026-10-19** — `harden_ssh_password_auth.yml` writes `/etc/ssh/sshd_config.d/00-no-password.conf` (PasswordAuthentication/KbdInteractive/PermitEmptyPasswords no), validates with `sshd -t`, reloads, then asserts `sshd -T`. Verified on all 12: `passwordauthentication no`, and a password-only client gets `Permission denied (publickey)`. |
+| Key hygiene | 7 containers + 3 PVE nodes: `amd` held the three inter-node `root@pveNN` keys and a duplicated ansible key | **Fixed 2026-10-19** — `prune_amd_authorized_keys.yml` (backup, temp file, refuses to install unless the sk key and ansible key survive). Now 2–3 keys per host: sk, ansible, and 1Password RSA where it existed. |
+| Unknown authorized keys left in place | pve01/02/03 `amd`: `Tanium Macbook` (RSA-2048, fingerprint tscpVpoF…); pve01 also an uncommented ECDSA key (ZGPKFcc4…) | No matching private key on this Mac. Left in place pending an owner call — likely the work laptop. |
+| Pending updates | 35–104 per host | Open. Highest: tc-oracle8 104, media-ingest-02 94, tc-ubuntu24 87, pve01/02/03 77, hermes-gw-01 64. |
+| No host firewall | 12 containers (`ufw` inactive), studios' macOS firewall off | Matches the documented "trusted SDN" model; the PVE per-CT firewall covers 9 CTs and pve-firewall is enabled/running. Studio firewall left alone — a live exo session is using those boxes. |
+| Unknown bot key | tailscale-gw `amd`: `hft-bot-direct-no-1password` | Intentional — the private half is `~/.ssh/hft_bot_direct` on this Mac. Owner call whether it still needs to sit on the perimeter host. |
+| No fail2ban/sshguard | everywhere | Open (low). SSH brute force is bounded by the perimeter + key-only auth now. |
 | macOS | MacBook: FileVault/SIP/Gatekeeper on, firewall on, stealth off, Remote Login on, password auth default (`yes`) | Studios: FileVault/SIP on, **firewall disabled**, Remote Login on, password auth `yes`. LAN-only. |
 | Tailnet | 14 nodes, all owner devices plus `tatis-iphone` (`suzumi.ashiya`, offline 52d) and an unnamed `mlhvyy0pwxmn` | `tailscale-gw` advertises `172.16.0.0/24`; confirm the second user's device is still intended and ACL-scoped. |
 | HA plain HTTP | `192.168.86.2:8123` on the LAN | TLS only at the LB. |
@@ -102,3 +103,9 @@ audit pass.
   serve, dashboard, bare and `.service`). Verified: `reset-failed
   hermes-serve` rc=0 as the `hermes` user, `restart ssh` and `restart
   hermes-attacker` both refused.
+- `harden_ssh_password_auth.yml` (new): key-only SSH on the 12 hosts above.
+  Applied and asserted; password-only login is refused at the protocol level.
+- `prune_amd_authorized_keys.yml` (new): dropped the inter-node cluster keys and
+  duplicate ansible key from `amd`'s file on 10 hosts (3 PVE + 7 containers),
+  with a backup and a guard that refuses to install a file missing the token or
+  ansible key. Backups: `/home/amd/.ssh/authorized_keys.bak-*`.
