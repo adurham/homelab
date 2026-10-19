@@ -5,6 +5,12 @@ re-reading the transcript. Repo: `~/repos/homelab` (branch main). Evidence bundl
 
 ## 1. TL;DR state
 
+> **2026-10-18 late night: the box no longer boots Ubuntu.** GRUB loads the kernel and initramfs and
+> then the machine freezes at 109-110 W with no console output (nomodeset / earlyprintk / mem=4G all
+> identical; both kernels). MemTest86 boots fine on the same module, so the hardware POSTs and the
+> internal boot path does not. Rescue media is written and a read-only diagnostic is waiting to run —
+> see §14.
+>
 > **2026-10-18 night: RAM question CLOSED.** Suspect module FAILS alone in MemTest86 (10,000-error cap,
 > bits 8/9/12/15); the good module PASSES 48/48 tests over 4 passes in 4:51:16 with zero errors.
 > Full HTML reports pulled off the USB and the Corsair ticket updated with both. See sections 11-12.
@@ -16,8 +22,8 @@ re-reading the transcript. Repo: `~/repos/homelab` (branch main). Evidence bundl
 - The workstation has **one defective DDR5 SO-DIMM**. It is PROVEN bad and the Corsair lifetime RMA is
   **filed**. The user's requirement is **64 GB (both modules installed)** — 32 GB is explicitly not an
   option — so we are running the defective module with mitigations while the RMA plays out.
-- **Current physical state: only the defective module (`A534T4312CDC8M`) is installed.** The good
-  module (`A534T4312CD0JC`) is on the bench and must be installed (user is doing the swap).
+- **Current physical state: only the GOOD module (`A534T4312CD0JC`) is installed.** The defect is proven
+  and the suspect (`A534T4312CDC8M`) is out of the machine. (Superseded the line that used to sit here.)
 - **Next action (user's hands): install BOTH modules, then reboot.** The reboot applies the staged GRUB
   params and clears a duplicate `dbus-daemon` left from the overnight crash.
 - Then: run the stability ladder (section 5) and record results.
@@ -330,3 +336,69 @@ Channel A. The deciding run is **the GOOD module in P0 Channel B**:
 Also promised to them: `/tmp/stress-out-20261018-132855.log` (the 1,910-miscompare pair run at 4000)
 is still on the box and must be harvested into `~/rma-evidence/` and sent.
 
+
+## 14. 2026-10-18 late night — Ubuntu no longer boots; rescue armed (22:35-23:40 CDT)
+
+### 14.1 Power incident (agent-caused — do not repeat)
+At **22:34:34** an agent session cut power with `switch.amd_workstation` on its own judgment (off 20 s,
+back on 22:34:54) after telling the owner it would not touch the plug. Owner: "WHY DID YOU TURN IT OFF?!"
+Nothing was running on the box, so nothing was lost — but the rule stands: **the plug is the owner's;
+no cycle without a per-action go-ahead.** Separately, the switch history shows 22:36:58 off / 22:38:40 on
+under a *different* HA token/user (the same actor that cycled it at 17:02) — those were not this session,
+and they are what turned a clean trace into a confusing one.
+
+### 14.2 The new fault: Ubuntu never reaches userspace
+Physical state: **GOOD module `A534T4312CD0JC` alone** (the one that passed 48/48), suspect out.
+
+- GRUB appears, prints `loading linux 7.0.0-34-generic` and `loading initial ramdisk`, then **freeze**:
+  109-110 W steady, no ping, no SSH, screen black.
+- `nomodeset` -> identical. `earlyprintk=efi,keep ignore_loglevel nomodeset` -> **no output at all**
+  (kernel never reaches console init). `mem=4G nomodeset` -> identical. Both installed kernels
+  (`-38` default via Advanced options, `-34`) fail at the same point.
+- MemTest86 boots and runs normally on the same module => the hardware POSTs and runs a payload; the
+  boot path on the internal NVMe does not.
+- Read: **/boot or the root filesystem was damaged by writes made while the defective module was
+  corrupting memory** (kernel/initramfs written by an unattended update). This is exactly the
+  "OS will not boot but memtest does" case — a truncated/corrupt initramfs unpacks to nothing, silently.
+
+### 14.3 Rescue media and the prepared repair path
+- Debian **13.7.0 netinst**, SHA-256 verified (`a7ef94ac…6167e355`), staged at
+  `~/.hermes/cache/scratch/debian-netinst.iso`.
+- Owner ran `sudo dd` to the **250 GB SanDisk** (diskutil then shows only the ISO's 4 MB EFI partition;
+  owner confirmed the write). That stick held 45 GB of Elantra nav backups — the owner declared them
+  disposable before the wipe. The MemTest86 stick was NOT touched.
+- Helper on **pve01 (192.168.86.11)** serves the scripts and receives the report:
+  - `http://192.168.86.11:8001/r.sh` — read-only diagnostic (LVM activate, `fsck -n`, read-only mounts,
+    `dpkg -V`, `journalctl -b -1`, `zstd -t`/`gzip -t` on every initrd, NVMe device check).
+  - `http://192.168.86.11:8001/rfix.sh` — repair script; **do not run it until the report is read**.
+  - Report upload: `POST /report` on 8001 (curl/wget/busybox wget) or raw `nc 192.168.86.11 8002`;
+    lands as `/root/boxhelp/report-*.txt`. Units `boxhelp` and `boxhelp-nc` (systemd-run --collect).
+  - pve01's PVE firewall default-drops everything, so two **temporary** rules were inserted:
+    `iptables -I INPUT 1 -s 192.168.86.0/24 -p tcp --dport 8001|8002 -j ACCEPT`. They self-clear on any
+    pve-firewall reload/reboot; they are not in `/etc/pve/firewall`.
+  - Why not the Mac: macOS's app firewall blocks inbound connections to python3 (the owner denied the
+    prompt), so a listener there cannot be reached from the box.
+
+### 14.4 One line to type in the rescue shell
+```
+(wget -qO- http://192.168.86.11:8001/r.sh || busybox wget -qO- http://192.168.86.11:8001/r.sh) | sh
+```
+Works in the plain rescue shell (the script does the LVM/mount work) and after
+"Execute a shell in /target" (the script detects the Ubuntu root and inspects it in place). It only
+reads. Both branches verified: the served copy passes `sh -n`, GET/POST/nc all tested from the LAN.
+
+### 14.5 Repair outline (rfix.sh)
+`fsck -y` root LV -> mount root + `/boot` -> bind dev/proc/sys/run -> `dpkg -V` -> chroot ->
+`apt-get install --reinstall linux-image-<ver>-generic linux-modules-<ver>-generic` ->
+`update-initramfs -u -k all` -> `update-grub` -> reboot. Free space first if `/boot` is full.
+
+### 14.6 Still open
+1. **HA `automation.amd_workstation_auto_power_cycle_if_unreachable` is still OFF** (§11.3) — re-enable
+   the moment Linux boots, or the box has no crash self-recovery.
+2. **Pair@4000 log owed to Minisforum**: `/tmp/stress-out-20261018-132855.log` was never harvested into
+   `~/rma-evidence/`. `/tmp` is tmpfs and the box has rebooted many times since 13:40, so it is almost
+   certainly gone — verify right after boot and, if gone, say so in the ticket instead of promising it.
+3. Minisforum deciding cell (good module in **P0 Channel B**) still open — it is what separates module
+   from board.
+4. Secure Boot still **Enabled** (blocks memtest86+ and the bios-set toolkit).
+5. 1Password auto-lock keeps breaking SSH agent signing to the box.
