@@ -300,3 +300,33 @@ Copied to `~/rma-evidence/` with their run logs:
    if it survived - it is the strongest pair-run artifact.
 4. Secure Boot still Enabled -> must be disabled while the box is open (blocks memtest86+ and `bios-set`).
 5. Update the Minisforum ticket with the A/B result; do not ship hardware until Corsair's RMA is settled.
+
+## 13. 2026-10-18 night — Minisforum case answered (21:59 in, 22:23 out)
+
+### 13.1 What they asked (case **C202610180028**, Y.J.Aickson, support@minisforum.com)
+- They agree it reads as a hardware fault in the memory path and that the module-vs-board isolation is
+  the right approach.
+- Asked for their standard 2x2 matrix: each module alone in each slot, ~4 min per run (four runs).
+- Back up data before more stress runs; note the BIOS version (they checked the catalog: 1.17 = current).
+- Send the stressapptest log + dmidecode/SPD output — they only ever received the receipt, so **none of
+  the diagnostic files had reached them** before this reply.
+
+### 13.2 What we sent (reply sent 22:23:35, 7 attachments, verified)
+Body archived: `~/rma-evidence/minisforum-reply-body-20261018.txt`
+Attachments: `stressapptest-1888-errors.log` (pair @4800: first miscompare at 266 s, 1,888 reports),
+`stressapptest-control-clean-17min.log` (clean single-module control, 17 min, zero errors),
+`dmidecode-memory.txt`, `dmidecode-system.txt`, `mce-edac-scan.txt`, and both MemTest86 HTML reports.
+Content: the module-level A/B (suspect fails alone, good passes 48/48), BIOS already at the current 1.17
+so there is no update to compare, data-safety already in force, and an explicit statement that we are
+NOT shipping the board and want the case open until the slot cross is done.
+
+### 13.3 The one open cell (this is what decides module vs board)
+Their matrix is already mostly answered, but not in the direction that closes it: the suspect-alone run
+happened in the channel the module was already in (P0 Channel B), and the good-module run happened in
+Channel A. The deciding run is **the GOOD module in P0 Channel B**:
+- passes there -> slot + CPU memory controller exonerated, module conclusively at fault;
+- fails there -> the board is implicated and Minisforum gets told immediately.
+
+Also promised to them: `/tmp/stress-out-20261018-132855.log` (the 1,910-miscompare pair run at 4000)
+is still on the box and must be harvested into `~/rma-evidence/` and sent.
+
