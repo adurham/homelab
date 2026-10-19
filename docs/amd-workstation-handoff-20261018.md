@@ -282,12 +282,18 @@ Copied to `~/rma-evidence/` with their run logs:
 - Same board/BIOS/settings/1-module configuration. CPU 46-80 C, RAM 31-56 C.
 - This is the A/B that closes the RAM question: the fault follows the module, not the slot or the board.
   **Correction 2026-10-19: that sentence overclaims — see below.**
-- What this run actually closes: the machine is not broken in general — this CPU with this module in
-  Channel A executed 4:51:16 of heavy pattern work with zero errors.
-- What it does **not** close: module vs slot. The two runs used different channels (suspect in **B**, good
-  in **A**), so "the fault follows the module" is confounded with "Channel B is bad". That is exactly the
-  open deciding cell in §13.3. Nor does a clean memtest say anything about the kernel-boot path (§14.2),
-  or about reserved ranges the tester never touches. **Do not quote this line to a vendor as proof.**
+- What this run actually closes: the machine is not broken in general — this CPU with this module executed
+  4:51:16 of heavy pattern work with zero errors.
+- **Slot of these two runs — corrected 2026-10-19 by the owner: both were in Channel A.** The suspect's
+  10 000-error run was in **A**, not B, and the good module's PASS started 1 m 44 s after it ended, which
+  is only possible if the module was swapped in the same slot. So the slot was held constant and the
+  module was the only variable: **same socket, suspect fails, good passes.** The earlier note here that
+  the two runs "used different channels (suspect in B, good in A)" was wrong, and with it the claim that
+  the result was confounded. It was not confounded — it was the clean one-factor comparison.
+- Replicated in **B** on 2026-10-19: good module 4/4 passes clean, suspect module erroring again. The
+  module-follows result now holds in both slots.
+- What it still does not close: a clean memtest says nothing about the kernel-boot path (§14.2), or about
+  reserved ranges the tester never touches.
 
 ### 12.2 Corsair ticket updated (sent, verified)
 - Sent 2026-10-18 22:19:58 from amdnative@gmail.com as a reply on ticket **2009654822**
@@ -475,10 +481,15 @@ Already recorded (all under today's BIOS 1.17 + the two bytes changed at ~13:00)
 
 | cell | instrument | result |
 |---|---|---|
-| suspect @ **B** | memtest | **FAIL** — aborted at the 10,000-error cap after 2:45:41, mask `0x9300` (bits 8,9,12,15) |
+| suspect @ **A** | memtest | **FAIL** — aborted at the 10,000-error cap after 2:45:41, mask `0x9300` (bits 8,9,12,15). *Slot corrected 2026-10-19 by the owner: this run was in A, not B.* |
 | good @ **A** | memtest | **PASS** — 48/48 tests, 4/4 passes, 4:51:16, zero errors |
 | good @ **A** | kernel | **HANG** — Ubuntu -34/-38 and Debian netinst, all after `Loading initial ramdisk` |
-| suspect | kernel | never tested — the module was out of the box before the boot fault appeared |
+| suspect @ **A** | kernel | **PANIC at boot** (2026-10-17 22:05, `ipam.md` Round-29) |
+
+Note on the design: the matrix below holds the slot at **B**, which is now a *cross-slot replication* of a
+comparison that had already been run in **A** — the same socket, one module at a time, suspect failing and
+good passing. B is the confirmation, not the first test of it.
+
 
 To run (one change at a time, stop and report at each cell):
 
@@ -592,20 +603,22 @@ Already on record before today, and part of the same 2x2:
 |---|---|---|---|---|
 | — | suspect `…DC8M` | **A** | kernel, alone | **PANIC at boot, no boot** (2026-10-17 22:05, `ipam.md` Round-29) |
 | — | good `…CD0JC` | **A** | kernel + 25 min stressapptest | **PASS**, 0 errors (2026-10-17, pre-BIOS-change) |
-| — | suspect `…DC8M` | **B** | memtest | **FAIL** 10 000 errors / 2:45:41 / bits 8,9,12,15 |
-| — | good `…CD0JC` | **A** | memtest | **PASS** 48/48 / 4:51:16 |
+| — | suspect `…DC8M` | **A** | memtest | **FAIL** 10 000 errors / 2:45:41 / bits 8,9,12,15 (2026-10-18 14:15-17:02) |
+| — | good `…CD0JC` | **A** | memtest | **PASS** 48/48 / 4:51:16 (2026-10-18 17:03-22:14) |
 | — | good `…CD0JC` | **A** | kernel | **HANG** at `Loading initial ramdisk` (2026-10-18 22:35+) |
+| — | suspect `…DC8M` | **B** | memtest | **erroring as of 15:45**, below the 10 000 cap (2026-10-19, running) |
 
-**Correction (owner, 2026-10-19):** the suspect module has failed in **both** slots — a boot panic
-standing alone in **A** on 2026-10-17, and 10 000 data errors standing in **B** on 2026-10-18. Anyone
-reading an earlier note that the module was "only ever tested in B" has it wrong; that was a bad claim
-made this session and it is retracted here.
+**Correction (owner, 2026-10-19), two parts:** the suspect's 10 000-error run was in **A**, not B — the
+slot labels in §12.1 and §17 said otherwise and were wrong. The module has now produced data errors in
+**both** slots, plus a boot panic in A; the good module is clean in both. That makes the module verdict
+stronger than the record claimed, not weaker, and it retires the wrong claim made earlier this session
+that the module had "only ever been tested in B".
 
 Together these close the two questions in opposite directions:
 
-1. **The module is bad, in either slot.** Suspect fails in A (boot panic) and in B (data errors at the
-   10 000 cap), while the good module passes memtest 4/4 in A *and* B. Two slots, two instruments, same
-   conclusion. The Corsair claim stands on its own and does not need the board to be at fault.
+1. **The module is bad, in either slot.** Suspect fails in A (boot panic on 10-17; 10 000 data errors on
+   10-18) and is erroring now in B, while the good module passes memtest 4/4 in A *and* B. Two slots, two
+   instruments, same conclusion. The Corsair claim stands on its own and does not need the board at fault.
 2. **The boot fault is Channel A, not the module.** The good module boots a kernel in **B** and hangs in
    **A**, while passing 4/4 passes of memtest in both. **Both** modules fail to boot in A (good: hang;
    suspect: panic) and **both** boot in B. That is a board/CPU/firmware fault in the A path, and it is
@@ -648,11 +661,15 @@ memtest reboot into the USB menu by power alone — the screen is what distingui
 cells 1 and 3 are recorded as owner-observed. If Minisforum needs more than the cross-slot argument, the
 cheap artifact is one photo of the B-slot rescue prompt (or the A-slot hang) from the same session.
 
-### 19.4 Expectation for cell 4
+### 19.4 Cell 4 (suspect in B) — erroring early, and that is not what the A run looked like
 
-Last time the suspect was in B it was clean through pass 1 and died in **test 8 of pass 3**, hitting the
-10 000-error cap at **2:45:41** (~17:59 if it repeats on the same schedule). A clean 4-pass run would be
-the surprise and would mean the earlier FAIL was not reproducible — in which case the module verdict is
-unstable and the Corsair claim has to be re-argued before anything ships.
+The suspect's **A** run stayed clean through pass 1 and first failed in **test 8 of pass 3**, reaching the
+10 000-error cap at **2:45:41**. The **B** run is already showing errors well inside that window, so this
+is either a different failure rate or a different test failing first — the report will say which, and the
+distinction matters: the same test-8 signature reproduced early is a solid control, while an early,
+different signature means the fault is rate-dependent and the A run's timing is not a stable baseline.
+
+The one thing that would overturn the verdict is a 4-pass clean run in B. Errors in B, on top of 10 000 in
+A, closes the module question outright: bad in both slots, on the record, for Corsair.
 
 
