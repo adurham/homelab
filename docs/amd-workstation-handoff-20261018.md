@@ -512,3 +512,57 @@ Design choices fixed now so tonight's numbers stay comparable:
   ~11:31 and 4 passes ~**15:10** if it stays clean.
 - Read the result off the USB report (UTF-16 HTML), not the screen; a mid-run **reset is evidence**, not
   completion.
+
+## 18. 2026-10-19 13:20 — MacBook's second crash (unrelated); cell 2 still clean; report parser built
+
+### 18.1 The MacBook crash at 13:04 is not the display panic and not a kernel reboot
+
+- Boot time is still **2026-10-18 23:55:33**: the kernel never went down. This is the GUI dying, not the
+  machine.
+- `JetsamEvent-2026-10-19-130432.ips`: **`bb-gpu` held 12.09 GiB** and `bb-probe` 1.92 GiB, with
+  WindowServer at 2.76 GiB and ~650 MB free. Jetsam killed at 13:04:32.
+- `WindowServer-2026-10-19-130515.ips`: **EXC_BAD_ACCESS / SIGSEGV** (`KERN_INVALID_ADDRESS at
+  0x2222222222222e`) at 13:05:15 — WindowServer died of its own allocation failure, taking every GUI app,
+  kitty included, and with it the agent session that was running in that terminal.
+- `bb-*` are the Bloodborne port's GPU/renderer processes, not anything this thread launched. Do not fold
+  this into the DCPEXT1 `axi_rd_err` panic count (§ recorded separately, three on 2026-10-18); different
+  failure, different owner.
+
+### 18.2 Cell 2 is intact — no reset, no gap, still running
+
+Reconstructed from the HA recorder's history for `sensor.amd_workstation_plug_power` (the recorder
+already holds this; no live watcher is needed — read it back after the fact):
+
+- Powered **10:18:49**, continuous sample stream through **13:10** with **no gap over 3 minutes**.
+- Lowest draw after power-on: **58.5 W**. A reset would show a boot-level dip (~30-40 W) and then a
+  restart of the phase pattern; there is none, and nothing near 0 W.
+- Draw alternates **58-84 W** (light test phases) with **105-134 W** (heavy phases) — normal MemTest86
+  test cycling, not a fault.
+- Elapsed at 13:10: **2 h 52 m**. On the 73 min/pass baseline: pass 2 ended ~12:44, pass 3 ~13:57,
+  **4 passes ~15:10-15:20** if it stays clean.
+
+### 18.3 Reading the result: `scripts/hardware/memtest_report.py`
+
+PassMark's HTML is UTF-16 with label/value pairs split across `<td>`s, which is why grep keeps coming up
+empty. The parser flattens it properly and prints the fields the campaign decides on (result, module
+count, slot population, tests completed → passes derived, error total, bit mask → bit list, per-test
+breakdown, last 10 errors).
+
+```
+python3 scripts/hardware/memtest_report.py --dir /Volumes/<MEMTEST-usb>      # every report on the stick
+python3 scripts/hardware/memtest_report.py report.html --json               # machine-readable
+```
+
+Verified against both 2026-10-18 reports: reproduces the PASS exactly (`4:51:16`, `48/48`, 0 errors,
+BIOS 1.17, 1 module, 31513M) and the FAIL exactly (`2:45:42`, `32/48 (66%)`, 10 000 errors, bits
+**8, 9, 12, 15**, mask `0x9300`). Do not transcribe the on-screen summary — it drops the bit mask and
+the address range.
+
+### 18.4 Still owed after the memtest
+
+- **Cell 1 — good module in B with a kernel** (~3 min, Debian stick): not run yet. This is the cell that
+  decides whether the boot fault is Channel-A specific.
+- **Cell 3 — suspect module in B with a kernel** (~3 min): for completeness against cell 1.
+- Nothing else on the workstation can be advanced remotely while it sits in memtest: the box has no
+  network by design (memtest has no stack), so the plug is the only instrument.
+
