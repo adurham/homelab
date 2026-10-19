@@ -109,3 +109,50 @@ audit pass.
   duplicate ansible key from `amd`'s file on 10 hosts (3 PVE + 7 containers),
   with a backup and a guard that refuses to install a file missing the token or
   ansible key. Backups: `/home/amd/.ssh/authorized_keys.bak-*`.
+- Mac Studios: `/etc/ssh/sshd_config.d/00-no-password.conf` (PasswordAuthentication
+  and KbdInteractiveAuthentication no). Verified: fresh key login works,
+  password-only client gets `Permission denied (publickey)`. Applied while the
+  exo session was live — sshd is socket-activated on macOS, so existing sessions
+  were untouched.
+- tailscale-gw: the `hft-bot-direct-no-1password` key is commented out pending an
+  owner decision (backup `authorized_keys.bak-hftbot-*`). It is reversible with a
+  one-line uncomment; no local cron/LaunchAgent references it.
+
+## Patch plan (Fable-reviewed) and why PVE is on hold
+
+Order: disposable Tanium client as canary → media-ingest-02 → remaining CTs
+(snapshot first where the storage allows) → PVE nodes one at a time, install only.
+
+**Done 2026-10-19** (each CT snapshotted as `pre-patch-20261019`, then
+`apt-get dist-upgrade`; every host verified `pending=0` afterwards):
+canary `tc-oracle8` (dnf, 104 → 0), then CTs 100 authentik, 101 tailscale-gw,
+102 dns-01, 103 lb-01, 104 mail-01, 105 ntp-01, 106 vm-01, 107 graf-01,
+108 proxy-01, 113 hermes-gw-01, 116 media-ingest-01, 117 media-ingest-02,
+118 adblock-proxy-01, 170 frigate-01. Service checks after each: nginx, AdGuard
+proxy units, authentik containers (health 200), hermes units (dashboard 302),
+media-ingest collector, frigate docker, tailscaled with both routes still
+advertised, cluster still quorate.
+
+Two things surfaced during the run:
+
+- **Grafana 12.3.1 → 13.2.4** (the dist-upgrade jumped a major). 13 refuses to
+  start with the shipped default `[rendering] renderer_token`, so graf-01 came up
+  failed until the token was set. Fixed forward with a 48-char token in
+  `grafana.ini` and `AUTH_TOKEN` on the renderer unit; the role now carries it
+  from the vault (`vault_grafana_renderer_token`) so a redeploy reproduces the
+  working state. Health 200, only the two benign boot-time unit failures remain
+  (`nvmf-autoconnect`, `openipmi`).
+- **Pre-existing, not caused by the patch:** `adguard-log-shipper` on
+  adblock-proxy-01 has failed 1370 times in 7 days — it gets HTTP 403 on the
+  Home Assistant websocket handshake at 192.168.86.2. Separate fix.
+
+**Still pending:** the three PVE nodes (81 packages each, including 4 from the
+corosync / pve-cluster / pve-manager family) and the 12 remaining Tanium test
+clients (35–104 each).
+
+Blocker on PVE: `ha-manager status` shows the LRM active with watchdog on
+pve02/pve03. A corosync restart with HA enabled can watchdog-fence (reboot) a
+node, which is a reboot without the owner's word. So PVE installs wait for a
+maintenance window; kernels land but take effect only at the next reboot, which
+is also his call.
+
