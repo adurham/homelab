@@ -586,22 +586,54 @@ Owner-reported cells (screen-observed; artifacts still to be pulled):
 | 3 | suspect `…DC8M` | **B** | Debian, rescue | **BOOTS** |
 | 4 | suspect `…DC8M` | **B** | memtest | **running** (same-session control) |
 
-Together with the already-recorded cells (suspect @ B memtest **FAIL** 10 000 errors / 2:45:41 /
-bits 8,9,12,15; good @ A memtest **PASS** 48/48 / 4:51:16; good @ A kernel **HANG** at
-`Loading initial ramdisk`), this closes the two questions in opposite directions:
+Already on record before today, and part of the same 2x2:
 
-1. **The module is bad, in either slot.** The suspect has now failed memtest standing in B, which is the
-   slot the good module passes in — so the earlier FAIL was not a slot artifact. The Corsair claim stands
-   on its own and does not need the board to be at fault.
-2. **The boot fault is Channel A, not the module.** One module, one stick, same BIOS bytes: `…CD0JC`
-   boots a kernel in **B** and hangs in **A**, while passing 4/4 passes of memtest in both. Both modules
-   boot in B. That is a board/CPU-side fault in the A path (slot, trace, or UMC channel), and it is
+| cell | module | slot | instrument | result |
+|---|---|---|---|---|
+| — | suspect `…DC8M` | **A** | kernel, alone | **PANIC at boot, no boot** (2026-10-17 22:05, `ipam.md` Round-29) |
+| — | good `…CD0JC` | **A** | kernel + 25 min stressapptest | **PASS**, 0 errors (2026-10-17, pre-BIOS-change) |
+| — | suspect `…DC8M` | **B** | memtest | **FAIL** 10 000 errors / 2:45:41 / bits 8,9,12,15 |
+| — | good `…CD0JC` | **A** | memtest | **PASS** 48/48 / 4:51:16 |
+| — | good `…CD0JC` | **A** | kernel | **HANG** at `Loading initial ramdisk` (2026-10-18 22:35+) |
+
+**Correction (owner, 2026-10-19):** the suspect module has failed in **both** slots — a boot panic
+standing alone in **A** on 2026-10-17, and 10 000 data errors standing in **B** on 2026-10-18. Anyone
+reading an earlier note that the module was "only ever tested in B" has it wrong; that was a bad claim
+made this session and it is retracted here.
+
+Together these close the two questions in opposite directions:
+
+1. **The module is bad, in either slot.** Suspect fails in A (boot panic) and in B (data errors at the
+   10 000 cap), while the good module passes memtest 4/4 in A *and* B. Two slots, two instruments, same
+   conclusion. The Corsair claim stands on its own and does not need the board to be at fault.
+2. **The boot fault is Channel A, not the module.** The good module boots a kernel in **B** and hangs in
+   **A**, while passing 4/4 passes of memtest in both. **Both** modules fail to boot in A (good: hang;
+   suspect: panic) and **both** boot in B. That is a board/CPU/firmware fault in the A path, and it is
    Minisforum's.
 3. **Consequence for the requirement:** the owner needs 64 GB, which needs both channels, which needs
-   Channel A. **The box cannot be a 64 GB machine until the board is fixed** — so the Minisforum RMA is
-   now on the critical path, not an insurance policy.
+   Channel A. **The box cannot be a 64 GB machine until the A path works** — see §19.2 for why that may
+   be a firmware setting rather than dead hardware, which matters because one of those is a 5-minute fix
+   and the other is an RMA.
 
-### 19.1 Plug timeline for the afternoon (verified from the recorder + the plug's energy meter)
+### 19.2 The A path worked yesterday morning — the cheap discriminator is the BIOS byte revert
+
+The record has the good module **booting a kernel and passing a 25-minute stressapptest in Channel A** on
+2026-10-17 (Round-28, old BIOS bytes). The A-slot boot failure appears only after the 2026-10-18 ~13:00
+change of two setup bytes (`0x29` Global C-State Auto→Disabled, `0x47` 0x08→0x04 unattributed). Under the
+current bytes the same module, same slot, hangs at `Loading initial ramdisk` while the same module boots
+in B.
+
+So "the board's A path is physically dead" is not the only live explanation, and it may not be the best
+one. Before shipping the board:
+
+1. Finish cell 4 (memtest, suspect in B).
+2. **Revert `0x29` and `0x47` to the recorded 10-18 11:47 values** (`0x29=0x03`, `0x47=0x08`), put the good
+   module in **A**, boot the Debian stick. Boots → the fault was a firmware setting, 64 GB is back on the
+   table with no RMA. Still hangs → the A path is genuinely bad and the Minisforum dossier gets stronger
+   (it then has: A fails for both modules under two BIOS configurations, B works for both).
+3. Do not skip step 2 by assuming hardware. It is one boot.
+
+### 19.3 Plug timeline for the afternoon (verified from the recorder + the plug's energy meter)
 
 - 10:18:49 power-on → memtest (good @ B) runs **4 h 51 m**, ending ~15:09:49 — exactly the 4-pass
   duration this stick produced on 2026-10-18 (4:51:16). Only the HTML can *prove* 4 passes; the duration
@@ -616,7 +648,7 @@ memtest reboot into the USB menu by power alone — the screen is what distingui
 cells 1 and 3 are recorded as owner-observed. If Minisforum needs more than the cross-slot argument, the
 cheap artifact is one photo of the B-slot rescue prompt (or the A-slot hang) from the same session.
 
-### 19.2 Expectation for cell 4
+### 19.4 Expectation for cell 4
 
 Last time the suspect was in B it was clean through pass 1 and died in **test 8 of pass 3**, hitting the
 10 000-error cap at **2:45:41** (~17:59 if it repeats on the same schedule). A clean 4-pass run would be
