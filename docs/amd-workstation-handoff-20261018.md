@@ -402,3 +402,22 @@ reads. Both branches verified: the served copy passes `sh -n`, GET/POST/nc all t
    from board.
 4. Secure Boot still **Enabled** (blocks memtest86+ and the bios-set toolkit).
 5. 1Password auto-lock keeps breaking SSH agent signing to the box.
+
+## 15. 2026-10-18 23:50 — Debian rescue hangs too; the disk theory is dead
+
+- Debian netinst 13.7.0 (SHA-256 verified, written to the 250 GB SanDisk) reached its **UEFI GRUB
+  installer menu**, the owner selected **Rescue mode**, and the machine **hard-locked**: frozen frame of
+  the menu with a torn/garbled region, keyboard dead.
+- Power trace across it: ~42 W at the menu (23:46:40) climbing to ~94-110 W and staying there — the same
+  busy-spin signature as the Ubuntu hangs (109-110 W), not an idle installer dialog.
+- **This is a different kernel from a different medium** (verified ISO on USB, not the internal NVMe) and
+  it dies the same way. So "the /boot on the NVMe is damaged" cannot explain it. Two independent Linux
+  kernels fail after handoff while MemTest86 runs clean for hours on the same module.
+- Remaining explanations, in order: the machine's kernel-visible hardware path (framebuffer/UMA carve-out,
+  ACPI/APIC bring-up, SoC memory path), or a device that hangs on probe (NVMe is the only candidate we
+  control — untested yet).
+- Next, one boot each: (a) Debian GRUB `e` -> `nomodeset acpi=off noapic nolapic maxcpus=1`;
+  (b) boot the same stick with the **NVMe physically removed** — if the installer comes up with no disk in
+  it, the SSD is what hangs the boot and the data is still readable in another machine.
+- OPEN QUESTION that must be answered physically: **which module is installed right now** (good `D0JC` vs
+  suspect `C8M`). SPD serials are zero on this SKU, so software cannot tell them apart.
