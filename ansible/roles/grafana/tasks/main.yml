@@ -133,6 +133,7 @@
       Environment=HTTP_PORT=8081
       Environment=CHROME_BIN=/usr/bin/chromium
       Environment=GF_RENDERER_PLUGIN_MODE=true
+      Environment=AUTH_TOKEN={{ vault_grafana_renderer_token }}
 
       [Install]
       WantedBy=multi-user.target
@@ -187,6 +188,10 @@
       [rendering]
       server_url = http://localhost:8081/render
       callback_url = http://localhost:3000/
+      # Grafana 13 refuses to start in production settings while the renderer
+      # token is the shipped default; the same value is given to the renderer
+      # service as AUTH_TOKEN.
+      renderer_token = {{ vault_grafana_renderer_token }}
       renderer_log_level = debug
 
       [unified_alerting]
