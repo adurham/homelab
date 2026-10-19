@@ -502,3 +502,13 @@ Design choices fixed now so tonight's numbers stay comparable:
 - **What the kernel half can and cannot say:** it is the more sensitive instrument and the faster one;
   it cannot attribute a failure to a bit or a lane. Memtest attributes, but only inside the range it
   tests, and only over completed passes.
+
+### 17.1 Live status — cell 2 running (2026-10-19 12:06 CDT)
+
+- **Good module is physically in Channel B; MemTest86 is running on it now.** Owner reports ~halfway.
+- Plug trace: box powered at **10:18 CDT**, no SSH and no tailnet on :22 (expected — memtest has no
+  network), draw settled at ~64 W after ~45 min at 113-127 W (test-phase change).
+- Baseline for this stick: **73 min/pass** (4 passes took 4:51:16 on 2026-10-18), so pass 1 lands
+  ~11:31 and 4 passes ~**15:10** if it stays clean.
+- Read the result off the USB report (UTF-16 HTML), not the screen; a mid-run **reset is evidence**, not
+  completion.
