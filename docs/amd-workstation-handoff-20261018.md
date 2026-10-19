@@ -464,3 +464,41 @@ reads. Both branches verified: the served copy passes `sh -n`, GET/POST/nc all t
     the Corsair claim stands; boots: the module was never bad and the Corsair claim must be walked back
     **before** anything ships.
 - No remote path exists to the box while it has no booting OS; the only instrument is the plug.
+
+## 17. 2026-10-19 — owner's test matrix: hold the slot at B, vary the module, run both instruments
+
+The owner rejected the memtest-as-referee framing and specified the design: **put the modules in
+Channel B and test each one with a Linux kernel AND with memtest.** That is the right shape — the slot
+is held constant and the module is the variable, so a result can no longer be confounded by the channel.
+
+Already recorded (all under today's BIOS 1.17 + the two bytes changed at ~13:00):
+
+| cell | instrument | result |
+|---|---|---|
+| suspect @ **B** | memtest | **FAIL** — aborted at the 10,000-error cap after 2:45:41, mask `0x9300` (bits 8,9,12,15) |
+| good @ **A** | memtest | **PASS** — 48/48 tests, 4/4 passes, 4:51:16, zero errors |
+| good @ **A** | kernel | **HANG** — Ubuntu -34/-38 and Debian netinst, all after `Loading initial ramdisk` |
+| suspect | kernel | never tested — the module was out of the box before the boot fault appeared |
+
+To run (one change at a time, stop and report at each cell):
+
+1. **Good in B — kernel.** Debian stick, plain boot. ~3 min. → boots: the boot fault is Channel-A
+   specific and B is cleared, and the board's A path is the suspect. Hangs: the boot fault is not
+   slot-dependent.
+2. **Good in B — memtest.** MemTest86 stick, run to **4 completed passes** (≈5 h, unattended; one pass
+   is not a result). → PASS: module-vs-slot is settled — the suspect module is bad, the Corsair claim
+   stands, and the board is cleared on both channels. FAIL: the board is implicated, and the Corsair
+   claim has to be walked back **before** anything ships.
+3. **Suspect in B — kernel.** ~3 min, for completeness against cell 1.
+4. **Suspect in B — memtest.** Already recorded above; only re-run if cell 2 passes and a same-session
+   control is wanted for the vendor.
+
+Design choices fixed now so tonight's numbers stay comparable:
+- **Do not touch the BIOS during the matrix.** Both recorded cells were taken under the current bytes;
+  reverting 0x29/0x47 first would make every new cell incomparable to them. The byte revert stays on the
+  shelf as the next experiment if the kernel side comes back dead for both modules.
+- **Physical:** relay off at the plug *and* the DC brick unplugged before any DIMM moves (standby rail
+  stays live otherwise). The slot is the one the suspect module came out of.
+- **What the kernel half can and cannot say:** it is the more sensitive instrument and the faster one;
+  it cannot attribute a failure to a bit or a lane. Memtest attributes, but only inside the range it
+  tests, and only over completed passes.
