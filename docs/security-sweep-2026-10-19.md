@@ -171,3 +171,52 @@ The Tanium lab segment has no direct egress (it is documented as going through
 proxy-01), so their 35–104 pending updates cannot be fetched without a network
 policy change. Only `tc-oracle8` (the canary) and `tc-oracle9` reached 0.
 
+
+## Second sweep (2026-10-20) — regressions found and fixed
+
+The re-run audited 33 hosts (frigate-01 and hermes-gw-01 flaked on the pass but
+were fine when probed directly). Headline results were clean: zero hosts with
+SSH password auth, every key file down to its intended set, all service hosts at
+0 pending packages. Two real regressions surfaced during the pass.
+
+### P1 — ZFS replication and HA migration were broken since the sudo conversion
+
+`pvesr status` showed every replication job failing with `exit 255` (44
+consecutive failures) on `ssh root@172.20.0.x ... pvesr prepare-local-job`.
+Cause: the PVE root-SSH policy applied during the 2026-10-19 conversion used
+`Match Address 192.168.86.11,192.168.86.12,192.168.86.13` only. Proxmox runs
+replication over the sync VLAN (`172.20.0.0/24`) and live migration over the
+migrate VLAN (`172.21.0.0/24`), so both paths were refused root login. HA
+failover would have failed the same way.
+
+Fix: `Match Address ... ,172.20.0.0/24,172.21.0.0/24` (both VLANs have no
+gateway and are confined to switch ports 3/4/5). Verified: root SSH over both
+VLANs works and `pvesr run --id 103-0` completes `OK, FailCount 0`.
+Codified in `harden_network_stack.yml`.
+
+### P1 — SDN-wide internet egress outage from the nftables package upgrade
+
+Every container ran Debian's default `nftables.service` (`flush ruleset`, empty
+chains) while the real state is iptables rules applied by the roles and saved by
+netfilter-persistent. The upgrade restarted the service, whose
+`ExecStop=/usr/sbin/nft flush ruleset` wiped tailscale-gw's three MASQUERADE
+rules. Result: the whole `172.16.0.0/24` SDN lost egress for about an hour,
+`dns-01` kept answering authoritative queries but every recursion timed out, and
+`hermes-gw-01` + `gallery-01` lost DNS (MagicDNS-only resolv.conf), their
+tailscaled went offline and they became unreachable over the tailnet.
+
+Fix: re-added and persisted the three MASQUERADE rules; masked `nftables.service`
+on all 15 containers; replaced `/etc/nftables.conf` with a rules-free no-flush
+file; restarted tailscaled on the two containers. Egress and recursion verified.
+Codified in `harden_network_stack.yml` so a new CT cannot reintroduce it.
+
+Still open from this incident: tailscale-gw's own `ts-*` chains were also wiped
+by the flush (`iptables -S | grep ts-` = 0). Traffic still flows on a permissive
+policy; recreating them needs a tailscaled restart on the gateway (brief tailnet
+blip) — owner's word.
+
+### Patches
+
+Tanium test clients re-patched now that egress is back: 10 of 11 at 0 pending
+(one pre-existing benign mount-unit failure each on rocky8/alma8/rhel8), plus
+`tg-harvester-01` at 0. The remaining pending work is now zero across the fleet.

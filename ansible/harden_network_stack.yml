@@ -1,0 +1,89 @@
+---
+# Network-stack ownership + PVE SSH policy, codified 2026-10-20 after two
+# incidents found in the second sweep:
+#
+#  1. Every container ran Debian's default nftables.service (`flush ruleset`)
+#     while the real firewall state is iptables (iptables-nft) applied by the
+#     ansible roles and saved by netfilter-persistent. A package upgrade
+#     restarted nftables.service, whose ExecStop is `nft flush ruleset`, which
+#     wiped tailscale-gw's MASQUERADE rules and took the whole 172.16.0.0/24
+#     SDN off the internet for an hour (and with it dns-01's recursion and two
+#     containers' tailscaled). Fix: one owner (iptables), service masked, and a
+#     rules-free /etc/nftables.conf so a stray start/stop can never flush again.
+#
+#  2. PVE's root-SSH policy was applied by hand during the 2026-10-19 sudo
+#     conversion with `Match Address` limited to the node LAN IPs. Proxmox runs
+#     ZFS replication over the sync VLAN (172.20.0.0/24) and live migration over
+#     the migrate VLAN (172.21.0.0/24), so every replication job had been failing
+#     with exit 255 (44 consecutive failures) and HA migration would have failed
+#     too. Both VLANs are physically confined to switch ports 3/4/5 with no
+#     gateway.
+- name: PVE root-SSH policy (cluster networks included)
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Render the no-root drop-in
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-no-root.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          PermitRootLogin no
+          # Cluster traffic: corosync/pvecm use the node LAN IPs; ZFS replication
+          # uses the sync VLAN and live migration the migrate VLAN. Both VLANs
+          # are physically confined to switch ports 3/4/5 and have no gateway.
+          Match Address 192.168.86.11,192.168.86.12,192.168.86.13,172.20.0.0/24,172.21.0.0/24
+              PermitRootLogin prohibit-password
+        validate: /usr/sbin/sshd -t -f %s
+
+    - name: Reload sshd
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded
+
+- name: iptables owns the ruleset (nftables.service masked, no flush on disk)
+  hosts: >-
+    lb-01,dns-01,proxy-01,ntp-01,authentik,frigate-01,tailscale-gw,
+    hermes-gw-01,gallery-01,media-ingest-01,media-ingest-02,
+    adblock-proxy-01,vm-01,graf-01,mail-01
+  gather_facts: false
+  tasks:
+    - name: Mask nftables.service so a package upgrade cannot flush the ruleset
+      ansible.builtin.systemd:
+        name: nftables
+        masked: true
+        enabled: false
+        state: stopped
+
+    - name: Replace /etc/nftables.conf with a rules-free, no-flush file
+      ansible.builtin.copy:
+        dest: /etc/nftables.conf
+        owner: root
+        group: root
+        mode: '0755'
+        content: "#!/usr/sbin/nft -f\n"
+        backup: true
+
+    - name: Is iptables present on this host?
+      ansible.builtin.command: which iptables
+      register: ipt
+      changed_when: false
+      failed_when: false
+
+    - name: Assert iptables is the nft-backed binary where iptables exists
+      ansible.builtin.shell: update-alternatives --display iptables | grep -q iptables-nft
+      changed_when: false
+      when: ipt.rc == 0
+
+    - name: Is there an iptables persistence unit on this host?
+      ansible.builtin.command: which netfilter-persistent
+      register: nfp
+      changed_when: false
+      failed_when: false
+
+    - name: Assert persistence is enabled where it exists
+      ansible.builtin.command: systemctl is-enabled netfilter-persistent
+      register: nfp_state
+      changed_when: false
+      failed_when: nfp.rc == 0 and nfp_state.rc != 0
