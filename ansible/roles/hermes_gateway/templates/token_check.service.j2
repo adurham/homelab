@@ -5,6 +5,14 @@
 # from a live /v1/models check. systemctl --failed + journal surface
 # the issue so the user can rotate the setup-token before users see
 # the 401 themselves.
+#
+# Retry wrapper added 2026-10-20: the 00:05 run on that date exited 2 on
+# "[Errno -3] Temporary failure in name resolution" during the SDN egress
+# outage, and a Type=oneshot unit stays `failed` until something resets it —
+# so a DNS blip produced a permanently red unit (and a systemd_unit_failed
+# alert) while the tokens were in fact fine. Three attempts, five minutes
+# apart, distinguishes "the network was down for a moment" from "the token
+# really is dead"; only the latter survives all three.
 [Unit]
 Description=Hermes Gateway — daily Claude OAuth token expiry check
 
@@ -13,6 +21,6 @@ Type=oneshot
 User=hermes
 Group=hermes
 WorkingDirectory=/home/hermes
-ExecStart=/opt/hermes-agent/venv/bin/python /opt/hermes-agent/scripts/hermes_token_check.py
+ExecStart=/bin/sh -c 'for i in 1 2 3; do /opt/hermes-agent/venv/bin/python /opt/hermes-agent/scripts/hermes_token_check.py && exit 0; echo "attempt $i failed; retrying in 300s"; [ "$i" = 3 ] || sleep 300; done; exit 1'
 StandardOutput=journal
 StandardError=journal
