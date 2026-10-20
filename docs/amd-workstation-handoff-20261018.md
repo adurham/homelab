@@ -688,6 +688,10 @@ A, closes the module question outright: bad in both slots, on the record, for Co
   any of these three.
 - Artifact to capture: the frozen screen is the only record of this cell — photograph it before the box
   is powered off. Nothing else is coming from it, and it has been drawing 104 W for ~17.5 h.
+- **Owner photographed the frozen screen, then power was cut at 09:17:34** via HA
+  (`switch.amd_workstation_power` → off). Verified after: both switch entities `off`, both power sensors
+  `0.0 W`, port 22 closed, plug energy meter settled at **4.439314 kWh**. The box is cold, not frozen —
+  the next boot is a cold boot, which is what the A-slot test needs anyway.
 
 ### 20.2 Corsair — no human reply in 57 h; follow-up sent 2026-10-20 09:12
 
