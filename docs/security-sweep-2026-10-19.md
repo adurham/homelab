@@ -296,3 +296,65 @@ provisioning **only at startup**. Compare
 
 **Still open (owner's word):** the node-by-node PVE kernel switchover —
 deliberately deferred; the tailscaled restart above is done.
+
+## Third sweep (2026-10-20, 10:35-11:05) — relationships, not boxes
+
+Scope widened after a Fable review: sweeps 1-2 were host-config audits, but
+both real incidents were *relationship* failures (sshd Match vs. VLANs,
+patch run vs. NAT state). This pass therefore tested paths and credentials:
+who holds what, what trusts what, and what is reachable from where.
+
+Method: `ansible/files/lab_audit.sh` (35 hosts) plus `sec_audit.sh`
+(identity/keys/secrets/IPv6), `lxc_audit.sh` (privilege boundary, per node),
+`pve_identity_audit.sh` / `pve_backup_audit.sh` (PVE users, tokens, ACLs,
+backups), HA via the SSH add-on, edge via `nginx -T`, external vantage via
+check-host.net. All four scripts are now in the repo — the sweep-2 script
+lived in `/tmp` and the MacBook crash destroyed it, so the numbers could not
+be reproduced.
+
+### Confirmed still good
+
+- Key-only SSH on all 35 reachable hosts (`PasswordAuthentication no`,
+  `PermitEmptyPasswords no`, `MaxAuthTries 6`).
+- Fleet sudo gate holds: every gated host has exactly **one ED25519-SK key**
+  in `/etc/security/sudo_keys/amd`, `amd`'s password is **locked**, no
+  plain-key fallback exists. (The ansible RSA key is not in that file.)
+- No non-root uid 0, no empty passwords, `root` is the only login shell
+  account on the containers.
+- 0 pending packages on every service host; 3 nightly PVE backup jobs all
+  OK (10-20 07:00/07:30/08:00).
+- PVE `root@pam` **does** have TOTP + recovery codes — sweep 1's "no TFA"
+  note is stale and should not be repeated.
+- Edge: unknown SNI → 444 on 80 and 443; no `real_ip`/XFF trust anywhere in
+  `nginx -T` (so `X-Forwarded-For: 172.16.0.5` cannot fake internal).
+  External check-host probes: `auth.` 302 public as designed, Tanium
+  `/api/v2/session` 403 from DE/HU/RU.
+
+### Findings, ranked
+
+| # | Finding | Why it matters | Owner input? |
+| - | - | - | - |
+| 1 | **HA Cloud remote access enabled** (`remote_enabled: true`, Google Assistant on) with **zero MFA** on any HA user | A second ingress that never touches the nginx ACL; HA currently has only password auth | yes — enable TOTP on `root` + `Adam Durham` (does *not* break the iOS app: MFA fires only at new logins) or turn remote off |
+| 2 | **`root@pam` API token `hermes-automation`: `privsep=0`, no expiry** | Full cluster-root API rights; PVE tokens bypass TFA. It is the highest-privilege credential in the lab | yes — migrate to a least-privilege user/token (note PVE forces `root@pam` for raw `lxc.*`/device/mp CT ops) or at minimum set an expiry |
+| 3 | **`tailscale-gw` is the only privileged LXC** (`unprivileged: 0`) — and it is the perimeter host that terminates tailnet traffic and owns the SDN NAT | Privileged container = no real boundary; compromise of the most exposed guest is pve02 root | yes — convert (backup, `pct restore --unprivileged`, tun passthrough, rollback keeps 101) or a small dedicated VM |
+| 4 | **`frigate-01` is the only host with a global IPv6 address** (`2600:1702:768c:9cf::/64`) + default route via RA; go2rtc listens wildcard on 1984/8554 with no auth | If the AT&T gateway does not filter inbound v6, that is a direct bypass of the whole edge. Also the only guest bridged to the physical LAN | yes — confirm from cellular, and/or disable IPv6 on the container (it has no need) |
+| 5 | **`nftables.service` only `disabled` on pve01/02/03** (masked on all 13 containers) and **`enabled+active` on 4 Tanium test clients** | Exactly the service whose `ExecStop` (`nft flush ruleset`) killed SDN egress yesterday. On a PVE node it would flush pve-firewall's ruleset | no — masking on PVE is trivial guard-rail codification; the Tanium clients need `/etc/nftables.conf` read first (it may be their only firewall) |
+| 6 | **Two undocumented listeners on pve01**: `/root/boxhelp/srv.py` on `0.0.0.0:8001` and `nc -l -p 8002`, both started 2026-10-18 23:32/23:34, no connections since | Raw TCP listener on a hypervisor; an unexplained one is an incident until explained | yes — triage was blocked mid-run (needs an approval); is `boxhelp` yours and does 8002 need to stay? |
+| 7 | **`hermes-token-check.service` failed** on hermes-gw-01 | The daily Claude OAuth-expiry check is dead — silent capability loss, not a security breach | no — investigate/fix |
+| 8 | Tailnet: **no tags on any node**, 14 peers incl. an unnamed macOS node (`MLHVYY0PWXMN`) and two iOS devices both named `localhost` | `100.64.0.0/10` is classed internal by the edge geo map, so tailnet membership *is* LAN membership; unattributable peers are the risk, not the missing tags | yes — identify each peer in the admin console |
+| 9 | `X11Forwarding yes` fleetwide; `homeassistant.local` `PermitRootLogin yes` (SSH add-on, key-only) | Hygiene only; no exploit path with key-only auth | no — fold into the sshd drop-in |
+
+### Audit-script correction
+
+Sweep 3's first pass reported `ssh_fail_24h=6066` on vm-01 and `1298` on
+graf-01. **Both were false positives**: the grep matched Loki/Grafana log
+lines that *quote* the alert query string `|~ "Failed password|Invalid
+user"`, and only the two hosts running the log pipeline showed them. Real
+count with `grep -E '\ssshd\[[0-9]+\]:.*Failed password'`: **4 on vm-01 in
+24h, 0 elsewhere**. The script is fixed.
+
+**Unreachable (18):** the BWT lab segment (10 hosts), the three TanOS
+appliances' management names, and `tc-debian11` — unchanged from sweep 2 and
+consistent with those segments being deliberately isolated. They remain the
+one part of the estate with no sweep coverage at all.
+
