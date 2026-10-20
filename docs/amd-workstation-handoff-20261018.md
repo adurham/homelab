@@ -802,3 +802,31 @@ A, closes the module question outright: bad in both slots, on the record, for Co
   `/etc/security/pam_ssh_agent_auth.conf` on the box. That contradicts the "the sudo key file holds
   exactly one sk key and no RSA" claim recorded during the 10-19 fleet gating work; verify before
   relying on it.
+
+## 22. 2026-10-20 10:36-11:14 — the single-module stress control PASSES
+
+- **What ran:** `stressapptest -s 1500 -M 26000 -W --pause_delay 120 --pause_duration 15`, 32 copy
+  threads, on the **good module alone in Channel B** (30276 MB total, 26000 MB allocated ≈ 86%).
+  Duty-cycled on purpose: 120 s of load then a 15 s pause, repeated — the power-dip trigger, not a
+  steady burn. Started 10:36:41, ended 11:01:44.
+- **Result: PASS, twelve load dips, nothing.** `Stats: Completed: 31009208.00M in 1500.36s
+  20667.83MB/s, with 0 hardware incidents, 0 errors`. **0 miscompares, 0 `Hardware Error` lines, 12
+  "Pausing worker threads" events.** Log pulled to `~/rma-evidence/amd-workstation-20261020/`
+  (`stress-out-20261020-103641.log`, plus the watcher trace `ws-stress-watch.log`).
+- **Contrast with the pair:** the 2026-10-17 02:00 run (`-s 28800 -M 52000`, both modules installed)
+  produced its first miscompares at **619 s — on the first resume after the first pause**, across CPUs
+  1/2/13/16/18/29 with patterns `OneZero32`, `walkingInvOnes~32`, `Checker8b10b32`. Same instrument,
+  same duty-cycle profile, opposite result once the suspect module is out.
+- **What it does and does not establish.** It gives the campaign the stress-instrument control that was
+  missing: the machine + this module survive the transition trigger that the pair failed on. It does
+  **not** clear the board for a *pair* (that is a different memory footprint and the thing the 64 GB
+  requirement actually needs), and it says nothing about the intermittent boot hang (§21.3) — different
+  instrument, different failure. Treat it as one completed control cell, not as a stability verdict for
+  the box.
+- **Not taken:** any long soak (the 10-17 equivalent was 8 h), and the same run with the module in
+  Channel A. Both remain open cells.
+- **Operational note for the next run:** the harness unloads kdump for the window and re-arms it in an
+  EXIT trap, but a **detached** run (`setsid nohup`) loses the forwarded SSH agent when the launching
+  connection closes, so the trap's `sudo kdump-config load` fails with `sudo: a password is required`
+  and kdump stays unloaded. Re-armed manually at 11:15 and verified (`loaded kdump kernel`). Either run
+  it attached, or re-arm by hand afterwards and check it.
