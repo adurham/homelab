@@ -331,7 +331,6 @@ be reproduced.
   `/api/v2/session` 403 from DE/HU/RU.
 
 ### Findings, ranked
-
 | # | Finding | Why it matters | Owner input? |
 | - | - | - | - |
 | 1 | **HA Cloud remote access enabled** (`remote_enabled: true`, Google Assistant on) with **zero MFA** on any HA user | A second ingress that never touches the nginx ACL; HA currently has only password auth | yes — enable TOTP on `root` + `Adam Durham` (does *not* break the iOS app: MFA fires only at new logins) or turn remote off |
@@ -358,3 +357,35 @@ appliances' management names, and `tc-debian11` — unchanged from sweep 2 and
 consistent with those segments being deliberately isolated. They remain the
 one part of the estate with no sweep coverage at all.
 
+
+### Sweep 3 — what was actually changed (2026-10-20, 11:00-11:35)
+
+| # | Action | Verified |
+| - | - | - |
+| 2 | **Revoked `root@pam!hermes-automation`.** Nothing consumed it: no role, playbook or gateway config referenced `vault_proxmox_api_token_*`, and the token id appears **0 times** in both the live and rotated `pveproxy` access logs. `pveum user token list root@pam` is now `[]`, and the vault block is replaced by a revocation note (the dead secret is still in 1Password item `felm6nfoibmszrus2ftoubx4n4` — drop it at the next edit). | token list empty; `grep -c '^vault_proxmox_api_token'` = 0 in the vault |
+| 4 | **IPv6 disabled on frigate-01** (sysctl drop-in `/etc/sysctl.d/99-disable-ipv6.conf`, `accept_ra=0`). It was the only guest with a router-advertised global address; frigate has no IPv6 need and go2rtc's unauthenticated 1984/8554 were listening wildcard. | `gua_count=0`, `eth0` IPv4-only, nginx still 200 |
+| 5 | **`nftables.service` masked on pve01/02/03** and codified in `harden_network_stack.yml`. Deliberately *not* applied to the Tanium test clients: there `/etc/nftables.conf` **is** the live firewall (12-19 rules, unit enabled+active), so masking would mean stopping it and losing their only policy. | `systemctl is-enabled nftables` = masked on all three nodes |
+| 6 | **Closed the two pve01 listeners.** They were *ours*: `/root/boxhelp/srv.py` is "tiny file server for the amd-workstation rescue session" (systemd-run unit `boxhelp`, serving `r.sh`/`rfix.sh` and accepting `POST /report`) and `boxhelp-nc` was a `while true; do nc -l -p 8002 >> report-nc.txt; done` sink. Left over from 2026-10-18 23:32 and never cleaned up. Both units stopped, both ports closed; `/root/boxhelp` kept as evidence for the workstation debugging. | `ss -lntp` shows 8001/8002 closed, no `boxhelp*` units |
+
+**#3 (privileged LXC) was attempted and aborted — and the attempt exposed a fact
+the earlier sweeps got wrong.** CT 101 is **HA-managed** (`ha-manager status`
+lists `ct:100`, `ct:101`, and ten more). `pct stop` therefore goes through the
+CRM, which **live-migrated the gateway from pve02 to pve01** while the restore
+was refused ("can't overwrite running container"). Nothing broke: the gateway
+came up on pve01 with `tailscaled` active, all three MASQUERADE rules, both
+advertised routes, SDN egress 200 and recursion answering; the tailnet-liveness
+probes went 0 for ~2 minutes during the migration and returned to 1 by
+themselves. But a same-VMID `pct restore --unprivileged 1` cannot be done
+against an HA-managed guest without first taking it out of HA, and the backup
+archive sits on node-local `vzdump-nvme`, which pins the restore to whichever
+node holds it. That is a maintenance-window procedure, not an ad-hoc one.
+
+Recommendation stands, with a better endpoint than a conversion: **replace the
+gateway with a small dedicated VM** (real privilege boundary, no tun/module
+caveats, HA-able) rather than converting the LXC. If conversion is preferred,
+the order is: `ha-manager set ct:101 --state stopped` → wait for stopped →
+`--state disabled` → restore on the node that holds the archive → start →
+`--state started`.
+
+`ansible/files/convert_tailscale_gw_unprivileged.sh` carries the attempt and its
+rollback path; it now aborts unless the HA resource is out of the picture first.
