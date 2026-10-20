@@ -707,5 +707,38 @@ A, closes the module question outright: bad in both slots, on the record, for Co
   (§19.2). If that boot works, the board claim changes shape and their letter must not say "board is
   dead" first.
 
+## 21. 2026-10-20 09:45 — box powered on with the good module in B: it does not come up
 
+- Owner reinstalled the good module in **Channel B** (the configuration that booted yesterday) and asked
+  for power. Plug on at **09:45:05**; draw ramped 0 → 53.6 → 59.4 W and then sat at **61.2-61.5 W, dead
+  flat for 11+ minutes** (through 09:56).
+- No tailnet (`tailscale` offline, tx but rx 0), no SSH on 100.66.90.53:22, no LAN presence. It never
+  reached userspace.
+- **No USB stick is installed**, so it is booting the **NVMe** — i.e. the installed Ubuntu. This is a new
+  cell that has never been run: *Ubuntu on the NVMe, in Channel B*. Yesterday only the **Debian rescue
+  USB** was proven to boot in B.
+- Two candidate states, and the draw cannot separate them:
+  1. **GRUB's recordfail menu.** Ubuntu sets `GRUB_TIMEOUT=-1` after failed boots, so it sits at the menu
+     forever waiting for a keypress — static screen, ~61 W, no network. This fits the history exactly
+     (two failed boots on 10-18).
+  2. The same initramfs hang as in A, now in B.
+- **This matters for the A-slot conclusion.** If Ubuntu fails to boot in B as well, the boot fault is not
+  slot-specific and §19.2's "A path is bad" framing is wrong; the differentiator would then be OS/medium,
+  not channel. Do not send Minisforum anything until this cell is read (one look at the screen, or one
+  Enter keypress at the menu, decides it).
 
+### 21.1 10:05-10:10 — resumed after a MacBook crash; the cell is unchanged and still stuck
+
+- The macOS session died at **09:58:37** (WindowServer userspace-watchdog timeout, twice: 09:58:37 and
+  09:59:17), machine restarted 10:00:25. GUI-level death, not a kernel panic, and unrelated to the box.
+- Box state re-read from the plug at **10:08-10:10**: relay `on`, draw a stable **58.1-59.9 W** (10 samples
+  over 2 min), 120.5 V, plug temp 29 °C. Cumulative energy meter **4.460394 kWh** vs **4.439314 kWh** at
+  the 09:17:34 power-cut → 21.08 Wh over ~24 min ≈ 53 W average, i.e. **continuous power, no reset and no
+  reboot-level dip** in the window. It has now sat in this one state for ~25 min.
+- Still no tailnet (last seen 1 d), no SSH on 100.66.90.53:22, no LAN presence.
+- **New, weak signal toward candidate 2:** the draw fell from 61.2-61.5 W (09:45-09:56) to 58.1-59.9 W
+  from ~09:56 on, a ~2 W step. A kernel console blanking at the 600 s default (≈09:55) fits that step;
+  GRUB's menu does not blank the screen. That is a hint, not an identification — the two states still
+  cannot be separated electrically, and the screen is still the decider.
+- Decider still outstanding: one look at the screen (or one keypress) — owner step, one question at a
+  time. If it is blank, a keypress that brings text back means it is a kernel/initramfs hang, not GRUB.
