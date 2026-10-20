@@ -335,13 +335,13 @@ be reproduced.
 | - | - | - | - |
 | 1 | ~~HA Cloud remote access enabled with zero MFA~~ — **NOT A FINDING (corrected by owner, 2026-10-20)** | HA login is OIDC through Authentik with a Require-MFA policy bound, and the local `root` account carries TOTP; Nabu Casa's relay does not add an MFA step of its own but lands on that MFA-protected login. The sweep's `mfa_modules` probe read the wrong storage key and reported 0. | none |
 | 2 | **`root@pam` API token `hermes-automation`: `privsep=0`, no expiry** | Full cluster-root API rights; PVE tokens bypass TFA. It is the highest-privilege credential in the lab | yes — migrate to a least-privilege user/token (note PVE forces `root@pam` for raw `lxc.*`/device/mp CT ops) or at minimum set an expiry |
-| 3 | **`tailscale-gw` is the only privileged LXC** (`unprivileged: 0`) — and it is the perimeter host that terminates tailnet traffic and owns the SDN NAT | Privileged container = no real boundary; compromise of the most exposed guest is pve02 root | yes — convert (backup, `pct restore --unprivileged`, tun passthrough, rollback keeps 101) or a small dedicated VM |
+| 3 | **`tailscale-gw` was the only privileged LXC** (`unprivileged: 0`) — perimeter host that terminates tailnet traffic and owns the SDN NAT | Privileged container = no real boundary; compromise of the most exposed guest was pve02 root | **DONE** — converted to `unprivileged: 1` on 2026-10-20 (two outages on the way, see below). Follow-up: decide whether to put it back under HA |
 | 4 | **`frigate-01` is the only host with a global IPv6 address** (`2600:1702:768c:9cf::/64`) + default route via RA; go2rtc listens wildcard on 1984/8554 with no auth | If the AT&T gateway does not filter inbound v6, that is a direct bypass of the whole edge. Also the only guest bridged to the physical LAN | yes — confirm from cellular, and/or disable IPv6 on the container (it has no need) |
 | 5 | **`nftables.service` only `disabled` on pve01/02/03** (masked on all 13 containers) and **`enabled+active` on 4 Tanium test clients** | Exactly the service whose `ExecStop` (`nft flush ruleset`) killed SDN egress yesterday. On a PVE node it would flush pve-firewall's ruleset | no — masking on PVE is trivial guard-rail codification; the Tanium clients need `/etc/nftables.conf` read first (it may be their only firewall) |
 | 6 | **Two undocumented listeners on pve01**: `/root/boxhelp/srv.py` on `0.0.0.0:8001` and `nc -l -p 8002`, both started 2026-10-18 23:32/23:34, no connections since | Raw TCP listener on a hypervisor; an unexplained one is an incident until explained | yes — triage was blocked mid-run (needs an approval); is `boxhelp` yours and does 8002 need to stay? |
 | 7 | **`hermes-token-check.service` failed** on hermes-gw-01 | The daily Claude OAuth-expiry check is dead — silent capability loss, not a security breach | no — investigate/fix |
 | 8 | Tailnet: **no tags on any node**, 14 peers — **all now attributed by the owner (2026-10-20)**: `MLHVYY0PWXMN` is the corp work MacBook, the two iOS devices named `localhost` are the owner's and Tati's phones (Tati's account is suspended, so that device is restricted). No unknown peers. | `100.64.0.0/10` is classed internal by the edge geo map, so tailnet membership *is* LAN membership — that is fine while every peer is a known owner device, and worth re-checking whenever a peer is added. Missing tags only matters if the ACL should be tag-scoped later. | none — closed |
-| 9 | `X11Forwarding yes` fleetwide; `homeassistant.local` `PermitRootLogin yes` (SSH add-on, key-only) | Hygiene only; no exploit path with key-only auth | no — fold into the sshd drop-in |
+| 9 | `X11Forwarding yes` fleetwide; `homeassistant.local` `PermitRootLogin yes` (SSH add-on, key-only) | **Dropped as noise (Fable, 2026-10-20).** X11 forwarding is inert without `xauth` installed — sshd refuses the forward anyway. The HA add-on's `PermitRootLogin yes` is identical to `prohibit-password` with password auth off and root the only account; editing sshd inside the add-on does not survive updates. One real rule came out of it: **never "harden" `PermitRootLogin` to `no` on the PVE nodes** — cluster migration and replication need root key SSH, so `prohibit-password` is the ceiling there. | none — closed |
 
 ### Audit-script correction
 
@@ -367,25 +367,59 @@ one part of the estate with no sweep coverage at all.
 | 5 | **`nftables.service` masked on pve01/02/03** and codified in `harden_network_stack.yml`. Deliberately *not* applied to the Tanium test clients: there `/etc/nftables.conf` **is** the live firewall (12-19 rules, unit enabled+active), so masking would mean stopping it and losing their only policy. | `systemctl is-enabled nftables` = masked on all three nodes |
 | 6 | **Closed the two pve01 listeners.** They were *ours*: `/root/boxhelp/srv.py` is "tiny file server for the amd-workstation rescue session" (systemd-run unit `boxhelp`, serving `r.sh`/`rfix.sh` and accepting `POST /report`) and `boxhelp-nc` was a `while true; do nc -l -p 8002 >> report-nc.txt; done` sink. Left over from 2026-10-18 23:32 and never cleaned up. Both units stopped, both ports closed; `/root/boxhelp` kept as evidence for the workstation debugging. | `ss -lntp` shows 8001/8002 closed, no `boxhelp*` units |
 
-**#3 (privileged LXC) was attempted and aborted — and the attempt exposed a fact
-the earlier sweeps got wrong.** CT 101 is **HA-managed** (`ha-manager status`
-lists `ct:100`, `ct:101`, and ten more). `pct stop` therefore goes through the
-CRM, which **live-migrated the gateway from pve02 to pve01** while the restore
-was refused ("can't overwrite running container"). Nothing broke: the gateway
-came up on pve01 with `tailscaled` active, all three MASQUERADE rules, both
-advertised routes, SDN egress 200 and recursion answering; the tailnet-liveness
-probes went 0 for ~2 minutes during the migration and returned to 1 by
-themselves. But a same-VMID `pct restore --unprivileged 1` cannot be done
-against an HA-managed guest without first taking it out of HA, and the backup
-archive sits on node-local `vzdump-nvme`, which pins the restore to whichever
-node holds it. That is a maintenance-window procedure, not an ad-hoc one.
+**#3 (privileged LXC) — DONE, after two outages and a Fable review.** CT 101 is
+now `unprivileged: 1`, running on pve01, with `tailscaled` active, 3
+MASQUERADE rules, `ip_forward=1` and all three NICs. Verified end-to-end after
+the dust settled: SDN egress 200, dns-01 recursion answering, both tailnet
+peers reachable, all five egress/DNS/tailnet probes back to 1.
 
-Recommendation stands, with a better endpoint than a conversion: **replace the
-gateway with a small dedicated VM** (real privilege boundary, no tun/module
-caveats, HA-able) rather than converting the LXC. If conversion is preferred,
-the order is: `ha-manager set ct:101 --state stopped` → wait for stopped →
-`--state disabled` → restore on the node that holds the archive → start →
-`--state started`.
+What it took (this is the part worth remembering):
 
-`ansible/files/convert_tailscale_gw_unprivileged.sh` carries the attempt and its
-rollback path; it now aborts unless the HA resource is out of the picture first.
+1. First attempt used `pct stop` on an HA resource. `datacenter.cfg` carries
+   `crs: ha-auto-rebalance=1,ha-rebalance-on-start=1`, so the CRM turned that
+   into a stop→start relocation (pve02 → pve01) and the restore refused
+   ("can't overwrite running container"). Proxmox cannot live-migrate LXC —
+   that was a restart-migration. No outage that time.
+2. Second attempt (correct HA dance: `ha-manager set --state stopped`, wait for
+   HA's own `stopped`) failed inside the restore: the archive contains
+   `/var/spool/postfix/dev/{random,urandom}` char devices and the restore
+   helper runs tar under `lxc-usernsexec`, where `mknod` is not permitted.
+   PVE 9.2.21 has no `--ignore-unpack-errors`. The rollback restored the
+   privileged config but left the guest stopped — **outage #1, ~3 min**, fixed
+   by `ha-manager set --state started`.
+3. Third attempt removed those two nodes from the live CT first (postfix
+   recreates them on start — mtimes proved it), backed up, stopped via HA and
+   restored `--unprivileged 1`. Restore succeeded and the config gates passed.
+   But HA then relocated the (now unprivileged) guest to pve03, **where the
+   disk does not live** — its dataset was still on pve01. The start failed,
+   pmxcfs lost `101.conf` from pve01, and the automatic rollback could not
+   restore ("already exists on node pve03"). **Outage #2, ~8 min.**
+4. Recovery: `ha-manager remove ct:101`, then move the config back to the node
+   that owns the dataset — `mv /etc/pve/nodes/pve03/lxc/101.conf
+   /etc/pve/nodes/pve01/lxc/101.conf` — then `pct start 101`. Came up clean,
+   and because the config it picked up was the restored one, the guest is
+   **unprivileged** exactly as intended.
+
+State left behind, deliberately:
+
+- **CT 101 is no longer HA-managed.** It was `ha-manager remove`d during
+  recovery. Re-adding it is one command, and replication for it is healthy
+  (`101-0` → pve03 OK, `101-1` → pve02 syncing), so HA would genuinely be able
+  to recover it elsewhere — but every HA action today relocated the guest, and
+  two of those relocations cost an outage. Owner decision: re-add, or leave it
+  unmanaged and rely on replication + the probes.
+- **Postfix's chroot device nodes are gone** (we deleted them so the
+  unprivileged restore could unpack). `postfix.service` still reports
+  `active (exited)`; chrooted smtpd would need `/var/spool/postfix/dev/random`
+  and `urandom` back. If that matters, bind-mount host `/dev/random` and
+  `/dev/urandom` there via two `lxc.mount.entry` lines in the CT config.
+- Disk is now `nvme-data:subvol-101-disk-1` (the UID-shifted restore),
+  `subvol-101-disk-0` is the old privileged one and is still on the pool.
+- The modules list for the host (`ansible/files/sdn-nat-modules.conf`, deployed
+  to all three nodes) now carries the full nft set (`nf_tables`, `nft_compat`,
+  `xt_MASQUERADE`, `nft_chain_nat`, …) — an unprivileged CT cannot trigger
+  module autoload, so those must be resident on the host before it boots.
+
+The script (`ansible/files/convert_tailscale_gw_unprivileged.sh`) carries the
+corrected procedure and the gates used above.
+
