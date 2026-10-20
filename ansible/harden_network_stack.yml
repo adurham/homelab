@@ -42,6 +42,28 @@
         name: ssh
         state: reloaded
 
+- name: Guard the PVE nodes against the same flush (nftables.service masked)
+  # The 13 containers were masked on 2026-10-20 after the SDN outage. The
+  # PVE nodes kept the unit merely `disabled` — one `systemctl start` (or a
+  # package's ExecStart) away from `nft flush ruleset` wiping pve-firewall's
+  # ruleset. Nothing in PVE 9 needs the unit: pve-firewall (iptables-legacy)
+  # and the optional proxmox-firewall daemon (its own nft tables) are both
+  # independent of it, and masking is if anything *more* correct if that
+  # backend is ever switched on.
+  #
+  # Deliberately NOT applied to the Tanium test clients: there
+  # /etc/nftables.conf IS the live firewall (12-19 rules, unit
+  # enabled+active), so masking would mean stopping it and losing their only
+  # policy. Reviewed 2026-10-20 and left as-is.
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Mask nftables.service on the PVE nodes
+      ansible.builtin.systemd:
+        name: nftables
+        masked: true
+        enabled: false
+
 - name: iptables owns the ruleset (nftables.service masked, no flush on disk)
   hosts: >-
     lb-01,dns-01,proxy-01,ntp-01,authentik,frigate-01,tailscale-gw,
