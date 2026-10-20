@@ -5,6 +5,13 @@ re-reading the transcript. Repo: `~/repos/homelab` (branch main). Evidence bundl
 
 ## 1. TL;DR state
 
+> **2026-10-20 10:35 — the box is UP and deliberately left running (owner's call).** Ubuntu
+> 7.0.0-38-generic booted normally after a relay power-cycle at 10:27:17 (2 m 16 s end to end), tailnet
+> and SSH up, login screen live. Physical config: good module alone in **Channel B**, Channel A empty,
+> BIOS 1.17. The same configuration sat **dead with a black screen for 40 minutes** (09:45-10:27) before
+> that cycle — so the no-boot is **intermittent and reproduces in Channel B**, and §19's "the boot fault
+> is Channel A" is not supported as written. No boot-rate series was run; owner declined. See §21.
+
 > **2026-10-18 late night: the box no longer boots Ubuntu.** GRUB loads the kernel and initramfs and
 > then the machine freezes at 109-110 W with no console output (nomodeset / earlyprintk / mem=4G all
 > identical; both kernels). MemTest86 boots fine on the same module, so the hardware POSTs and the
@@ -742,3 +749,56 @@ A, closes the module question outright: bad in both slots, on the record, for Co
   cannot be separated electrically, and the screen is still the decider.
 - Decider still outstanding: one look at the screen (or one keypress) — owner step, one question at a
   time. If it is blank, a keypress that brings text back means it is a kernel/initramfs hang, not GRUB.
+
+### 21.2 10:14-10:22 — the screen is black and a keypress changes nothing: this is not a GRUB menu
+
+- Owner report: the display is a **black screen with no output**, before and after pressing **Enter**.
+  (The monitor has no signal-vs-lit distinction recorded, and the box's keyboard has no Caps Lock LED, so
+  the LED liveness test was unavailable.)
+- **This retires candidate 1 for practical purposes.** A GRUB menu at `GRUB_TIMEOUT=-1` accepts a
+  keypress and boots its default entry; 25+ min later there is still no tailnet, no SSH and no LAN
+  presence. A menu waiting for input would have a kernel running by now. Caveat: it assumes a working
+  keyboard is attached to the box, which has not been separately confirmed.
+- What remains: (a) a kernel/initramfs hang in B whose VT no longer wakes on a keypress, or (b) a hang
+  at or below POST with no video out at all. Note the box showed video for the Debian rescue boots in
+  this same slot on 10-19, so (b) would be a **new** failure mode introduced after the 17.5 h freeze.
+- Discriminator: a watched cold boot. Both cases are separated by one thing — whether the POST/splash
+  screen appears at all before the black.
+
+### 21.3 10:27-10:35 — a power cycle brought it up: the boot failure is intermittent, in B
+
+- **10:27:16 relay off** (confirmed dark, 0.0 W), **10:27:17 relay on**. Draw ramped 41 -> 56 -> 65 W,
+  dipped to 37 W, held ~78 W for ~30 s, peaked **106 W** for ~6 s, then decayed to 55-60 W. That is a
+  real boot, not a static state.
+- **It booted.** Ubuntu login screen (owner-observed), `amd-workstation` on the tailnet, port 22 open,
+  `uptime` 2 min at 10:31. `systemd-analyze`: 11.510 s firmware + **31.555 s loader** + 745 ms kernel +
+  3.102 s initrd + 1 min 29.5 s userspace = **2 m 16 s**. The loader figure is abnormally long.
+- **Config read back from the box, not inferred:** `dmidecode -t 17` shows `P0 CHANNEL A / DIMM 0` =
+  *No Module Installed*, `P0 CHANNEL B / DIMM 0` = 32 GB `CMSX32GX5M1A4800C40` at 4800 MT/s. BIOS 1.17
+  (08/28/2026) on `DRFXI`. Kernel `7.0.0-38-generic`.
+- **The 09:45 attempt left no trace on disk.** `journalctl --list-boots` ends at 10-18 13:19:42 ->
+  13:33:25 before today's 10:28:29 boot; nothing between. So it never mounted root and never ran
+  journald — a stall at or before initramfs, not a userspace hang.
+- **The GRUB-recordfail hypothesis is structurally dead twice over:** `/etc/default/grub` has
+  `GRUB_TIMEOUT=0` with `GRUB_TIMEOUT_STYLE=hidden`, so there is no menu to sit at (`grub-editenv` could
+  not read `/boot/grub/grubenv` — it falls back to `nvme0n1p2` and fails — so the recordfail flag itself
+  stays unread, but with timeout 0 it could not have been waiting for a keypress either way).
+- **NVMe is not implicated by its own counters:** Samsung 970 EVO 500GB, fw `2B2QEXE7`, 1% used,
+  **0 media/data-integrity errors**, 86 unsafe shutdowns. The scary-looking 977 is a single *Invalid
+  Field in Command* admin command (`status 0x2002`, `cmdid 0x7005`) counted 977 times in log entry 0;
+  every other entry in the 64-slot log is empty. Enumerated at 2.88 s, root mounted at 5.5 s this boot.
+- **Consequence for §19 conclusion 2 ("the boot fault is Channel A, not the module"):** same module,
+  same slot, same medium, same BIOS produced *both* no-boot (09:45) and clean boot (10:27) inside one
+  hour. A single A-slot hang (10-18 22:35) therefore cannot distinguish a dead A path from this
+  intermittent fault. Do not send Minisforum a "board is dead" letter on the current record. What would
+  separate them is a **boot-rate measurement** (N cold boots per channel) — proposed, owner declined for
+  now.
+- **Owner decision 10:35:** leave the box exactly as it is — up, in B, no further cycles.
+- Evidence bundle pulled off the box while it was alive: `~/rma-evidence/amd-workstation-20261020/`
+  (`ev-dmesg.txt`, `ev-dmidecode.txt`, `ev-journal.txt`, `ev-nvme.txt`, `ev-nvme-err.txt`).
+- **Side finding, separate thread, not chased:** `sudo` on this box logs `pam_ssh_agent_auth: error:
+  key_from_blob: remaining bytes in key blob 44` — the ED25519-SK blob does not parse, so the gate is
+  likely being satisfied by the forwarded 1Password RSA key instead of the YubiKey. There is no
+  `/etc/security/pam_ssh_agent_auth.conf` on the box. That contradicts the "the sudo key file holds
+  exactly one sk key and no RSA" claim recorded during the 10-19 fleet gating work; verify before
+  relying on it.
