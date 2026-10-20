@@ -402,17 +402,15 @@ What it took (this is the part worth remembering):
 
 State left behind, deliberately:
 
-- **CT 101 is no longer HA-managed.** It was `ha-manager remove`d during
-  recovery. Re-adding it is one command, and replication for it is healthy
-  (`101-0` → pve03 OK, `101-1` → pve02 syncing), so HA would genuinely be able
-  to recover it elsewhere — but every HA action today relocated the guest, and
-  two of those relocations cost an outage. Owner decision: re-add, or leave it
-  unmanaged and rely on replication + the probes.
-- **Postfix's chroot device nodes are gone** (we deleted them so the
-  unprivileged restore could unpack). `postfix.service` still reports
-  `active (exited)`; chrooted smtpd would need `/var/spool/postfix/dev/random`
-  and `urandom` back. If that matters, bind-mount host `/dev/random` and
-  `/dev/urandom` there via two `lxc.mount.entry` lines in the CT config.
+- **CT 101 is HA-managed again**, re-added after the recovery and stable on pve01
+  (`ct:101 (pve01, started)` across repeated checks, no relocation). Replication
+  for it is current (`101-0` → pve03 OK, `101-1` → pve02), so HA can now actually
+  recover it on another node, which is the whole point.
+- **Postfix disabled on the gateway** (`systemctl disable --now postfix`). It was
+  only there because the Ubuntu template ships an MTA; mail-01 is the lab's mail
+  server, and the chroot device nodes the unprivileged restore could not unpack
+  left it half-broken. Re-enable and bind-mount host `/dev/random` +
+  `/dev/urandom` into `/var/spool/postfix/dev` if gateway mail is ever wanted.
 - Disk is now `nvme-data:subvol-101-disk-1` (the UID-shifted restore),
   `subvol-101-disk-0` is the old privileged one and is still on the pool.
 - The modules list for the host (`ansible/files/sdn-nat-modules.conf`, deployed
