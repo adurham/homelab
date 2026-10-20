@@ -830,3 +830,9 @@ A, closes the module question outright: bad in both slots, on the record, for Co
   connection closes, so the trap's `sudo kdump-config load` fails with `sudo: a password is required`
   and kdump stays unloaded. Re-armed manually at 11:15 and verified (`loaded kdump kernel`). Either run
   it attached, or re-arm by hand afterwards and check it.
+
+- **Owner position, 11:20:** the box stays up. The board is **not** proven clean and that stays open — but
+  it is "clean enough" for current use with the good module alone in Channel B, so no board claim is
+  being made or dropped. The only blocking dependency now is a **Corsair human reply** on RMA ticket
+  2009654822 for the bad module (`A534T4312CDC8M`); everything measured on this box is already in their
+  hands as of the 09:12 follow-up.
