@@ -836,3 +836,18 @@ A, closes the module question outright: bad in both slots, on the record, for Co
   being made or dropped. The only blocking dependency now is a **Corsair human reply** on RMA ticket
   2009654822 for the bad module (`A534T4312CDC8M`); everything measured on this box is already in their
   hands as of the 09:12 follow-up.
+
+### 22.1 11:25 mail check — Corsair still has not answered; Minisforum HAS and is waiting on us
+
+- **Corsair (ticket 2009654822): zero human contact, ever.** The thread in the Google inbox contains only
+  the 10-18 00:04 auto-ack, our two updates (10-18 16:49, 10-20 09:12) and Zendesk's echoes of those same
+  two updates (10-18 22:20, 10-20 09:12). No agent reply in ~83 h, and their quoted 24-48 h window closed
+  roughly two days ago.
+- **Judgement: do not send a third follow-up today.** The 09:12 one went two hours ago; another now reads
+  as pestering and buys nothing. Escalation trigger = nothing from a human by 10-21 09:00, then go around
+  the ticket (support phone/chat) rather than adding more mail to the same thread.
+- **Minisforum DID reply with a human** (Y.J.Aickson, 10-19 01:52): "please take your time with the
+  testing, and simply let us know the results when you have them." So *they* are waiting on *us* — that
+  is an open loop, and it cannot be closed with the old framing: the update we owe them now has to say
+  that the same configuration both failed and booted in Channel B (§21.3), i.e. the "A path is bad" claim
+  is withdrawn pending a boot-rate measurement, not restated.
