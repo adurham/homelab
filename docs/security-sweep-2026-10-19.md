@@ -242,8 +242,16 @@ were already committed at 09:49. Everything was re-verified live afterwards:
   recursively. `nftables.service` is `masked` + `inactive` there.
 - **tailscale-gw**: 3 nat `POSTROUTING` MASQUERADE rules present (2x
   `172.16.0.0/24` for eth0 + tailscale0, 1x `10.99.0.0/24`), nftables masked,
-  tailscaled active. The `ts-*` iptables chains are still **0** — unchanged,
-  still waiting on the owner-approved tailscaled restart.
+  tailscaled active. The `ts-*` iptables chains were **0** at that point,
+  still missing from the nftables flush.
+- **tailscaled restarted on tailscale-gw 15:37 UTC (owner-approved).** Chains
+  came back within 5 s (`-N ts-forward`, `-N ts-input`), tailscaled active,
+  self online with the same two advertised routes (`10.99.0.0/24`,
+  `172.16.0.0/24`), 12 tailnet peers visible. Post-restart from inside the
+  SDN: peer `100.119.249.49:22` open, external HTTPS 200, dns-01 recursion
+  answering — so the subnet-router path survived the restart. The three
+  MASQUERADE rules were untouched (the restart only rebuilds tailscaled's own
+  chains). `tailscale_gw_ts_iptables_chains` now reports **2**.
 
 **New monitoring (this closes "an hour of total egress loss alerted nothing").**
 Three blackbox jobs on vm-01, all verified returning `probe_success 1` live:
@@ -286,5 +294,5 @@ provisioning **only at startup**. Compare
 `/etc/grafana/provisioning/alerting/rules.yml` before debugging a rule that
 "didn't deploy" — that mismatch was the actual state here until 15:25.
 
-**Still open (owner's word):** the tailscaled restart on tailscale-gw to
-restore the `ts-*` chains, and the node-by-node PVE kernel switchover.
+**Still open (owner's word):** the node-by-node PVE kernel switchover —
+deliberately deferred; the tailscaled restart above is done.
