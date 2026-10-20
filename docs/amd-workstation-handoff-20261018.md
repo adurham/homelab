@@ -672,4 +672,36 @@ different signature means the fault is rate-dependent and the A run's timing is 
 The one thing that would overturn the verdict is a 4-pass clean run in B. Errors in B, on top of 10 000 in
 A, closes the module question outright: bad in both slots, on the record, for Corsair.
 
+## 20. 2026-10-20 09:10 — third failure mode: the suspect freezes MemTest86 in B; Corsair still silent
+
+### 20.1 Cell 4 ended in a freeze, not a result
+
+- **Suspect in B: MemTest86 erroring inside the first pass, then froze.** The tester locked up and wrote
+  no report. Owner-observed; no HTML artifact exists for this cell.
+- Plug trace agrees with a freeze and not a finish: draw went flat at **104.0-105.4 W** from ~15:30 on
+  10-19 and did not vary once through 09:10 on 10-20 — that is ~17.5 h on a single value. A running
+  MemTest86 cycles 58-84 W / 105-134 W; a completed one idles at ~58-64 W (as on 10-18 22:00-22:14).
+  Nothing cycles, nothing idles: it stopped.
+- Failure-mode tally for S/N `…DC8M`: **boot panic in A** (10-17 22:05) → **10 000 data errors in A**
+  (10-18, mask 0x9300) → **tester freeze in B** (10-19). Three distinct modes, two slots.
+- Good module `…CD0JC`: 4/4 passes, zero errors, in **A** and in **B**. The host is not the variable for
+  any of these three.
+- Artifact to capture: the frozen screen is the only record of this cell — photograph it before the box
+  is powered off. Nothing else is coming from it, and it has been drawing 104 W for ~17.5 h.
+
+### 20.2 Corsair — no human reply in 57 h; follow-up sent 2026-10-20 09:12
+
+- Inbox contains only the Zendesk auto-ack (10-18 00:04, "expect a reply within 24-48 hours") and two
+  Zendesk echoes of **our own** updates (10-18 16:49 and 22:20). No agent has responded, and the 24-48 h
+  window they quoted has expired.
+- Sent a follow-up at **09:12:10** from amdnative@gmail.com as a reply on ticket **2009654822**.
+  Verified afterwards: exactly one copy in `[Gmail]/Sent Mail`, Outbox empty, Drafts empty (no duplicate,
+  no blind retry). Body archived: `~/rma-evidence/corsair-followup-body-20261020.txt`.
+- It states the both-slot result, the three failure modes, the good module clean in both slots, and asks
+  for RMA approval plus shipping instructions — replacement part, not refund or credit.
+- Minisforum was **not** chased today, deliberately: their update depends on the A-slot BIOS-revert test
+  (§19.2). If that boot works, the board claim changes shape and their letter must not say "board is
+  dead" first.
+
+
 
