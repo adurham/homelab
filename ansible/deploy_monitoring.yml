@@ -107,6 +107,19 @@
         name: ups_autoshutdown
       when: nut_ups_enabled | default(false)
 
+- name: Install SDN egress-path metrics on the gateway
+  # Textfile metrics for tailscale-gw's NAT rule inventory (added
+  # 2026-10-20). Same ordering rule as the smartctl/nut/qga plays above:
+  # the first tailscale_gw_nat.prom dump has to exist BEFORE "Install
+  # Telemetry Agents" renders Alloy's textfile collector block and
+  # restarts it. See roles/nat_metrics/README.md for the incident.
+  hosts: tailscale
+  gather_facts: false
+  tasks:
+    - name: Install nat_metrics
+      ansible.builtin.include_role:
+        name: nat_metrics
+
 - name: Install Telemetry Agents
   hosts: all:!victoriametrics:!grafana:!localhost:!tanium_cluster:!bwt_lab
   gather_facts: true

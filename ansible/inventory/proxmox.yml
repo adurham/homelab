@@ -220,6 +220,12 @@ all:
           ansible_host: "{{ ip_tailscale_gw_lan }}"
           vmid: 101
           target_node: pve01
+          # Enables the textfile collector in Alloy's unix exporter so the
+          # nat_metrics role's tailscale_gw_nat_*.prom is scraped. Added
+          # 2026-10-20 with the egress-path probes: this gateway is where
+          # the SDN's MASQUERADE rules live, so its rule inventory is the
+          # first thing to check when outbound traffic dies.
+          textfile_collector_enabled: true
       vars:
         ansible_user: amd
         ansible_become: true

@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect SDN egress-path (NAT/iptables) metrics into the textfile collector
+Documentation=roles/nat_metrics/README.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nat-metrics
+User=root
+# iptables needs NET_ADMIN; the container runs privileged for the gateway
+# role anyway. Not hardening further so a future iptables-nft/legacy switch
+# can't turn this into a silent no-data probe.

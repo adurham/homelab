@@ -100,6 +100,40 @@
           tcp:
             query_response:
               - expect: "^SSH-2.0-"
+
+        # Plain-internet egress probe, added 2026-10-20 after an nftables
+        # package upgrade restarted nftables.service on the containers,
+        # whose ExecStop is `nft flush ruleset`. That wiped tailscale-gw's
+        # three nat POSTROUTING MASQUERADE rules and the ENTIRE
+        # 172.16.0.0/24 SDN lost internet for about an hour — with nothing
+        # alerting. This probe is scraped from vm-01 (172.16.0.42), which
+        # sits inside the SDN and leaves it through exactly those rules,
+        # so it fails for that whole class of breakage.
+        https_204_egress:
+          prober: http
+          timeout: 8s
+          http:
+            valid_status_codes: [204, 200]
+            method: GET
+            fail_if_not_ssl: true
+            preferred_ip_protocol: ip4
+
+        # Recursive DNS against dns-01, added 2026-10-20 for the same
+        # incident: dns-01 kept answering AUTHORITATIVE queries while every
+        # RECURSIVE lookup timed out, so "is :53 open" (or a plain tcp
+        # probe) stayed green through the whole outage. This asks dns-01
+        # to resolve an external name and requires NOERROR; the scrape also
+        # surfaces probe_dns_answer_rrs, which the alert uses to catch the
+        # "NOERROR but zero answers" variant.
+        dns_recursion:
+          prober: dns
+          timeout: 5s
+          dns:
+            query_name: "www.google.com"
+            query_type: "A"
+            recursion_desired: true
+            valid_rcodes: ["NOERROR"]
+            preferred_ip_protocol: ip4
     owner: root
     group: blackbox_exporter
     mode: '0640'

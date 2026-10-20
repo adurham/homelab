@@ -1,0 +1,18 @@
+---
+# Textfile metrics for the SDN egress path (added 2026-10-20).
+#
+# Why this exists: see roles/nat_metrics/README.md and the "Second sweep"
+# section of docs/security-sweep-2026-10-19.md. Short version: an
+# nftables package upgrade restarted nftables.service, whose ExecStop is
+# `nft flush ruleset`, which silently emptied the gateway's NAT table and
+# took the whole SDN's internet away for about an hour with nothing
+# alerting. The egress probe catches that symptom; these counters say WHY.
+
+# How often the collector rewrites the .prom file.
+nat_metrics_interval: "60s"
+
+# Same directory the smartctl_exporter / nut_ups roles write to, and the
+# one Alloy's textfile collector reads (see roles/alloy/templates/
+# config.alloy.j2). One directory, one collector — set
+# textfile_collector_enabled: true on the host in inventory.
+nat_metrics_textfile_dir: "/var/lib/node_exporter/textfile_collector"

@@ -92,6 +92,24 @@
     group: grafana
     mode: '0755'
 
+# The checkout below is cloned/built as `grafana` (correct), but the git
+# module's remote-URL step can run with root's effective uid, and git
+# >= 2.35 refuses a repo owned by another user ("dubious ownership").
+# When that happened on 2026-10-20 it aborted the ENTIRE Grafana play
+# before the alerting provisioning tasks — i.e. new alert rules silently
+# never deployed. Declaring the exception is git's own supported fix.
+- name: Check whether root's git already trusts the renderer checkout
+  ansible.builtin.command:
+    cmd: git config --global --get-all safe.directory
+  register: renderer_safe_dirs
+  changed_when: false
+  failed_when: false
+
+- name: Declare the renderer checkout safe for root's git
+  ansible.builtin.command:
+    cmd: git config --global --add safe.directory /usr/local/share/grafana-image-renderer
+  when: renderer_safe_dirs.stdout is not search('/usr/local/share/grafana-image-renderer')
+
 - name: Clone Grafana Image Renderer
   ansible.builtin.git:
     repo: https://github.com/grafana/grafana-image-renderer.git

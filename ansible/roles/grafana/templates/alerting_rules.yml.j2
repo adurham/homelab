@@ -3374,3 +3374,247 @@ groups:
         labels:
           severity: critical
         isPaused: false
+
+      # -----------------------------------------------------------------
+      # SDN egress-path monitoring (added 2026-10-20). The outage these
+      # close: an nftables package upgrade restarted nftables.service on
+      # the containers, whose ExecStop is `nft flush ruleset`. It wiped
+      # tailscale-gw's three nat POSTROUTING MASQUERADE rules, the whole
+      # 172.16.0.0/24 SDN lost internet for ~an hour, dns-01's recursion
+      # died, hermes-gw-01 + gallery-01 fell off the tailnet — and nothing
+      # alerted. Probes live in roles/victoriametrics/templates/
+      # prometheus.yml.j2; the rule inventory comes from roles/nat_metrics.
+      # -----------------------------------------------------------------
+      - uid: sdn_egress_down
+        title: SDN internet egress down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # max() over the two independent external targets: fires only
+              # when BOTH fail, so a single provider hiccup or a blocked
+              # endpoint never pages.
+              expr: max(probe_success{job="blackbox_internet_egress"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "SDN (172.16.0.0/24) has lost internet egress"
+          description: "HTTPS probes from vm-01 to both external endpoints have failed for 5 minutes. vm-01 leaves the SDN through tailscale-gw's MASQUERADE rules, so this is the end-to-end signal for an egress-path break. Check, in order: `systemctl is-active nftables` on the containers (must be inactive/masked — its ExecStop is `nft flush ruleset`), then `sudo iptables -t nat -S POSTROUTING | grep MASQUERADE` on tailscale-gw (expect 3 rules for 172.16.0.0/24), then `tailscale_gw_nat_masquerade_rules` on the dashboard for the same count. Re-add + persist with roles/harden_network_stack.yml. See docs/security-sweep-2026-10-19.md, 'Second sweep'."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: dns_recursion_down
+        title: dns-01 recursive resolution down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # The module asks dns-01 to RESOLVE an external name and
+              # requires NOERROR. During the 2026-10-20 outage dns-01 kept
+              # answering authoritative queries while every recursion
+              # timed out, so a port-open check would have stayed green.
+              expr: probe_success{job="blackbox_dns_recursion"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "dns-01 cannot resolve external names"
+          description: "The recursive probe (www.google.com A via 172.16.0.10) has failed for 5 minutes. Authoritative answers can still be fine while recursion is broken — that was exactly the 2026-10-20 state, where dns-01 had no upstream because the SDN had lost egress. Check sdn_egress_down first, then `dig +short google.com @172.16.0.10` on any container. Also glance at probe_dns_answer_rrs for this job: NOERROR with 0 answers is the same fault wearing a different hat."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: tailnet_node_unreachable
+        title: Tailnet-only container unreachable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: probe_success{job="blackbox_tailnet_nodes"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: eq
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "{{ '{{' }} $labels.instance {{ '}}' }} is unreachable on the tailnet"
+          description: "SSH-banner probe to {{ '{{' }} $labels.target {{ '}}' }} has failed for 5 minutes. hermes-gw-01 and gallery-01 peer DIRECTLY on the tailnet and resolve via MagicDNS only, so they drop off the tailnet whenever their DNS path dies — during the 2026-10-20 SDN egress outage both vanished while still pingable on their LAN leg. Check the container's `tailscale status` from pve01 (`pct exec <vmid> -- tailscale status`) and `systemctl restart tailscaled` inside it after DNS is healthy again."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: nat_masquerade_rules_missing
+        title: SDN gateway NAT rules missing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # Raw gauge + an `lt 3` threshold, deliberately NOT
+              # `... < 3` as the expr: a healthy value of 3 makes `< 3`
+              # return an empty vector, which noDataState would then have
+              # to interpret. Same shape the other probe rules use.
+              expr: tailscale_gw_nat_masquerade_rules
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [3]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "tailscale-gw has fewer than 3 MASQUERADE rules"
+          description: "The gateway's nat POSTROUTING chain is missing SDN egress rules (expected 3). Anything in 172.16.0.0/24 is about to lose — or already lost — internet. Most likely cause: nftables.service ran its ExecStop (`nft flush ruleset`), which is why it is masked on every container. Verify with `sudo iptables -t nat -S POSTROUTING | grep -c MASQUERADE` on tailscale-gw, re-apply + persist via `ansible-playbook harden_network_stack.yml`, and confirm nftables is still masked. noData here also fires: the nat_metrics timer (roles/nat_metrics) may have stopped."
+        labels:
+          severity: critical
+        isPaused: false
+
+# NOTE (2026-10-20): Grafana reads file-based alerting provisioning ONLY at
+# startup. A new rule appears in the UI/DB only after grafana-server has
+# restarted since this file changed — the "Restart Grafana" handler does
+# that on every template change. If a rule is missing after a deploy,
+# check `systemctl show grafana-server -p ExecMainStartTimestamp` against
+# this file mtime before debugging the rule itself.

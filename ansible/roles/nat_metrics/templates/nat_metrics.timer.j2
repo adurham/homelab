@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh SDN egress-path metrics every {{ nat_metrics_interval }}
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec={{ nat_metrics_interval }}
+AccuracySec=5s
+Unit=nat-metrics.service
+
+[Install]
+WantedBy=timers.target

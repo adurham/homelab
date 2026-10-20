@@ -20,7 +20,13 @@ from the agentless `blackbox_tanium_reachable` TCP/22 probe.
   blackbox/loki disk pressure alerts).
 - Configures blackbox probe targets for: HTTPS cert-expiry on the
   public-facing endpoints (`blackbox_https_targets`), Tanium postgres
-  (5432/5433), Tanium server consoles (:443).
+  (5432/5433), Tanium server consoles (:443), and — added 2026-10-20 — the
+  SDN egress path: `blackbox_internet_egress` (HTTPS to two external
+  endpoints from inside the SDN), `blackbox_dns_recursion` (dns-01 must
+  RESOLVE an external name) and `blackbox_tailnet_nodes` (SSH banner to
+  the two directly-tailnet'd containers). Those three exist because an
+  nftables package upgrade flushed tailscale-gw's NAT rules and the whole
+  SDN lost internet for an hour with nothing alerting.
 
 ## Key variables (`defaults/main.yml`)
 

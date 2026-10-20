@@ -23,12 +23,17 @@
 // (roles/nut_ups) dumps UPS state to the SAME textfile dir, so the
 // collector must be enabled on any host running EITHER role. One
 // directory, one collector.
+// 2026-10-20: ALSO gated on textfile_collector_enabled (tailscale-gw) --
+// the nat_metrics role writes the gateway's NAT/iptables inventory there
+// (the rules an nftables flush silently deleted during the SDN egress
+// outage that day). Explicit flag so hosts that run neither smartctl nor
+// nut can still opt in.
 prometheus.exporter.unix "host" {
-    enable_collectors = ["systemd"{% if (smartctl_exporter_enabled | default(false)) or (nut_ups_enabled | default(false)) %}, "textfile"{% endif %}]
+    enable_collectors = ["systemd"{% if (smartctl_exporter_enabled | default(false)) or (nut_ups_enabled | default(false)) or (textfile_collector_enabled | default(false)) %}, "textfile"{% endif %}]
     systemd {
         unit_include = ".+\\.service"
     }
-{% if (smartctl_exporter_enabled | default(false)) or (nut_ups_enabled | default(false)) %}
+{% if (smartctl_exporter_enabled | default(false)) or (nut_ups_enabled | default(false)) or (textfile_collector_enabled | default(false)) %}
     textfile {
         directory = "{{ smartctl_exporter_textfile_dir | default('/var/lib/node_exporter/textfile_collector') }}"
     }

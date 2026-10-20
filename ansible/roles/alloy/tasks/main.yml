@@ -50,13 +50,21 @@
   when: ansible_facts['os_family'] in ['RedHat', 'Suse']
 
 - name: Compute whether alloy needs (re)install
+  # Install only when alloy is MISSING or OLDER than the pin. The old
+  # test was "the pinned version string isn't in the installed version
+  # string", so a host that had drifted AHEAD of the pin tried to
+  # downgrade itself: graf-01 runs 1.20.1 while this role pinned 1.16.0,
+  # apt refused ("A later version is already installed"), and the whole
+  # deploy_monitoring play aborted — found 2026-10-20 while deploying the
+  # egress-probe alert rules. Never downgrade an agent that is newer;
+  # raise alloy_version instead when the fleet should move together.
   ansible.builtin.set_fact:
     alloy_needs_install: >-
       {{ (current_alloy_deb.rc | default(1) != 0 or
-          alloy_version not in (current_alloy_deb.stdout | default('')))
+          (current_alloy_deb.stdout | default('0')) is version(alloy_version, '<'))
          if ansible_facts['os_family'] == 'Debian'
          else (current_alloy_rpm.rc | default(1) != 0 or
-               alloy_version not in (current_alloy_rpm.stdout | default(''))) }}
+               (current_alloy_rpm.stdout | default('0')) is version(alloy_version, '<')) }}
 
 - name: Download alloy .deb (Debian)
   ansible.builtin.get_url:

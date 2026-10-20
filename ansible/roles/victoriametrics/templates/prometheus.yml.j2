@@ -288,3 +288,79 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: 127.0.0.1:9115
+
+  # ---------------------------------------------------------------------
+  # SDN egress / recursive DNS / tailnet liveness probes (added 2026-10-20)
+  #
+  # The incident these close: an nftables package upgrade restarted
+  # nftables.service on the containers, whose ExecStop is `nft flush
+  # ruleset`. That wiped tailscale-gw's three nat POSTROUTING MASQUERADE
+  # rules, so the entire 172.16.0.0/24 SDN lost internet for roughly an
+  # hour: dns-01 still answered authoritative queries but every recursion
+  # timed out, and hermes-gw-01 + gallery-01 (MagicDNS-only resolv.conf)
+  # lost the tailnet entirely. Nothing paged during any of it.
+  # ---------------------------------------------------------------------
+
+  # End-to-end egress from inside the SDN. vm-01 is 172.16.0.42 and its
+  # default route is tailscale-gw (172.16.0.1), so these requests traverse
+  # exactly the MASQUERADE rules that were flushed. Two independent
+  # providers; the alert fires on max() == 0, so one provider hiccup or a
+  # single blocked endpoint doesn't page.
+  - job_name: 'blackbox_internet_egress'
+    metrics_path: /probe
+    params:
+      module: [https_204_egress]
+    static_configs:
+      - targets:
+          - https://www.google.com/generate_204
+          - https://www.cloudflare.com/cdn-cgi/trace
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
+  # Recursion, not just "port 53 answers". dns-01 resolving an external
+  # name requires the whole chain (egress -> upstream -> cache); the
+  # authoritative-only path that stayed green during the outage does not.
+  - job_name: 'blackbox_dns_recursion'
+    metrics_path: /probe
+    params:
+      module: [dns_recursion]
+    static_configs:
+      - targets: ['172.16.0.10']
+        labels:
+          instance: 'dns-01'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
+  # Directly-tailnet'd containers. These two lost their tailscaled when
+  # their resolv.conf (MagicDNS only) lost DNS, which made them
+  # unreachable by name while their LAN leg stayed up — the failure looked
+  # like "the container vanished". ssh_banner (not tcp_connect) so a
+  # kernel-alive/userland-dead host can't pass the probe.
+  - job_name: 'blackbox_tailnet_nodes'
+    metrics_path: /probe
+    params:
+      module: [ssh_banner]
+    static_configs:
+      - targets: ['100.119.249.49:22']
+        labels:
+          instance: 'hermes-gw-01'
+      - targets: ['100.83.114.12:22']
+        labels:
+          instance: 'gallery-01'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: 127.0.0.1:9115

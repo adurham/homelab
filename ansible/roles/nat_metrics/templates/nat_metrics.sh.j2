@@ -1,0 +1,46 @@
+#!/bin/sh
+# Managed by ansible -- roles/nat_metrics.
+#
+# Writes the SDN egress-path invariants as a Prometheus textfile so Alloy
+# (textfile collector) can ship them to VictoriaMetrics.
+#
+# 2026-10-20 incident these exist for: an nftables package upgrade
+# restarted nftables.service, whose ExecStop is `nft flush ruleset`. That
+# wiped tailscale-gw's three nat POSTROUTING MASQUERADE rules and every
+# container in 172.16.0.0/24 lost internet for about an hour. Alerts:
+#   nat_masquerade_rules_missing   (tailscale_gw_nat_masquerade_rules < 3)
+#   sdn_egress_down                (end-to-end probe)
+set -eu
+
+DIR="{{ nat_metrics_textfile_dir }}"
+OUT="$DIR/tailscale_gw_nat.prom"
+TMP="$OUT.$$"
+
+# Counted with awk, not `grep -c`: grep exits 1 on zero matches, which
+# would abort this script under `set -e` in exactly the case we most care
+# about (rules gone -> zero matches).
+MASQ=$(iptables -t nat -S 2>/dev/null | awk '/^-A POSTROUTING/ && /-j MASQUERADE/ {n++} END {print n+0}')
+SDN_MASQ=$(iptables -t nat -S 2>/dev/null | awk '/^-A POSTROUTING/ && /172\.16\.0\.0\/24/ && /-j MASQUERADE/ {n++} END {print n+0}')
+TS_CHAINS=$(iptables -S 2>/dev/null | awk '/^-N ts-/ {n++} END {print n+0}')
+NFT_ACTIVE=$(systemctl is-active nftables 2>/dev/null || true)
+case "$NFT_ACTIVE" in
+    active) NFT=1 ;;
+    *)      NFT=0 ;;
+esac
+
+{
+    echo '# HELP tailscale_gw_nat_masquerade_rules nat POSTROUTING MASQUERADE rules (expected 3: SDN egress).'
+    echo '# TYPE tailscale_gw_nat_masquerade_rules gauge'
+    echo "tailscale_gw_nat_masquerade_rules $MASQ"
+    echo '# HELP tailscale_gw_nat_sdn_masquerade_rules MASQUERADE rules scoped to 172.16.0.0/24.'
+    echo '# TYPE tailscale_gw_nat_sdn_masquerade_rules gauge'
+    echo "tailscale_gw_nat_sdn_masquerade_rules $SDN_MASQ"
+    echo '# HELP tailscale_gw_ts_iptables_chains Tailscale-owned iptables chains (0 = tailscaled chains missing; traffic still flows on a permissive policy).'
+    echo '# TYPE tailscale_gw_ts_iptables_chains gauge'
+    echo "tailscale_gw_ts_iptables_chains $TS_CHAINS"
+    echo '# HELP tailscale_gw_nftables_service_active 1 if nftables.service is active (it MUST be masked: ExecStop flushes the ruleset).'
+    echo '# TYPE tailscale_gw_nftables_service_active gauge'
+    echo "tailscale_gw_nftables_service_active $NFT"
+} > "$TMP"
+
+mv "$TMP" "$OUT"

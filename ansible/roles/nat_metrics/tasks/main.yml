@@ -1,0 +1,44 @@
+---
+- name: Create the textfile collector directory
+  ansible.builtin.file:
+    path: "{{ nat_metrics_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the NAT rule-count collector
+  ansible.builtin.template:
+    src: nat_metrics.sh.j2
+    dest: /usr/local/sbin/nat-metrics
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the NAT metrics service unit
+  ansible.builtin.template:
+    src: nat_metrics.service.j2
+    dest: /etc/systemd/system/nat-metrics.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install the NAT metrics timer unit
+  ansible.builtin.template:
+    src: nat_metrics.timer.j2
+    dest: /etc/systemd/system/nat-metrics.timer
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable and start the NAT metrics timer
+  ansible.builtin.systemd:
+    name: nat-metrics.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Collect once now so the first scrape has real data
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/nat-metrics
+  changed_when: false

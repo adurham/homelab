@@ -220,3 +220,71 @@ blip) — owner's word.
 Tanium test clients re-patched now that egress is back: 10 of 11 at 0 pending
 (one pre-existing benign mount-unit failure each on rocky8/alma8/rhel8), plus
 `tg-harvester-01` at 0. The remaining pending work is now zero across the fleet.
+
+### Post-crash re-verification (2026-10-20, ~10:00-10:30) and the monitoring gap closed
+
+The MacBook running the sweep died at 09:58 (WindowServer userspace watchdog
+timeout, the second one in 40 seconds, after a 09:41 Jetsam event; it came back
+at 10:00). No sweep work was lost — this doc and `harden_network_stack.yml`
+were already committed at 09:49. Everything was re-verified live afterwards:
+
+- **Replication was still showing FailCount 44 on ten jobs.** The SSH fix was
+  real (root over the sync VLAN from pve01 to pve03 answered `ROOT_OK`), but
+  Proxmox keeps the failure counter until a job actually completes, and the
+  scheduler had not reached them yet. Ran every pending job by hand
+  (`pvesr run --id ...`): 103-0/103-1/104-0/104-1/106-0/106-1/107-0 all ended
+  with `end replication job`, and `pvesr status` now reports **FailCount 0 on
+  all 14 jobs** (113-0 was mid-sync, also 0). FailCount 0 is the state that
+  matters — a stale counter is exactly how "replication broken for N days"
+  hides.
+- **Egress and recursion from inside the SDN**: `dns-01` fetched
+  `https://example.com` → 200 in 0.18 s and resolved `google.com`
+  recursively. `nftables.service` is `masked` + `inactive` there.
+- **tailscale-gw**: 3 nat `POSTROUTING` MASQUERADE rules present (2x
+  `172.16.0.0/24` for eth0 + tailscale0, 1x `10.99.0.0/24`), nftables masked,
+  tailscaled active. The `ts-*` iptables chains are still **0** — unchanged,
+  still waiting on the owner-approved tailscaled restart.
+
+**New monitoring (this closes "an hour of total egress loss alerted nothing").**
+Three blackbox jobs on vm-01, all verified returning `probe_success 1` live:
+
+| job | module | target | catches |
+| --- | --- | --- | --- |
+| `blackbox_internet_egress` | `https_204_egress` | google `generate_204` + cloudflare `cdn-cgi/trace` | SDN-wide egress loss (vm-01's default route is tailscale-gw) |
+| `blackbox_dns_recursion` | `dns_recursion` | `172.16.0.10` (dns-01) | authoritative-answers-but-no-recursion |
+| `blackbox_tailnet_nodes` | `ssh_banner` | `100.119.249.49:22`, `100.83.114.12:22` | hermes-gw-01 / gallery-01 falling off the tailnet |
+
+Plus `roles/nat_metrics` on tailscale-gw: a 60 s timer writing
+`tailscale_gw_nat_masquerade_rules`, `..._sdn_masquerade_rules`,
+`tailscale_gw_ts_iptables_chains` and `tailscale_gw_nftables_service_active`
+into the textfile collector (Alloy ships them; `textfile_collector_enabled:
+true` on that host). Live values: 3 / 2 / 0 / 0.
+
+Four Grafana rules provision alongside them (`sdn_egress_down`,
+`dns_recursion_down`, `tailnet_node_unreachable`,
+`nat_masquerade_rules_missing`) — 57 rules total now loaded, scheduler running
+all four with no evaluation errors.
+
+**Two automation defects found while deploying this, both fixed:**
+
+1. **The Grafana play could never finish, which silently blocked every new
+   alert rule.** `Clone Grafana Image Renderer` failed with git's "dubious
+   ownership" (checkout owned by `grafana`, the module's remote-URL step
+   running with root's uid) — and that task sits *before* the alerting
+   provisioning tasks, so the play aborted and no rule ever deployed. Added a
+   `safe.directory` declaration for that path (git's own supported fix,
+   idempotent).
+2. **The alloy role tried to downgrade hosts that had drifted ahead.** The
+   install test was "pinned version string not in installed version string",
+   so graf-01 (1.20.1) was told to install 1.16.0, apt refused ("A later
+   version is already installed") and the whole play aborted. It now installs
+   only when alloy is missing or *older* than the pin.
+
+Also worth knowing for the next person: Grafana reads file-based alerting
+provisioning **only at startup**. Compare
+`systemctl show grafana-server -p ExecMainStartTimestamp` with the mtime of
+`/etc/grafana/provisioning/alerting/rules.yml` before debugging a rule that
+"didn't deploy" — that mismatch was the actual state here until 15:25.
+
+**Still open (owner's word):** the tailscaled restart on tailscale-gw to
+restore the `ts-*` chains, and the node-by-node PVE kernel switchover.
