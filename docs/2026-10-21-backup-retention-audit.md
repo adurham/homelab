@@ -271,3 +271,18 @@ meantime.
 Note on ZFS accounting: `zfs destroy` returns before the space is reclaimed
 (async free). The pool read 80 % three seconds after the destroy and settled at
 68 % a minute later — read the pool, not the destroy's exit status.
+
+## Retention policy applied live 2026-10-21 (supersedes the Monday window)
+
+`prune-backups keep-daily=3,keep-weekly=2` set on all three jobs via
+`pvesh set /cluster/backup/<id> --prune-backups keep-daily=3,keep-weekly=2`
+and mirrored in `roles/proxmox_backup_jobs/defaults`. Verified back from
+`pvesh get /cluster/backup`: all three jobs now report the new policy.
+
+Why not the bigger policy: Fable recommended `keep-daily=7,keep-weekly=4` on
+the theory that space was not a constraint. It is, on pve01 — one night is
+~38 GB and the pool has 288 GB free, so daily=7 needs ~266 GB (pool at ~98 %)
+and last=3+daily=7+weekly=2 needs ~456 GB. `keep-daily=3,keep-weekly=2`
+(~5 archives/guest, ~190 GB) keeps a week-old restore point and stays under
+80 %. The Monday-03:30 scheduling argument was dropped as churn: going from
+three consecutive dailies to three dailies plus weeklies is not a loss.

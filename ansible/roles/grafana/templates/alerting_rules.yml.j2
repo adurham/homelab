@@ -1191,11 +1191,182 @@ groups:
           summary: "Home Assistant banned a client IP"
           description: "Home Assistant logged `Banned IP ...` on {{ '{{' }} $labels.host {{ '}}' }} in the last 10 minutes. A ban is a state change, not an error line: from now on EVERY request from that address returns 403 regardless of token validity, which is how the 2026-10-18/20 bans silently broke the SDN's API consumers (the subnet egresses via tailscale-gw 192.168.86.16, so one ban takes every container out of HA). The ban line names the address -- decide whether it was hostile traffic or a stale/rotated credential, then clear it: prune that entry from Home Assistant's ip_bans.yaml (keep a .bak, as was done on 2026-10-21) and restart HA. If the banned address is the exporter host, expect the metrics scrape to be 403ing too (see ha_metrics_scrape_unauthorized)."
         labels:
+          # critical, not warning (2026-10-21): a ban silently 403s EVERY
+          # request from that address, and the SDN egresses through one NAT
+          # address, so a single ban takes the whole private subnet out of HA
+          # for as long as nobody notices (3 days, last time).
+          severity: critical
+        isPaused: false
+
+      # ── Orphan-guest detector health ─────────────────────────────────────
+      # The detector itself is fail-open by design (a broken scan must not
+      # invent orphans), so its own death has to be visible: a dead timer
+      # leaves node_exporter serving the LAST textfile value forever, which
+      # reads as "no orphans" indefinitely.
+      - uid: orphan_scan_stale
+        title: Orphan-guest scan is stale or absent
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: time() - node_textfile_mtime_seconds{instance=~"pve0[123]",file=~".*orphan_guests\\.prom"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [900]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "orphan-guest scan on {{ '{{' }} $labels.instance {{ '}}' }} has not refreshed in 15 minutes"
+          description: "orphan-guest-check.timer writes /var/lib/node_exporter/textfile_collector/orphan_guests.prom every 5 minutes; that file is older than 15 minutes (value is age in seconds), so the node is currently reporting NO orphans because nothing has looked. Check `systemctl status orphan-guest-check.timer` and `journalctl -u orphan-guest-check` on {{ '{{' }} $labels.instance {{ '}}' }}. noDataState is Alerting on purpose: a vanished series means the same thing as a stale one."
+        labels:
           severity: warning
         isPaused: false
 
-      # (b) The metrics scrape is failing AUTH, and HA is demonstrably alive
-      # enough to say so. This is the auth-vs-host-death discriminator: `up`
+      - uid: orphan_scan_failed
+        title: Orphan-guest scan is failing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: orphan_guests_scan_ok{instance=~"pve0[123]"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "orphan-guest scan on {{ '{{' }} $labels.instance {{ '}}' }} reports failure"
+          description: "orphan_guests_scan_ok = 0 on {{ '{{' }} $labels.instance {{ '}}' }}: the checker could not enumerate `pct list`/`qm list`, so it deliberately emitted no orphan series (fail-open, so a broken scan cannot invent a guest). A real orphan would go unnoticed while this persists. Check `journalctl -u orphan-guest-check` on that node."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: root_ssh_accepted
+        title: root SSH login accepted on a PVE node
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              # Inter-node root SSH is constant: pvesr replication and live
+              # migration log into each other from the node LAN IPs and the
+              # sync/migrate VLANs. Only logins from anywhere ELSE are news.
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+"} |~ "Accepted publickey for root" != "COMMAND=" != "from 192.168.86.11" != "from 192.168.86.12" != "from 192.168.86.13" != "from 172.20." != "from 172.21." != "from 127.0.0.1" [10m]))'
+              instant: false
+              range: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 0"
+              type: math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "root SSH login on {{ '{{' }} $labels.host {{ '}}' }}"
+          description: "Root SSH to the PVE nodes is break-glass only (owner's rule: normal access is `amd` + sudo via the forwarded hardware key). This fires on every accepted root key login so a routine-but-wrong habit or a stolen key both become visible. Inter-node root SSH from the node LAN IPs or the sync/migrate VLANs is filtered out of this query, so anything that fires here came from somewhere else."
+        labels:
+          severity: warning
+        isPaused: false
       # cannot distinguish the two (dead container and rejected token are both
       # just up == 0), and this stack has no live HTTP-status probe of the HA
       # API to read a 401/403 from -- roles/victoriametrics templates a
@@ -1223,7 +1394,7 @@ groups:
               # rejected bearer token; the metrics scrape is the only consumer
               # that requests /api/prometheus, so matching on the URL keeps
               # this to the scrape and out of browser login-flow noise.
-              expr: 'sum by (host) (count_over_time({job="home-assistant"} |~ "invalid authentication.*/api/prometheus" [10m]))'
+              expr: 'sum by (host) (count_over_time({job="home-assistant"} |~ "(?i)invalid authentication" [10m]))'
               instant: false
               range: true
               intervalMs: 1000
