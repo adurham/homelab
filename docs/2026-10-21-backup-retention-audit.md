@@ -253,3 +253,21 @@ the same pool.
 This procedure has **not been executed** in this audit (no restores was a
 hard rule). The last real restore test was 2026-09-10 (Authentik). The next
 step is to run the 114 example above on pve01 or pve02.
+
+## Applied 2026-10-21 (owner approved the reclamation)
+
+| Action | Before | After |
+| :--- | :--- | :--- |
+| pve01 zombie zvols `nvme-pool/vm-200-disk-{0,1,2}` (orphan VM ts-01 killed earlier) | pool 81 %, 176 G free | pool 68 %, 289 G free |
+| pve02 stale archives for the five guests that migrated away (101/102/103/105/108, 47 files) | dump 14 G | dump 6.4 G (115 + 116 only, 3 each) |
+| frigate-01 `containerd.corrupt-2026{0728,0816-185405}` (dated leftovers, not the live runtime) | 18 G used | 8.6 G used, container `Up (healthy)`, API 200 |
+
+Every guest named above keeps three fresh archives (2026-10-21) on the node it
+actually runs on — verified before deleting the older copies. Replication and
+backup jobs were not touched; the retention policy itself still waits for the
+Mon 03:30–Tue 02:00 window so no guest drops from 3 archives to 2 in the
+meantime.
+
+Note on ZFS accounting: `zfs destroy` returns before the space is reclaimed
+(async free). The pool read 80 % three seconds after the destroy and settled at
+68 % a minute later — read the pool, not the destroy's exit status.
