@@ -1214,6 +1214,16 @@ Three independent paths feed vm-01, covering different layers:
 | `tzs-01`  | 204  | `172.16.0.55`    | Tanium Zone Server    |
 | `tzs-02`  | 205  | `172.16.0.56`    | Tanium Zone Server    |
 
+**Expected-down set (alerting, 2026-10-21):** `ts-02` console (:443) and
+`tms-02` postgres (:5433) are the owner-confirmed standby-incomplete pair
+(`docs/2026-09-10-fleet-health-sweep.md`), so the two Tanium alert rules now
+exclude those instances — the probes stay, so the data is still there if either
+appliance is brought back for real. `tms-01` (202) is expected UP; it wedged
+sometime after 10-17 19:00 (VM running, guest dead: no ARP, ACPI powerdown
+timed out, no qga) and was recovered 2026-10-21 11:03 with `qm reset 202` —
+:22 and :5433 back within ~4 minutes. Prefer ACPI; TanOS has no guest agent, so
+a wedged appliance needs the hard reset.
+
 ## BWT lab (bandwidth-throttle repro)
 
 Separate from the existing `tanium_cluster` — uses TanOS appliance VMs on the

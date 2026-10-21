@@ -329,7 +329,10 @@ groups:
                 type: prometheus
                 uid: victoriametrics
               editorMode: code
-              expr: probe_success{job="blackbox_tanium_console"}
+              # ts-02 is the deliberate Tanium-server standby (docs/2026-09-10-fleet-sweep):
+              # the appliance VM runs but its console service is off until it is
+              # brought back for real. Probe kept for visibility; alert excluded.
+              expr: probe_success{job="blackbox_tanium_console",instance!="ts-02"}
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -383,7 +386,10 @@ groups:
                 type: prometheus
                 uid: victoriametrics
               editorMode: code
-              expr: probe_success{job="blackbox_tanium_postgres"}
+              # tms-02 is the second deliberate standby (owner-confirmed
+              # 2026-09-10: "known, intentional standby-incomplete state").
+              # ts-01's postgres probe still guards the real path.
+              expr: probe_success{job="blackbox_tanium_postgres",instance!="tms-02"}
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
