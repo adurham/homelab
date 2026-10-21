@@ -286,3 +286,27 @@ and last=3+daily=7+weekly=2 needs ~456 GB. `keep-daily=3,keep-weekly=2`
 (~5 archives/guest, ~190 GB) keeps a week-old restore point and stays under
 80 %. The Monday-03:30 scheduling argument was dropped as churn: going from
 three consecutive dailies to three dailies plus weeklies is not a loss.
+
+## Lab VMs 200-205 / 270-272 are NOT disposable — protected 2026-10-21
+
+Owner confirmed they are real state. Size reality: 200=122 G, 201=136 G,
+202=289 G, 203=52 G, 204=17 G, 205=17 G, 270/271/272≈1 G each — about 635 GB
+total against 965 GB of free space spread across three nodes, so neither vzdump
+nor a full `zfs send` fits anywhere.
+
+What runs now: `lab-vm-snapshots.timer` on all three nodes, weekly (Sun 04:30),
+`zfs snapshot` on every lab zvol tagged `auto-weekly-<ISO week>`, keeping 4.
+Measured cost at creation: ~0 B per snapshot; the largest observed is 796 K.
+First run produced 22 snapshots (pve01 9, pve02 7, pve03 6).
+
+Restore path proven: `zfs clone nvme-pool/<vol>@auto-weekly-202643 nvme-pool/restore-test-snap`
+succeeded and was destroyed cleanly.
+
+Why not `qm snapshot`: it writes a stanza into the guest config and takes a VM
+lock; a delete that fails after the ZFS snapshot is already gone leaves the VM
+locked in `snapshot-delete` with a phantom snapshot section (this happened to
+vm270 during the build — config backed up and repaired by hand). ZFS-level
+snapshots touch no config and cannot lock a guest.
+
+What this does NOT cover: node loss (snapshots live on the same pool). Off-node
+copies need either more free space or thinner lab disks.

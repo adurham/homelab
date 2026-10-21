@@ -1,0 +1,7 @@
+# Ansible managed
+[Unit]
+Description=Weekly ZFS snapshots for lab VMs with no vzdump coverage
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/lab-vm-snapshots.sh

@@ -152,3 +152,46 @@
     name: orphan-guest-check.service
     state: started
   changed_when: false
+
+# ── Lab VM snapshots: the only protection that fits ──────────────────────
+# VMs 200-205 (Tanium lab) and 270-272 (small clones) are real state the owner
+# does not consider disposable, but their disks are 500 GB-1 TB of sparse zvol:
+# vzdump is impractical and a full zfs send does not fit any node's free space.
+# Weekly ZFS snapshots cost ~0 bytes until blocks diverge and are the only
+# protection that fits. Deliberately plain `zfs snapshot`, NOT `qm snapshot` --
+# qm writes a snapshot stanza into the guest config and takes a VM lock, and a
+# half-failed delete leaves the VM locked in `snapshot-delete` with a phantom
+# section (hit on vm270 while building this). See files/lab-vm-snapshots.sh.
+- name: Install lab VM snapshot script
+  ansible.builtin.copy:
+    src: lab-vm-snapshots.sh
+    dest: /usr/local/bin/lab-vm-snapshots.sh
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart lab-vm-snapshots timer
+
+- name: Install lab VM snapshot systemd service
+  ansible.builtin.template:
+    src: lab-vm-snapshots.service.j2
+    dest: /etc/systemd/system/lab-vm-snapshots.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart lab-vm-snapshots timer
+
+- name: Install lab VM snapshot systemd timer
+  ansible.builtin.template:
+    src: lab-vm-snapshots.timer.j2
+    dest: /etc/systemd/system/lab-vm-snapshots.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart lab-vm-snapshots timer
+
+- name: Enable and start lab VM snapshot timer
+  ansible.builtin.systemd:
+    name: lab-vm-snapshots.timer
+    enabled: true
+    state: started
+    daemon_reload: true
