@@ -37,7 +37,7 @@
       --vmid {{ pve_backup_vmid_str }}
       --enabled 1
       --mailnotification always
-      --prune-backups keep-last={{ pve_backup_keep_last }}
+      --prune-backups {{ pve_backup_prune_backups }}
       --notes-template "{{ pve_backup_notes_template }}"
   when: pve_backup_job_parsed == {}
   changed_when: true
@@ -56,6 +56,24 @@
   when:
     - pve_backup_job_parsed != {}
     - pve_backup_job_parsed.schedule | default('') != pve_backup_schedule
+  changed_when: true
+
+# pvesh returns prune-backups as a dict with STRING values
+# ({"keep-last":"3"}), so compare dict-to-dict rather than string-to-string:
+# key order in the declared var must not cause a perpetual "changed".
+- name: Build the desired prune-backups dict from the declared retention string
+  ansible.builtin.set_fact:
+    pve_backup_prune_desired: >-
+      {{ dict(pve_backup_prune_backups.split(',')
+              | map('trim') | map('split', '=')
+              | map('map', 'trim') | list) }}
+
+- name: Update the retention (prune-backups) if it drifted from what's declared here
+  ansible.builtin.command:
+    cmd: "pvesh set /cluster/backup/{{ pve_backup_job_id }} --prune-backups {{ pve_backup_prune_backups }}"
+  when:
+    - pve_backup_job_parsed != {}
+    - pve_backup_job_parsed['prune-backups'] | default({}) != pve_backup_prune_desired
   changed_when: true
 
 - name: Fix the notes-template if it's stale/missing (was falsely "ansible-managed" pre-2026-09-11 while genuinely unmanaged)
@@ -83,4 +101,5 @@
     that:
       - (pve_backup_job_final.stdout | from_json).node | default('') == inventory_hostname
       - (pve_backup_job_final.stdout | from_json).vmid | default('') == pve_backup_vmid_str
-    fail_msg: "Backup job {{ pve_backup_job_id }} on {{ inventory_hostname }} did not converge (node/vmid mismatch after deploy)."
+      - (pve_backup_job_final.stdout | from_json)['prune-backups'] | default({}) == pve_backup_prune_desired
+    fail_msg: "Backup job {{ pve_backup_job_id }} on {{ inventory_hostname }} did not converge (node/vmid/prune-backups mismatch after deploy)."

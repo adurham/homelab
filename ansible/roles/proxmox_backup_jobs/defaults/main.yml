@@ -15,5 +15,24 @@
 pve_backup_storage: vzdump-nvme
 pve_backup_compress: zstd
 pve_backup_mode: snapshot
-pve_backup_keep_last: 3
+# Retention, in PVE's own `prune-backups` syntax (comma-joined keep-*=N).
+# Enforced on create AND drift-corrected on every run by tasks/main.yml.
+#
+# 2026-10-21: keep-last=3 -> keep-daily=2,keep-weekly=1. Same disk
+# footprint (3 archives per guest at steady state -- simulated against
+# PVE's prune algorithm), but the oldest restore point is now 2-8 days old
+# instead of always exactly 2 days, so damage noticed after a weekend is
+# still recoverable. keep-daily also collapses ad-hoc same-day manual runs
+# (2026-10-20: two manual CT 101 dumps each consumed a keep-last slot).
+# Anything bigger does NOT fit pve01: one generation of every guest it
+# hosts is ~38 GiB (113 hermes-gw-01 15.7G + 170 frigate-01 14.1G
+# dominate), its dump dir holds ~113 GiB, the pool is 81% CAP / 68% FRAG
+# with 147G avail -- each extra generation costs another ~38 GiB there.
+# Numbers + procedure: docs/2026-10-21-backup-retention-audit.md.
+#
+# Timing caveat when changing this live: the first nightly run under the
+# new policy prunes by the NEW rules. Apply between Mon 03:30 and Tue 02:00
+# so the first run is a Tuesday -- applied later in the week, guests dip to
+# 2 archives until the next ISO-week rollover (Monday).
+pve_backup_prune_backups: "keep-daily=2,keep-weekly=1"
 pve_backup_notes_template: "ansible-managed nightly backup"
