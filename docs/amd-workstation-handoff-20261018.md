@@ -851,3 +851,23 @@ A, closes the module question outright: bad in both slots, on the record, for Co
   is an open loop, and it cannot be closed with the old framing: the update we owe them now has to say
   that the same configuration both failed and booted in Channel B (§21.3), i.e. the "A path is bad" claim
   is withdrawn pending a boot-rate measurement, not restated.
+
+### 22.2 2026-10-21 10:03 — escalation sent to Corsair (and one blank reply before it)
+
+- Still **zero human contact** as of 10:05 (`Corsair` hits in the Google inbox: the 10-18 auto-ack, our
+  10-18 16:49 and 10-20 09:12 updates, and Zendesk's echoes). Nothing in Junk either (1,248 scanned, 0
+  hits). That is ~113 h from the original request.
+- **Escalation sent 10:03:18** on the ticket thread from `amdnative@gmail.com` to
+  `support@corsair.zendesk.com`: four asks (RMA number, shipping instructions, advance-ship vs
+  on-receipt, expected date) plus the timeline. Body archived at
+  `~/rma-evidence/corsair-escalation-body-20261021.txt`; verified present in `[Gmail]/Sent Mail` by
+  reading the message `source` (5,712 chars, body string found), Outbox empty, one copy.
+- **A first attempt at 10:01:32 went out BLANK.** Zendesk's echo at 10:02:12 shows it as
+  `[No content]`. Cause and rule: in Mail's AppleScript, `reply <msg> without opening window` followed by
+  `set content of r` compiles and sends, but the body is dropped — the reply must be created
+  `with opening window` for the composed text to stick. (And `opening window` written without `with` is
+  a compile error: "Expected expression but found end of line".) Verify a send by reading the message's
+  `source`, never its `content` — `content` comes back empty for HTML messages and will tell you a
+  perfectly good send was blank.
+- The escalation opens by telling them to disregard the blank reply, so the `[No content]` entry in the
+  thread is accounted for.
