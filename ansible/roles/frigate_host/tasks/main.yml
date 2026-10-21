@@ -409,6 +409,45 @@
     "systemctl daemon-reload && systemctl enable frigate-recreate.service frigate-keepalive.service"
   changed_when: true
 
+# ── Weekly restart: reset Frigate's capture memory leak ──────────────────
+# Measured 2026-10-21: 7 container-cgroup OOM kills in 14 days on pve01, all
+# `frigate.capture`, at ~6 GB and then 13.7-13.8 GB. mem_limit in
+# docker-compose.yml.j2 turns a runaway into a clean container restart; this
+# timer usually prevents ever reaching it.
+- name: Render frigate-restart-weekly.service locally
+  ansible.builtin.set_fact:
+    frigate_weekly_unit_rendered: "{{ lookup('ansible.builtin.template', 'frigate-restart-weekly.service.j2') }}"
+
+- name: Deploy frigate-restart-weekly.service into CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec {{ vmid }} -- tee /etc/systemd/system/frigate-restart-weekly.service >/dev/null <<'UNIT_EOF'
+    {{ frigate_weekly_unit_rendered }}
+    UNIT_EOF
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Render frigate-restart-weekly.timer locally
+  ansible.builtin.set_fact:
+    frigate_weekly_timer_rendered: "{{ lookup('ansible.builtin.template', 'frigate-restart-weekly.timer.j2') }}"
+
+- name: Deploy frigate-restart-weekly.timer into CT
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec {{ vmid }} -- tee /etc/systemd/system/frigate-restart-weekly.timer >/dev/null <<'UNIT_EOF'
+    {{ frigate_weekly_timer_rendered }}
+    UNIT_EOF
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Enable frigate-restart-weekly.timer
+  ansible.builtin.command: >
+    pct exec {{ vmid }} -- bash -c
+    "systemctl daemon-reload && systemctl enable --now frigate-restart-weekly.timer"
+  changed_when: true
+
 # ── HA node-affinity: prefer target_node, but allow real failover ────────
 # 2026-07-28: the cluster's datacenter-level CRS auto-rebalance
 # (crs.ha=dynamic, ha-auto-rebalance=1 — set independently of this role,

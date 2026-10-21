@@ -1,0 +1,19 @@
+# Ansible managed
+# Weekly restart to reset Frigate's capture/embeddings memory leak.
+#
+# Measured 2026-10-21: 7 container-cgroup OOM kills in 14 days on pve01, all of
+# them `frigate.capture`, at ~6 GB (10-10, 10-12) and 13.7-13.8 GB (10-14,
+# 10-21). The leak itself is upstream and slow, so a scheduled restart costs
+# one ~30 s recording gap a week and removes the OOM entirely in the normal
+# case. If the container does reach its mem_limit first, docker kills and
+# restarts it cleanly (restart: unless-stopped) instead of the kernel killing a
+# random process inside the LXC.
+[Unit]
+Description=Frigate weekly restart (resets the memory leak)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker compose -f {{ frigate_base_dir }}/docker-compose.yml restart frigate
+TimeoutStartSec=300

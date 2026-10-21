@@ -32,6 +32,17 @@ services:
     restart: unless-stopped
     network_mode: host
     shm_size: "{{ frigate_shm_size }}"
+    # Container-level memory ceiling (2026-10-21). Without it, Frigate's known
+    # capture/embeddings leak grows until the LXC's own cgroup OOMs and the
+    # kernel picks an arbitrary victim inside the container — 7 kills in 14
+    # days on pve01, every one of them `frigate.capture`, at 6 GB and then
+    # 13.8 GB. With this set, docker kills and restarts the container cleanly
+    # instead, which is the failure mode the CT is already built to survive
+    # (see frigate-recreate.service). 12g leaves ~4 GB for docker/containerd/
+    # OS inside a 16 GB CT. Paired with frigate-restart-weekly.timer so the
+    # leak is normally reset before the limit is ever reached.
+    mem_limit: {{ frigate_mem_limit | default('12g') }}
+    memswap_limit: {{ frigate_mem_limit | default('12g') }}
     volumes:
       - {{ frigate_base_dir }}/config:/config
       - {{ frigate_base_dir }}/media:/media/frigate

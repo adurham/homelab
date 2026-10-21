@@ -1,0 +1,13 @@
+# Ansible managed
+[Unit]
+Description=Weekly Frigate restart (resets the memory leak)
+
+[Timer]
+# 09:00 UTC = 04:00 CDT: the CT runs UTC, so an OnCalendar of 04:00 would land
+# at 23:00 the previous evening in local time.
+OnCalendar=Sun *-*-* 09:00:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
