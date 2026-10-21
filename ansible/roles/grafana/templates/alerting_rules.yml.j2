@@ -423,6 +423,64 @@ groups:
           severity: critical
         isPaused: false
 
+      # Added 2026-10-21 after the pve03 incident: a ZFS writeback deadlock left
+      # 71 processes unkillable and the node's load at 80 for 22 hours without a
+      # single alert (the only symptom was pve_exporter flapping, which the ack
+      # bot deletes on resolve). Blocked-process count is the direct signal.
+      - uid: node_procs_blocked_high
+        title: Node has stuck (uninterruptible) processes
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: node_procs_blocked{job="node_exporter",instance=~"pve0[123]"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [20]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "{{ '{{' }} $labels.instance {{ '}}' }} has processes stuck in uninterruptible sleep"
+          description: "Blocked processes with an idle disk is the signature of a wedged filesystem (ZFS writeback/page-lock deadlock, hung network mount). The 2026-10-21 pve03 incident sat at load 80 for 22 h this way and never alerted. Check on the node: ps -eo state,pid,comm | awk '$1==\"D\"', cat /proc/<pid>/stack, zpool status, and whether any lxc-start/qemu process is running for a guest that is not in `pct list` / `qm list`."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: amd_workstation_unreachable
         title: amd-workstation unreachable
         condition: C

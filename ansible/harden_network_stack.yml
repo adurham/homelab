@@ -18,9 +18,24 @@
 #     with exit 255 (44 consecutive failures) and HA migration would have failed
 #     too. Both VLANs are physically confined to switch ports 3/4/5 with no
 #     gateway.
-- name: PVE root-SSH policy (cluster networks included)
+#
+#  3. 2026-10-21: the owner wants root SSH to the PVE nodes to keep working
+#     from his MacBook as a BREAK-GLASS path (normal access stays `amd` + sudo
+#     via the forwarded hardware key). Two gaps had to be closed: the Match
+#     list named only the node LAN IPs, so a laptop in the DHCP pool was
+#     refused; and pve01/pve02 ship root's authorized_keys as a REGULAR file
+#     holding only the three inter-node keys (pve03 happens to symlink it to
+#     /etc/pve/priv/authorized_keys, which is why root worked there and not on
+#     the other two). Both MacBook addresses are DHCP (wired .45 / wifi .53):
+#     re-render if the leases drift.
+- name: PVE root-SSH policy (cluster networks + owner break-glass)
   hosts: proxmox_nodes
   gather_facts: false
+  vars:
+    pve_root_ssh_breakglass_addresses: "192.168.86.45,192.168.86.53"
+    pve_root_ssh_breakglass_pubkeys:
+      - "{{ lookup('file', '~/.ssh/id_ed25519_sk_yk.pub') }}"
+      - "{{ lookup('file', '~/.ssh/personal_macbook.pub') }}"
   tasks:
     - name: Render the no-root drop-in
       ansible.builtin.copy:
@@ -33,9 +48,21 @@
           # Cluster traffic: corosync/pvecm use the node LAN IPs; ZFS replication
           # uses the sync VLAN and live migration the migrate VLAN. Both VLANs
           # are physically confined to switch ports 3/4/5 and have no gateway.
-          Match Address 192.168.86.11,192.168.86.12,192.168.86.13,172.20.0.0/24,172.21.0.0/24
+          # Break-glass: the owner's MacBook ({{ pve_root_ssh_breakglass_addresses }};
+          # both DHCP, re-render if the leases drift) may log in as root with a
+          # key for manual recovery only. Normal access is the `amd` account
+          # with sudo via the forwarded hardware key.
+          Match Address 192.168.86.11,192.168.86.12,192.168.86.13,{{ pve_root_ssh_breakglass_addresses }},172.20.0.0/24,172.21.0.0/24
               PermitRootLogin prohibit-password
         validate: /usr/sbin/sshd -t -f %s
+
+    - name: Install the break-glass keys for root (idempotent)
+      ansible.posix.authorized_key:
+        user: root
+        key: "{{ item }}"
+        state: present
+        manage_dir: false
+      loop: "{{ pve_root_ssh_breakglass_pubkeys }}"
 
     - name: Reload sshd
       ansible.builtin.systemd:

@@ -100,6 +100,27 @@ hosts as unneeded attack surface:
 Tightening pve host firewall further is a deferred plan — see
 `#5 plan` in tonight's audit conversation.
 
+### Root SSH on the PVE nodes — break-glass only (2026-10-21)
+
+Root SSH to pve01/02/03 is deliberately available and deliberately narrow:
+`/etc/ssh/sshd_config.d/00-no-root.conf` sets `PermitRootLogin no` globally and
+restores `prohibit-password` only for a `Match Address` list — the three node
+LAN IPs, the sync/migrate VLANs (ZFS replication and live migration need root
+key SSH, so `no` without that list silently breaks every replication job), and
+the owner's MacBook (192.168.86.45 wired / .53 wifi, both DHCP — re-render via
+`ansible/harden_network_stack.yml` if the leases drift).
+
+The normal path is **not** root: log in as `amd` with `ssh -A` and use plain
+`sudo cmd </dev/null` (the forwarded hardware key satisfies
+`pam_ssh_agent_auth`). Root SSH is for recovery when that path is unavailable.
+
+Gotcha found the hard way: pve03 ships `/root/.ssh/authorized_keys` as a
+symlink to the cluster-wide `/etc/pve/priv/authorized_keys`, but pve01/pve02
+have it as a regular file holding only the three inter-node keys — so the same
+laptop key works on one node and is refused on the other two. Both now carry
+the break-glass keys (the YubiKey sk key and the 1Password-gated MacBook RSA);
+`harden_network_stack.yml` installs them idempotently.
+
 ## When this would change
 
 The model would tighten (add per-CT firewalls to the 9 service CTs) if
