@@ -198,10 +198,21 @@ Rules:
 - Destroy it within 6 h: `guest_backup_missing` only excludes `tc-*` and
   `vm-01`, so a scratch CT that lives longer will page.
 
-The archive's net0 carries the production static IP and MAC. **Always
-override net0**, or the scratch CT will collide with the live guest.
+The archive's net0 carries the production static IP and MAC. **Override net0
+after the restore, not on the restore command** — verified the hard way on
+2026-10-21: `pct restore ... --net0 ...link_down=1` does NOT survive the
+"merging backed-up and given configuration" step, the archived net0 wins, and
+the scratch CT comes up holding the live guest's address (restoring 114 that way
+put a second 10.99.0.2 on the lab segment for the ~20 s it was up). Restore with
+`--start 0`, rewrite the net before starting, then start:
 
-Example: bwt-dhcp (114) restored onto pve01.
+```bash
+sudo pct set $N -net0 name=eth0,bridge=vmbr0,link_down=1 </dev/null
+```
+
+Example: bwt-dhcp (114) restored onto pve01 — this exact sequence was run
+end-to-end on 2026-10-21: restore 8.9 s for 690 MiB, container booted,
+`systemctl is-system-running` = running, then destroyed with no leftovers.
 
 ```bash
 N=990; ARCH=vzdump-nvme:backup/vzdump-lxc-114-2026_10_21-02_10_16.tar.zst
@@ -209,8 +220,8 @@ sudo pvesh get /cluster/nextid --vmid $N </dev/null            # must echo $N
 sudo pvesh get /nodes/$(hostname)/vzdump/extractconfig --volume $ARCH </dev/null   # inspect first
 zfs list -H -o avail nvme-pool                                   # space gate (below)
 sudo pct restore $N $ARCH --storage nvme-data --unique 1 \
-  --hostname restore-test-$N --onboot 0 --start 0 \
-  --net0 name=eth0,bridge=vmbr0,link_down=1 </dev/null
+  --hostname restore-test-$N --onboot 0 --start 0 </dev/null
+sudo pct set $N -net0 name=eth0,bridge=vmbr0,link_down=1 </dev/null   # MUST be before start
 sudo pct start $N </dev/null && sudo pct exec $N -- systemctl is-system-running </dev/null
 sudo pct exec $N -- ls / </dev/null                              # spot-check content
 # teardown
