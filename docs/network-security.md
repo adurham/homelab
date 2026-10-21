@@ -132,6 +132,12 @@ rotation (`iss 9e28d1a2…`), which is what produced the 10-18 ban of `.16` and
 the 10-20 ban of the owner's wired MacBook (`.45`). Both bans were cleared
 (backup `ip_bans.yaml.bak-*`) and all three consumers moved to the tokens above.
 
+The legacy root-owned long-lived token (`hermes+ansible (2026-10-18 rotation)`)
+was then deleted: `auth/delete_refresh_token` only deletes the caller's own
+tokens, so an admin on the OIDC account cannot remove another user's token over
+the API. Procedure that works: `ha core stop`, remove the entry with
+`jq`, `ha core start` — with `/config/.storage/auth.bak-*` taken first.
+
 ### Root SSH on the PVE nodes — break-glass only (2026-10-21)
 
 Root SSH to pve01/02/03 is deliberately available and deliberately narrow:
