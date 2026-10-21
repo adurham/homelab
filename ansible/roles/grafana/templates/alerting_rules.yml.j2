@@ -1814,7 +1814,7 @@ groups:
               # host!~"tc-.*" excludes the disposable tanium_clients test
               # fleet -- see the matching exclusion + rationale on the
               # host_down rule earlier in this file.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "Out of memory|invoked oom-killer" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "Out of memory|invoked oom-killer" != "COMMAND=" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -1880,7 +1880,7 @@ groups:
               # host!~"tc-.*" excludes the disposable tanium_clients test
               # fleet -- see the matching exclusion + rationale on the
               # host_down rule earlier in this file.
-              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
+              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "Start request repeated too quickly|Failed to start" != "COMMAND=" [10m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -2005,7 +2005,7 @@ groups:
               # host!~"tc-.*" excludes the disposable tanium_clients test
               # fleet -- see the matching exclusion + rationale on the
               # host_down rule earlier in this file.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "I/O error|EXT4-fs error|Buffer I/O error|Medium error|blk_update_request" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "I/O error|EXT4-fs error|Buffer I/O error|Medium error|blk_update_request" != "COMMAND=" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -2342,63 +2342,121 @@ groups:
           severity: warning
         isPaused: false
 
+      # Metric-based since 2026-10-21. The old Loki rule matched
+      # "(?i)replication.*(failed|error)" over the systemd journal, so it fired
+      # on the sudo audit line of ANY admin command that mentioned both words —
+      # including a `grep -cE '... replication ... error' /var/log/pve/replicate`
+      # run during an investigation. It was firing on its own noise, not on a
+      # fault: all 20 jobs were OK with FailCount 0. pve_exporter already
+      # exports the authoritative counter.
       - uid: log_pve_replication_failed
         title: pve replication failure
         condition: C
         data:
           - refId: A
             relativeTimeRange:
-              from: 1800
+              from: 3600
               to: 0
-            datasourceUid: loki
+            datasourceUid: victoriametrics
             model:
               datasource:
-                type: loki
-                uid: loki
-              # pvescheduler / pvesr run replication; failures show up in
-              # the systemd journal of the pve host that's sending. Match
-              # the noisy-but-precise patterns that indicate a real fail
-              # (not a transient retry).
-              # See the "Range query (NOT instant)" comment on log_oom_kill
-              # for why this can't be instant:true with multiple
-              # simultaneous host series.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+"} |~ "(?i)replication.*(failed|error)|send/receive failed|530 Permission denied|cannot send.*: Broken pipe" [15m]))'
-              instant: false
-              range: true
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: sum by (instance) (increase(pve_replication_failed_syncs[30m]))
+              instant: true
               intervalMs: 1000
               maxDataPoints: 43200
+              range: false
               refId: A
-          - refId: B
+          - refId: C
             datasourceUid: __expr__
             model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
               datasource:
                 name: Expression
                 type: __expr__
                 uid: __expr__
               expression: A
-              reducer: last
-              type: reduce
               intervalMs: 1000
               maxDataPoints: 43200
-              refId: B
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "pve replication failing on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "A sync failed on {{ '{{' }} $labels.instance {{ '}}' }}: `pvesr status` shows the job's FailCount and `/var/log/pve/replicate/<jobid>` the reason. Usual causes: root SSH between nodes (the sshd Match Address list must include 172.20.0.0/24 and 172.21.0.0/24 or every job dies with exit 255), a target node that is down, or a missing common base snapshot after a storage rename."
+        labels:
+          severity: warning
+        isPaused: false
+
+      # Silent counterpart: a job that stops running does not increment the
+      # failure counter at all (e.g. pvescheduler disabled, job disabled, or a
+      # target that stopped accepting). Jobs are staggered and run every 20m,
+      # so an hour without a successful sync is already wrong.
+      - uid: pve_replication_stalled
+        title: pve replication stalled
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: time() - max by (instance) (pve_replication_last_sync_timestamp_seconds)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
           - refId: C
             datasourceUid: __expr__
             model:
+              conditions:
+                - evaluator:
+                    params: [3600]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
               datasource:
                 name: Expression
                 type: __expr__
                 uid: __expr__
-              expression: "$B > 0"
-              type: math
+              expression: A
               intervalMs: 1000
               maxDataPoints: 43200
               refId: C
+              type: threshold
         noDataState: OK
         execErrState: Error
-        for: 5m
+        for: 10m
         annotations:
-          summary: "pve replication failing on {{ '{{' }} $labels.host {{ '}}' }}"
-          description: "ZFS replication between pve nodes is the substrate for HA failover. If a job stays failed, an HA migration of the affected CT loses up to 15m of data. Run `pvesr status` on {{ '{{' }} $labels.host {{ '}}' }} and check `/var/log/pve/replicate/<jobid>` for the failing job."
+          summary: "no successful pve replication on {{ '{{' }} $labels.instance {{ '}}' }} for over an hour"
+          description: "The newest successful sync on {{ '{{' }} $labels.instance {{ '}}' }} is older than an hour (value is the age in seconds). Check `pvesr status` there and `systemctl status pvescheduler`; a job that silently stops is worse than one that fails, because nothing in the logs mentions it."
         labels:
           severity: warning
         isPaused: false
@@ -2435,7 +2493,7 @@ groups:
               # itself is emitted as "non-primary component ... will NOT
               # provide any services" / "received write while not quorate"
               # -- those remain matched here.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+"} |~ "(?i)not quorate|non-primary component|quorum lost" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+"} |~ "(?i)not quorate|non-primary component|quorum lost" != "COMMAND=" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -2492,7 +2550,7 @@ groups:
               # See the "Range query (NOT instant)" comment on log_oom_kill
               # for why this can't be instant:true with multiple
               # simultaneous host series.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "FATAL:|PANIC:" |~ "postgres" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "FATAL:|PANIC:" |~ "postgres" != "COMMAND=" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
