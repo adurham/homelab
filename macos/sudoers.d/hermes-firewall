@@ -1,0 +1,14 @@
+# Hermes remote-sudo whitelist for the Mac Studios (macstudio-m4-1/2).
+#
+# Install: see the paste block in the session notes. Mode must be 0440
+# root:wheel; validate with `sudo visudo -c`.
+#
+# Convention: exact binary + exact arguments, no wildcards — same shape as
+# the existing exo-cluster-relaunch / exo-route-clear / powermetrics rules on
+# these machines. Anything broader would turn a compromised SSH key into
+# unattended root, which is the thing the hardware-key gate exists to stop.
+#
+# Deliberately NOT included: --setglobalstate off. Turning the firewall off is
+# a "make it worse" action; it stays a human step even though the rollback
+# path is then manual.
+adam.durham ALL=(root) NOPASSWD: /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate, /usr/libexec/ApplicationFirewall/socketfilterfw --listapps, /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on, /usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode
