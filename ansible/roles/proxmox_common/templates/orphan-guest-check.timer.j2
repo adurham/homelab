@@ -1,0 +1,12 @@
+# Managed by ansible -- see roles/proxmox_common/tasks/main.yml.
+[Unit]
+Description=Run the orphan guest detector every {{ proxmox_common_orphan_guest_interval }}
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec={{ proxmox_common_orphan_guest_interval }}
+AccuracySec=30s
+Unit=orphan-guest-check.service
+
+[Install]
+WantedBy=timers.target

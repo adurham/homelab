@@ -1,0 +1,11 @@
+# Managed by ansible -- see roles/proxmox_common/tasks/main.yml.
+[Unit]
+Description=Detect Proxmox guests running outside Proxmox management (orphan/duplicate)
+Documentation=file:///usr/local/bin/orphan-guest-check.sh
+# `pct list` / `qm list` read /etc/pve, which only exists once pmxcfs is up.
+After=pve-cluster.service local-fs.target
+
+[Service]
+Type=oneshot
+Environment=TEXTFILE_DIR={{ proxmox_common_orphan_guest_textfile_dir }}
+ExecStart=/usr/local/bin/orphan-guest-check.sh

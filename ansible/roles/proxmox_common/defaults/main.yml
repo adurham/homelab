@@ -1,0 +1,11 @@
+---
+# Textfile directory shared with the other .prom writers on the PVE nodes
+# (roles/smartctl_exporter, roles/nut_ups, roles/qga_disk_export). Alloy's
+# prometheus.exporter.unix textfile collector reads this directory and these
+# hosts already scrape it -- verified live on pve01/pve02/pve03
+# (`ls /var/lib/node_exporter/textfile_collector`, node_textfile_scrape_error 0).
+proxmox_common_orphan_guest_textfile_dir: /var/lib/node_exporter/textfile_collector
+
+# 5 minutes: fast enough that a split-brain duplicate is caught while it is
+# still doing damage, cheap enough to be a no-op (~50ms of ps + pct/qm list).
+proxmox_common_orphan_guest_interval: 5min

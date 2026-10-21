@@ -1122,6 +1122,148 @@ groups:
           severity: warning
         isPaused: false
 
+      # ----- Home Assistant auth / ban detection (2026-10-21) -----
+      # The failure that motivated these two: the 10-18 refresh-token rotation
+      # deleted the entry behind three tokens still in service, so their
+      # requests started failing auth, HA banned the source address, and from
+      # then on EVERY request from that address got 403 no matter how valid the
+      # token was. Because the private subnet egresses through tailscale-gw
+      # (192.168.86.16), one banned address silently took the whole SDN out of
+      # Home Assistant, and the metrics scrape with it. Nothing reported it.
+      #
+      # These read HA's own log stream (job="home-assistant", shipped by
+      # roles/ha_log_shipper), not systemd-journal.
+
+      # (a) HA banned an address. `Banned IP <ip> ...` comes from
+      # homeassistant.components.http.ban and is the only record of the state
+      # change; afterwards that client just gets 403 forever.
+      - uid: ha_ip_banned
+        title: Home Assistant banned a client IP
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              # Range query + reduce + math, not an instant query with a
+              # classic threshold -- see the duplicate-label bug documented on
+              # log_oom_kill.
+              expr: 'sum by (host) (count_over_time({job="home-assistant"} |~ "Banned IP " [10m]))'
+              instant: false
+              range: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 0"
+              type: math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "Home Assistant banned a client IP"
+          description: "Home Assistant logged `Banned IP ...` on {{ '{{' }} $labels.host {{ '}}' }} in the last 10 minutes. A ban is a state change, not an error line: from now on EVERY request from that address returns 403 regardless of token validity, which is how the 2026-10-18/20 bans silently broke the SDN's API consumers (the subnet egresses via tailscale-gw 192.168.86.16, so one ban takes every container out of HA). The ban line names the address -- decide whether it was hostile traffic or a stale/rotated credential, then clear it: prune that entry from Home Assistant's ip_bans.yaml (keep a .bak, as was done on 2026-10-21) and restart HA. If the banned address is the exporter host, expect the metrics scrape to be 403ing too (see ha_metrics_scrape_unauthorized)."
+        labels:
+          severity: warning
+        isPaused: false
+
+      # (b) The metrics scrape is failing AUTH, and HA is demonstrably alive
+      # enough to say so. This is the auth-vs-host-death discriminator: `up`
+      # cannot distinguish the two (dead container and rejected token are both
+      # just up == 0), and this stack has no live HTTP-status probe of the HA
+      # API to read a 401/403 from -- roles/victoriametrics templates a
+      # blackbox_https_cert job for the HA frontend whose probe_http_status_code
+      # would have done it, but that job is NOT deployed on vm-01 (verified
+      # 2026-10-21: no blackbox_https_cert targets in /api/v1/targets there).
+      # A dead host writes no log line at all, so "this line exists" is a sound
+      # proof of life; only an auth rejection can produce it.
+      - uid: ha_metrics_scrape_unauthorized
+        title: Home Assistant rejected the metrics scrape (auth, not host death)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              # homeassistant.components.http.ban logs
+              # `Login attempt or request with invalid authentication from <ip>
+              #  (<ip>). Requested URL: '<path>'. (<user-agent>)` for any
+              # rejected bearer token; the metrics scrape is the only consumer
+              # that requests /api/prometheus, so matching on the URL keeps
+              # this to the scrape and out of browser login-flow noise.
+              expr: 'sum by (host) (count_over_time({job="home-assistant"} |~ "invalid authentication.*/api/prometheus" [10m]))'
+              instant: false
+              range: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              type: reduce
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 0"
+              type: math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "Home Assistant is rejecting the metrics scrape's credentials"
+          description: "Home Assistant logged an invalid-authentication request for /api/prometheus in the last 10 minutes, so `up{job=\"homeassistant\"}` is about to go to 0 -- and this is an AUTH failure, not a dead host: HA answered HTTP and wrote this line, so the container is alive. Every rejected request also counts toward HA's IP ban, and once banned the address gets 403 no matter how valid the token is. Fix the credential, not the host: the scrape uses `homeassistant_token` from inventory/group_vars/all.yml (vault) -- check whether that long-lived token still exists on the HA user (HA's 2026-10-18 refresh-token rotation silently deleted three tokens in service), re-mint it if not, and clear any resulting ban (see ha_ip_banned)."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: adguard_dns_down
         title: AdGuard Home DNS down
         condition: C
@@ -1784,6 +1926,20 @@ groups:
       # Promtail ships from every host. Use noDataState=OK so a Promtail
       # outage doesn't fire the alert (host_down would catch the underlying
       # cause anyway). Use `for:` to dampen single-event noise.
+      #
+      # SUDO AUDIT NOISE, structural fix (2026-10-21): a broad `|~` match over
+      # the whole journal also matches the audit line sudo writes for every
+      # command whose TEXT happens to contain the pattern -- a
+      # `grep 'replication.*failed' /var/log/pve/replicate` run during an
+      # investigation paged for a replication fault that did not exist. Those
+      # audit lines are logged in unit=session-<id>.scope, so every broad rule
+      # in this file now excludes that unit by LABEL MATCHER:
+      #     unit!~"grafana-server.service|loki.service|alloy.service|session-.*\.scope"
+      # That replaces the `!= "COMMAND="` line filter added under pressure
+      # earlier today: the free-text filter only matched audit lines that still
+      # carried the literal COMMAND= string (the journal truncates the message
+      # on some paths) while being able to hide a genuine match that happened
+      # to contain it. A unit label matcher can do neither.
       # ---------------------------------------------------------------------
 
       - uid: log_oom_kill
@@ -1814,7 +1970,7 @@ groups:
               # host!~"tc-.*" excludes the disposable tanium_clients test
               # fleet -- see the matching exclusion + rationale on the
               # host_down rule earlier in this file.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "Out of memory|invoked oom-killer" != "COMMAND=" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service|session-.*\\.scope", host!~"tc-.*"} |~ "Out of memory|invoked oom-killer" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -1880,7 +2036,7 @@ groups:
               # host!~"tc-.*" excludes the disposable tanium_clients test
               # fleet -- see the matching exclusion + rationale on the
               # host_down rule earlier in this file.
-              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "Start request repeated too quickly|Failed to start" != "COMMAND=" [10m]))'
+              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service|session-.*\\.scope", host!~"tc-.*"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -2005,7 +2161,7 @@ groups:
               # host!~"tc-.*" excludes the disposable tanium_clients test
               # fleet -- see the matching exclusion + rationale on the
               # host_down rule earlier in this file.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service", host!~"tc-.*"} |~ "I/O error|EXT4-fs error|Buffer I/O error|Medium error|blk_update_request" != "COMMAND=" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service|session-.*\\.scope", host!~"tc-.*"} |~ "I/O error|EXT4-fs error|Buffer I/O error|Medium error|blk_update_request" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -2062,7 +2218,7 @@ groups:
               # Track postfix logging deferred or bounced messages on mail-01.
               # Catches "iCloud SMTP not authenticating", "queue piling up",
               # "rate limit hit" — anything that prevents alert email delivery.
-              expr: 'sum (count_over_time({job="systemd-journal", host="mail-01"} |~ "postfix.*status=(deferred|bounced)" [10m]))'
+              expr: 'sum (count_over_time({job="systemd-journal", host="mail-01", unit!~"session-.*\\.scope"} |~ "postfix.*status=(deferred|bounced)" [10m]))'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -2421,7 +2577,24 @@ groups:
                 type: prometheus
                 uid: victoriametrics
               editorMode: code
-              expr: time() - max by (instance) (pve_replication_last_sync_timestamp_seconds)
+              # max by (instance) was the bug in the original (2026-10-21)
+              # version: it reports the NEWEST successful sync across ALL jobs
+              # on the node, so one stalled job hides behind ~15 healthy ones
+              # forever. Replication is per (instance, id) -- pve_exporter's
+              # `id` label is the job id, e.g. 101-0 -- so age is computed per
+              # job and a single stuck one now surfaces on its own.
+              # Verified against the 2026-10-20/21 pve03 wedge window
+              # (17:00Z-15:40Z): every job's age peaked at 1200s, i.e. exactly
+              # its 20-minute schedule, and pve_replication_failed_syncs stayed
+              # at 0 -- replication genuinely never stalled, so staying silent
+              # was the CORRECT outcome for that incident. What that window did
+              # expose is a different gap: pve_exporter could not scrape pve03
+              # for ~46% of it (up{job="pve_exporter",instance="pve03"} == 0 in
+              # 126 of 273 samples), and while the scrape is missing this rule
+              # has no series to age at all (NoData -> OK). That is a scrape
+              # config problem on vm-01, not something a threshold here can fix;
+              # node_procs_blocked_high is the rule that DID see that wedge.
+              expr: time() - max by (instance, id) (pve_replication_last_sync_timestamp_seconds)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -2455,8 +2628,8 @@ groups:
         execErrState: Error
         for: 10m
         annotations:
-          summary: "no successful pve replication on {{ '{{' }} $labels.instance {{ '}}' }} for over an hour"
-          description: "The newest successful sync on {{ '{{' }} $labels.instance {{ '}}' }} is older than an hour (value is the age in seconds). Check `pvesr status` there and `systemctl status pvescheduler`; a job that silently stops is worse than one that fails, because nothing in the logs mentions it."
+          summary: "pve replication job {{ '{{' }} $labels.id {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} has not synced for over an hour"
+          description: "Replication job {{ '{{' }} $labels.id {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} has not had a successful sync for over an hour (value is the age in seconds; the schedule is 20 minutes, so this is 3+ missed cycles). Check `pvesr status` there and `systemctl status pvescheduler`; a job that silently stops is worse than one that fails, because nothing in the logs mentions it. Note this rule can only see a job while pve_exporter can still scrape the node -- if the node is unreachable the scrape has no data and neither does this rule (`up{job=\"pve_exporter\"}` covers that)."
         labels:
           severity: warning
         isPaused: false
@@ -2493,7 +2666,7 @@ groups:
               # itself is emitted as "non-primary component ... will NOT
               # provide any services" / "received write while not quorate"
               # -- those remain matched here.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+"} |~ "(?i)not quorate|non-primary component|quorum lost" != "COMMAND=" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", host=~"pve0.+", unit!~"session-.*\\.scope"} |~ "(?i)not quorate|non-primary component|quorum lost" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -2550,7 +2723,7 @@ groups:
               # See the "Range query (NOT instant)" comment on log_oom_kill
               # for why this can't be instant:true with multiple
               # simultaneous host series.
-              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service"} |~ "FATAL:|PANIC:" |~ "postgres" != "COMMAND=" [5m]))'
+              expr: 'sum by (host) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service|session-.*\\.scope"} |~ "FATAL:|PANIC:" |~ "postgres" [5m]))'
               instant: false
               range: true
               intervalMs: 1000
@@ -2978,6 +3151,76 @@ groups:
           description: "At least one nightly vzdump run on {{ '{{' }} $labels.host {{ '}}' }} logged 'Backup job finished with errors' in the last 26 hours. One bad vmid in a job's list is enough to error the run while the rest still back up (verified 2026-10-03: a nonexistent vmid fails only its own entry -- the other guests in the same run complete normally). Check the newest task log: `pvesh get /nodes/{{ '{{' }} $labels.host {{ '}}' }}/tasks --typefilter vzdump` then read its log for the failing vmid and message (storage full, guest locked, vmid typo). Note: this covers EXECUTION failures; job-coverage drift is the separate guest_backup_missing rule."
         labels:
           severity: warning
+        isPaused: false
+
+      # 2026-10-21: two unmanaged duplicate guests ran on this cluster and
+      # NOTHING alerted -- a container double-started on two nodes with the
+      # same MACs and IPs for 22 hours (split brain), and VM ts-01 running on
+      # pve01, which has no config for it, while the real ts-01 ran on pve02
+      # for 8 days with its NIC counters at zero. Every other rule in this file
+      # trusts Proxmox's own view of the world, and Proxmox did not know those
+      # processes existed: `pct list` / `qm list` only list guests registered in
+      # THAT node's config, so a leftover lxc-start / kvm from an interrupted
+      # migration or a hand-started copy is invisible to it.
+      #
+      # roles/proxmox_common installs a 5-minute systemd timer on every PVE node
+      # (orphan-guest-check.sh) that compares the managed VMID list against the
+      # live guest-process table and writes this metric into the textfile
+      # directory Alloy already scrapes there. A series only EXISTS while a
+      # mismatch is present, so no data = healthy, any series = at least one
+      # guest process is running for a vmid the node does not manage.
+      - uid: orphan_guests
+        title: Guest running outside Proxmox (orphan)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: orphan_guests
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "{{ '{{' }} $labels.kind {{ '}}' }} {{ '{{' }} $labels.vmid {{ '}}' }} is running on {{ '{{' }} $labels.node {{ '}}' }} outside Proxmox"
+          description: "{{ '{{' }} $labels.node {{ '}}' }} has a {{ '{{' }} $labels.kind {{ '}}' }} process for vmid {{ '{{' }} $labels.vmid {{ '}}' }} but its own `pct list` / `qm list` does not manage that guest: a duplicate or split-brain guest. This is exactly what went unseen on 2026-10-21 (a container running on two nodes at once for 22h, and ts-01 running on pve01 while the real one ran on pve02 for 8 days). Do NOT just kill it: `pct stop`/`qm stop` acts on the guest Proxmox knows about, which may be the WRONG copy. Compare `pct list` + `ps -eo args= | grep -E 'lxc-start|/usr/bin/kvm'` on {{ '{{' }} $labels.node {{ '}}' }}, check which copy owns the guest's IPs/MACs (and whether another node still runs it), then stop whichever copy is not backed by the authoritative config. Journal marker from the detector: ORPHAN-GUEST vmid=<n> kind=<ct|vm> node=<node>."
+        labels:
+          severity: critical
         isPaused: false
 
       - uid: zfs_pool_not_online

@@ -1,0 +1,6 @@
+---
+- name: Restart orphan-guest-check timer
+  ansible.builtin.systemd:
+    name: orphan-guest-check.timer
+    state: restarted
+    daemon_reload: true

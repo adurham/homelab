@@ -1,9 +1,10 @@
 ---
 # Re-apply JUST roles/proxmox_common (hosts-file entries, repo config,
-# base packages, squid/rpcbind purge, overlay module, aliases.db repair)
-# without deploy_proxmox.yml's proxmox_network play, which re-renders
-# /etc/network/interfaces on all three nodes -- the blast radius that
-# silently dropped vmbr0.21 on 2026-09-11 (see docs/ipam.md).
+# base packages, squid/rpcbind purge, overlay module, aliases.db repair,
+# orphan-guest detector script+timer) without deploy_proxmox.yml's
+# proxmox_network play, which re-renders /etc/network/interfaces on all three
+# nodes -- the blast radius that silently dropped vmbr0.21 on 2026-09-11 (see
+# docs/ipam.md).
 #
 # gather_facts: true REQUIRED -- proxmox_common's apt_repository task
 # interpolates ansible_facts['distribution_release'] (verified: fails

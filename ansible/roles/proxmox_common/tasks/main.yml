@@ -90,3 +90,65 @@
   ansible.builtin.command: newaliases
   when: not pve_aliases_db.stat.exists
   changed_when: true
+
+# ----- Orphan guest detector -----
+# The 2026-10-21 gap this closes: two unmanaged duplicate guests were running
+# on the cluster and NOTHING alerted -- a container double-started on two
+# nodes with the same MACs/IPs for 22h, and VM 'ts-01' running on pve01 while
+# the real one ran on pve02 (its NIC counters at zero). `pct list`/`qm list`
+# only know guests registered in THAT node's config, so a leftover lxc-start or
+# /usr/bin/kvm is invisible to Proxmox. This timer compares the two views every
+# 5 minutes, journals an ORPHAN-GUEST marker and exports an
+# orphan_guests{node,vmid,kind} textfile metric that the `orphan_guests` Grafana
+# rule (critical) watches. See files/orphan-guest-check.sh for the full writeup.
+
+- name: Ensure orphan-guest textfile output directory exists
+  ansible.builtin.file:
+    path: "{{ proxmox_common_orphan_guest_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install orphan guest detector script
+  ansible.builtin.copy:
+    src: orphan-guest-check.sh
+    dest: /usr/local/bin/orphan-guest-check.sh
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart orphan-guest-check timer
+
+- name: Install orphan guest detector systemd service
+  ansible.builtin.template:
+    src: orphan-guest-check.service.j2
+    dest: /etc/systemd/system/orphan-guest-check.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart orphan-guest-check timer
+
+- name: Install orphan guest detector systemd timer
+  ansible.builtin.template:
+    src: orphan-guest-check.timer.j2
+    dest: /etc/systemd/system/orphan-guest-check.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart orphan-guest-check timer
+
+- name: Flush handlers so the timer picks up a fresh script/unit before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Start and enable orphan guest detector timer
+  ansible.builtin.systemd:
+    name: orphan-guest-check.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Run one orphan scan immediately so the textfile exists before the first timer tick
+  ansible.builtin.systemd:
+    name: orphan-guest-check.service
+    state: started
+  changed_when: false
