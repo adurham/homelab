@@ -100,6 +100,38 @@ hosts as unneeded attack surface:
 Tightening pve host firewall further is a deferred plan — see
 `#5 plan` in tonight's audit conversation.
 
+### Home Assistant API tokens — OIDC account, one token per consumer (2026-10-21)
+
+HA long-lived tokens are minted against the **`Adam Durham` user (the
+Authentik/OIDC account), never the local `root` user** — owner's rule. Each
+consumer gets its own named token so it can be revoked alone in
+Settings → Security:
+
+| Token name | Used by | Stored in |
+| :--- | :--- | :--- |
+| `victoriametrics-scrape` | VM scrape of `/api/prometheus` | vault var `homeassistant_token` |
+| `hermes-gateway` | hermes gateway `.env` + both log shippers on adblock-proxy-01 | vault var `vault_hermes_gw_hass_token` |
+| `hermes-agent` | the owner's MacBook `~/.hermes/.env` | local `.env` only |
+
+Creation path: HA only mints long-lived tokens over its WebSocket API for the
+authenticated user, and the OIDC login needs a browser. `auth/long_lived_access_token`
+can be reached without a browser by authenticating with a 30-minute access token
+for that same user — an HS256 JWT whose `iss` is one of the user's refresh-token
+ids and whose key is that entry's `jwt_key` in `/config/.storage/auth`. HA then
+creates and stores the long-lived entry itself; nothing is hand-edited in
+`.storage`.
+
+**IP banning stays enabled, with no exemption for the SDN.** It is real
+brute-force protection — but note the failure mode: a stale token makes every
+failed request count, HA bans the source, and once banned EVERY request from
+that address gets `403: Forbidden` regardless of token validity. Because the
+private subnet egresses through `tailscale-gw` (`192.168.86.16`), one banned
+address takes the whole SDN out of Home Assistant. On 2026-10-21 three
+consumers still held tokens whose refresh entry was deleted in the 10-18
+rotation (`iss 9e28d1a2…`), which is what produced the 10-18 ban of `.16` and
+the 10-20 ban of the owner's wired MacBook (`.45`). Both bans were cleared
+(backup `ip_bans.yaml.bak-*`) and all three consumers moved to the tokens above.
+
 ### Root SSH on the PVE nodes — break-glass only (2026-10-21)
 
 Root SSH to pve01/02/03 is deliberately available and deliberately narrow:
