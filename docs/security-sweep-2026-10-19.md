@@ -421,3 +421,27 @@ State left behind, deliberately:
 The script (`ansible/files/convert_tailscale_gw_unprivileged.sh`) carries the
 corrected procedure and the gates used above.
 
+
+### Mac Studios application firewall (2026-10-20, evening)
+
+Both studios had the macOS application firewall **off** (sweep 1 noted it and left
+it alone because a live exo session was running). Now **enabled on both**, with
+`/Users/adam.durham/repos/exo/.venv/bin/python` in the allow list so the cluster
+API and the vm-01 scrape keep working — verified after the change: API 200 on
+52415 from the LAN and the tailnet, `up{job="exo"}` = 1 on both nodes, ssh
+unaffected, `exorun` screens still running. Stealth mode deliberately left off
+(it would break ping-based liveness checks).
+
+Remote sudo on the studios: they use plain macOS sudo, not the homelab's
+YubiKey/pam_ssh_agent gate, so the agent had no privileged path at all. Added
+`/etc/sudoers.d/hermes-firewall` (repo: `macos/sudoers.d/hermes-firewall`) with
+exact-argument NOPASSWD entries for the socketfilterfw **status** commands and
+`--setglobalstate on` only — same convention as the existing
+`exo-cluster-relaunch` rule. `--setglobalstate off` and `--add` are deliberately
+absent, so disabling the firewall or whitelisting new binaries stays a human act.
+
+Two lessons from doing it the hard way: a long sudoers line pasted into a chat
+hard-wraps and leaves sudo **unparseable for every user** (that happened, and
+recovering it needed root — `dsenableroot` was the only SSH-reachable path);
+and always install such files from a staged copy (`sudo install -m 0440`), never
+by paste.
