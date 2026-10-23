@@ -1,0 +1,17 @@
+table ip ps5forge {
+  chain prerouting {
+    type nat hook prerouting priority dstnat; policy accept;
+    ip saddr {{ ps5forge_console_ip }} tcp dport 443 redirect to :443
+    ip saddr {{ ps5forge_console_ip }} tcp dport 80 redirect to :3128
+    ip saddr {{ ps5forge_console_ip }} udp dport 53 redirect to :53
+    ip saddr {{ ps5forge_console_ip }} tcp dport 53 redirect to :53
+  }
+  chain postrouting {
+    type nat hook postrouting priority srcnat; policy accept;
+    oifname "{{ ps5forge_lan_if }}" ip saddr {{ ps5forge_console_ip }} masquerade
+  }
+  chain forward {
+    type filter hook forward priority filter; policy accept;
+    ip saddr {{ ps5forge_console_ip }} udp dport 443 drop
+  }
+}

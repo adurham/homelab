@@ -1,0 +1,36 @@
+{
+ "_comment": "{{ ps5forge_role }}: overrides served by the terminator. Last-Modified per document is the acceptance oracle -- a client that stored our copy echoes it as If-Modified-Since.",
+ "always": {
+  {% if ps5forge_role == 'rig' %}
+  "status.playstation.com": {
+   "location": "{{ ps5forge_door_url }}",
+   "status": 302
+  },
+  "fus01.ps5.update.playstation.net": {
+   "status": 200,
+   "type": "text/xml; charset=utf-8",
+   "file": "run/ov/noupdate_wellformed.xml"
+  }
+  {% endif %}
+ },
+ "probes": {
+  {% if ps5forge_role == 'rig' %}
+  "ps5cel.np.dl.playstation.net": {
+   "rules": [
+    {
+     "path": "hid_config.xml",
+     "file": "run/probes/hid_config_ps4.env",
+     "type": "application/octet-stream",
+     "last_modified": "Sat, 20 Jun 2026 12:30:01 GMT"
+    },
+    {
+     "path": "hid_config_notification_list.xml",
+     "file": "run/probes/notif_plain.xml",
+     "type": "text/xml",
+     "last_modified": "Sat, 20 Jun 2026 12:00:00 GMT"
+    }
+   ]
+  }
+  {% endif %}
+ }
+}

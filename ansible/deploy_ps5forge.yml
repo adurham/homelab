@@ -1,0 +1,95 @@
+---
+# deploy_ps5forge.yml -- build and converge the two interception VMs.
+#
+#   240 ps5forge-rig      DNS + transparent terminator + CONNECT proxy, overrides armed,
+#                        nft rules keyed on the console. 192.168.86.55 / 172.16.0.78
+#   241 mitm-generic     same stack, no rewrites, services installed but stopped.
+#                        192.168.86.56 / 172.16.0.79
+#
+# The cloud image and the console-specific documents are staged on the Proxmox host by the
+# first play; the role copies the scripts and certs from the control machine.
+- name: Ensure the interception VMs exist
+  hosts: pve02
+  gather_facts: false
+  vars:
+    ps5forge_vms:
+      - vmid: 240
+        name: ps5forge-rig
+        ip: 192.168.86.55
+        lab_ip: 172.16.0.78
+        role: rig
+      - vmid: 241
+        name: mitm-generic
+        ip: 192.168.86.56
+        lab_ip: 172.16.0.79
+        role: generic
+    cloud_image: /var/lib/vz/template/iso/debian-12-genericcloud-amd64.qcow2
+    ssh_keys_file: /tmp/rig_keys.pub
+  tasks:
+    - name: Check which VMs already exist
+      ansible.builtin.command: qm status {{ item.vmid }}
+      loop: "{{ ps5forge_vms }}"
+      register: qm_status
+      failed_when: false
+      changed_when: false
+
+    - name: Create the missing VMs
+      ansible.builtin.command: >-
+        qm create {{ item.item.vmid }} --name {{ item.item.name }} --memory 2048 --cores 2
+        --ostype l26 --scsihw virtio-scsi-single --agent enabled=1
+        --net0 virtio,bridge=vmbr0 --net1 virtio,bridge=private --serial0 socket
+      loop: "{{ qm_status.results }}"
+      when: item.rc != 0
+      changed_when: true
+
+    - name: Import the cloud image
+      ansible.builtin.command: qm importdisk {{ item.item.vmid }} {{ cloud_image }} local-lvm
+      loop: "{{ qm_status.results }}"
+      when: item.rc != 0
+      changed_when: true
+
+    - name: Configure disk, cloud-init and addressing
+      ansible.builtin.command: >-
+        qm set {{ item.item.vmid }}
+        --scsi0 local-lvm:vm-{{ item.item.vmid }}-disk-0 --boot order=scsi0
+        --ide2 local-lvm:cloudinit
+        --ciuser root --sshkeys {{ ssh_keys_file }}
+        --ipconfig0 ip={{ item.item.ip }}/24,gw=192.168.86.1
+        --ipconfig1 ip={{ item.item.lab_ip }}/24
+      loop: "{{ qm_status.results }}"
+      when: item.rc != 0
+      changed_when: true
+
+    - name: Grow the disk
+      ansible.builtin.command: qm resize {{ item.item.vmid }} scsi0 16G
+      loop: "{{ qm_status.results }}"
+      when: item.rc != 0
+      changed_when: true
+
+    - name: Start the VMs
+      ansible.builtin.command: qm start {{ item.vmid }}
+      loop: "{{ ps5forge_vms }}"
+      failed_when: false
+      changed_when: true
+
+    - name: Wait for SSH on both
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: 22
+        delay: 5
+        timeout: 180
+      loop: "{{ ps5forge_vms }}"
+
+    - name: Add them to the in-memory inventory
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        ansible_host: "{{ item.ip }}"
+        ps5forge_role: "{{ item.role }}"
+        groups: ps5forge
+      loop: "{{ ps5forge_vms }}"
+
+- name: Converge the interception stack
+  hosts: ps5forge
+  gather_facts: true
+  roles:
+    - ps5forge

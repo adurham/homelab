@@ -1,0 +1,111 @@
+---
+- name: Validate the requested flavour
+  ansible.builtin.assert:
+    that:
+      - ps5forge_role in ['rig', 'generic']
+    fail_msg: "ps5forge_role must be 'rig' or 'generic' (got '{{ ps5forge_role }}')"
+
+- name: Install the runtime
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-cryptography
+      - openssl
+      - nftables
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the tree
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ps5forge_base }}"
+    - "{{ ps5forge_base }}/ov"
+    - "{{ ps5forge_base }}/certs"
+    - "{{ ps5forge_base }}/run"
+    - "{{ ps5forge_base }}/run/ov"
+    - "{{ ps5forge_base }}/run/captures"
+    - "{{ ps5forge_base }}/run/probes"
+
+- name: Copy the interception scripts
+  ansible.builtin.copy:
+    src: "{{ ps5forge_src }}/{{ item }}"
+    dest: "{{ ps5forge_base }}/"
+    mode: "0644"
+  loop:
+    - pocs/tls/transparent_443.py
+    - pocs/tls/mitm_forge.py
+    - dns/forge_dns.py
+
+- name: Copy the forged-chain material
+  ansible.builtin.copy:
+    src: "{{ ps5forge_src }}/pocs/tls/certs/"
+    dest: "{{ ps5forge_base }}/certs/"
+    mode: "0600"
+    directory_mode: "0755"
+
+- name: Install the DNS rewrite table
+  ansible.builtin.template:
+    src: rewrite.json.j2
+    dest: "{{ ps5forge_base }}/ov/rewrite.json"
+    mode: "0644"
+
+- name: Install the override table
+  ansible.builtin.template:
+    src: ov.json.j2
+    dest: "{{ ps5forge_base }}/run/ov/ov.json"
+    mode: "0644"
+
+- name: Forwarding sysctl
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-ps5forge.conf
+    mode: "0644"
+    content: |
+      net.ipv4.ip_forward=1
+      net.ipv4.conf.all.send_redirects=0
+  notify: Reload sysctl
+
+- name: Install the service units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - ps5forge-dns.service
+    - ps5forge-tls.service
+    - ps5forge-proxy.service
+  notify: Reload systemd
+
+- name: Install the packet path
+  ansible.builtin.template:
+    src: ps5forge.nft.j2
+    dest: /etc/nftables.d/ps5forge.nft
+    mode: "0644"
+  notify: Reload nftables
+
+- name: Apply the packet path now
+  ansible.builtin.command: nft -f /etc/nftables.d/ps5forge.nft
+  changed_when: false
+
+- name: Enable the stack
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+  loop:
+    - ps5forge-dns.service
+    - ps5forge-tls.service
+    - ps5forge-proxy.service
+  notify: Reload systemd
+
+- name: Run the stack (rig) or leave it stopped (generic)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: "{{ 'started' if ps5forge_role == 'rig' else 'stopped' }}"
+  loop:
+    - ps5forge-dns.service
+    - ps5forge-tls.service
+    - ps5forge-proxy.service

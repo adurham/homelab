@@ -1,0 +1,14 @@
+[Unit]
+Description=ps5forge DNS (rewrites + logging)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ ps5forge_base }}
+ExecStart=/usr/bin/python3 {{ ps5forge_base }}/forge_dns.py --port 53 --bind 0.0.0.0 --upstream {{ ps5forge_upstream_dns }} --log {{ ps5forge_base }}/run/queries.log --rewrite {{ ps5forge_base }}/ov/rewrite.json
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

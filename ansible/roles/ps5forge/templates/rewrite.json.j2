@@ -1,0 +1,11 @@
+{
+ "_comment": "{{ ps5forge_role }}: every name forwards upstream{% if ps5forge_role == 'rig' %}; the console's HID host is answered locally{% else %}; nothing is answered locally{% endif %}.",
+ {% if ps5forge_role == 'rig' %}
+ "ps5cel.np.dl.playstation.net": "{{ ansible_host }}",
+ "ps5cel.np.dl": "{{ ansible_host }}",
+ "redircanary.ps5probe.invalid": "{{ ansible_host }}",
+ "dtdcanary.ps5probe.invalid": "{{ ansible_host }}"
+ {% else %}
+ "_example": "add \"hostname\": \"{{ ansible_host }}\" to answer a name locally"
+ {% endif %}
+}

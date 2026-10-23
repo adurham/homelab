@@ -1,0 +1,12 @@
+---
+- name: Reload sysctl
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/90-ps5forge.conf
+  changed_when: false
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Reload nftables
+  ansible.builtin.command: nft -f /etc/nftables.d/ps5forge.nft
+  changed_when: false

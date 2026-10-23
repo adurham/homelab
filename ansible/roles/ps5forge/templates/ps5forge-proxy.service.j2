@@ -1,0 +1,15 @@
+[Unit]
+Description=ps5forge CONNECT proxy (:3128)
+After=network-online.target ps5forge-tls.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ ps5forge_base }}
+Environment=PROBES={{ ps5forge_probes }}
+ExecStart=/usr/bin/python3 {{ ps5forge_base }}/mitm_forge.py --port 3128 --bind 0.0.0.0 --override {{ ps5forge_base }}/run/ov/ov.json --include-root --no-crl-deny
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

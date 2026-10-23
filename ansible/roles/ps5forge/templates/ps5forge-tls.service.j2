@@ -1,0 +1,15 @@
+[Unit]
+Description=ps5forge transparent :443 terminator (forged chain)
+After=network-online.target ps5forge-dns.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ ps5forge_base }}
+Environment=PROBES={{ ps5forge_probes }}
+ExecStart=/usr/bin/python3 {{ ps5forge_base }}/transparent_443.py 0.0.0.0
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

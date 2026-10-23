@@ -1,0 +1,17 @@
+---
+# ps5forge -- Sony-console interception hosts.
+#
+# Two flavours, same stack:
+#   role: rig      DNS rewrites + transparent :443 terminator + CONNECT proxy, with the
+#                  console-specific overrides armed and nft redirect rules for the console.
+#   role: generic  identical stack with no rewrites and no overrides; services installed
+#                  and enabled but STOPPED, ready to be activated for any other target.
+ps5forge_role: rig
+ps5forge_base: /opt/ps5forge
+ps5forge_src: /Users/adam.durham/ps5-loader
+ps5forge_lan_if: eth0
+ps5forge_lab_if: eth1
+ps5forge_console_ip: 192.168.86.32
+ps5forge_upstream_dns: 192.168.86.1
+ps5forge_probes: 1
+ps5forge_door_url: http://192.168.86.45:8080/
