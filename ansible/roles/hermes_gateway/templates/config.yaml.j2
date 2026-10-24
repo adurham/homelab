@@ -595,6 +595,17 @@ plugins:
     # Ollama Cloud Web Search Plugin (machine-root profile)" for why.
     - web-ollama-cloud
     - claude-subscription-directsdk-experimental
+    # Home Assistant: core shipped the platform adapter AND the four ha_*
+    # tools until upstream v0.22.5 (2026-10-23) moved both into the official
+    # `homeassistant` plugin; the tree keeps only an empty
+    # plugins/platforms/homeassistant placeholder. Without this entry a
+    # converge drops the plugin from plugins.enabled, the gateway loads two
+    # platforms instead of three (no HA adapter — the stale row in
+    # gateway_state.json hides it), and the `homeassistant` toolset that
+    # platform_toolsets.discord below still lists stops resolving ("unknown
+    # toolset 'homeassistant'"). See tasks/main.yml "Install/Enable Home
+    # Assistant Plugin".
+    - homeassistant
   disabled: []
 
 # Persistent remote backend (`hermes serve`, systemd unit

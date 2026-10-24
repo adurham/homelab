@@ -659,6 +659,38 @@
     mode: '0600'
   notify: Restart Hermes Gateway
 
+# Home Assistant moved out of core in upstream v0.22.5 (2026-10-23): the
+# gateway's `homeassistant` platform adapter AND the four ha_* tools now ship
+# in the official catalog plugin, and the tree keeps only an empty
+# plugins/platforms/homeassistant placeholder. An install that does not enable
+# this plugin silently serves TWO platforms (discord + api_server): the HA
+# adapter never starts, and the `homeassistant` toolset named by
+# platform_toolsets.discord stops resolving (config check: "platform 'discord'
+# references unknown toolset 'homeassistant'"). Enabling it restores both —
+# HASS_URL/HASS_TOKEN already come from env.j2 and the plugin's
+# requires_hermes (>=0.21.5) is satisfied. `creates:` keeps the install
+# idempotent; enable stays unconditional with changed_when: false (the plugin's
+# own dependency sync runs on every enable), mirroring the directsdk pair.
+- name: Install Home Assistant Plugin (machine-root profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes plugins install homeassistant
+    creates: /home/hermes/.hermes/plugins/homeassistant
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+
+- name: Enable Home Assistant Plugin (machine-root profile)
+  ansible.builtin.command:
+    cmd: /opt/hermes-agent/venv/bin/hermes plugins enable homeassistant
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  register: hermes_homeassistant_enable_root
+  changed_when: false
+  notify: Restart Hermes Gateway
+
 # Backs hermes_gateway_main_provider: claude-subscription-directsdk-experimental
 # (defaults/main.yml, default as of 2026-09-26) — installs the official
 # plugin (github.com/NousResearch/hermes-plugin-claude-subscription-directsdk)
