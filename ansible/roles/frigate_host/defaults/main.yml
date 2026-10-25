@@ -48,10 +48,20 @@ frigate_base_dir: /opt/frigate
 frigate_cameras:
   cat_room: "Cat Room"
   foyer: "Foyer"
-  basement: "Basement"
+  # basement: "Basement"   # DISABLED 2026-10-24 — see note below
   driveway: "Driveway"
   backyard: "Backyard"
   front_porch: "Front Porch"
+# The Basement Camera is OFFLINE IN GOOGLE'S CLOUD, not misconfigured here:
+# SDM GenerateWebRtcStream for its device_id returns FAILED_PRECONDITION "The
+# camera is not available for streaming", while the other cameras answer
+# normally. go2rtc therefore 404s/400s that one stream every ~5 s forever,
+# which drives frigate.capture memory growth until the 12g cgroup OOM-kills
+# it (measured 2026-10-24: kills at 12:18Z and 18:49Z, RSS ~10.4 GB each, ~6.5 h
+# apart; basement had been 404ing since 2026-10-23 21:42Z). A container restart
+# does NOT clear it — the fault is on the device side. Re-enable this line (and
+# the CAMS entry in keepalive.sh.j2) once the camera is physically back on
+# power/Wi-Fi and Google Home shows it streaming again.
 # SDM device IDs per stream name (from GET enterprises/<project>/devices).
 nest_camera_ids:
   cat_room: "AVPHwEugLnM10nHJPNtx9QPddhEtup_wvq3nZVErtRs50C29zePNzFbFQqY20_k5hhz72csTDSYhFO_8YQPel1alW9rM9w"
