@@ -555,7 +555,14 @@ groups:
                 type: prometheus
                 uid: victoriametrics
               editorMode: code
-              expr: changes(amd_workstation_boot_time_seconds[30m])
+              # `changes(...[30m])` FALSE-FIRED on scrape gaps: VictoriaMetrics
+              # counts the sample on either side of a gap as a change, so every
+              # ~10 min tailnet outage on the box produced a "rebooted" alert
+              # even though boot_time never moved (confirmed 2026-10-25: two
+              # alerts at 14:21Z and 15:33Z, value constant at 1792510115).
+              # Compare against wall clock instead -- gap-immune, still fires
+              # for exactly 15 min after any real boot.
+              expr: (time() - amd_workstation_boot_time_seconds) < 900
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
