@@ -31,3 +31,8 @@ rclone copy "$DEST" "vmbackup_crypt:{{ ha_backup_gdrive_subdir }}/" --transfers 
 find "$DEST" -name '*.tar' -type f -mtime +"$KEEP" -delete
 rclone delete "vmbackup_crypt:{{ ha_backup_gdrive_subdir }}/" --min-age "${KEEP}d" --rmdirs >/dev/null 2>&1 || true
 echo "ha-backup-push: done $(date -Is) local=$(ls -1 "$DEST"/*.tar 2>/dev/null | wc -l) files"
+
+# Liveness for alerting: record that this run finished, so a dead timer or a
+# silent failure is visible instead of assumed. (Grafana: see "backup push" rules.)
+curl -fsS -m 10 -X POST "http://172.16.0.42:8428/api/v1/import/prometheus" \
+  --data-binary "ha_backup_push_last_success_timestamp_seconds $(date +%s)"$'\n' >/dev/null 2>&1 || echo "warn: metric push failed" >&2

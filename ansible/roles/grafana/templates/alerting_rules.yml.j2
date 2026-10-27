@@ -3347,6 +3347,124 @@ groups:
       # directory Alloy already scrapes there. A series only EXISTS while a
       # mismatch is present, so no data = healthy, any series = at least one
       # guest process is running for a vmid the node does not manage.
+      # Off-site push liveness (added 2026-10-27 with the two push pipelines).
+      # The push scripts write a success timestamp whenever a run completes, so
+      # a dead timer, a revoked OAuth token, or a full/expired Drive remote
+      # surfaces here instead of being discovered the next time a restore is
+      # needed. `absent()` covers the case where the metric never arrives at
+      # all (script never ran / was never deployed).
+      - uid: offsite_backup_ha_stale
+        title: Home Assistant off-site backup push has not succeeded
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # Daily timer (06:15 America/Chicago) on hermes-gw-01. 2 days of
+              # slack absorbs a missed run plus a long upload.
+              expr: '(time() - max(ha_backup_push_last_success_timestamp_seconds)) > bool 172800 or absent(ha_backup_push_last_success_timestamp_seconds)'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 30m
+        annotations:
+          summary: "Home Assistant backups have not reached Google Drive for over 2 days"
+          description: "The last successful ha-backup-push run is older than 2 days (or the metric is missing). On hermes-gw-01: `systemctl status ha-backup-push.timer`, `journalctl -u ha-backup-push.service -n 50`, then run it by hand with `systemctl start ha-backup-push.service`. Common causes: HAOS SSH key rejected, rclone OAuth token expired, or /backup on the HA box full."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: offsite_backup_pve_stale
+        title: Proxmox off-site backup push has not succeeded
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              # Weekly timer (Saturday 05:00 America/Chicago) on pve01; 9 days
+              # gives one full missed cycle before it pages.
+              expr: '(time() - max(pve_backup_push_last_success_timestamp_seconds)) > bool 777600 or absent(pve_backup_push_last_success_timestamp_seconds)'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 6h
+        annotations:
+          summary: "Proxmox archives have not reached Google Drive for over 9 days"
+          description: "The last successful pve-backup-push run is older than 9 days (or the metric is missing). On pve01: `systemctl status pve-backup-push.timer`, `journalctl -u pve-backup-push.service -n 50`, `du -sh /nvme-pool/pve-backup-stage`, `rclone size vmbackup_crypt:pve`. Common causes: staging pool full, rclone token expired, or a node unreachable over the cluster root keys."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: orphan_guests
         title: Guest running outside Proxmox (orphan)
         condition: C

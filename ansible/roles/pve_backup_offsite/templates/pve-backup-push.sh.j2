@@ -45,3 +45,8 @@ rclone copy "$STAGE" "vmbackup_crypt:{{ pve_backup_offsite_gdrive_subdir }}/" --
 find "$STAGE" -maxdepth 1 \( -name '*.tar.zst' -o -name '*.vma.zst' \) -type f -mtime +1 -delete
 rclone delete "vmbackup_crypt:{{ pve_backup_offsite_gdrive_subdir }}/" --min-age "${KEEP_DAYS}d" --rmdirs >/dev/null 2>&1 || true
 echo "pve-backup-push: done $(date -Is) staged=$(find "$STAGE" -maxdepth 1 \( -name '*.tar.zst' -o -name '*.vma.zst' \) | wc -l) files"
+
+# Liveness for alerting: record that this run finished, so a dead timer or a
+# silent failure is visible instead of assumed. (Grafana: see "backup push" rules.)
+curl -fsS -m 10 -X POST "http://172.16.0.42:8428/api/v1/import/prometheus" \
+  --data-binary "pve_backup_push_last_success_timestamp_seconds $(date +%s)"$'\n' >/dev/null 2>&1 || echo "warn: metric push failed" >&2
