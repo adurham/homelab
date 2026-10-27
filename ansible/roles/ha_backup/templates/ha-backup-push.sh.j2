@@ -1,0 +1,33 @@
+#!/bin/bash
+# Managed by Ansible — roles/ha_backup.
+# Pulls Home Assistant's own backup tarballs and pushes them, encrypted, to
+# Google Drive via the lab's rclone crypt remote.
+#
+# The HAOS SSH add-on has no rsync, so files are fetched individually with scp
+# and only when they are not already in the staging dir.
+set -euo pipefail
+DEST="{{ ha_backup_stage_dir }}"
+SRC="{{ ha_backup_haos_user }}@{{ ha_backup_haos_host }}"
+KEY="{{ ha_backup_key }}"
+PORT={{ ha_backup_haos_port }}
+KEEP={{ ha_backup_keep_days }}
+SSH_OPTS="-i $KEY -p $PORT -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+
+mkdir -p "$DEST"
+remote_list=$(ssh $SSH_OPTS "$SRC" 'ls -1 {{ ha_backup_remote_dir }}/*.tar 2>/dev/null || true')
+new=0; have=0
+for f in $remote_list; do
+  base=$(basename "$f")
+  if [ -f "$DEST/$base" ]; then have=$((have+1)); continue; fi
+  if scp -q -P "$PORT" -i "$KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$SRC:$f" "$DEST/"; then
+    new=$((new+1))
+  else
+    echo "ha-backup-push: scp failed for $base" >&2
+  fi
+done
+echo "ha-backup-push: fetched $new new, $have already present"
+
+rclone copy "$DEST" "vmbackup_crypt:{{ ha_backup_gdrive_subdir }}/" --transfers 2 --checkers 4 --stats-one-line 2>&1 | tail -2
+find "$DEST" -name '*.tar' -type f -mtime +"$KEEP" -delete
+rclone delete "vmbackup_crypt:{{ ha_backup_gdrive_subdir }}/" --min-age "${KEEP}d" --rmdirs >/dev/null 2>&1 || true
+echo "ha-backup-push: done $(date -Is) local=$(ls -1 "$DEST"/*.tar 2>/dev/null | wc -l) files"

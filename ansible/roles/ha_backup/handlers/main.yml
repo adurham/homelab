@@ -1,0 +1,7 @@
+---
+- name: Reload systemd and enable timer
+  ansible.builtin.systemd:
+    daemon_reload: true
+    name: ha-backup-push.timer
+    enabled: true
+    state: started

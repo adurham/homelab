@@ -1,0 +1,26 @@
+---
+# Pulls Home Assistant's own nightly backup tarballs off the HAOS SD card and
+# pushes them, encrypted, to the lab's Google Drive (same rclone crypt remote
+# the vm_backup role uses). No on-prem copy beyond a short-lived staging dir.
+#
+# Why: HA keeps 3 automatic backups (~1 GB each) on the same 28 GB SD card as
+# its config and recorder DB. A card failure takes the hub and every backup of
+# it together, so the copies have to leave the device.
+#
+# Trust: this role deploys a dedicated ed25519 key (ha_backup_private_key_dest)
+# which must be authorised in HAOS's /root/.ssh/authorized_keys (the Advanced
+# SSH add-on on port 2222). That authorisation is a one-time manual step, or
+# run once from a machine that already has access.
+ha_backup_haos_host: "192.168.86.2"
+ha_backup_haos_port: 2222
+ha_backup_haos_user: "root"
+ha_backup_remote_dir: "/backup"
+ha_backup_key: "/root/.ssh/ha_backup"
+ha_backup_stage_dir: "/var/backups/ha"
+# GDrive side: the crypt remote's root is the vm-backup tree, so this is
+# drive:vm-backup/ha (encrypted names, encrypted contents).
+ha_backup_gdrive_subdir: "ha"
+# Keep this many days on both the staging dir and in Drive. HA itself keeps 3.
+ha_backup_keep_days: 14
+ha_backup_schedule: "*-*-* 06:15:00 America/Chicago"
+ha_backup_rclone_conf: "/root/.config/rclone/rclone.conf"

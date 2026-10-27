@@ -1,0 +1,11 @@
+[Unit]
+Description=Push Home Assistant backups to encrypted Google Drive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ha-backup-push.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
