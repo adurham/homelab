@@ -1,5 +1,10 @@
 # Controlled NIC-failure test on a PVE node — runbook
 
+> **STATUS: HELD (2026-10-27).** The owner chose not to take any further
+> service impact right now. Do NOT run this test without an explicit go in
+> the session where it is to be executed — it reboots pve01 and forces an
+> HA failover round.
+
 **Why:** on 2026-10-27 pve01 lost its whole network path at 09:12:17, stayed alive
 for at least ~40 s, then reset itself. The evidence (witness probes all failing at
 once while survivors saw only pve01 down, `kernel.panic=0`, 10 s watchdog0,
