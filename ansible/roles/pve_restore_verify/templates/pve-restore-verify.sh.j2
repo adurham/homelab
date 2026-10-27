@@ -18,15 +18,33 @@ LOG="/var/log/pve-restore-verify.log"
 log() { echo "$(date -Is) $*" | tee -a "$LOG"; }
 push() { curl -fsS -m 10 -X POST "$METRICS" --data-binary "$1" >/dev/null 2>&1 || log "warn: metric push failed"; }
 
+cleanup_scratch() { [ -n "${arch:-}" ] && case "$arch" in "$SCRATCH"/*) rm -f "$arch" ;; esac; }
+trap cleanup_scratch EXIT
+
 fail() {
   log "FAIL: $*"
   push "pve_restore_verify_last_failure_timestamp_seconds $(date +%s)"
   exit 1
 }
 
-# Smallest archive keeps the drill cheap; any container proves the same path.
-arch=$(ls -1Sr "$DUMP"/*.tar.zst 2>/dev/null | head -1)
-[ -n "$arch" ] || fail "no LXC archives in $DUMP"
+# Two sources: `offsite` proves the whole chain (Drive -> decrypt -> restore ->
+# boot), `local` only proves the archive on the dump dir. Offsite is the
+# default because that is the copy nobody has ever tested.
+SCRATCH="{{ pve_restore_verify_scratch_dir }}"
+if [ "{{ pve_restore_verify_source }}" = "offsite" ]; then
+  mkdir -p "$SCRATCH"
+  # Smallest object on the crypt remote: cheapest download that still proves
+  # decryption and restore.
+  base=$(rclone lsl "{{ pve_restore_verify_remote }}" 2>/dev/null | awk 'NF>=4 && $1+0>0 {print $1" "$4}' | sort -n | head -1 | awk '{print $2}')
+  [ -n "$base" ] || fail "cannot list {{ pve_restore_verify_remote }} (rclone/OAuth/decryption problem)"
+  log "fetching $base from {{ pve_restore_verify_remote }}"
+  rclone copy "{{ pve_restore_verify_remote }}/$base" "$SCRATCH/" --transfers 1 >/tmp/pve-restore-verify.rclone 2>&1 \
+    || fail "rclone copy failed for $base"
+  arch="$SCRATCH/$base"
+else
+  arch=$(ls -1Sr "$DUMP"/*.tar.zst 2>/dev/null | head -1)
+fi
+[ -n "$arch" ] && [ -f "$arch" ] || fail "no LXC archive available (source={{ pve_restore_verify_source }})"
 
 if pct status "$VMID" >/dev/null 2>&1; then
   fail "VMID $VMID already exists — refusing to touch it"

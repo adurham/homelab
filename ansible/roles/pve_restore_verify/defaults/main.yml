@@ -8,4 +8,9 @@ pve_restore_verify_storage: "nvme-data"
 pve_restore_verify_vmid: 998
 pve_restore_verify_schedule: "*-*-01 04:30:00 America/Chicago"
 pve_restore_verify_boot_timeout_s: 180
+# `offsite` pulls the archive back from encrypted Drive (proves the full chain);
+# `local` just uses the dump dir.
+pve_restore_verify_source: "offsite"
+pve_restore_verify_remote: "vmbackup_crypt:pve"
+pve_restore_verify_scratch_dir: "/nvme-pool/restore-verify"
 pve_restore_verify_metrics_url: "http://172.16.0.42:8428/api/v1/import/prometheus"
