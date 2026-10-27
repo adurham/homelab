@@ -77,6 +77,17 @@ while true; do
     fi
   done <<<"$TARGETS"
 
+  # 1s-resolution carrier state. This is the discriminator between a physical link
+  # drop (cable / switch port / PHY) and the network stack or driver stalling with
+  # the link still up (e1000e hardware-unit-hang, ME reset). The 60s HB line alone
+  # cannot answer it: on 2026-10-27 pve01 the last HB said nic0=up and the reset
+  # beat the next sample, so the question was unanswerable after the fact.
+  c=$(cat /sys/class/net/nic0/carrier 2>/dev/null || echo '?')
+  if [ "${PREV[nic0carrier]:-unknown}" != "$c" ]; then
+    log "STATE nic0carrier=$c was=${PREV[nic0carrier]:-unknown}"
+    PREV[nic0carrier]="$c"
+  fi
+
   hb=$((hb + 1))
   if [ $((hb % 30)) -eq 0 ]; then
     nic=$(cat /sys/class/net/nic0/operstate 2>/dev/null || echo '?')
