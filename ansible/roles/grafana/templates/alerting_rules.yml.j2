@@ -3348,6 +3348,10 @@ groups:
       # mismatch is present, so no data = healthy, any series = at least one
       # guest process is running for a vmid the node does not manage.
       # Off-site push liveness (added 2026-10-27 with the two push pipelines).
+      # NOTE the max_over_time/absent_over_time form: these metrics are written
+      # once per run (daily/weekly/monthly), so a plain `max()` stops existing a
+      # few minutes after each push and `absent()` would then fire around the
+      # clock. The lookback has to span more than one scheduled interval.
       # The push scripts write a success timestamp whenever a run completes, so
       # a dead timer, a revoked OAuth token, or a full/expired Drive remote
       # surfaces here instead of being discovered the next time a restore is
@@ -3369,7 +3373,7 @@ groups:
               editorMode: code
               # Daily timer (06:15 America/Chicago) on hermes-gw-01. 2 days of
               # slack absorbs a missed run plus a long upload.
-              expr: '(time() - max(ha_backup_push_last_success_timestamp_seconds)) > bool 172800 or absent(ha_backup_push_last_success_timestamp_seconds)'
+              expr: '(time() - max_over_time(ha_backup_push_last_success_timestamp_seconds[3d])) > bool 172800 or absent_over_time(ha_backup_push_last_success_timestamp_seconds[3d])'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -3425,7 +3429,7 @@ groups:
               editorMode: code
               # Weekly timer (Saturday 05:00 America/Chicago) on pve01; 9 days
               # gives one full missed cycle before it pages.
-              expr: '(time() - max(pve_backup_push_last_success_timestamp_seconds)) > bool 777600 or absent(pve_backup_push_last_success_timestamp_seconds)'
+              expr: '(time() - max_over_time(pve_backup_push_last_success_timestamp_seconds[12d])) > bool 777600 or absent_over_time(pve_backup_push_last_success_timestamp_seconds[12d])'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -3483,7 +3487,7 @@ groups:
                 type: prometheus
                 uid: victoriametrics
               editorMode: code
-              expr: '(time() - max(pve_restore_verify_last_success_timestamp_seconds)) > bool 3456000 or absent(pve_restore_verify_last_success_timestamp_seconds)'
+              expr: '(time() - max_over_time(pve_restore_verify_last_success_timestamp_seconds[45d])) > bool 3456000 or absent_over_time(pve_restore_verify_last_success_timestamp_seconds[45d])'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
