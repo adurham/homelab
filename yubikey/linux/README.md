@@ -36,9 +36,30 @@ the flags byte. That is what runs here.
 
 ## Rollout
 
-`rollout.sh` is the idempotent per-host step (run as root). It deliberately does
-not touch root's keys or sshd — those are a separate, later step taken only
-after the new path is proven from a fresh session.
+`rollout.sh` is the idempotent per-host step (run as root). Default run = phase 1:
+module, `amd`, login keys, token-only sudo key file, PAM stack, amd's password
+locked. Root's keys and sshd are untouched — that is phase 2 (`--finish`), taken
+only after `ssh -A amd@<host> 'sudo id'` has returned root from a fresh login.
+
+Phase 2 also inserts `Include /etc/ssh/sshd_config.d/*.conf` when the distro's
+`sshd_config` has no such line. **Some containers built from Ubuntu images ship
+without it** (adblock-proxy-01 had none), so a drop-in there is silently ignored
+and `sshd -T` still reports `passwordauthentication yes`. Always confirm with
+`sshd -T` after writing the drop-ins; never assume the file was read.
+
+`--finish` empties `/root/.ssh/authorized_keys` (backup at
+`/root/authorized_keys.bak-<date>`), matching the rest of the fleet.
+
+### Completion ledger
+
+- 2026-10-19 — 12 containers + 3 PVE nodes.
+- 2026-10-27 — **adblock-proxy-01** (the 13th) finished. It had been added to
+  `yd_gated_hosts` on 10-19 but the conversion never landed: no `amd` user, no
+  PAM module, `PasswordAuthentication yes`, and root key-only with the ansible
+  key. Rolled out phase 1 (module copied from proxy-01, same sha256
+  `dc87d9dfdabbff7013ae2cb397c7a6ceb0e6bdeeae3cd57fed5276079c5f04a9`), proved
+  `ssh -A amd@… 'sudo id'`, then phase 2. Verified: amd key login OK, sudo via
+  the token OK, root SSH denied, password auth off, `sshd -T` clean.
 
 ## Ansible
 
