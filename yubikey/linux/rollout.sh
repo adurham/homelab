@@ -77,6 +77,16 @@ session  required    pam_env.so readenv=1 envfile=/etc/default/locale user_reade
 PAMEOF
 chmod 0644 /etc/pam.d/sudo
 
+# `sudo -i` uses its OWN PAM stack (/etc/pam.d/sudo-i). Unpatched, it falls through
+# to the password stack, amd's password is locked, and a root login shell becomes
+# impossible while plain `sudo cmd` works — an inconsistent, confusing failure.
+if [ -f /etc/pam.d/sudo-i ] && ! grep -q pam_ssh_agent /etc/pam.d/sudo-i; then
+  cp /etc/pam.d/sudo-i "/etc/pam.d/sudo-i.bak-$(date +%Y%m%d)"
+  { printf 'auth     sufficient  pam_ssh_agent.so file=/etc/security/sudo_keys/%%u\n';
+    cat "/etc/pam.d/sudo-i.bak-$(date +%Y%m%d)"; } > /etc/pam.d/sudo-i
+  chmod 0644 /etc/pam.d/sudo-i
+fi
+
 passwd -l amd >/dev/null 2>&1 || true
 echo "phase1 done: $(hostname) — $(id amd | cut -d' ' -f1)"
 
