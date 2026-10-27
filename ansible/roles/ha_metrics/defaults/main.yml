@@ -1,0 +1,8 @@
+---
+# Small exporters that read Home Assistant's own state and push it to
+# VictoriaMetrics, because HA exposes neither as a sensor you could graph:
+#   - BLE RSSI per lock (passive scanner state from the bluetooth integration)
+#   - eMMC wear + free space on the HA Green
+ha_metrics_ble_interval: "*/5 * * * *"   # not used directly; see timer template
+ha_metrics_bluetooth_entry_id: "01JWXZDH06P4TTPTAS1RBPGEGV"
+ha_metrics_vm_url: "http://172.16.0.42:8428"

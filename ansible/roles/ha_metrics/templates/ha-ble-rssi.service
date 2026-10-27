@@ -1,0 +1,6 @@
+[Unit]
+Description=Sample HA BLE RSSI into VictoriaMetrics
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ha_ble_rssi.py

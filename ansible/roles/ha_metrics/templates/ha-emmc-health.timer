@@ -1,0 +1,9 @@
+[Unit]
+Description=Sample HA eMMC health every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

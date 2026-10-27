@@ -1,0 +1,6 @@
+[Unit]
+Description=Sample HA eMMC wear and free space into VictoriaMetrics
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ha_emmc_health.py

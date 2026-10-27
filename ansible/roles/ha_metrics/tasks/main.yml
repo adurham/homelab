@@ -1,0 +1,50 @@
+---
+- name: Ensure token directory
+  ansible.builtin.file:
+    path: /etc/ha-ble-rssi
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install Home Assistant API token
+  ansible.builtin.copy:
+    content: "{{ vault_hermes_gw_hass_token }}"
+    dest: /etc/ha-ble-rssi/token
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Record the bluetooth config entry id the RSSI exporter reads
+  ansible.builtin.copy:
+    content: "{{ ha_metrics_bluetooth_entry_id }}"
+    dest: /etc/ha-ble-rssi/bluetooth_entry_id
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Install exporters
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/ha/{{ item }}"
+    dest: "/usr/local/sbin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - ha_ble_rssi.py
+    - ha_emmc_health.py
+
+- name: Install units
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - ha-ble-rssi.service
+    - ha-ble-rssi.timer
+    - ha-emmc-health.service
+    - ha-emmc-health.timer
+  notify: Reload systemd and start HA metric timers

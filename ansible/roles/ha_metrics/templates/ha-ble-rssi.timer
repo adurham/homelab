@@ -1,0 +1,10 @@
+[Unit]
+Description=Sample HA BLE RSSI every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

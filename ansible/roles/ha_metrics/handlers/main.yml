@@ -1,0 +1,10 @@
+---
+- name: Reload systemd and start HA metric timers
+  ansible.builtin.systemd:
+    daemon_reload: true
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - ha-ble-rssi.timer
+    - ha-emmc-health.timer

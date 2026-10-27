@@ -3523,6 +3523,65 @@ groups:
           severity: warning
         isPaused: false
 
+      # Home Assistant Green eMMC wear. The device runs everything (config,
+      # recorder DB, backups) on one soldered 32 GB eMMC; the kernel publishes a
+      # JEDEC lifetime estimate that roles/../scripts/ha/ha_emmc_health.py samples
+      # every 6 h. 0x04 at install time == 30% of rated write life consumed, so
+      # 80% is the point where replacing the box starts to deserve planning.
+      - uid: ha_emmc_wear_high
+        title: Home Assistant eMMC wear is approaching its rated life
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: 'max(ha_emmc_life_used_percent) >= 80'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 6h
+        annotations:
+          summary: "Home Assistant eMMC has consumed {{ '{{' }} $value {{ '}}' }}% of its rated write life"
+          description: "The HA Green's soldered eMMC reports a JEDEC lifetime estimate at or above 80%. It still works, but plan the replacement (or an off-box recorder database) before it goes read-only. Check the trend with `ha_emmc_life_used_percent` in VictoriaMetrics; the raw counter is /sys/block/mmcblk0/device/life_time on the HA host."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: orphan_guests
         title: Guest running outside Proxmox (orphan)
         condition: C

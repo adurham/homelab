@@ -1,0 +1,8 @@
+---
+# Exporters that push HA-only data (BLE RSSI, eMMC wear) into VictoriaMetrics.
+- name: Home Assistant exporters
+  hosts: hermes-gw-01
+  become: true
+  gather_facts: false
+  roles:
+    - ha_metrics
