@@ -71,6 +71,10 @@ One week, until **2026-11-03**. What to check:
    together to -26, in the order pve03 → pve01 → pve02 (see the cluster's
    rolling-reboot rule), never one node alone.
 
+Proving the mechanism (link down vs driver hang) needs a deliberate one-node test:
+see `docs/proxmox-nic-failover-test.md` for the runbook, preconditions and the
+timings to record. Do not run it blind.
+
 Structural note: a single-NIC HA node self-fences on any NIC stall. If this
 recurs on a node after the kernel is equalised, the fix is a second corosync
 link on a separate path, not another post-mortem.
