@@ -1,0 +1,10 @@
+---
+# Push the newest Proxmox vzdump archives to encrypted Google Drive, weekly.
+#   ansible-playbook -i inventory/proxmox.yml deploy_pve_backup_offsite.yml \
+#     --vault-password-file ../.vault_pass
+- name: Off-site Proxmox backups (encrypted GDrive)
+  hosts: pve01
+  become: true
+  gather_facts: true
+  roles:
+    - pve_backup_offsite

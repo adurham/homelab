@@ -1,0 +1,11 @@
+[Unit]
+Description=Push newest Proxmox backups to encrypted Google Drive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pve-backup-push.sh
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

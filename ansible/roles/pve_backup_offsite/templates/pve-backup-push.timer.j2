@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Proxmox backup push
+
+[Timer]
+OnCalendar={{ pve_backup_offsite_schedule }}
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

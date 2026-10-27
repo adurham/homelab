@@ -1,0 +1,7 @@
+---
+- name: Reload systemd and enable PVE push timer
+  ansible.builtin.systemd:
+    daemon_reload: true
+    name: pve-backup-push.timer
+    enabled: true
+    state: started

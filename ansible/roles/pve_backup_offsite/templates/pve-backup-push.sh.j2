@@ -1,0 +1,47 @@
+#!/bin/bash
+# Managed by Ansible — roles/pve_backup_offsite.
+# Stages the newest vzdump archive of every guest from all nodes, then pushes
+# them, encrypted, to Google Drive (vmbackup_crypt:{{ pve_backup_offsite_gdrive_subdir }}/).
+set -euo pipefail
+STAGE="{{ pve_backup_offsite_stage_dir }}"
+DUMP="{{ pve_backup_offsite_dump_dir }}"
+KEEP_DAYS={{ pve_backup_offsite_keep_days }}
+NODES="{% for n in pve_backup_offsite_nodes %}{{ n }} {% endfor %}"
+mkdir -p "$STAGE"
+
+list_newest() {
+  node="$1"
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@"$node" \
+    "ls -1 $DUMP/*.tar.zst $DUMP/*.vma.zst 2>/dev/null" | while read -r f; do
+      b=$(basename "$f")
+      key=$(printf '%s' "$b" | sed -E 's/-[0-9]{4}_[0-9]{2}_[0-9]{2}-[0-9]{2}_[0-9]{2}_[0-9]{2}\.(tar|vma)\.zst$//')
+      printf '%s|%s|%s\n' "$node" "$key" "$f"
+    done
+}
+
+picks=$(for n in $NODES; do list_newest "$n"; done |
+        sort -t'|' -k2,2 -k3,3 | awk -F'|' '{last[$2]=$0} END{for (k in last) print last[k]}')
+
+fetched=0; have=0
+while IFS='|' read -r node _key path; do
+  [ -z "${path:-}" ] && continue
+  base=$(basename "$path")
+  if [ -s "$STAGE/$base" ]; then have=$((have+1)); continue; fi
+  rm -f "$STAGE/$base"
+  if [ "$node" = "{{ pve_backup_offsite_nodes[0] }}" ]; then
+    cp -f "$path" "$STAGE/$base.tmp" && mv -f "$STAGE/$base.tmp" "$STAGE/$base"
+  else
+    scp -q -o BatchMode=yes -o StrictHostKeyChecking=no "root@$node:$path" "$STAGE/$base.tmp" &&
+      mv -f "$STAGE/$base.tmp" "$STAGE/$base"
+  fi
+  fetched=$((fetched+1))
+done <<< "$picks"
+echo "pve-backup-push: staged $fetched new, $have already present"
+
+rclone copy "$STAGE" "vmbackup_crypt:{{ pve_backup_offsite_gdrive_subdir }}/" --transfers 2 --checkers 4 --stats-one-line 2>&1 | tail -2
+# Staging is only needed while uploading; the on-site dump is the source of
+# truth. Keeping old copies here would cost a whole generation per week on the
+# same pool the guests live on.
+find "$STAGE" -maxdepth 1 \( -name '*.tar.zst' -o -name '*.vma.zst' \) -type f -mtime +1 -delete
+rclone delete "vmbackup_crypt:{{ pve_backup_offsite_gdrive_subdir }}/" --min-age "${KEEP_DAYS}d" --rmdirs >/dev/null 2>&1 || true
+echo "pve-backup-push: done $(date -Is) staged=$(find "$STAGE" -maxdepth 1 \( -name '*.tar.zst' -o -name '*.vma.zst' \) | wc -l) files"

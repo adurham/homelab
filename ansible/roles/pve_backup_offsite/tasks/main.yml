@@ -1,0 +1,59 @@
+---
+# Requires the same vault vars as roles/vm_backup (the rclone crypt remote).
+# Proxmox cluster root keys already give pve01 SSH to the other nodes, so the
+# only trust this needs is the existing cluster relationship.
+- name: Install rclone (encrypted GDrive transport)
+  ansible.builtin.apt:
+    name: rclone
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure root-only rclone config dir
+  ansible.builtin.file:
+    path: /root/.config/rclone
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Drop encrypted rclone remote config
+  ansible.builtin.template:
+    src: rclone.conf.j2
+    dest: "{{ pve_backup_offsite_rclone_conf }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Ensure staging dir exists
+  ansible.builtin.file:
+    path: "{{ pve_backup_offsite_stage_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install push script
+  ansible.builtin.template:
+    src: pve-backup-push.sh.j2
+    dest: /usr/local/sbin/pve-backup-push.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install systemd unit
+  ansible.builtin.template:
+    src: pve-backup-push.service
+    dest: /etc/systemd/system/pve-backup-push.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install systemd timer
+  ansible.builtin.template:
+    src: pve-backup-push.timer.j2
+    dest: /etc/systemd/system/pve-backup-push.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd and enable PVE push timer

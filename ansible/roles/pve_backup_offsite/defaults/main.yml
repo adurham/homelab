@@ -1,0 +1,23 @@
+---
+# Weekly off-site copy of the newest vzdump archive of every guest, pushed to
+# the lab's encrypted Google Drive (same rclone crypt remote as vm_backup).
+#
+# Why weekly, not nightly: on-site retention (keep-daily=3, keep-weekly=2 per
+# guest) already covers point-in-time restores. This exists for losing the
+# site/device itself — and a full generation is ~50 GB, which is a lot of
+# upstream every night for marginal extra protection.
+#
+# Runs on pve01 because Proxmox's cluster root keys give it SSH to pve02/pve03
+# without any new trust relationship, and the dump dirs are node-local.
+pve_backup_offsite_stage_dir: "/nvme-pool/pve-backup-stage"
+pve_backup_offsite_dump_dir: "/nvme-pool/vzdump-backups/dump"
+pve_backup_offsite_nodes:
+  - 192.168.86.11
+  - 192.168.86.12
+  - 192.168.86.13
+# Drive side: crypt remote rooted at the vm-backup tree -> drive:vm-backup/pve
+pve_backup_offsite_gdrive_subdir: "pve"
+pve_backup_offsite_gdrive_folder: "vm-backup"
+pve_backup_offsite_keep_days: 28
+pve_backup_offsite_schedule: "Sat *-*-* 05:00:00 America/Chicago"
+pve_backup_offsite_rclone_conf: "/root/.config/rclone/rclone.conf"
