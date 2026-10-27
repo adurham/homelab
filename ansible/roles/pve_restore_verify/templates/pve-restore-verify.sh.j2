@@ -1,0 +1,76 @@
+#!/bin/bash
+# Managed by Ansible — roles/pve_restore_verify.
+#
+# Restores the smallest recent LXC archive to a throwaway VMID, boots it with no
+# network, and tears it down. Emits:
+#   pve_restore_verify_last_success_timestamp_seconds
+#   pve_restore_verify_duration_seconds
+#   pve_restore_verify_last_failure_timestamp_seconds  (only on failure)
+set -uo pipefail
+
+DUMP="{{ pve_restore_verify_dump_dir }}"
+STORAGE="{{ pve_restore_verify_storage }}"
+VMID={{ pve_restore_verify_vmid }}
+TIMEOUT={{ pve_restore_verify_boot_timeout_s }}
+METRICS="{{ pve_restore_verify_metrics_url }}"
+LOG="/var/log/pve-restore-verify.log"
+
+log() { echo "$(date -Is) $*" | tee -a "$LOG"; }
+push() { curl -fsS -m 10 -X POST "$METRICS" --data-binary "$1" >/dev/null 2>&1 || log "warn: metric push failed"; }
+
+fail() {
+  log "FAIL: $*"
+  push "pve_restore_verify_last_failure_timestamp_seconds $(date +%s)"
+  exit 1
+}
+
+# Smallest archive keeps the drill cheap; any container proves the same path.
+arch=$(ls -1Sr "$DUMP"/*.tar.zst 2>/dev/null | head -1)
+[ -n "$arch" ] || fail "no LXC archives in $DUMP"
+
+if pct status "$VMID" >/dev/null 2>&1; then
+  fail "VMID $VMID already exists — refusing to touch it"
+fi
+
+log "restoring $(basename "$arch") to VMID $VMID on $STORAGE"
+start=$(date +%s)
+if ! pct restore "$VMID" "$arch" --storage "$STORAGE" --unique 1 >/tmp/pve-restore-verify.restore 2>&1; then
+  tail -3 /tmp/pve-restore-verify.restore | while read -r l; do log "  $l"; done
+  pct destroy "$VMID" --purge >/dev/null 2>&1 || true
+  fail "pct restore returned non-zero"
+fi
+
+# A restore keeps the original static IP; strip NICs so it cannot fight the live guest.
+sed -i '/^net[0-9]:/d' "/etc/pve/lxc/$VMID.conf"
+
+pct start "$VMID" >/dev/null 2>&1 || { pct destroy "$VMID" --purge >/dev/null 2>&1; fail "pct start failed"; }
+
+# `systemctl is-system-running` is the wrong gate on its own: a container whose
+# units wait for a network that this drill deliberately removes can sit at
+# "starting" indefinitely while its userspace is perfectly healthy. Count how
+# many units actually reached "running" instead — that answers the real
+# question (did the archive produce a bootable guest?).
+units=0
+state=""
+deadline=$(( $(date +%s) + TIMEOUT ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  sleep 3
+  state=$(pct exec "$VMID" -- systemctl is-system-running 2>/dev/null | tr -d '\r')
+  units=$(pct exec "$VMID" -- systemctl list-units --state=running --no-legend --no-pager 2>/dev/null | wc -l)
+  case "$state" in
+    running|degraded) [ "$units" -ge 5 ] && break ;;
+    *) [ "$units" -ge 8 ] && break ;;
+  esac
+done
+
+pct stop "$VMID" >/dev/null 2>&1 || true
+pct destroy "$VMID" --purge >/dev/null 2>&1 || true
+dur=$(( $(date +%s) - start ))
+
+if [ "$units" -ge 5 ]; then
+    log "OK: $(basename "$arch") booted to '${state:-unknown}' with ${units} running units in ${dur}s"
+    push "pve_restore_verify_last_success_timestamp_seconds $(date +%s)"
+    push "pve_restore_verify_duration_seconds $dur"
+else
+    fail "guest did not reach a booted state within ${TIMEOUT}s (last state '$state', ${units} running units)"
+fi

@@ -1,0 +1,10 @@
+[Unit]
+Description=Monthly backup restore verification
+
+[Timer]
+OnCalendar={{ pve_restore_verify_schedule }}
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target

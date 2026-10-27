@@ -1,0 +1,11 @@
+---
+# Monthly proof that a backup archive actually boots. Distance between "the job
+# logged success" and "the guest comes back" is where backups quietly rot, so
+# this restores the smallest recent archive to a throwaway VMID, boots it with
+# its NICs stripped, and destroys it — then reports the result as a metric.
+pve_restore_verify_dump_dir: "/nvme-pool/vzdump-backups/dump"
+pve_restore_verify_storage: "nvme-data"
+pve_restore_verify_vmid: 998
+pve_restore_verify_schedule: "*-*-01 04:30:00 America/Chicago"
+pve_restore_verify_boot_timeout_s: 180
+pve_restore_verify_metrics_url: "http://172.16.0.42:8428/api/v1/import/prometheus"

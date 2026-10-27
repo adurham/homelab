@@ -1,0 +1,28 @@
+---
+# Runs on a single node (pve01 by default): it only needs one node's dump dir plus
+# a container-capable storage, and doing it once per cluster avoids three
+# simultaneous restores competing for the same storage.
+- name: Install restore-verify script
+  ansible.builtin.template:
+    src: pve-restore-verify.sh.j2
+    dest: /usr/local/sbin/pve-restore-verify.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install systemd unit
+  ansible.builtin.template:
+    src: pve-restore-verify.service
+    dest: /etc/systemd/system/pve-restore-verify.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install systemd timer
+  ansible.builtin.template:
+    src: pve-restore-verify.timer.j2
+    dest: /etc/systemd/system/pve-restore-verify.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd and enable restore-verify timer

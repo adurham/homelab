@@ -1,0 +1,10 @@
+---
+# Monthly proof that a backup archive boots. Run:
+#   ansible-playbook -i inventory/proxmox.yml deploy_pve_restore_verify.yml \
+#     --vault-password-file ../.vault_pass
+- name: Backup restore verification (monthly throwaway restore)
+  hosts: pve01
+  become: true
+  gather_facts: false
+  roles:
+    - pve_restore_verify

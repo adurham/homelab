@@ -3465,6 +3465,64 @@ groups:
           severity: warning
         isPaused: false
 
+      # Monthly restore verification (roles/pve_restore_verify) restores the
+      # smallest archive to a throwaway VMID, boots it, destroys it, and records
+      # success. Silence here means the drill stopped running — which is how
+      # backup rot goes unnoticed. 40 days = one missed month plus slack.
+      - uid: restore_verify_stale
+        title: Backup restore verification has not passed recently
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: '(time() - max(pve_restore_verify_last_success_timestamp_seconds)) > bool 3456000 or absent(pve_restore_verify_last_success_timestamp_seconds)'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 6h
+        annotations:
+          summary: "Monthly backup restore drill has not succeeded in over 40 days"
+          description: "The throwaway restore (pve-restore-verify.timer on pve01) has not recorded a success for 40+ days, or never ran. Check `systemctl status pve-restore-verify.timer`, `journalctl -u pve-restore-verify.service -n 60`, and /var/log/pve-restore-verify.log. A FAIL line means an archive did not boot — treat that as a real backup failure, not a drill problem."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: orphan_guests
         title: Guest running outside Proxmox (orphan)
         condition: C
