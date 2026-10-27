@@ -23,7 +23,7 @@ team_drive =
 
 [vmbackup_crypt]
 type = crypt
-remote = vmbackup_drive:{{ vm_backup_gdrive_folder }}
+remote = vmbackup_drive:{{ ha_backup_gdrive_folder }}
 filename_encryption = standard
 directory_name_encryption = true
 password = {{ vault_vm_backup_crypt_password_obscured }}

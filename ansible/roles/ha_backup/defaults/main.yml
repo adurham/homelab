@@ -20,6 +20,8 @@ ha_backup_stage_dir: "/var/backups/ha"
 # GDrive side: the crypt remote's root is the vm-backup tree, so this is
 # drive:vm-backup/ha (encrypted names, encrypted contents).
 ha_backup_gdrive_subdir: "ha"
+# Crypt remote root on Drive (roles/vm_backup uses the same tree).
+ha_backup_gdrive_folder: "vm-backup"
 # Keep this many days on both the staging dir and in Drive. HA itself keeps 3.
 ha_backup_keep_days: 14
 ha_backup_schedule: "*-*-* 06:15:00 America/Chicago"
