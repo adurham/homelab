@@ -1,0 +1,35 @@
+---
+# Freeze the running kernel while the pve01 NIC-stall observation window is open.
+#
+# unattended-upgrades is enabled on all three nodes, so without this a routine
+# upgrade can install a newer kernel mid-experiment and destroy the only
+# evidence the window was supposed to produce. Holds are visible in
+# `apt-mark showhold` and removed with `apt-mark unhold`.
+#
+# Remove after the 2026-11-03 decision:
+#   ansible-playbook -i inventory/proxmox.yml deploy_pve_kernel_hold.yml \
+#     --vault-password-file ../.vault_pass -e pve_kernel_hold_state=absent
+- name: Pin the Proxmox kernel during the stability observation window
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+  vars:
+    pve_kernel_hold_packages:
+      - proxmox-kernel-7.0
+      - proxmox-kernel-7.0.14-24-pve-signed
+    pve_kernel_hold_state: present
+  tasks:
+    - name: Set kernel package holds
+      ansible.builtin.command:
+        cmd: "apt-mark {{ 'hold' if pve_kernel_hold_state == 'present' else 'unhold' }} {{ item }}"
+      loop: "{{ pve_kernel_hold_packages }}"
+      changed_when: false
+
+    - name: Report current holds
+      ansible.builtin.command: apt-mark showhold
+      register: holds
+      changed_when: false
+
+    - name: Show holds
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ holds.stdout_lines | join(' ') }}"

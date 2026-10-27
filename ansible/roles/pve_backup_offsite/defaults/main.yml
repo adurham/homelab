@@ -18,6 +18,10 @@ pve_backup_offsite_nodes:
 # Drive side: crypt remote rooted at the vm-backup tree -> drive:vm-backup/pve
 pve_backup_offsite_gdrive_subdir: "pve"
 pve_backup_offsite_gdrive_folder: "vm-backup"
+# Keep the newest N archives per guest off-site (count-based: a missed week can
+# never prune the last surviving copy). Roughly 4x the 43 GB generation.
+pve_backup_offsite_keep_copies: 4
+
 pve_backup_offsite_keep_days: 28
 pve_backup_offsite_schedule: "Sat *-*-* 05:00:00 America/Chicago"
 pve_backup_offsite_rclone_conf: "/root/.config/rclone/rclone.conf"
