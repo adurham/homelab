@@ -11,11 +11,18 @@ still marked UNTESTED are exactly that.
   Ansible vault alone was enough to list both remotes: 16 objects under `ha/`,
   19 under `pve/`, filenames decrypting correctly. The crypt password and OAuth
   token therefore survive without any cluster host.
-- **Download + decrypt an HA backup.** Pulled one archive from `ha/` onto the
-  laptop, decrypted its name, and `tar -tf` listed its contents (`backup.json`,
-  `core_configurator.tar.gz`). Home Assistant's backups are **plain tar, not
-  encrypted** — the rclone crypt layer is the only encryption protecting them.
-  There is no separate HA backup key to lose.
+- **Download an HA backup and confirm what is inside it.** Pulled the 963 MB
+  automatic backup from `ha/` onto the laptop in 30 s: the outer tar lists
+  `backup.json` plus one tar per add-on and `homeassistant.tar.gz`.
+
+  **Correction to an earlier claim in this document: those inner archives are
+  NOT plain tars.** They are SecureTar v3 — argon2id-derived key, XChaCha20-
+  Poly1305 secretstream — encrypted with the backup password Home Assistant
+  keeps in its own configuration (`create_backup.password`). Without that
+  password the off-site HA backups are unreadable. It is now escrowed as
+  `vault_ha_backup_password` in the Ansible vault, and validated
+  cryptographically against a real archive: recomputing the header's validation
+  key from the vault value returns a match, while a control string does not.
 - **Restore an archive pulled back from Drive, and boot it.** `pve-restore-verify`
   does this monthly on pve01: fetch the smallest object from `pve/`, restore to
   throwaway VMID 998, strip NICs, boot, check userspace, destroy. Passed twice
