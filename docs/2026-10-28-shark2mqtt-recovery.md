@@ -34,7 +34,33 @@ A crash loop after a HA reboot would point at the MQTT broker not being ready ye
 is a guess, not a finding, and the watchdog covers it either way.
 
 **Details worth remembering.** It is a **locally built** app
-(`f5b120c9/aarch64-addon-shark2mqtt`, version `1.0.7-waterflow3`, `image: null` → built
+(`f5b120c9/aarch64-addon-shark2mqtt`, version `1.0.7-waterflow4`, `image: null` → built
 on the Green, not pulled), so it needs a rebuild rather than an update when the fork
-changes. Disk on the Green is at 72 % (7.5 GB free) — enough headroom for a rebuild,
+changes. Disk on the Green is at 73 % (7.3 GB free) — enough headroom for a rebuild,
 but not for a from-source build that drags in a toolchain.
+
+## The crash itself, fixed in the fork — 2026-10-28
+
+The watchdog stops a death from going unnoticed; it does not stop the death. The death
+was a cold-boot race in the wrapper: `run.sh` read the Mosquitto service details from
+the Supervisor **once**, and if the app started before that service was registered the
+read came back empty, the fallback had no `mqtt_host`, and the script exited 1 with no
+retry.
+
+Fixed in `adurham/shark2mqtt-addon` (`97f764f`, version `1.0.7-waterflow4`):
+
+- `fetch_mqtt_service()` retries the lookup — 60 attempts, 2 s apart, both overridable
+  via `MQTT_SERVICE_RETRIES` / `MQTT_SERVICE_RETRY_DELAY` — before falling back to
+  manual settings.
+- With genuinely no broker anywhere it exits non-zero and says why, so the watchdog has
+  something to act on instead of a silent corpse.
+- `CONFIG_PATH` is now overridable, which is what makes the wrapper testable off-box.
+- `tests/test_run_sh_retry.sh` runs the real `run.sh` against a curl stub: broker ready,
+  broker three attempts late, Supervisor dead with manual settings, nothing configured
+  anywhere. 11 checks, all green. It also caught a bug in the fix — the progress line
+  went to stdout, which is the channel carrying the captured JSON reply, and corrupted
+  the parse.
+
+Deployed the same day via `ha apps update` (the Supervisor's repo clone is the fork):
+running `1.0.7-waterflow4`, watchdog on, discovery republished, `vacuum.cleanelizabeth2`
+= `docked` at 100 %. Disk after the rebuild: 7.3 GB free (73 %).
