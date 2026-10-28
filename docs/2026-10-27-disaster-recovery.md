@@ -48,9 +48,22 @@ crypt password + OAuth token -> the archives.
   container at 02:45, before the 03:00 vzdump captures it (7-day retention,
   first dump 23 MB, `gzip -t` clean).
 
-Still unproven: any **VM/VMA** restore (the qemu path has never been restored,
-on-site or off-site), vm-01 from its own `daily/` snapshots, and an HA restore
-end-to-end.
+- **A VM restore, both ends of it.** mitm-generic's 1.6 GB VMA pulled from
+  `pve/` and `qmrestore`d to throwaway VMID 996: **17 s** to restore, NICs
+  stripped, guest kernel booted (AppArmor profiles at 3.4 s) and settled idle.
+  Destroyed clean. (`qmrestore`, not `qm restore` — the latter does not exist.)
+- **A Home Assistant restore, end to end, on a real spare instance.** HAOS
+  18.4 installed as a fresh VM, the 963 MB automatic backup restored into it
+  with the vaulted password via `ha backups restore <slug> --password
+  "$(cat pw.txt)" --folders homeassistant`, and the result checked over the API
+  with the *production* long-lived token — it authenticated, which by itself
+  proves the auth store came back intact. Same 40 automations, same 16 lights,
+  same auth users. 1017 entities vs production's 1283; every one of the 266
+  missing is integration-dependent (MQTT, ESPHome, comma car, assist satellite)
+  because a partial restore carries core config, not add-ons.
+
+Still unproven: vm-01's own `daily/` snapshots (192 GiB of VictoriaMetrics data
+trees — a full pull has not been done) and a *full* HA restore including add-ons.
 
 ## What exists off-site
 
