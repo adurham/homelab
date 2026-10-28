@@ -1,8 +1,9 @@
 # Disaster recovery runbook — rebuilding the lab from encrypted Google Drive
 
-Written 2026-10-27, after the off-site push went live. **Status: the off-site
-path is partly proven** — see "What has actually been proven" below. The parts
-still marked UNTESTED are exactly that.
+Written 2026-10-27, after the off-site push went live. **Status: the whole
+off-site path is proven** — Drive pull, decrypt, VM restore, LXC-with-database
+restore, a full Home Assistant restore and a metrics-archive replay have all
+been run end to end; see "What has actually been proven" below.
 
 ## What has actually been proven (2026-10-27)
 
@@ -109,7 +110,7 @@ and replay the metrics archive have all been exercised end to end.
 
 | Remote path | Contents | Cadence | Retention |
 |---|---|---|---|
-| `vmbackup_crypt:pve/` | newest vzdump archive of each of the 17 production guests (`.tar.zst` for LXCs, `.vma.zst` for VMs) | weekly, Sat 05:00 | 28 days |
+| `vmbackup_crypt:pve/` | newest vzdump archive of each of the 17 production guests (`.tar.zst` for LXCs, `.vma.zst` for VMs) | weekly, Sat 05:00 | newest 4 per guest, pruned only after a successful copy |
 | `vmbackup_crypt:ha/` | Home Assistant's own nightly backups | daily 06:15 | 14 days |
 | `vmbackup_crypt:daily/`, `archive-yearly/` | VictoriaMetrics snapshots (vm-01 self-backup) | daily | role-defined |
 
@@ -163,10 +164,12 @@ sed -i '/^net[01]:/d' /etc/pve/lxc/<vmid>.conf   # only if restoring alongside a
 pct start <vmid>
 ```
 
-Per VM (UNTESTED — the qemu path has never been restored):
+Per VM (proven off-site — mitm-generic's 1.6 GB archive was pulled from Drive,
+restored to throwaway VMID 996 and booted; note the command is `qmrestore`, there
+is no `qm restore`):
 
 ```bash
-qm restore <vmid> /nvme-pool/vzdump-backups/dump/vzdump-qemu-<vmid>-<stamp>.vma.zst \
+qmrestore /nvme-pool/vzdump-backups/dump/vzdump-qemu-<vmid>-<stamp>.vma.zst <vmid> \
     --storage nvme-data
 qm start <vmid>
 ```
@@ -189,9 +192,21 @@ Restore order (each depends on the one before):
 ### 4. Home Assistant
 
 The HA box is independent of the cluster. Its backups are in
-`vmbackup_crypt:ha/`; copy one back to the box's `/backup` and restore through the
-Supervisor (`ha backups restore <slug>` or the UI). Its config, add-ons and
-database are all inside that tarball.
+`vmbackup_crypt:ha/`; copy one back to `/backup` (or upload it through the API)
+and restore it. Its config, add-ons and database are all inside that tarball.
+Proven end to end on a throwaway HAOS VM: 1279 of production's 1283 entities and
+all 12 add-ons came back, and the production long-lived token still
+authenticated against the restored instance.
+
+Two things that will waste an hour if you hit them fresh:
+
+- **`ha backups restore` refuses an archive whose `backup.json` says
+  `type: partial`** unless you name every item in it, e.g.
+  `ha backups restore <slug> --password "$PW" --homeassistant --folders ssl --app core_letsencrypt --app a0d7b954_ssh …`.
+  Name them all or it stops with "only a partial backup".
+- **The web UI may not be on 8123.** A freshly onboarded HAOS VM answered on
+  port 80; only after the production config was restored did it move to 8123.
+  Check both before concluding the restore failed.
 
 ### 5. Verify before declaring done
 
@@ -211,10 +226,17 @@ database are all inside that tarball.
   things whose loss makes the rest of this document useless. Both live outside the
   cluster on purpose.
 
-## The drill that closes the gap
+## The drill that closes the gap — automated
 
-Once, in a quiet window: pull one archive back from Drive to a throwaway storage,
-restore it to an unused VMID, boot it with NICs stripped, confirm
-`system-is-running == running`, then destroy it. That proves the crypt remote, the
-download path and the archive in one pass. Until then, the off-site copy is a
-backup only in the sense that it exists.
+`pve-restore-verify.timer` on pve01 runs monthly (`*-*-01 04:30`
+America/Chicago): it pulls the smallest object out of `vmbackup_crypt:pve/`,
+restores it to throwaway VMID 998, strips the NICs, boots it, counts running
+units and destroys it. It writes
+`pve_restore_verify_last_success_timestamp_seconds`, and Grafana pages
+(`restore_verify_stale`) if that metric goes missing for 45 days — so a backup
+that has quietly stopped restoring cannot go unnoticed.
+
+That covers the recurring proof. The one-off drills on 2026-10-27 covered the
+paths the monthly job does not: a VM restore (`qmrestore`, VMID 996), an LXC
+whose database has to come back (`authentik`, VMID 997), a full Home Assistant
+restore, and replaying vm-01's VictoriaMetrics archive.
