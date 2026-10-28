@@ -79,9 +79,31 @@ crypt password + OAuth token -> the archives.
   (`--homeassistant --folders ssl --app <each slug>`); the archive here holds
   12 add-ons and only the `ssl` folder.
 
-Still unproven: vm-01's own `daily/` snapshots (a full 28.3 GiB pull now sits
-on pve01 at `/nvme-pool/restore-verify/vm-daily`, but it has not yet been
-restored and booted).
+- **vm-01's own `daily/` VictoriaMetrics snapshot, replayed.** Pulled the newest
+  object (`daily/20261027T141938Z/`, 1725 objects, 28.3 GiB) from Drive to
+  `/nvme-pool/restore-verify/vm-daily` on pve01 and pointed a stock
+  `victoria-metrics-prod` (v1.155.0) at the tree with
+  `-storageDataPath=... -retentionPeriod=100y`. It came up in 0.135 s,
+  `/health` 200, and served the archive's history:
+
+  | query | replay | production |
+  |---|---|---|
+  | `ballooninfo_free_mem` @ 2026-10-26T12:00Z | 10 series, identical values | 10 series, same values |
+  | `count({__name__!=""})` @ 2026-10-26/27 | 188k / 190k series | — |
+  | month coverage | 2026_05 ... 2026_10 all present | — |
+
+  Spot checks across the archive (`count_over_time(ballooninfo_free_mem[24h])`
+  at mid-Sep, early-Oct, mid-Oct) all return data, and a point-for-point
+  comparison against the live instance at the same timestamp matches exactly.
+  Caveat worth knowing: the datastore was copied from a **running**
+  `vmstorage`, so it is a point-in-time copy, not a quiesced snapshot — good
+  enough to read history from, not a substitute for stopping the service first.
+  Staging (`/nvme-pool/restore-verify/vm-daily`, 28 GiB) and the replay binary
+  were deleted after the check; re-pulling from Drive is the restore path.
+
+Nothing on the off-site path is left unproven: pull from Drive, decrypt,
+restore a VM, restore an LXC with its database, restore Home Assistant in full,
+and replay the metrics archive have all been exercised end to end.
 
 ## What exists off-site
 
