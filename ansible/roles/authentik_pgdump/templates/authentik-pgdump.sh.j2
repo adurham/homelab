@@ -1,0 +1,20 @@
+#!/bin/bash
+# Managed by Ansible — roles/authentik_pgdump.
+set -uo pipefail
+DEST="{{ authentik_pgdump_dir }}"
+KEEP={{ authentik_pgdump_keep }}
+C="{{ authentik_pgdump_container }}"
+out="$DEST/authentik-$(date +%Y%m%d-%H%M).sql.gz"
+
+mkdir -p "$DEST"
+if ! docker exec "$C" pg_dump -U authentik -d authentik --clean --if-exists 2>/tmp/pgdump.err | gzip -9 > "$out"; then
+  echo "authentik-pgdump: pg_dump failed: $(tail -2 /tmp/pgdump.err)" >&2
+  rm -f "$out"
+  exit 1
+fi
+if ! gzip -t "$out" 2>/dev/null; then
+  echo "authentik-pgdump: $out is not a valid gzip — discarding" >&2
+  rm -f "$out"; exit 1
+fi
+echo "authentik-pgdump: wrote $out ($(du -h "$out" | cut -f1))"
+ls -1t "$DEST"/authentik-*.sql.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f

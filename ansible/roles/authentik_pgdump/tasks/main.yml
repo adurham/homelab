@@ -1,0 +1,34 @@
+---
+- name: Ensure dump directory
+  ansible.builtin.file:
+    path: "{{ authentik_pgdump_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install dump script
+  ansible.builtin.template:
+    src: authentik-pgdump.sh.j2
+    dest: /usr/local/sbin/authentik-pgdump.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install dump service
+  ansible.builtin.template:
+    src: authentik-pgdump.service
+    dest: /etc/systemd/system/authentik-pgdump.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd and start authentik dump timer
+
+- name: Install dump timer
+  ansible.builtin.template:
+    src: authentik-pgdump.timer.j2
+    dest: /etc/systemd/system/authentik-pgdump.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd and start authentik dump timer

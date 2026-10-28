@@ -31,9 +31,19 @@ documents the remote path through the op-broker. So a total loss of the cluster
 and this laptop leaves: 1Password -> vault password -> Ansible vault -> rclone
 crypt password + OAuth token -> the archives.
 
+- **Restore the dependency root from the off-site copy.** authentik's 5.3 GB
+  archive pulled from `pve/` and restored to throwaway VMID 997 on pve01 with
+  its NICs stripped: restore 122 s, all four containers (server, worker,
+  postgresql, redis) healthy, `authentik_core_user` count identical to
+  production. PostgreSQL logged **"database system was not properly shut down;
+  automatic recovery in progress"** — it recovered in under a second, which is
+  exactly why `roles/authentik_pgdump` now writes a logical `pg_dump` inside the
+  container at 02:45, before the 03:00 vzdump captures it (7-day retention,
+  first dump 23 MB, `gzip -t` clean).
+
 Still unproven: any **VM/VMA** restore (the qemu path has never been restored,
-on-site or off-site), authentik (the dependency root), vm-01 from its own
-`daily/` snapshots, and an HA restore end-to-end.
+on-site or off-site), vm-01 from its own `daily/` snapshots, and an HA restore
+end-to-end.
 
 ## What exists off-site
 

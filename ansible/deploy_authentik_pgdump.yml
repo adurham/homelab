@@ -1,0 +1,8 @@
+---
+# Application-consistent dump of authentik's database, captured by the nightly vzdump.
+- name: authentik nightly PostgreSQL dump
+  hosts: authentik_server
+  become: true
+  gather_facts: false
+  roles:
+    - authentik_pgdump

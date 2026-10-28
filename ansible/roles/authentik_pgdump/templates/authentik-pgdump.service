@@ -1,0 +1,7 @@
+[Unit]
+Description=Logical dump of authentik's PostgreSQL
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/authentik-pgdump.sh
+Nice=10

@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly authentik PostgreSQL dump (before the 03:00 vzdump)
+
+[Timer]
+OnCalendar={{ authentik_pgdump_schedule }}
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,10 @@
+---
+# Nightly logical dump of authentik's PostgreSQL, written INSIDE the container so
+# the 03:00 vzdump archive captures a consistent dump alongside the raw data
+# files. The raw files alone restore to "database system was not properly shut
+# down; automatic recovery in progress" (observed 2026-10-27 on a real restore) —
+# it recovered, but a logical dump is the difference between hoping and knowing.
+authentik_pgdump_dir: /var/backups/authentik
+authentik_pgdump_keep: 7
+authentik_pgdump_schedule: "*-*-* 02:45:00 America/Chicago"
+authentik_pgdump_container: authentik-postgresql-1

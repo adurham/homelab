@@ -1,0 +1,7 @@
+---
+- name: Reload systemd and start authentik dump timer
+  ansible.builtin.systemd:
+    daemon_reload: true
+    name: authentik-pgdump.timer
+    enabled: true
+    state: started
