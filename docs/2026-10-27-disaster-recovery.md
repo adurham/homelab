@@ -52,18 +52,36 @@ crypt password + OAuth token -> the archives.
   `pve/` and `qmrestore`d to throwaway VMID 996: **17 s** to restore, NICs
   stripped, guest kernel booted (AppArmor profiles at 3.4 s) and settled idle.
   Destroyed clean. (`qmrestore`, not `qm restore` — the latter does not exist.)
-- **A Home Assistant restore, end to end, on a real spare instance.** HAOS
-  18.4 installed as a fresh VM, the 963 MB automatic backup restored into it
-  with the vaulted password via `ha backups restore <slug> --password
-  "$(cat pw.txt)" --folders homeassistant`, and the result checked over the API
-  with the *production* long-lived token — it authenticated, which by itself
-  proves the auth store came back intact. Same 40 automations, same 16 lights,
-  same auth users. 1017 entities vs production's 1283; every one of the 266
-  missing is integration-dependent (MQTT, ESPHome, comma car, assist satellite)
-  because a partial restore carries core config, not add-ons.
+- **A Home Assistant restore, end to end, on a real spare instance — partial,
+  then full.** HAOS 18.4 installed as a fresh VM on pve01 (VM 994,
+  192.168.86.48), the 963 MB automatic backup uploaded to it and restored with
+  the vaulted password.
+  *Partial* (core config + `ssl` folder only): the *production* long-lived
+  token authenticated against the spare — proving the auth store came back
+  intact — 40 automations, 16 lights, but 1017 entities vs production's 1283,
+  the 266 missing all integration-dependent because no add-ons were restored.
+  *Full* (core config + `ssl` + all 12 add-ons in the archive): supervisor log
+  ends `Partial-Restore 8c058769 done` after ~2 min, and the spare then reports
+  **1279 entities vs production's 1283**, every key domain identical — 40
+  automations, 16 lights, 636/637 sensors, 196 binary_sensors, 3 locks,
+  67 switches, 5 climate, 13 media_players, 2 persons. All 12 add-ons came back
+  and are registered: Portainer, Terminal & SSH, Advanced SSH & Web Terminal,
+  Uptime Kuma, AppDaemon, Matter Server, Tailscale, Let's Encrypt, Get HACS,
+  AdGuard Home, ESPHome Device Builder, Mosquitto broker. The 4 remaining
+  entities are one scene, one sensor and two add-on `update.*` rows that only
+  appear once those add-ons re-register.
 
-Still unproven: vm-01's own `daily/` snapshots (192 GiB of VictoriaMetrics data
-trees — a full pull has not been done) and a *full* HA restore including add-ons.
+  Two gotchas learned the hard way: the spare's core listened on **port 80**
+  until the production config was restored, at which point it moved to **8123**
+  like production — so "port closed" during a drill means "wrong port", not
+  "broken restore". And `ha backups restore` refuses an archive whose
+  `backup.json` says `type: partial` unless you name every item it holds
+  (`--homeassistant --folders ssl --app <each slug>`); the archive here holds
+  12 add-ons and only the `ssl` folder.
+
+Still unproven: vm-01's own `daily/` snapshots (a full 28.3 GiB pull now sits
+on pve01 at `/nvme-pool/restore-verify/vm-daily`, but it has not yet been
+restored and booted).
 
 ## What exists off-site
 
