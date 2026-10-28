@@ -39,9 +39,18 @@ policies:
       # the route unfiltered, the lab's warning-level alert storm delivered
       # ~90 alerts/day to that inbox (measured Sep-Oct 2026). Warnings still
       # reach HA mobile push and Discord; only severity=critical also emails.
+      #
+      # exo alerts are excluded by name even at critical severity. The exo
+      # cluster is started on demand and its runners unload when idle (JIT),
+      # so "server process down" / "runners not ready" fire on every
+      # start-stop and every idle unload -- 362 mails in October 2026, the
+      # single largest source, for a machine that is deliberately off ~14%
+      # of the month. They stay on HA push and Discord, where the cluster's
+      # on/off state is actually readable; they are not paging events.
       - receiver: email
         matchers:
           - severity = "critical"
+          - alertname !~ "exo_server_down|exo_runners_not_ready"
         continue: true
         group_wait: 30s
         group_interval: 5m
