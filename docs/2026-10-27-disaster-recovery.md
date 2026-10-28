@@ -21,11 +21,19 @@ still marked UNTESTED are exactly that.
   throwaway VMID 998, strip NICs, boot, check userspace, destroy. Passed twice
   (17 s and 19 s, 14 running units).
 
+**The vault password itself is escrowed off this machine.** It lives in 1Password
+as item "Ansible Vault Password (homelab)" (Personal vault, id
+`6x2qdqloldso6yx75oba3t74qq`), reachable as
+`op read "op://Personal/6x2qdqloldso6yx75oba3t74qq/password"` from any device with
+a 1Password session. `ansible/scripts/op-vault-pass.sh` is the Ansible
+vault-password provider that reads it, and `docs/1password-hlxc-bridge.md`
+documents the remote path through the op-broker. So a total loss of the cluster
+and this laptop leaves: 1Password -> vault password -> Ansible vault -> rclone
+crypt password + OAuth token -> the archives.
+
 Still unproven: any **VM/VMA** restore (the qemu path has never been restored,
 on-site or off-site), authentik (the dependency root), vm-01 from its own
-`daily/` snapshots, an HA restore end-to-end, and — the one thing no drill can
-prove — that the vault password itself is recoverable if this laptop and all
-three nodes are gone at once.
+`daily/` snapshots, and an HA restore end-to-end.
 
 ## What exists off-site
 
