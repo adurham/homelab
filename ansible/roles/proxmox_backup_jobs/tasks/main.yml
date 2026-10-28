@@ -36,7 +36,7 @@
       --storage {{ pve_backup_storage }}
       --vmid {{ pve_backup_vmid_str }}
       --enabled 1
-      --mailnotification always
+      --mailnotification {{ pve_backup_mailnotification }}
       --prune-backups {{ pve_backup_prune_backups }}
       --notes-template "{{ pve_backup_notes_template }}"
   when: pve_backup_job_parsed == {}
@@ -84,6 +84,14 @@
     - pve_backup_job_parsed['notes-template'] | default('') != pve_backup_notes_template
   changed_when: true
 
+- name: Fix the mail-notification mode if it drifted (success mails are noise)
+  ansible.builtin.command:
+    cmd: "pvesh set /cluster/backup/{{ pve_backup_job_id }} --mailnotification {{ pve_backup_mailnotification }}"
+  when:
+    - pve_backup_job_parsed != {}
+    - pve_backup_job_parsed['mailnotification'] | default('always') != pve_backup_mailnotification
+  changed_when: true
+
 - name: Re-read this node's backup job after the update (final state)
   ansible.builtin.command:
     cmd: "pvesh get /cluster/backup/{{ pve_backup_job_id }} --output-format json"
@@ -102,4 +110,5 @@
       - (pve_backup_job_final.stdout | from_json).node | default('') == inventory_hostname
       - (pve_backup_job_final.stdout | from_json).vmid | default('') == pve_backup_vmid_str
       - (pve_backup_job_final.stdout | from_json)['prune-backups'] | default({}) == pve_backup_prune_desired
+      - (pve_backup_job_final.stdout | from_json)['mailnotification'] | default('always') == pve_backup_mailnotification
     fail_msg: "Backup job {{ pve_backup_job_id }} on {{ inventory_hostname }} did not converge (node/vmid/prune-backups mismatch after deploy)."

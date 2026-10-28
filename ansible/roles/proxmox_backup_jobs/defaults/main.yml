@@ -15,6 +15,13 @@
 pve_backup_storage: vzdump-nvme
 pve_backup_compress: zstd
 pve_backup_mode: snapshot
+# PVE's own job-completion email. 'always' sent a "backup successful" mail per
+# node per night through mail-01 -> iCloud, where it landed in the operator's
+# personal inbox (39 such mails in the 10 days to 2026-10-28) alongside the
+# Grafana alert flood. Backup SUCCESS is not an event worth waking anyone for;
+# failure still mails, and Grafana already has guest_backup_stale /
+# guest_backup_missing / offsite_backup_* rules covering silent breakage.
+pve_backup_mailnotification: failure
 # Retention, in PVE's own `prune-backups` syntax (comma-joined keep-*=N).
 # Enforced on create AND drift-corrected on every run by tasks/main.yml.
 #
