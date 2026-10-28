@@ -1,9 +1,31 @@
 # Disaster recovery runbook — rebuilding the lab from encrypted Google Drive
 
-Written 2026-10-27, after the off-site push went live. **Status: procedure written
-from verified facts; the pull-restore from Drive has NOT been exercised yet.**
-Everything marked UNTESTED below is exactly that — treat it as a plan, not a
-proven path, until the drill at the end has been run once.
+Written 2026-10-27, after the off-site push went live. **Status: the off-site
+path is partly proven** — see "What has actually been proven" below. The parts
+still marked UNTESTED are exactly that.
+
+## What has actually been proven (2026-10-27)
+
+- **Vault-only access to the off-site copies, from outside the cluster.** On a
+  laptop with no cluster credentials, rendering the rclone config from the
+  Ansible vault alone was enough to list both remotes: 16 objects under `ha/`,
+  19 under `pve/`, filenames decrypting correctly. The crypt password and OAuth
+  token therefore survive without any cluster host.
+- **Download + decrypt an HA backup.** Pulled one archive from `ha/` onto the
+  laptop, decrypted its name, and `tar -tf` listed its contents (`backup.json`,
+  `core_configurator.tar.gz`). Home Assistant's backups are **plain tar, not
+  encrypted** — the rclone crypt layer is the only encryption protecting them.
+  There is no separate HA backup key to lose.
+- **Restore an archive pulled back from Drive, and boot it.** `pve-restore-verify`
+  does this monthly on pve01: fetch the smallest object from `pve/`, restore to
+  throwaway VMID 998, strip NICs, boot, check userspace, destroy. Passed twice
+  (17 s and 19 s, 14 running units).
+
+Still unproven: any **VM/VMA** restore (the qemu path has never been restored,
+on-site or off-site), authentik (the dependency root), vm-01 from its own
+`daily/` snapshots, an HA restore end-to-end, and — the one thing no drill can
+prove — that the vault password itself is recoverable if this laptop and all
+three nodes are gone at once.
 
 ## What exists off-site
 
