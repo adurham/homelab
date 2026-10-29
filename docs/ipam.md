@@ -7,24 +7,34 @@ sync when adding/removing/moving CTs or VMs.
 
 | Network         | CIDR              | Bridge  | Purpose                                    |
 | :-------------- | :---------------- | :------ | :----------------------------------------- |
-| LAN             | `192.168.86.0/24` | `vmbr0` | Home LAN — DHCP from the Nest router       |
+| LAN             | `192.168.86.0/24` | `vmbr0` | Home LAN — DHCP from dnsmasq on HA (.2), gateway .1 |
 | Private (VXLAN) | `172.16.0.0/24`   | `private` | SDN private subnet for service traffic   |
 | BWT Lab (VXLAN) | `10.99.0.0/24`    | `bwt`     | Isolated subnet for Tanium bandwidth-throttle repro (NEC 00271560 et al) |
 | PVE Sync (VLAN 20) | `172.20.0.0/24` | `vmbr0.20` | Isolated L2 segment for corosync + ZFS replication, physically confined to switch ports 3/4/5 — see below |
 | PVE Migrate (VLAN 21) | `172.21.0.0/24` | `vmbr0.21` | Isolated L2 segment for live-migration traffic + its node-to-node SSH transport, same physical ports 3/4/5 — see below |
 
-### LAN static-IP allocations (outside the Nest router's DHCP pool)
+### LAN static-IP allocations
 
-Google Nest/Wifi's default DHCP pool is **192.168.86.20-250** (confirmed
-via vendor docs + a live nmap sweep 2026-09-10 finding active DHCP
-leases scattered up to .235, consistent with that default never having
-been customized). That leaves **.2-.19** and **.251-.254** safe for
-static allocations. No local API/CLI exists to change or query this
-scope directly (Nest's local HTTP API needs cloud/app auth; there's no
-SSH/SNMP access) — the Google Home app is the only way to verify/change
-the actual pool boundary if it's ever suspected to have changed.
+Address assignment moved off the Nest router on 2026-10-28. The authority is
+now the **dnsmasq add-on on HA (`56be630e_dnsmasq-dhcp`, 192.168.86.2)**:
+pool **192.168.86.10-250**, gateway + DNS option 3/6 = .1, 1 h default lease,
+24 h on reservations. Read it from the source, never the router:
 
-Current static allocations in the safe-outside-DHCP range:
+```bash
+ssh -p 2222 root@homeassistant.local 'ha addons info 56be630e_dnsmasq-dhcp --raw-json'
+# live lease table (current_clients / past_clients), no auth:
+#   ws://192.168.86.2:8976/ws
+```
+
+**Open risk (measured 2026-10-28):** the pool starts at **.10**, so it covers
+.10-.19, which is where this document puts static allocations — pve01-03
+(.11-.13), tailscale-gw (.16), frigate-01 (.17). None of them is reserved in
+dnsmasq, so any DISCOVERing client that asks for a free address can be handed
+one of them; Tati's gaming desktop already holds **.14**. Two acceptable fixes:
+move the pool start to .20, or add reservations for .11-.13/.16/.17. Not done
+yet — this is a whole-house addressing change and needs the owner's go.
+
+Current static allocations:
 
 | IP | Host | Notes |
 | :--- | :--- | :--- |
@@ -39,6 +49,27 @@ Current static allocations in the safe-outside-DHCP range:
 `.14`/`.15` also showed as live in the same nmap sweep — identity not
 confirmed, left alone. `.18`-`.19` still free if another static
 allocation is needed (`.17` taken by frigate-01 as of 2026-10-15).
+
+`.14` is now identified: Tati's gaming desktop, a dnsmasq dynamic lease
+(verified 2026-10-28). `.15` is the TP-Link TL-SG105E.
+
+### Philips Hue devices (dynamic, unpinned)
+
+Both bridges moved off their long-standing .58/.61 during the dnsmasq
+cutover and both sync boxes ride dynamic leases. Nothing is reserved, so any
+of the four can drift on its next renewal — HA pins them by IP in
+`core.config_entries`, so a drift breaks the integration silently. Live values
+2026-10-28, confirmed by SSDP `IpBridge` + `/description.xml`:
+
+| IP | Device | MAC | HA entry |
+| :--- | :--- | :--- | :--- |
+| `192.168.86.197` | Living Room Hue Bridge (was .58) | `ec:b5:fa:9c:41:a0` | `01JV3MXDAG0DN7Q082FRZAN76N` |
+| `192.168.86.53` | Game Room Hue Bridge (was .61) | `ec:b5:fa:ae:57:db` | `01M24XVCSRZ58K8D28FMB6V8PV` |
+| `192.168.86.250` | Living Room Sync Box | `c4:29:96:e0:fd:56` | `01KGNFHJZFTEJHVTSZMSG69PHE` |
+| `192.168.86.190` | Game Room Sync Box | `c4:29:96:09:be:a8` | `01M251CVT0SMRRNDNZX389K4K8` |
+
+`.250` is the last address in the pool — pin these four before anything else
+in the 10-250 range gets discussed.
 
 ## Physical switch chain (LAN, non-Proxmox)
 
