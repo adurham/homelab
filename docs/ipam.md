@@ -17,8 +17,8 @@ sync when adding/removing/moving CTs or VMs.
 
 Address assignment moved off the Nest router on 2026-10-28. The authority is
 now the **dnsmasq add-on on HA (`56be630e_dnsmasq-dhcp`, 192.168.86.2)**:
-pool **192.168.86.10-250**, gateway + DNS option 3/6 = .1, 1 h default lease,
-24 h on reservations. Read it from the source, never the router:
+pool **192.168.86.20-250**, gateway + DNS option 3/6 = .1, 1 h default lease,
+24 h on reservations (14 of them). Read it from the source, never the router:
 
 ```bash
 ssh -p 2222 root@homeassistant.local 'ha addons info 56be630e_dnsmasq-dhcp --raw-json'
@@ -26,13 +26,14 @@ ssh -p 2222 root@homeassistant.local 'ha addons info 56be630e_dnsmasq-dhcp --raw
 #   ws://192.168.86.2:8976/ws
 ```
 
-**Open risk (measured 2026-10-28):** the pool starts at **.10**, so it covers
-.10-.19, which is where this document puts static allocations — pve01-03
-(.11-.13), tailscale-gw (.16), frigate-01 (.17). None of them is reserved in
-dnsmasq, so any DISCOVERing client that asks for a free address can be handed
-one of them; Tati's gaming desktop already holds **.14**. Two acceptable fixes:
-move the pool start to .20, or add reservations for .11-.13/.16/.17. Not done
-yet — this is a whole-house addressing change and needs the owner's go.
+**Pool boundary history.** The add-on first came up with a pool of .10-250,
+which swallowed this document's static block (.10-.19 = pve01-03, tailscale-gw,
+frigate-01, none of them reserved); Tati's gaming desktop was handed .14 inside
+it. Fixed 2026-10-28 22:15: pool start moved to **.20**, so .10-.19 and
+.251-.254 are once again outside DHCP. Verified from the generated config
+(`dhcp-range=end0,192.168.86.20,192.168.86.250,...`) and by live ACKs after the
+restart. The one loose end is .14, which keeps its old out-of-pool lease until
+it expires and then re-DISCOVERs into .20-250.
 
 Current static allocations:
 
@@ -53,13 +54,13 @@ allocation is needed (`.17` taken by frigate-01 as of 2026-10-15).
 `.14` is now identified: Tati's gaming desktop, a dnsmasq dynamic lease
 (verified 2026-10-28). `.15` is the TP-Link TL-SG105E.
 
-### Philips Hue devices (dynamic, unpinned)
+### Philips Hue devices (reserved 2026-10-28)
 
 Both bridges moved off their long-standing .58/.61 during the dnsmasq
-cutover and both sync boxes ride dynamic leases. Nothing is reserved, so any
-of the four can drift on its next renewal — HA pins them by IP in
-`core.config_entries`, so a drift breaks the integration silently. Live values
-2026-10-28, confirmed by SSDP `IpBridge` + `/description.xml`:
+cutover. All four are now **pinned as dnsmasq reservations with 24 h leases**
+so they cannot drift again — HA pins them by IP in `core.config_entries`, and a
+drift breaks the integration silently. Values confirmed by SSDP `IpBridge` +
+`/description.xml` and by the generated `dhcp-host=` lines:
 
 | IP | Device | MAC | HA entry |
 | :--- | :--- | :--- | :--- |
@@ -68,8 +69,8 @@ of the four can drift on its next renewal — HA pins them by IP in
 | `192.168.86.250` | Living Room Sync Box | `c4:29:96:e0:fd:56` | `01KGNFHJZFTEJHVTSZMSG69PHE` |
 | `192.168.86.190` | Game Room Sync Box | `c4:29:96:09:be:a8` | `01M251CVT0SMRRNDNZX389K4K8` |
 
-`.250` is the last address in the pool — pin these four before anything else
-in the 10-250 range gets discussed.
+Reservation names in the add-on are `hue-living-room-bridge`,
+`hue-game-room-bridge`, `hue-living-room-sync-box`, `hue-game-room-sync-box`.
 
 ## Physical switch chain (LAN, non-Proxmox)
 
