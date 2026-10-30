@@ -1,0 +1,12 @@
+[Unit]
+Description=NIC stall watch (link-up-but-nothing-passes catcher, pve01/02/03)
+Documentation=file:/root/nic_stall.log
+After=network-online.target
+
+[Service]
+ExecStart=/bin/bash /usr/local/sbin/nic_stall_watch.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
