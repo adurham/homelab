@@ -113,18 +113,28 @@ dns-sd -R d2d-probe _d2d._tcp local 17120                                # A/B: 
 - The lab monitors already watch this MAC: `mac-flow-witness.service` on pve01/02/03 counts its frames per
   second (`/root/mac_flow.log`), so a change in sweep shape would be recorded.
 
-## Filed with ecobee (2026-10-30)
+## Filing with ecobee (2026-10-30) — there is no automatable intake
 
-Bug report emailed to **support@ecobee.com** on 2026-10-30 14:28 CDT from the address on file for the
-other vendor accounts (`AMDNative@gmail.com`), subject "Bug report: Smart Thermostat Premium (ECB601)
-continuously ARP-scans the local subnet and queries a non-existent _d2d._tcp service". Verified from that
-account's Sent Mail: **exactly one copy**, correct sender and recipient, body present in the raw MIME, and
-both attachments intact — a 2,418-frame pcap filtered to the thermostat's own conversation with the
-capture host (no other device's traffic) plus the written measurement record.
+Emailed **support@ecobee.com** at 14:28 CDT from the address on file for the other vendor accounts
+(`AMDNative@gmail.com`), pcap + written record attached, verified sent (one copy, body and attachments
+intact). **It bounced**: ecobee's autoresponder says that address "is currently not monitored" and
+redirects to the Help Center. Every other channel was then checked:
 
-It asks ecobee three things: (1) is the full-subnet ARP sweep intended, and is there a supported way to
-disable it or slow it down; (2) what peer the `_d2d._tcp` browse is looking for, and whether never finding
-one affects any feature (Siri/AirPlay, sensors, local control); (3) whether engineering wants further
-captures. The report carries no personal name beyond the sending address.
+- **Live chat** is the sanctioned route (ecobee's own staff answer on r/ecobee with "call 1-877-932-6233
+  or connect with our live support team via chat at ecobee.com/contact"). It is a Mavenoid assistant
+  (`#mavenoid-shadow-root`; reachable: Continue → Contact support → Live Chat) that hands off to a
+  **Salesforce Embedded Messaging** window (`ecobee.my.site.com/ESWecobeecomMessaging…`, title "Chat
+  Window"). That window is a cross-origin out-of-process iframe: it is absent from `Page.getFrameTree`,
+  attaching to its target with `Target.attachToTarget(flatten=True)` returns the PARENT page's context
+  (this harness drops `sessionId`), the accessibility tree does not include it, and the ESW URL opened
+  standalone renders empty (it needs `sitecontext.min.html` as parent). **A harness-driven chat cannot
+  read or type into it — don't burn another session on this.**
+- **Phone** 1-877-932-6233 (Mon–Fri 9am–10pm EST) — live human, not automatable.
+- **API support portal** `developer.ecobee.com/support` — ticketing, but explicitly for API /
+  developer-account questions, and new registrations are closed. Do not misroute a device bug there.
+- `developer@ecobee.com` / `developer-api@ecobee.com` appear only in r/ecobee comments, for API keys.
 
-Everything needed to regenerate the evidence is in the Reproduce section above.
+Paste-ready text for the chat or the phone: `~/.hermes/cache/scratch/ecobee-chat-paste.txt`
+(regenerable from this doc once scratch is pruned). r/ecobee is the one public place ecobee staff
+demonstrably engage (they acknowledged the Sep 2026 temperature bug there and on status.ecobee.com), but
+it is public and needs the owner's approval.
