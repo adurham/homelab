@@ -5,6 +5,68 @@ groups:
     folder: Infrastructure
     interval: 1m
     rules:
+      # ── Alert-path heartbeat ─────────────────────────────────────────────
+      # Lives only in the deployed instance (added on the box, never committed);
+      # folded in so a playbook run stops deleting it. Fires permanently by
+      # design: absence of the alert means the evaluation/notification path is
+      # dead. severity=meta + label dms=true keep it out of the normal routes.
+      - uid: dead_mans_switch
+        title: Dead man's switch
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 60
+            to: 0
+          datasourceUid: __expr__
+          model:
+            datasource:
+              name: Expression
+              type: __expr__
+              uid: __expr__
+            expression: '1'
+            intervalMs: 1000
+            maxDataPoints: 43200
+            refId: A
+            type: math
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            conditions:
+            - evaluator:
+                params:
+                - 0
+                type: gt
+              operator:
+                type: and
+              query:
+                params:
+                - A
+              reducer:
+                type: last
+                params: []
+              type: query
+            datasource:
+              name: Expression
+              type: __expr__
+              uid: __expr__
+            expression: A
+            intervalMs: 1000
+            maxDataPoints: 43200
+            refId: C
+            type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: Alert pipeline alive (dead man's switch)
+          description: "If healthchecks.io stops receiving these pings, Grafana / rule-eval\
+            \ / network is broken \u2014 page out-of-band."
+        labels:
+          severity: meta
+          dms: 'true'
+        isPaused: false
+
       - uid: host_down
         title: Host down
         condition: C
@@ -1192,7 +1254,7 @@ groups:
               maxDataPoints: 43200
               refId: C
         noDataState: OK
-        execErrState: Error
+        execErrState: Alerting
         for: 1m
         annotations:
           summary: "Home Assistant banned a client IP"
@@ -1202,7 +1264,7 @@ groups:
           # request from that address, and the SDN egresses through one NAT
           # address, so a single ban takes the whole private subnet out of HA
           # for as long as nobody notices (3 days, last time).
-          severity: critical
+          severity: warning
         isPaused: false
 
       # ── Orphan-guest detector health ─────────────────────────────────────
@@ -1289,7 +1351,7 @@ groups:
             model:
               conditions:
                 - evaluator:
-                    params: [0]
+                    params: [1]
                     type: lt
                   operator:
                     type: and
@@ -1464,7 +1526,7 @@ groups:
             model:
               conditions:
                 - evaluator:
-                    params: [0]
+                    params: [1]
                     type: lt
                   operator:
                     type: and
@@ -1541,7 +1603,7 @@ groups:
               maxDataPoints: 43200
               refId: C
         noDataState: OK
-        execErrState: Error
+        execErrState: Alerting
         for: 1m
         annotations:
           summary: "root SSH login on {{ '{{' }} $labels.host {{ '}}' }}"
@@ -1608,7 +1670,7 @@ groups:
               maxDataPoints: 43200
               refId: C
         noDataState: OK
-        execErrState: Error
+        execErrState: Alerting
         for: 1m
         annotations:
           summary: "Home Assistant is rejecting the metrics scrape's credentials"
@@ -2977,8 +3039,8 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        noDataState: OK
-        execErrState: Error
+        noDataState: Alerting
+        execErrState: Alerting
         for: 10m
         annotations:
           summary: "pve replication job {{ '{{' }} $labels.id {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} has not synced for over an hour"
@@ -3579,7 +3641,7 @@ groups:
               refId: C
               type: threshold
         noDataState: OK
-        execErrState: Error
+        execErrState: Alerting
         for: 30m
         annotations:
           summary: "Home Assistant backups have not reached Google Drive for over 2 days"
@@ -3635,7 +3697,7 @@ groups:
               refId: C
               type: threshold
         noDataState: OK
-        execErrState: Error
+        execErrState: Alerting
         for: 6h
         annotations:
           summary: "Proxmox archives have not reached Google Drive for over 9 days"
@@ -3693,7 +3755,7 @@ groups:
               refId: C
               type: threshold
         noDataState: OK
-        execErrState: Error
+        execErrState: Alerting
         for: 6h
         annotations:
           summary: "Monthly backup restore drill has not succeeded in over 40 days"
@@ -3721,7 +3783,7 @@ groups:
                 type: prometheus
                 uid: victoriametrics
               editorMode: code
-              expr: 'max(ha_emmc_life_used_percent) >= 80'
+              expr: 'max_over_time(ha_emmc_life_used_percent[3d]) >= 80'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -3752,7 +3814,7 @@ groups:
               refId: C
               type: threshold
         noDataState: OK
-        execErrState: Error
+        execErrState: Alerting
         for: 6h
         annotations:
           summary: "Home Assistant eMMC has consumed {{ '{{' }} $value {{ '}}' }}% of its rated write life"
@@ -3806,7 +3868,7 @@ groups:
               refId: C
               type: threshold
         noDataState: OK
-        execErrState: Error
+        execErrState: Alerting
         for: 5m
         annotations:
           summary: "{{ '{{' }} $labels.kind {{ '}}' }} {{ '{{' }} $labels.vmid {{ '}}' }} is running on {{ '{{' }} $labels.node {{ '}}' }} outside Proxmox"
