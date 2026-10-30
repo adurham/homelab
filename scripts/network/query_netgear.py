@@ -104,11 +104,17 @@ class Switch:
         self.op = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.cj))
 
-    def _raw(self, path, data=None, timeout=25):
+    def _raw(self, path, data=None, timeout=25, method=None):
         global HOST
         if HOST is None:
             HOST = resolve_switch_host()
-        body = urllib.parse.urlencode(data).encode() if data else None
+        if data is None and method == "POST":
+            # POST with an empty body -- what the SPA's own logout does.
+            body = b""
+        elif data is None:
+            body = None
+        else:
+            body = urllib.parse.urlencode(data).encode()
         req = urllib.request.Request(
             f"http://{HOST}{path}", data=body,
             headers={"User-Agent": "Mozilla/5.0", "Referer": f"http://{HOST}/"})
@@ -123,26 +129,41 @@ class Switch:
     def logout(self):
         """Release the session slot.
 
-        CRITICAL: this switch allows only a few concurrent sessions and holds
-        each one until it times out (minutes). Abandoning sessions quickly
-        yields "The maximum number of sessions has been reached." -- always
-        log out, even on error paths.
+        CRITICAL: this switch allows only a handful of concurrent sessions (its
+        own HTTP configuration caps the count at 4) and holds each one until it
+        times out -- up to 60 minutes. Filling the table is what produces
+        "The maximum number of sessions has been reached." for the next hour.
 
-        No-op when we don't hold a session (the endpoint 404s unauthenticated).
+        The firmware releases a session with a **POST** to /logout.cgi; this was
+        read out of the SPA's own JS. A GET on that path is answered with a
+        harmless 200 stub and does NOT release the slot -- doing that is how this
+        script used to fill the table while appearing to log out cleanly. So:
+        POST, then PROVE it with an authenticated probe, and shout if the slot
+        survived.
         """
-        if not any(c.name == "SID" for c in self.cj):
+        if not self.cj:
             return
         errors = []
         for path in ("/logout.cgi", "/login.cgi?cmd=logout"):
             try:
-                self.get(path)
+                self._raw(path, method="POST")
                 break
-            except Exception as e:  # noqa: S112, BLE001 - try next candidate
+            except Exception as e:  # noqa: BLE001 - try next candidate
                 errors.append(f"{path}: {str(e)[:40]}")
-        else:
-            print(f"   (warning: could not log out -- {'; '.join(errors)})",
-                  file=sys.stderr)
+        try:
+            probe = self.get("/dashboard.cgi")
+            still_live = "LinkedSpeed" in probe  # only a live port table has this
+        except Exception:  # noqa: BLE001
+            still_live = False
         self.cj.clear()
+        if still_live:
+            print(
+                "   (warning: the session is STILL live after logout -- the switch "
+                "will hold that slot until its HTTP session timeout; lower it under "
+                "Settings > HTTP configuration if this keeps happening"
+                + (f"; logout errors: {'; '.join(errors)}" if errors else "") + ")",
+                file=sys.stderr,
+            )
 
     def __enter__(self):
         return self
