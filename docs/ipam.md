@@ -341,8 +341,9 @@ Netgear+PVE corner (mechanism (a)), NOT with an HA self-fence (mechanism (b))
 would leave the fence log line + softdog reason; neither exists. Next
 occurrence: physically inspect the strip/branch feeding that corner, and
 check whether the GS108's own uptime counter reset (its web UI at
-192.168.86.51 now answers; a single read-only visit is allowed, do NOT loop
-logins).
+its DHCP address now answers (192.168.86.163 since 2026-10-30, pinned by a
+real dnsmasq reservation -- .51 only ever lived in AdGuard, which is no longer in
+the DHCP path); a single read-only visit is allowed, do NOT loop logins).
 
 **EVENT 2026-10-01 13:23:57 CDT (18:23Z) — SECOND event captured live; first with a full node-side reconstruction.**
 
@@ -801,7 +802,7 @@ afterward, don't re-add as a leaf without deciding on backhaul first).
 
 | Device | Model | LAN IP | Notes |
 | :--- | :--- | :--- | :--- |
-| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | `192.168.86.51` (verified live 2026-09-25; resolves as `gs108ev4.lan`) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
+| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | DHCP, pinned to `192.168.86.163` (dnsmasq reservation added 2026-10-30; was `.51` while an AdGuard-only reservation held) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
 
 **Password state (2026-09-25):** the factory-default label password is
 REJECTED — the user rotated it. The 1Password item `Netgear GS108Ev4`
@@ -819,9 +820,11 @@ loss, ~2 ms to gateway) and at the BGW (0 Tx/Rx errors, only port 2
 live). Re-enable from DIAGNOSTICS → LOOP PREVENTION only if loop reports
 recur.
 
-**Status (2026-08-04, IP corrected 2026-10-15):** switch reachable at `192.168.86.51` via a DHCP
-reservation (added directly in AdGuard, not yet mirrored into the Ansible
-role). Port mapping confirmed via live link-toggle tests (bring interface
+**Status (2026-10-30):** switch pinned at `192.168.86.163` by a real dnsmasq DHCP
+reservation (addon option `dhcp_client_settings`, added 2026-10-30). The old `.51`
+only ever existed as an AdGuard reservation, which is no longer in the DHCP path,
+so the switch had been drifting on dynamic leases. Scripted readers resolve it from
+the dnsmasq client table by MAC (see `scripts/network/query_netgear.py`). Port mapping confirmed via live link-toggle tests (bring interface
 down/up on each host, watch for the corresponding port's traffic counters
 on `/portStatistics.cgi` to freeze — NOT via UP/DOWN status labels, which
 are unreliable on macOS since `ifconfig down` only sets an administrative

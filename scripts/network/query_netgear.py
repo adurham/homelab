@@ -31,9 +31,12 @@ import sys
 import urllib.parse
 import urllib.request
 import gzip
+import os
 
-HOST = "192.168.86.51"
+HOST = None   # resolved lazily by resolve_switch_host() -- it DHCPs and moves
 OP_ITEM = "Netgear GS108Ev4"
+SWITCH_MAC = "28:94:01:77:1d:80"
+DNSMASQ_WS = "ws://192.168.86.2:8976/ws"
 
 # page -> {checkbox id: human label}
 TOGGLES = {
@@ -63,6 +66,38 @@ def merge(s1, s2):
     return "".join(out)
 
 
+def resolve_switch_host():
+    """Find the switch's current address instead of trusting a remembered one.
+
+    The GS108Ev4 takes DHCP and moves (notes have it at .14, .51, .62 and, on
+    2026-10-30, .163 -- a DHCP reservation now pins that). Ask the dnsmasq
+    add-on's live client table for its MAC; only fall back to the last known
+    address if that lookup is unavailable.
+    """
+    env = os.environ.get("GS108_HOST")
+    if env:
+        return env
+    try:
+        import json as _json
+
+        import websocket  # type: ignore[import-not-found]
+        ws = websocket.create_connection(DNSMASQ_WS, timeout=8)
+        try:
+            for _ in range(10):
+                msg = _json.loads(ws.recv())
+                for client in msg.get("current_clients", []):
+                    lease = client.get("lease", {})
+                    if (lease.get("mac_addr") or "").lower() == SWITCH_MAC:
+                        return lease["ip_addr"]
+        finally:
+            ws.close()
+    except Exception:  # noqa: BLE001 - any failure just means "use the fallback"
+        pass
+    print("warning: switch not found in the dnsmasq client table "
+          "(websocket unavailable?); using the last known address", file=sys.stderr)
+    return "192.168.86.163"
+
+
 class Switch:
     def __init__(self):
         self.cj = http.cookiejar.CookieJar()
@@ -70,6 +105,9 @@ class Switch:
             urllib.request.HTTPCookieProcessor(self.cj))
 
     def _raw(self, path, data=None, timeout=25):
+        global HOST
+        if HOST is None:
+            HOST = resolve_switch_host()
         body = urllib.parse.urlencode(data).encode() if data else None
         req = urllib.request.Request(
             f"http://{HOST}{path}", data=body,

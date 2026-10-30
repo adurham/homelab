@@ -1,0 +1,149 @@
+{
+  "dhcp_client_settings": [
+    {
+      "description": "HA OS box",
+      "mac": "20:f8:3b:01:a8:ca",
+      "name": "home-assistant",
+      "reserved_ip": "192.168.86.2",
+      "tags": []
+    },
+    {
+      "description": "Shelly Middle Garage Bay Door",
+      "mac": "34:B7:DA:C5:5E:A4",
+      "name": "shelly-middle-garage",
+      "reserved_ip": "192.168.86.21",
+      "tags": []
+    },
+    {
+      "description": "Shelly Exhaust Fan",
+      "mac": "D0:CF:13:CB:FC:28",
+      "name": "shelly-exhaust-fan",
+      "reserved_ip": "192.168.86.24",
+      "tags": []
+    },
+    {
+      "description": "Shelly Pool Pump",
+      "mac": "28:37:2F:21:C5:B8",
+      "name": "shelly-pool-pump",
+      "reserved_ip": "192.168.86.25",
+      "tags": []
+    },
+    {
+      "description": "nginx load balancer, CT 103",
+      "mac": "BC:24:11:8B:07:28",
+      "name": "lb-01",
+      "reserved_ip": "192.168.86.34",
+      "tags": []
+    },
+    {
+      "description": "was the Shelly Workstation Plug reservation",
+      "mac": "58:47:CA:78:CF:F7",
+      "name": "amd-workstation",
+      "reserved_ip": "192.168.86.57",
+      "tags": []
+    },
+    {
+      "description": "Shelly Right Garage Bay Door",
+      "mac": "B0:81:84:EE:0F:D0",
+      "name": "shelly-right-garage",
+      "reserved_ip": "192.168.86.211",
+      "tags": []
+    },
+    {
+      "description": "Shelly Left Garage Bay Door",
+      "mac": "34:B7:DA:C4:95:74",
+      "name": "shelly-left-garage",
+      "reserved_ip": "192.168.86.216",
+      "tags": []
+    },
+    {
+      "description": "Shelly Circulator Pump",
+      "mac": "28:37:2F:21:C1:DC",
+      "name": "shelly-circulator-pump",
+      "reserved_ip": "192.168.86.222",
+      "tags": []
+    },
+    {
+      "description": "GL.iNet GL-RM10 Comet Pro KVM",
+      "mac": "94:83:c4:d7:ea:9e",
+      "name": "gl-rm10-kvm",
+      "reserved_ip": "192.168.86.104",
+      "tags": []
+    },
+    {
+      "description": "Philips Hue bridge, Living Room (serial ecb5fa9c41a0)",
+      "mac": "ec:b5:fa:9c:41:a0",
+      "name": "hue-living-room-bridge",
+      "reserved_ip": "192.168.86.197",
+      "tags": []
+    },
+    {
+      "description": "Philips Hue bridge, Game Room (serial ecb5faae57db)",
+      "mac": "ec:b5:fa:ae:57:db",
+      "name": "hue-game-room-bridge",
+      "reserved_ip": "192.168.86.53",
+      "tags": []
+    },
+    {
+      "description": "Hue Play HDMI sync box, Living Room",
+      "mac": "c4:29:96:e0:fd:56",
+      "name": "hue-living-room-sync-box",
+      "reserved_ip": "192.168.86.250",
+      "tags": []
+    },
+    {
+      "description": "Hue Play HDMI sync box, Game Room",
+      "mac": "c4:29:96:09:be:a8",
+      "name": "hue-game-room-sync-box",
+      "reserved_ip": "192.168.86.190",
+      "tags": []
+    }
+  ],
+  "dhcp_mac_address_blocklist": [],
+  "dhcp_pools": [
+    {
+      "end": "192.168.86.250",
+      "gateway": "192.168.86.1",
+      "interface": "end0",
+      "netmask": "255.255.255.0",
+      "start": "192.168.86.20"
+    }
+  ],
+  "dhcp_server": {
+    "address_reservation_lease": "24h",
+    "default_lease": "1h",
+    "dns_domain": "lan",
+    "dns_servers": [
+      "192.168.86.1"
+    ],
+    "dnsmasq_customizations": "# nest-mitm: route every Nest camera's default gateway at the test interceptor.\n# One dhcp-host line per MAC on purpose: a second line for the same MAC silently\n# drops the reservation (verified). Every line carries set:cam, so the single\n# dhcp-option below applies to all of them. 1h leases: a camera flips onto the\n# interceptor within ~30 minutes of a change, and back just as fast on rollback.\ndhcp-host=b8:7b:d4:da:5e:17,nest-cam-indoor.lan,192.168.86.192,1h,set:cam\ndhcp-host=b8:7b:d4:e8:b2:bf,cam-79.lan,192.168.86.79,1h,set:cam\ndhcp-host=cc:a7:c1:60:0e:df,cam-164.lan,192.168.86.164,1h,set:cam\ndhcp-host=3c:31:74:bf:75:b2,cam-191.lan,192.168.86.191,1h,set:cam\ndhcp-host=3c:31:74:55:a4:2c,cam-210.lan,192.168.86.210,1h,set:cam\ndhcp-host=cc:a7:c1:68:f0:03,cam-233.lan,192.168.86.233,1h,set:cam\ndhcp-option=cam,3,192.168.86.56\n\n# switch2 (4c:30:6a:de:9f:01 at .28): tag -> router override. Reservation and\n# dhcp-option must name the same MAC; this is the console, not the Switch 1.\ndhcp-host=4c:30:6a:de:9f:01,switch2.lan,192.168.86.28,1h,set:sw2\ndhcp-option=sw2,3,192.168.86.56\ndhcp-option=sw2,6,192.168.86.56\n",
+    "forget_past_clients_after": "30d",
+    "log_requests": true,
+    "ntp_servers": [
+      "time1.google.com",
+      "time2.google.com"
+    ],
+    "reset_dhcp_lease_database_on_reboot": false
+  },
+  "dns_custom_hosts": [],
+  "dns_server": {
+    "cache_size": 10000,
+    "dns_domain": "lan",
+    "enable": false,
+    "log_requests": false,
+    "port": 53,
+    "upstream_servers": [
+      "8.8.8.8",
+      "8.8.4.4"
+    ]
+  },
+  "interfaces": [
+    "end0"
+  ],
+  "web_ui": {
+    "data_tables_num_rows": 20,
+    "log_activity": false,
+    "port": 8976,
+    "refresh_interval_sec": 10
+  }
+}

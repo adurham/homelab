@@ -1,6 +1,8 @@
 #!/bin/bash
 # netgear_mgmt_probe.sh -- 15 s reachability record for the GS108Ev4 management
-# interface (192.168.86.51) and its ARP presence.
+# interface (192.168.86.163 since 2026-10-30; DHCP-pinned by a dnsmasq reservation
+# -- it used to drift, which is why earlier probes pointed at a dead .51) and its
+# ARP presence.
 #
 # WHY: the switch's control plane has been unreachable for >=17 h while its data
 # plane keeps forwarding (no ARP reply, no http on 80/443, no NSDP answer, and it
@@ -14,7 +16,7 @@
 #
 # Unit: netgear-mgmt-probe.service (Restart=always).
 set -u
-TARGET=192.168.86.51
+TARGET=192.168.86.163
 LOG=/root/netgear_mgmt.log
 MAXB=1048576
 prev=""
