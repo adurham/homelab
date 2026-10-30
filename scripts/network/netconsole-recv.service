@@ -1,0 +1,23 @@
+[Unit]
+Description=netconsole receiver (collects kernel messages from sibling pve nodes)
+Documentation=file:///usr/local/bin/netconsole_recv.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/netconsole_recv.py
+Restart=always
+RestartSec=2
+# The point of this unit is to be listening when a sibling node's network dies;
+# it must never take the host down with it.
+Nice=5
+IOSchedulingClass=best-effort
+# Small footprint, no privileges beyond a UDP socket and its log file.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
