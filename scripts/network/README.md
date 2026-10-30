@@ -124,3 +124,30 @@ either a lab-branch power event or HA self-fencing. Besides the three PVE nodes
 (TCP/22) and the two managed switches above (TCP/80), it probes the gateway
 (`192.168.86.1`, ICMP) and `1.1.1.1:443` (WAN). See `docs/ipam.md` (EVENT
 2026-09-30 / 2026-10-01) for how the logs are interpreted.
+
+## Self-fence forensics (deployed 2026-10-30 on pve01/02/03)
+
+Two read-only observers that catch the instant a node loses its network, plus why
+the existing witness cannot answer the question by itself:
+
+| Tool | Unit | Output | Answers |
+|---|---|---|---|
+| `nic_stall_watch.sh` | `nic-stall-watch.service` | `/root/nic_stall.log`, `/root/progress_witness.log` | Is the NIC still *receiving* while everything else is dead (1 s counter deltas), what did the driver say (dmesg ring buffer, live RAM), and was the *machine* still executing during the ~110 s before the reset (1 Hz fsync'd local progress trace, no network involved) |
+| `mac_flow_witness.py` | `mac-flow-witness.service` (+ `/etc/default/mac-flow-witness`) | `/root/mac_flow.log` | Seen from a healthy neighbour: are the stalled node's frames still arriving on the wire (per-second counts per sibling node MAC) |
+
+`lab_witness.sh` cannot answer either question: its `HB` line is emitted every **30 loop
+iterations** and a fully-failed round costs ~7 s (7 probes x 1 s timeout), so no HB can
+appear inside a 110 s outage — missing heartbeats during a stall are a cadence property,
+not evidence that the box hung.
+
+Install (per node; the unit reads `MAC_FLOW_ARGS` from `/etc/default/mac-flow-witness`):
+
+```sh
+sudo install -m 755 nic_stall_watch.sh /usr/local/sbin/nic_stall_watch.sh
+sudo install -m 755 mac_flow_witness.py /usr/local/sbin/mac_flow_witness.py
+sudo install -m 644 nic-stall-watch.service mac-flow-witness.service /etc/systemd/system/
+echo 'MAC_FLOW_ARGS="-i nic0 -o /root/mac_flow.log -m <macB> -n pveB -m <macC> -n pveC"' \
+  | sudo tee /etc/default/mac-flow-witness
+sudo systemctl daemon-reload
+sudo systemctl enable --now nic-stall-watch.service mac-flow-witness.service
+```

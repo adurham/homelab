@@ -1,0 +1,13 @@
+[Unit]
+Description=Per-second frame counts for sibling pve node MACs (self-fence forensics)
+Documentation=file:/root/mac_flow.log
+After=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/default/mac-flow-witness
+ExecStart=/usr/bin/python3 /usr/local/sbin/mac_flow_witness.py $MAC_FLOW_ARGS
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
