@@ -832,6 +832,20 @@ flag and doesn't reliably drop the physical PHY link; Linux's
 `ip link set down` / `networksetup -setnetworkserviceenabled ... off` do
 drop the real link and are trustworthy for this test):
 
+**2026-10-30 mapping (verified by counter matching against each node's own nic0
+counters over the same window -- switch byte fields are *from-node* then *to-node*,
+each a 32-bit counter that wraps in whole 4 GiB steps):**
+
+| Port | Device | Evidence |
+| :--- | :--- | :--- |
+| 1 | `pve01` (192.168.86.11) | 0.52 GB out / 1.31 GB in on the port vs pve01's own 0.57 / 1.36 GB over the same 34 min -- a 0.1 GB residual, far tighter than any other port |
+| 2 | `pve02` (192.168.86.12) | node-to-switch direction matches exactly at zero wraps (1.3295 GB port vs 1.33 GB node); the receive direction needs 5 wraps and then sits ~0.7 GB short, which is window skew on a 65 Mbit/s port |
+| 3-4 or 8 | `pve03` (192.168.86.13) | **not pinned.** Its ~23 GB each way wraps ~5 times and the residual window error (~1 GB) swamps the difference between candidate ports; best fit is port 8 (0.96 GB) then 3 (1.52) / 4 (1.55). Settle it with a 60 s delta sample (`scripts/network/switch_counter_deltas.py`) rather than whole-uptime volumes |
+| 8 | presumed uplink toward the under-desk switch | carries house-bound traffic only; the heavy inter-node traffic stays local, so this port is NOT the sum of the others |
+| 5, 6, 7 | light devices (no more than ~20 MB per port in 34 min) | not identified; candidates are the KVM, the console rig and a Mac Studio |
+
+**Historical mapping (2026-09-25, now stale -- do not use for cable work):**
+
 | Port | Device | Confirmed via |
 | :--- | :--- | :--- |
 | 8 | **Uplink toward the under-desk switch** (i.e. every host on this switch's other branches reaches the house through here) | Traffic test 2026-09-25: downloads to BOTH Mac Studios in turn (served from the MacBook on the desk branch) both produced by far the largest counter deltas on port 8, while no single other port carried a studio's whole flow. Matches user's recollection that 8 is the upstream to the under-work-desk switch. Also the port whose LEDs were seen blinking — a loop report landing on the uplink is the expected place for it. |
