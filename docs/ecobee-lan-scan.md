@@ -112,3 +112,19 @@ dns-sd -R d2d-probe _d2d._tcp local 17120                                # A/B: 
 - Do not touch the lab's switch/VLAN/DHCP config for this; the pve self-fence lane owns those changes.
 - The lab monitors already watch this MAC: `mac-flow-witness.service` on pve01/02/03 counts its frames per
   second (`/root/mac_flow.log`), so a change in sweep shape would be recorded.
+
+## Filed with ecobee (2026-10-30)
+
+Bug report emailed to **support@ecobee.com** on 2026-10-30 14:28 CDT from the address on file for the
+other vendor accounts (`AMDNative@gmail.com`), subject "Bug report: Smart Thermostat Premium (ECB601)
+continuously ARP-scans the local subnet and queries a non-existent _d2d._tcp service". Verified from that
+account's Sent Mail: **exactly one copy**, correct sender and recipient, body present in the raw MIME, and
+both attachments intact — a 2,418-frame pcap filtered to the thermostat's own conversation with the
+capture host (no other device's traffic) plus the written measurement record.
+
+It asks ecobee three things: (1) is the full-subnet ARP sweep intended, and is there a supported way to
+disable it or slow it down; (2) what peer the `_d2d._tcp` browse is looking for, and whether never finding
+one affects any feature (Siri/AirPlay, sensors, local control); (3) whether engineering wants further
+captures. The report carries no personal name beyond the sending address.
+
+Everything needed to regenerate the evidence is in the Reproduce section above.
