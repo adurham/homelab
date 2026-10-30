@@ -10,3 +10,10 @@
     name: lab-vm-snapshots.timer
     state: restarted
     daemon_reload: true
+
+# A changed drop-in only takes effect once sysctl re-reads /etc/sysctl.d;
+# systemd-sysctl does it at boot, this does it now.
+- name: Apply crash-capture sysctls
+  ansible.builtin.command:
+    cmd: sysctl --system
+  changed_when: true

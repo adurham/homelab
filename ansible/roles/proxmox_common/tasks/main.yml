@@ -195,3 +195,25 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# ── Crash capture + fast recovery ────────────────────────────────────────
+# 2026-10-30: the nodes had been dying every few hours of a fault that left no
+# trace behind -- no journal lines at all, no network in either direction, link
+# still up -- and then hung for ~2 minutes until the software watchdog or the HA
+# fence reset them. The one record that survived was in pve02's firmware pstore:
+# an Oops in ZFS's ARC eviction path (arc_evictable_space_decrement, comm
+# arc_evict), after which the kernel could no longer write its own logs.
+# These four sysctls make that class of fault observable and bounded:
+# panic_on_oops / softlockup_panic / hardlockup_panic turn it into a panic,
+# which writes the efi_pstore slot that systemd-pstore archives at the next boot
+# under /var/lib/systemd/pstore/, and kernel.panic=20 reboots 20 s later instead
+# of the kernel default ("hang forever"). See files/99-crash-capture.conf for
+# the writeup and the one-line revert.
+- name: Install crash-capture and fast-recovery sysctls
+  ansible.builtin.copy:
+    src: 99-crash-capture.conf
+    dest: /etc/sysctl.d/99-crash-capture.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Apply crash-capture sysctls
