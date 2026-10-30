@@ -1,0 +1,12 @@
+# Managed by ansible -- see roles/proxmox_common/tasks/main.yml.
+[Unit]
+Description=Check that every HA-managed guest has a pvesr replication job (every {{ proxmox_common_orphan_guest_interval }})
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec={{ proxmox_common_orphan_guest_interval }}
+AccuracySec=30s
+Unit=ha-replication-check.service
+
+[Install]
+WantedBy=timers.target

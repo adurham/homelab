@@ -11,6 +11,12 @@
     state: restarted
     daemon_reload: true
 
+- name: Restart HA replication check timer
+  ansible.builtin.systemd:
+    name: ha-replication-check.timer
+    state: restarted
+    daemon_reload: true
+
 # A changed drop-in only takes effect once sysctl re-reads /etc/sysctl.d;
 # systemd-sysctl does it at boot, this does it now.
 - name: Apply crash-capture sysctls

@@ -1318,6 +1318,181 @@ groups:
           severity: warning
         isPaused: false
 
+      # ── HA guests without replication ────────────────────────────────────
+      # Owner's rule (2026-10-30): every VM or CT with HA set NEEDS a pvesr
+      # replication job. There is no shared storage in this cluster -- a guest's
+      # disks live on one node's local pool, and replication is the only thing
+      # that puts a usable copy on another node. An HA service without a job can
+      # still be relocated by the CRM after a fence, and then it lands on a node
+      # that has no disk for it and refuses to start: that is exactly how ct:105
+      # (ntp-01) ended up stopped and unnoticed. max by (vmid,kind) collapses the
+      # per-node copies of one finding into a single alert.
+      - uid: ha_guest_without_replication
+        title: HA-managed guest has no replication job
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (vmid, kind) (ha_guest_without_replication)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "HA guest {{ '{{' }} $labels.kind {{ '}}' }}:{{ '{{' }} $labels.vmid {{ '}}' }} has no replication job"
+          description: "Every VM or CT with HA set must have a pvesr replication job: this cluster has no shared storage, so without one a fence or relocation starts the guest on a node that has no disk for it (ct:105 on 2026-10-30 sat stopped with 'dataset does not exist'). Add jobs to BOTH other nodes -- on the node that holds the disks: `pvesr create-local-job <vmid>-<n> <target> --schedule '*:N/20' --rate 15`, then `pvesr run --id <jobid>` for the first sync. ha-replication-check.timer re-checks every 5 minutes."
+        labels:
+          severity: critical
+        isPaused: false
+
+      # The check is fail-open by design (a broken scan must not invent
+      # findings), so its own death has to be visible: a dead timer leaves
+      # node_exporter serving the LAST textfile value forever, which reads as
+      # "fully covered" indefinitely.
+      - uid: ha_replication_scan_stale
+        title: HA/replication coverage check is stale or absent
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: time() - node_textfile_mtime_seconds{instance=~"pve0[123]",file=~".*ha_replication.prom"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [900]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "HA/replication check on {{ '{{' }} $labels.instance {{ '}}' }} has not refreshed in 15 minutes"
+          description: "ha-replication-check.timer writes /var/lib/node_exporter/textfile_collector/ha_replication.prom every 5 minutes; that file is older than 15 minutes, so the cluster is currently reporting FULL replication coverage because nothing has looked. Check `systemctl status ha-replication-check.timer` and `journalctl -t ha-replication` on {{ '{{' }} $labels.instance {{ '}}' }}. noDataState is Alerting on purpose: a vanished series means the same thing as a stale one."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: ha_replication_scan_failed
+        title: HA/replication coverage check is failing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: ha_replication_check_ok{instance=~"pve0[123]"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "HA/replication check on {{ '{{' }} $labels.instance {{ '}}' }} reports failure"
+          description: "ha_replication_check_ok = 0 on {{ '{{' }} $labels.instance {{ '}}' }}: the checker could not read the HA or the replication configuration (fail-open, so a broken scan cannot invent findings). A guest with no replication job would go unnoticed while this persists. Check `journalctl -t ha-replication` on that node."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: root_ssh_accepted
         title: root SSH login accepted on a PVE node
         condition: C

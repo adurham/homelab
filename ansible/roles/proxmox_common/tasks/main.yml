@@ -153,6 +153,58 @@
     state: started
   changed_when: false
 
+# ── HA guests without replication: the owner's rule ──────────────────────
+# 2026-10-30, owner's words: "any VM or CT with HA set NEEDS to have a
+# replication job". There is no shared storage in this cluster, so a guest's
+# disks live on one node's local pool and pvesr is what puts a usable copy on
+# another node. Without a job, a fence-relocation still moves the HA service --
+# and it lands on a node that has no disk for it and refuses to start, which is
+# how ct:105 (ntp-01) sat stopped and unnoticed until it was found by hand.
+# The check is fail-open (a broken scan must not invent findings) and its own
+# death is alerted on. See files/ha-replication-check.sh.
+- name: Install HA-without-replication detector script
+  ansible.builtin.copy:
+    src: ha-replication-check.sh
+    dest: /usr/local/bin/ha-replication-check.sh
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart HA replication check timer
+
+- name: Install HA-without-replication detector systemd service
+  ansible.builtin.template:
+    src: ha-replication-check.service.j2
+    dest: /etc/systemd/system/ha-replication-check.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart HA replication check timer
+
+- name: Install HA-without-replication detector systemd timer
+  ansible.builtin.template:
+    src: ha-replication-check.timer.j2
+    dest: /etc/systemd/system/ha-replication-check.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart HA replication check timer
+
+- name: Flush handlers so the timer picks up a fresh script/unit before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Start and enable HA-without-replication detector timer
+  ansible.builtin.systemd:
+    name: ha-replication-check.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Run one HA/replication scan immediately so the textfile exists before the first timer tick
+  ansible.builtin.systemd:
+    name: ha-replication-check.service
+    state: started
+  changed_when: false
+
 # ── Lab VM snapshots: the only protection that fits ──────────────────────
 # VMs 200-205 (Tanium lab) and 270-272 (small clones) are real state the owner
 # does not consider disposable, but their disks are 500 GB-1 TB of sparse zvol:

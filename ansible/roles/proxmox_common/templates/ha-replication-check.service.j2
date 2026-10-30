@@ -1,0 +1,11 @@
+# Managed by ansible -- see roles/proxmox_common/tasks/main.yml.
+[Unit]
+Description=Detect HA-managed guests without a pvesr replication job
+Documentation=file:///usr/local/bin/ha-replication-check.sh
+# Both configs it reads live in /etc/pve, which only exists once pmxcfs is up.
+After=pve-cluster.service local-fs.target
+
+[Service]
+Type=oneshot
+Environment=TEXTFILE_DIR={{ proxmox_common_orphan_guest_textfile_dir }}
+ExecStart=/usr/local/bin/ha-replication-check.sh
