@@ -134,7 +134,8 @@ redirects to the Help Center. Every other channel was then checked:
   developer-account questions, and new registrations are closed. Do not misroute a device bug there.
 - `developer@ecobee.com` / `developer-api@ecobee.com` appear only in r/ecobee comments, for API keys.
 
-Paste-ready text for the chat or the phone: `~/.hermes/cache/scratch/ecobee-chat-paste.txt`
-(regenerable from this doc once scratch is pruned). r/ecobee is the one public place ecobee staff
-demonstrably engage (they acknowledged the Sep 2026 temperature bug there and on status.ecobee.com), but
-it is public and needs the owner's approval.
+**Resolution (owner, 2026-10-30):** **not filed, deliberately.** The owner's call: if it can't be filed by
+automation it isn't worth a manual step, so both the chat/phone leg and a public r/ecobee post were
+declined. **Do not re-raise this.** The findings above stand as the record and the paste-ready text lived
+only in scratch, so it will be pruned. If a future firmware release changes the behaviour, the Reproduce
+section says exactly what to re-measure.
