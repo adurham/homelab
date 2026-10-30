@@ -1,0 +1,12 @@
+[Unit]
+Description=Kernel-message witness (NIC/hang/lockup lines to disk before a self-fence reset)
+Documentation=file:/root/kernel_witness.log
+After=network-online.target
+
+[Service]
+ExecStart=/bin/bash /usr/local/sbin/kernel_witness.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

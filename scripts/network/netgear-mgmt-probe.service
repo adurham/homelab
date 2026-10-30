@@ -1,0 +1,12 @@
+[Unit]
+Description=GS108Ev4 management-interface reachability record (15 s)
+Documentation=file:/root/netgear_mgmt.log
+After=network-online.target
+
+[Service]
+ExecStart=/bin/bash /usr/local/sbin/netgear_mgmt_probe.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

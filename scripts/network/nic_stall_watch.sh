@@ -76,6 +76,13 @@ log_event() {
       [ "$p" = "$(hostname -I | awk '{print $1}')" ] && continue
       echo "   $p:22: $(timeout 2 bash -c "</dev/tcp/$p/22" 2>/dev/null && echo up || echo down)"
     done
+    echo "-- NIC hardware counters (the NIC's own view; compare with the netdev deltas above)"
+    ethtool -S "$IF" 2>/dev/null | grep -E "^[[:space:]]+(rx_packets|tx_packets|rx_bytes|tx_bytes|rx_missed_errors|rx_no_buffer_count|tx_timeout_count|tx_restart_queue|rx_over_errors|rx_crc_errors|rx_long_length_errors|rx_length_errors):" | sed 's/^/   /'
+    echo "-- frame visibility during the stall (<=5 s each, capped at 300 frames)"
+    echo "   inbound broadcast/multicast: $(timeout 6 tcpdump -i $IF -Q in -n -c 600 'ether broadcast or ether multicast' 2>/dev/null | wc -l)"
+    echo "   inbound unicast to our MAC:  $(timeout 6 tcpdump -i $IF -Q in -n -c 600 "ether dst $(cat /sys/class/net/$IF/address)" 2>/dev/null | wc -l)"
+    echo "   outbound frames:             $(timeout 6 tcpdump -i $IF -Q out -n -c 600 2>/dev/null | wc -l)"
+    echo "   (broadcasts arriving + no unicast + we transmit = switch mis-forwarding; nothing at all = the wire to the NIC is dead)"
     echo "=== end stall record"
   } >> "$LOG"
   sync_file "$LOG"
