@@ -511,8 +511,18 @@ async def handle_grafana_webhook(request: web.Request) -> web.Response:
                     "Alert %s resolved (not ack-watched), deleting message %s",
                     pending.get("alertname"), message_id,
                 )
+                try:
+                    await _delete_via_webhook(session, message_id)
+                except DiscordDeleteFailed:
+                    # Keep the entry tracked -- the reconcile sweep retries
+                    # the delete on its next pass. Dropping it here is what
+                    # orphans the message (see DiscordDeleteFailed).
+                    log.exception(
+                        "Delete failed for message %s; leaving it tracked for the reconcile sweep",
+                        message_id,
+                    )
+                    continue
                 await _post_history_event(session, _history_line(alert, "RESOLVED"))
-                await _delete_via_webhook(session, message_id)
                 # Re-check after the await: the user could have acked
                 # this exact message while the delete was in flight
                 # (e.g. rate-limited retry taking a few seconds), in
@@ -684,12 +694,23 @@ async def _watch_for_resolution(
                 continue
 
             log.info("Alert %s (silence %s) resolved, tearing down ack silence and deleting message %s", alertname, silence_id, message_id)
+            await _delete_silence(session, silence_id)
+            try:
+                await _delete_via_webhook(session, message_id)
+            except DiscordDeleteFailed:
+                # Keep the entry (acked, no live watcher once we return) --
+                # the reconcile sweep's relaxed skip condition picks it up
+                # and finishes the cleanup.
+                log.exception(
+                    "Delete failed for message %s after ack-resolution; leaving it for the reconcile sweep",
+                    message_id,
+                )
+                _ack_watchers.pop(message_id, None)
+                return
             await _post_history_event(
                 session,
                 f"\N{WHITE HEAVY CHECK MARK} `RESOLVED` — {alertname} (acked, resolved after watcher confirmation)",
             )
-            await _delete_silence(session, silence_id)
-            await _delete_via_webhook(session, message_id)
             _pending.pop(message_id, None)
             _ack_watchers.pop(message_id, None)
             _save_pending()
@@ -898,6 +919,19 @@ async def _edit_via_webhook(
     log.error("Giving up editing message %s after %d attempts", message_id, max_attempts)
 
 
+class DiscordDeleteFailed(RuntimeError):
+    """Raised when a Discord message delete could not be completed.
+
+    Callers MUST NOT drop their bookkeeping for a message whose delete
+    failed -- a silent give-up here is exactly what orphaned 44 resolved
+    messages in #infra-alerts on 2026-10-29: the caller popped its
+    _pending entry anyway, leaving the message with nothing tracking it,
+    so neither the resolved-webhook path nor the reconcile sweep could
+    ever clean it up. On failure, keep the entry so the reconcile sweep
+    (or the next webhook retry) keeps trying.
+    """
+
+
 async def _delete_via_webhook(
     session: aiohttp.ClientSession, message_id: int, max_attempts: int = 4
 ) -> None:
@@ -907,6 +941,10 @@ async def _delete_via_webhook(
     direction, #infra-alerts should show ONLY currently-firing alerts,
     with resolved/historical state living in Grafana, not accumulating
     in Discord. Retries on 429 like every other Discord call here.
+
+    Raises DiscordDeleteFailed if the message could not be deleted (after
+    exhausting 429 retries, or on any hard API error). Callers must keep
+    the message tracked on failure -- see DiscordDeleteFailed.
     """
     for attempt in range(1, max_attempts + 1):
         async with session.delete(
@@ -930,8 +968,87 @@ async def _delete_via_webhook(
                 continue
             body_text = await del_resp.text()
             log.warning("Failed to delete message via webhook API: %s %s", del_resp.status, body_text)
-            return
+            raise DiscordDeleteFailed(
+                f"delete of message {message_id} failed with HTTP {del_resp.status}"
+            )
     log.error("Giving up deleting message %s after %d attempts", message_id, max_attempts)
+    raise DiscordDeleteFailed(
+        f"giving up deleting message {message_id} after {max_attempts} rate-limit attempts"
+    )
+
+
+# ── startup channel reconcile (orphan cleanup) ───────────────────────────
+#
+# #infra-alerts is supposed to contain ONLY currently-firing alerts, but
+# the _pending-backed reconcile sweep can only clean up messages it is
+# tracking. Messages orphaned by a state-persistence gap -- posted while
+# _pending failed to save, then a restart reloaded an empty state.json
+# (observed 2026-10-29: a deploy-time gap left 44 resolved messages with
+# nothing tracking them; they sat in the channel visibly, un-actionable,
+# until noticed days later) -- are invisible to every existing path.
+# This startup sweep reconciles the CHANNEL itself: list the recent
+# messages via the bot API and delete any that are (a) older than an age
+# floor, (b) not tracked in _pending, and (c) untouched by a human (only
+# the bot's own priming reactions). Why this is safe: an alert that is
+# STILL firing but somehow untracked gets re-posted by Grafana's repeat
+# notification (the dedup only skips fingerprints that are tracked), so
+# any old untracked message is stale residue either way. Deletes go
+# through the WEBHOOK endpoint (the bot API cannot delete webhook-
+# authored messages -- same constraint as _delete_via_webhook).
+CHANNEL_RECONCILE_MIN_AGE_SEC = 6 * 3600
+CHANNEL_RECONCILE_MAX_DELETES = 50
+_channel_reconcile_started = False
+
+
+async def _reconcile_channel_once() -> None:
+    await asyncio.sleep(20)  # let the gateway session settle first
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://discord.com/api/v10/channels/{DISCORD_CHANNEL_ID}/messages?limit=100",
+                headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}"},
+            ) as resp:
+                if resp.status >= 300:
+                    log.warning("Channel reconcile: message list failed (%s), skipping", resp.status)
+                    return
+                messages = await resp.json()
+            now = datetime.now(timezone.utc)
+            deleted = 0
+            for msg in messages:
+                if deleted >= CHANNEL_RECONCILE_MAX_DELETES:
+                    break
+                try:
+                    mid = int(msg["id"])
+                    ts = datetime.fromisoformat(msg["timestamp"].replace("Z", "+00:00"))
+                except Exception:
+                    continue
+                if mid in _pending:
+                    continue
+                if (now - ts).total_seconds() < CHANNEL_RECONCILE_MIN_AGE_SEC:
+                    continue
+                human_touched = False
+                for r in (msg.get("reactions") or []):
+                    name = (r.get("emoji") or {}).get("name")
+                    if name in INITIAL_REACTION_EMOJI and r.get("count", 0) <= 1 and r.get("me"):
+                        continue  # bot's own priming reaction
+                    human_touched = True
+                    break
+                if human_touched:
+                    log.info("Channel reconcile: message %s has non-bot reaction(s), leaving it", mid)
+                    continue
+                try:
+                    await _delete_via_webhook(session, mid)
+                except DiscordDeleteFailed:
+                    log.exception("Channel reconcile: delete failed for message %s", mid)
+                    continue
+                log.info(
+                    "Channel reconcile: deleted orphaned message %s (untracked, older than %ds)",
+                    mid, CHANNEL_RECONCILE_MIN_AGE_SEC,
+                )
+                deleted += 1
+            log.info("Channel reconcile: complete, %d orphaned message(s) deleted", deleted)
+    except Exception:
+        log.exception("Channel reconcile failed (non-fatal)")
 
 
 def _resume_ack_watchers() -> None:
@@ -1000,6 +1117,10 @@ class AckBotClient(discord.Client):
         log.info("Reaction listener ready as %s", self.user)
         _resume_ack_watchers()
         _resume_silence_watchers()
+        global _channel_reconcile_started
+        if not _channel_reconcile_started:
+            _channel_reconcile_started = True
+            asyncio.create_task(_reconcile_channel_once())
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         if payload.channel_id != DISCORD_CHANNEL_ID:
@@ -1202,9 +1323,16 @@ async def _reconcile_pending() -> None:
             active_fingerprints = {a.get("fingerprint") for a in active_alerts if a.get("fingerprint")}
             candidates: list[int] = []
             for message_id, pending in list(_pending.items()):
-                if pending.get("resolved") or pending.get("acked"):
-                    # acked entries are covered by their own watcher task
+                if pending.get("resolved"):
                     continue
+                if pending.get("acked"):
+                    watcher = _ack_watchers.get(message_id)
+                    if watcher is not None and not watcher.done():
+                        # still covered by its own resolution watcher
+                        continue
+                    # acked but no live watcher (the watcher concluded but
+                    # its delete failed, or it was lost across a restart):
+                    # fall through so the sweep can finish the cleanup.
                 fingerprint = pending.get("fingerprint")
                 if not fingerprint:
                     # Pre-fingerprint legacy entry -- nothing safe to
@@ -1233,12 +1361,19 @@ async def _reconcile_pending() -> None:
             log.info("Reconcile: found %d stale unacked message(s) not caught by the webhook path, cleaning up", len(stale))
             for message_id in stale:
                 stale_pending = _pending.get(message_id, {})
+                try:
+                    await _delete_via_webhook(session, message_id)
+                except DiscordDeleteFailed:
+                    log.exception(
+                        "Reconcile: delete failed for message %s; will retry next sweep",
+                        message_id,
+                    )
+                    continue
                 await _post_history_event(
                     session,
                     f"\N{WHITE HEAVY CHECK MARK} `RESOLVED` — {stale_pending.get('alertname', 'alert')} "
                     "(caught by reconcile sweep, not the webhook path)",
                 )
-                await _delete_via_webhook(session, message_id)
                 _reconcile_miss_counts.pop(message_id, None)
                 still_pending = _pending.get(message_id)
                 if still_pending is not None and not still_pending.get("acked"):
