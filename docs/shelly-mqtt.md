@@ -81,10 +81,10 @@ plug's `.57`, so that one must not move without a config deploy.
 owns `.57` (dnsmasq reservation `amd-workstation`, Minisforum NIC
 58:47:CA:78:CF:F7); its plug was pushed off it and is pinned at `.100`
 (dnsmasq reservation `shelly-workstation-plug`, MAC E8:F6:0A:7E:15:28, 24 h
-lease), with `command_line.yaml` repointed. Three additional Plug US Gen4 units
-joined as PVE node plugs on dynamic leases: **PVE Plug A** `.160` (feeds pve01 —
-verified 2026-11-03 by a relay cycle), **PVE Plug B** `.187`, **PVE Plug C**
-`.234`; B/C → pve02/pve03 mapping is not yet verified.
+lease), with `command_line.yaml` repointed. Three Plug US Gen4 units joined as
+PVE node plugs, each verified by a relay-cycle test: **PVE Plug A** `.160` →
+pve01, **PVE Plug B** `.187` → pve02, **PVE Plug C** `.234` → pve03; all three
+are pinned by dnsmasq reservations (`shelly-pve-plug-a/b/c`, 24 h leases).
 
 ## Security status (important)
 

@@ -12,9 +12,9 @@
 | **Garage (Mid)** | Shelly | `192.168.86.21`| ✅ Mapped | Shelly relay control (`cover.middle_garage_bay_door`). DHCP. |
 | **Garage (Left)**| Shelly | `192.168.86.216`| ✅ Mapped | Shelly relay control (`cover.left_garage_door`). DHCP. |
 | **amd-workstation plug**| Shelly | `192.168.86.100`| ✅ Mapped | Shelly Plug US Gen4 (`switch.amd_workstation`). Pinned by dnsmasq reservation (`shelly-workstation-plug`) after the box took `.57` (2026-11-03); address hardcoded in `command_line.yaml`. |
-| **PVE Plug A** | Shelly | `192.168.86.160`| ✅ Mapped | Shelly Plug US Gen4 feeding **pve01** (verified 2026-11-03 via relay cycle). DHCP, name `PVE-Plug-A`. HA `switch.pve_plug_a`. |
-| **PVE Plug B** | Shelly | `192.168.86.187`| ✅ Mapped | Shelly Plug US Gen4. DHCP, name `PVE-Plug-B`. HA `switch.pve_plug_b`. Node mapping (pve02/03) unverified. |
-| **PVE Plug C** | Shelly | `192.168.86.234`| ✅ Mapped | Shelly Plug US Gen4. DHCP, name `PVE-Plug-C`. HA `switch.pve_plug_c`. Node mapping (pve02/03) unverified. |
+| **PVE Plug A** | Shelly | `192.168.86.160`| ✅ Mapped | Shelly Plug US Gen4 feeding **pve01** (verified 2026-11-03 via relay cycle). dnsmasq reservation `shelly-pve-plug-a`. HA `switch.pve_plug_a`. |
+| **PVE Plug B** | Shelly | `192.168.86.187`| ✅ Mapped | Shelly Plug US Gen4 feeding **pve02** (verified 2026-11-03 via relay cycle). dnsmasq reservation `shelly-pve-plug-b`. HA `switch.pve_plug_b`. |
+| **PVE Plug C** | Shelly | `192.168.86.234`| ✅ Mapped | Shelly Plug US Gen4 feeding **pve03** (verified 2026-11-03 via relay cycle). dnsmasq reservation `shelly-pve-plug-c`. HA `switch.pve_plug_c`. |
 | **Living Room TV**| Sony Bravia | `192.168.86.195`| ✅ REST API | Optimized for performance. |
 | **PS5** | Hue Sync Box | `192.168.86.x` | ✅ Intelligent | Restores previous scene/state on power off. |
 | **Nest Doorbell**| Nest SDM | `192.168.86.28`| ✅ Active | Real-time chime and motion events. |
