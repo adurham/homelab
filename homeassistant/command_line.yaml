@@ -86,8 +86,10 @@
     name: "amd-workstation reachable"
     unique_id: amd_workstation_reachable
     # SSH-port probe, not ICMP: a zombie (kernel up, sshd dead) must read as DOWN.
+    # 2026-11-03: probes the LAN address (.57, 24h reservation), not the box's
+    # Tailscale IP — the tailnet path from HA is down and made this read falsely off.
     command: >-
-      bash -c 'timeout 4 bash -c "exec 3<>/dev/tcp/100.66.90.53/22" 2>/dev/null && echo 1 || echo 0'
+      bash -c 'timeout 4 bash -c "exec 3<>/dev/tcp/192.168.86.57/22" 2>/dev/null && echo 1 || echo 0'
     device_class: connectivity
     payload_on: "1"
     payload_off: "0"
