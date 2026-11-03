@@ -89,7 +89,7 @@ verified 2026-11-03 by a relay cycle), **PVE Plug B** `.187`, **PVE Plug C**
 ## Security status (important)
 
 - **Cloud**: off on all 11 (7 original + PS5 plug + 3 PVE plugs, 2026-11-03). No vendor cloud, no Shelly app control.
-- **Enhanced security (2026-11-03)**: `enhanced_security` is ON on all five Plug US Gen4 units (PS5, workstation, PVE A/B/C; the workstation plug shipped with it on, the other four were pre-2.0.0-factory units where it can be enabled once — factory reset is the only way back). With no factory HTTPS certificate the flag starts no TLS listener and redirects no HTTP, so plain-HTTP RPC with digest auth, MQTT and Matter are unchanged. The six Gen3 relays/covers remain `false`.
+- **Enhanced security (2026-11-03)**: `enhanced_security` is ON on all five Plug US Gen4 units (PS5, workstation, PVE A/B/C) **and both basement Gen3 relays** (exhaust fan, water-heater circulator) — the workstation plug shipped with it on; the other six were pre-2.0.0-factory units where it can be enabled once (factory reset is the only way back). With no factory HTTPS certificate the flag starts no TLS listener and redirects no HTTP, so plain-HTTP RPC with digest auth, MQTT and Matter are unchanged. The pool pump and the three garage cover relays remain `false` (the pool unit sits in a sealed enclosure, so the one-way flag is deliberately not set there).
 - **Remote path**: HA only (Nabu Casa).
 - **Device login is ON (2026-10-18).** `Shelly.SetAuth` with user `admin`,
   realm = device id and `ha1 = SHA256("admin:<device-id>:<password>")`. All 7
