@@ -2913,6 +2913,78 @@ groups:
           severity: warning
         isPaused: false
 
+      # HA service stuck in `error` (added 2026-11-03). Motivated by a real
+      # incident the same day: ct:100 (authentik -- the SSO in front of every
+      # *.chi.lab.amd-e.com service) sat in HA `error` for 2h30m with NO alert
+      # anywhere. During the ~13:00 network outage the CRM tried to relocate it
+      # and logged `migration failed: service registered on wrong node!`; PVE's
+      # CRM never retries an error state, so the CT stayed dead until someone
+      # noticed. The only signal was three hops downstream: both media-ingest
+      # collectors failed their OAuth token fetch and raised "systemd unit
+      # failed", plus "HTTPS endpoint unreachable" on the auth URL.
+      #
+      # `error` is the ONLY state worth paging on -- fence/relocate/recovery are
+      # transient states the CRM works through by itself. Guests not managed by
+      # HA export an all-zero vector, so they never match.
+      # `max by (id)` collapses the duplicate series each scraper instance emits
+      # for the same guest (lxc/100 came back as three identical error series).
+      #
+      # Backtested against the incident: lxc/100 read error=1 from 15:05 to
+      # 17:35, and no other guest matched at any point in that window.
+      - uid: pve_ha_service_error
+        title: HA service stuck in error state
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: 'max by (id) (pve_ha_state{state="error"}) == 1'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "HA service {{ '{{' }} $labels.id {{ '}}' }} is stuck in `error` (CRM will not retry)"
+          description: "`ha-manager status` reports {{ '{{' }} $labels.id {{ '}}' }} in `error`, which means the CRM gave up and will NOT retry -- it stays down until a human intervenes. The usual cause is a relocation that failed during a node reboot or fence (`migration failed: service registered on wrong node!`), leaving the service assigned to a node that does not hold its config. Recover from any node: `ha-manager set <sid> --state disabled`, wait for the CRM to settle, then `ha-manager set <sid> --state started`. If the re-enable is refused with 'in error state, must be disabled and fixed first', the disable has not been processed yet -- re-issue the start once `ha-manager status` shows `(disabled)`. Confirm the config lives on the node that holds the disk (`/etc/pve/nodes/<node>/lxc/<id>.conf`) before re-enabling."
+        labels:
+          severity: critical
+        isPaused: false
+
       # Metric-based since 2026-10-21. The old Loki rule matched
       # "(?i)replication.*(failed|error)" over the systemd journal, so it fired
       # on the sudo audit line of ANY admin command that mentioned both words —
