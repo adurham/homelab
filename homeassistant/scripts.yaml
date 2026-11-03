@@ -1,2 +1,23 @@
-# Home Assistant Scripts
-# This file is managed by the UI - do not edit manually
+ps5_freeze_recovery:
+  alias: PS5 Freeze Recovery
+  description: Cut console AC 5 s, restore, one finger press to boot, then tap the pad's PS button.
+  mode: single
+  sequence:
+  - action: switch.turn_off
+    target:
+      entity_id: switch.ps5_plug
+  - delay:
+      seconds: 5
+  - action: switch.turn_on
+    target:
+      entity_id: switch.ps5_plug
+  - delay:
+      seconds: 3
+  - action: switch.turn_on
+    target:
+      entity_id: switch.christmas_finger_1
+  - delay:
+      seconds: 45
+  - action: switch.turn_on
+    target:
+      entity_id: switch.christmas_finger_2

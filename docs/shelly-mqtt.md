@@ -55,7 +55,11 @@ both the Shelly integration (CoAP) and MQTT. All three terminate at HA.
 | Right garage bay | shelly1minig3-b08184ee0fd0 | B0:81:84:EE:0F:D0 | 192.168.86.211 | `cover.right_garage_bay_door` |
 | Middle garage bay | shelly1minig3-34b7dac55ea4 | 34:B7:DA:C5:5E:A4 | 192.168.86.21 | `cover.middle_garage_bay_door` |
 | Left garage bay | shelly1minig3-34b7dac49574 | 34:B7:DA:C4:95:74 | 192.168.86.216 | `cover.left_garage_door` |
-| amd-workstation plug | shellyplugusg4-e8f60a7e1528 | E8:F6:0A:7E:15:28 | 192.168.86.57 | `switch.amd_workstation` |
+| amd-workstation plug | shellyplugusg4-e8f60a7e1528 | E8:F6:0A:7E:15:28 | 192.168.86.100 | `switch.amd_workstation` |
+| PS5 plug | shellyplugusg4-98c377015f88 | 98:C3:77:01:5F:88 | 192.168.86.158 | `switch.ps5_plug` |
+| PVE Plug A (feeds pve01) | shellyplugusg4-acebe6f292fc | AC:EB:E6:F2:92:FC | 192.168.86.160 | `switch.pve_plug_a` |
+| PVE Plug B | shellyplugusg4-acebe6f64838 | AC:EB:E6:F6:48:38 | 192.168.86.187 | `switch.pve_plug_b` |
+| PVE Plug C | shellyplugusg4-acebe6f78dc4 | AC:EB:E6:F7:8D:C4 | 192.168.86.234 | `switch.pve_plug_c` |
 
 The 3 garage devices are covers (`device_class: garage`, momentary relay:
 `in_mode: detached`, `auto_off: true`, `auto_off_delay: 1.0s`) with
@@ -73,9 +77,18 @@ Shelly integration follows the IP by itself (zeroconf) and MQTT/Matter are
 IP-agnostic — but `homeassistant/command_line.yaml` hardcodes the workstation
 plug's `.57`, so that one must not move without a config deploy.
 
+**2026-11-03 — workstation split + PVE node plugs.** The workstation box now
+owns `.57` (dnsmasq reservation `amd-workstation`, Minisforum NIC
+58:47:CA:78:CF:F7); its plug was pushed off it and is pinned at `.100`
+(dnsmasq reservation `shelly-workstation-plug`, MAC E8:F6:0A:7E:15:28, 24 h
+lease), with `command_line.yaml` repointed. Three additional Plug US Gen4 units
+joined as PVE node plugs on dynamic leases: **PVE Plug A** `.160` (feeds pve01 —
+verified 2026-11-03 by a relay cycle), **PVE Plug B** `.187`, **PVE Plug C**
+`.234`; B/C → pve02/pve03 mapping is not yet verified.
+
 ## Security status (important)
 
-- **Cloud**: off on all 7. No vendor cloud, no Shelly app control.
+- **Cloud**: off on all 11 (7 original + PS5 plug + 3 PVE plugs, 2026-11-03). No vendor cloud, no Shelly app control.
 - **Remote path**: HA only (Nabu Casa).
 - **Device login is ON (2026-10-18).** `Shelly.SetAuth` with user `admin`,
   realm = device id and `ha1 = SHA256("admin:<device-id>:<password>")`. All 7
@@ -151,9 +164,9 @@ ansible localhost -i ansible/inventory/hosts --vault-password-file .vault_pass \
 
 ## Firmware
 
-- 5 Gen3 Minis: 2.0.1 (`20260923-075459`)
-- Basement 1PM Gen3: 2.1.0 (`20261014-085741`)
-- Workstation Plug Gen4: 2.0.1 (`20260923-075613`)
+- 5 Gen3 Minis: 2.0.3 (`20261026-122213`)
+- Basement 1PM Gen3: 2.1.1 (`20261026-151135`)
+- Plug US Gen4 (workstation, PS5, PVE A/B/C): 2.0.3 (`20261026-122147`)
 
 Beta 2.2.0-beta1 is offered by `Shelly.CheckForUpdate` on the Gen4. Do not push
 beta firmware — no cloud rollback path. Manual per-device update when a new

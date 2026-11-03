@@ -1,0 +1,53 @@
+# Proxmox cluster watchdog (2026-10-28)
+#
+# Why this exists: every other alert is raised by Grafana on pve03 and delivered
+# through the Discord ack-bot on pve03. Losing pve03 -- or the whole cluster --
+# therefore loses the alerting too. The HA box is separate hardware on the same
+# LAN, so it is the only thing that can still tell you the cluster is gone.
+#
+# Deliberately NOT routed through Grafana/Discord: this fires precisely when
+# those are unreachable. It goes straight to the phone.
+#
+# Not a flapping alert: it needs all three nodes to be silent for ten minutes.
+- alias: "Infrastructure: Proxmox cluster watchdog"
+  id: "infrastructure_proxmox_cluster_watchdog"
+  description: "Phone alert when all three Proxmox nodes stop answering (alerting would otherwise die with the cluster)"
+  mode: single
+
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.pve01_reachable
+      to: "off"
+      for: "00:10:00"
+    - platform: state
+      entity_id: binary_sensor.pve02_reachable
+      to: "off"
+      for: "00:10:00"
+    - platform: state
+      entity_id: binary_sensor.pve03_reachable
+      to: "off"
+      for: "00:10:00"
+
+  condition:
+    - condition: state
+      entity_id: binary_sensor.pve01_reachable
+      state: "off"
+    - condition: state
+      entity_id: binary_sensor.pve02_reachable
+      state: "off"
+    - condition: state
+      entity_id: binary_sensor.pve03_reachable
+      state: "off"
+
+  action:
+    - service: notify.mobile_app_adams_iphone_18_pro
+      data:
+        title: "Homelab cluster is down"
+        message: >-
+          pve01, pve02 and pve03 have not answered for 10+ minutes.
+          Backups are off-site and unaffected. Check power, the switch and the
+          node consoles.
+    - service: persistent_notification.create
+      data:
+        title: "Homelab cluster is down"
+        message: "All three Proxmox nodes unreachable since {{ now().strftime(\"%Y-%m-%d %H:%M\") }}"
