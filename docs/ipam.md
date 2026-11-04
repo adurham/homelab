@@ -40,7 +40,7 @@ Current static allocations:
 | IP | Host | Notes |
 | :--- | :--- | :--- |
 | `192.168.86.1` | Nest router | gateway |
-| `192.168.86.2` | Home Assistant (HAOS) | hosts AdGuard Home add-on for DoT upstream + iOS push |
+| `192.168.86.2` | Home Assistant (HAOS) | **the LAN resolver for every DHCP client since 2026-11-04** (dnsmasq `dhcp_server.dns_servers` → `.2`); hosts the AdGuard Home add-on (filtering, DoT/family upstream) |
 | `192.168.86.11` | `pve01` | |
 | `192.168.86.12` | `pve02` | |
 | `192.168.86.13` | `pve03` | |
@@ -99,6 +99,17 @@ wirelessly through the router. `.39`/`.40` in older notes are stale. Same day:
 both Mac Studios are DHCP at `.27` (Adams-Mac-Studio-M4-2) and `.171`
 (Adams-Mac-Studio-M4-1), and the three switches moved to the `.14`/`.15`/`.16`
 block (see the switch-group note further down).
+
+**2026-11-04 DNS cutover:** dnsmasq now hands out `192.168.86.2` (AdGuard Home)
+as option 6 instead of the Nest — verified in the live DHCPACK log
+(`sent size: 4 option: 6 dns-server 192.168.86.2`). AdGuard answered 20/20 test
+domains at a 6 ms median (the Nest: 12 ms with 108 ms outliers), blocks
+`doubleclick.net` → `0.0.0.0`, and resolves normal names. Two limits worth
+remembering: devices that hardcode a resolver (Google/Nest/Chromecast use
+`8.8.8.8` regardless of DHCP) still bypass it — that needs a NAT redirect on
+the router, which the Nest cannot do — and AdGuard's own upstream is
+`https://family.adguard-dns.com` (DoH, family variant), which intermittently
+logs `Client.Timeout` in the add-on log.
 
 (Re-cabled 2026-09-30 14:50-14:56 CDT per the user: pod removed from the path
 — direct trunk -> under-desk cable, pod re-attached as a leaf. This replaces
