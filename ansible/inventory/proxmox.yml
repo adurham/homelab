@@ -419,7 +419,12 @@ all:
     adblock_proxy:
       hosts:
         adblock-proxy-01:
+          # Joins the tailnet directly. The private_subnet group's default
+          # ProxyCommand jumps THROUGH the Mac's own tailscale IP, which
+          # loops back to itself when ansible runs on the Mac; the CT is
+          # reachable directly over the tailnet subnet route.
           ansible_host: adblock-proxy-01.tail19c543.ts.net
+          ansible_ssh_common_args: ""
           vmid: 118
           target_node: pve03
       vars:
