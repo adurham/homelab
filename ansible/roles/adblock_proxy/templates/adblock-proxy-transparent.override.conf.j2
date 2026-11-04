@@ -1,0 +1,17 @@
+[Unit]
+# The upstream unit (and the systemd default) gives up after 5 failed starts in
+# 10s. This process IS the internet path for every device using this box as an
+# exit node, so it must never enter a permanent "failed" state after a flaky
+# boot or a burst of crashes — keep trying forever.
+StartLimitIntervalSec=0
+
+[Service]
+# on-failure only restarted non-zero exits; a clean-but-early exit (e.g. a
+# config problem that makes mitmdump return 0) left the listener dead with the
+# unit "inactive". Always restart.
+Restart=always
+RestartSec=3
+# Baseline RSS is ~85 MB after a day of uptime. If it ever leaks, let systemd
+# recycle the process instead of the kernel OOM-killing something else in the
+# container (or the container itself, which takes the exit node down).
+MemoryMax=1200M

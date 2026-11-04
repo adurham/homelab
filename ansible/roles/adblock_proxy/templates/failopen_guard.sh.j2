@@ -1,0 +1,44 @@
+#!/bin/bash
+# Fail-open guard for the transparent interceptor (installed by
+# roles/adblock_proxy, run every 20s by adblock-failopen.timer).
+#
+# WHY: devices using this host as a Tailscale exit node send ALL of their
+# traffic here. While the listener is healthy that is exactly the point, but if
+# mitmdump is down (crash loop, slow/failed boot, OOM) the PREROUTING REDIRECT
+# rules point 443/80 at a port with nothing on it, so those devices don't just
+# lose ad filtering — they lose the internet entirely. Unfiltered internet
+# beats no internet, so: pull the REDIRECT rules while unhealthy, put them back
+# once the listener is up again. The window is at most one timer interval.
+#
+# Exit status is always 0: the timer runs this as a oneshot unit, and a
+# deliberate fail-open is not a unit failure (a real failure would be the guard
+# itself not running).
+set -uo pipefail
+
+PORT=8443
+IFACES="tailscale0 eth1"
+PORTS="443 80"
+
+healthy=0
+systemctl is-active --quiet adblock-proxy-transparent || healthy=-1
+if [ "$healthy" = 0 ] && ss -ltn "sport = :${PORT}" 2>/dev/null | grep -q LISTEN; then
+    healthy=1
+fi
+
+nat_rule() { iptables -t nat -C PREROUTING -i "$1" -p tcp --dport "$2" -j REDIRECT --to-ports "$PORT" 2>/dev/null; }
+add_rule() { iptables -t nat -A PREROUTING -i "$1" -p tcp --dport "$2" -j REDIRECT --to-ports "$PORT" 2>/dev/null; }
+del_rule() { iptables -t nat -D PREROUTING -i "$1" -p tcp --dport "$2" -j REDIRECT --to-ports "$PORT" 2>/dev/null; }
+
+if [ "$healthy" = 1 ]; then
+    for i in $IFACES; do for p in $PORTS; do
+        nat_rule "$i" "$p" || add_rule "$i" "$p"
+    done; done
+    exit 0
+fi
+
+removed=0
+for i in $IFACES; do for p in $PORTS; do
+    if nat_rule "$i" "$p"; then del_rule "$i" "$p"; removed=$((removed+1)); fi
+done; done
+[ "$removed" -gt 0 ] && logger -t adblock-guard "interceptor unhealthy — removed ${removed} REDIRECT rule(s), failing open"
+exit 0

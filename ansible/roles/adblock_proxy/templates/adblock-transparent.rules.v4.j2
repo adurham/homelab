@@ -29,6 +29,15 @@
 # non-Reddit host, so this is safe for the same reason the HTTPS
 # SNI-passthrough is safe.
 -A PREROUTING -i tailscale0 -p tcp --dport 80 -j REDIRECT --to-port 8443
+
+# LAN devices whose DHCP gateway is set to this host (dnsmasq tag
+# dhcp-option=tag:<x>,3,<this host>) arrive on the LAN leg, eth1, instead of
+# tailscale0. Same redirect, same SNI-based filtering — this is the path for
+# devices that can't run Tailscale (smart TVs). Added live 2026-11-04; the
+# ansible template had drifted from the running config and would have dropped
+# these on the next run.
+-A PREROUTING -i eth1 -p tcp --dport 443 -j REDIRECT --to-port 8443
+-A PREROUTING -i eth1 -p tcp --dport 80 -j REDIRECT --to-port 8443
 COMMIT
 
 *filter

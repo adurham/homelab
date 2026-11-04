@@ -1,0 +1,8 @@
+[Unit]
+Description=Fail-open guard for the transparent adblock interceptor
+Documentation=file:/opt/adblock-proxy/failopen_guard.sh
+After=adblock-proxy-transparent.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/adblock-proxy/failopen_guard.sh

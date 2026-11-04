@@ -1,0 +1,13 @@
+[Unit]
+Description=Check the interceptor every 20s and fail open if it is down
+
+[Timer]
+# 30s after boot: long enough for netfilter-persistent to have loaded the
+# REDIRECT rules and for mitmdump to have bound its listener.
+OnBootSec=30
+OnUnitActiveSec=20
+AccuracySec=2
+Unit=adblock-failopen.service
+
+[Install]
+WantedBy=timers.target

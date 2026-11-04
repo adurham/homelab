@@ -21,3 +21,9 @@
 - name: Reload Sysctl (Adblock Proxy)
   ansible.builtin.command: sysctl -p /etc/sysctl.d/99-tailscale.conf
   changed_when: true
+
+- name: Restart journald (Adblock Proxy)
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted
+
