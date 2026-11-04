@@ -44,7 +44,7 @@ Current static allocations:
 | `192.168.86.11` | `pve01` | |
 | `192.168.86.12` | `pve02` | |
 | `192.168.86.13` | `pve03` | |
-| `192.168.86.16` | `tailscale-gw` | eth0/vmbr0 -- was DHCP until 2026-09-10 (see Service CTs table below for why) |
+| `192.168.86.10` | `tailscale-gw` | eth0/vmbr0, static since 2026-09-10 (moved here from `.16` on 2026-11-04 so the GS108 could take `.16`) |
 | `192.168.86.17` | `frigate-01` | eth0/vmbr0 -- was DHCP until 2026-09-18 (lease drifted to .45 after a cluster-wide reboot, breaking every hardcoded consumer of this IP; same failure class as tailscale-gw above). Moved .85 -> .17 on 2026-10-15: .85 sat INSIDE the Nest router's DHCP pool (.20-.250) with no reservation, so the router could hand it to a new device and collide. .17 is out-of-pool and free (verified: no ping/HTTP/ARP). NOTE: `netgear-switch-01` (.51) and `lb-01` (.86) are still in-pool -- accepted precedent, but the same migration applies if either ever collides. |
 
 `.14`/`.15` also showed as live in the same nmap sweep — identity not
@@ -800,14 +800,15 @@ directly between whatever was upstream and whatever was downstream of it,
 removing the pod from the physical path entirely (leave it unplugged/idle
 afterward, don't re-add as a leaf without deciding on backhaul first).
 
+**Switch group (2026-11-04):** the three switches downstream of the Nest are reserved in order of
+use, in the low block below the DHCP pool (`.20`+), so a lost reservation can never collide with a
+pooled client: `192.168.86.14` SG105E (nearest the Nest), `.15` ES208G, `.16` GS108. To free `.16`
+for the GS108, `tailscale-gw` moved `.16` → `.10` the same day.
+
 | Device | Model | LAN IP | Notes |
 | :--- | :--- | :--- | :--- |
-
-**Switch group (2026-11-04):** the three switches downstream of the Nest are reserved in the low
-block below the DHCP pool (`.20`+), so a lost reservation can never collide with a pooled client:
-`192.168.86.15` SG105E, `.14` ES208G, `.18` GS108.
 | `tp-link-switch-es208g` | TP-Link ES208G v1.0, FW 1.0.7 | DHCP, reserved `192.168.86.14` (set 2026-11-04; it had been drifting on pool leases, `.209` then `.203`) | Under-desk switch between the basement trunk and the GS108; replaced the old under-desk Netgear. MAC `0C:EF:15:C3:7D:62`. HTTPS-only web UI (self-signed), no SNMP, no SSH. Loop prevention OFF per user (2026-11-04), as on every switch downstream of the Nest. 1Password item titled `192.168.86.203` holds the local admin login (title still carries the pre-move address). |
-| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | DHCP, reserved `192.168.86.18` (moved 2026-11-04 from `.163` so the switches sit below the DHCP pool; takes effect at the switch's next renewal; before that `.51`/`.163` were the reservation addresses) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
+| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | DHCP, reserved `192.168.86.16` (moved 2026-11-04 from `.163` so the switches sit below the DHCP pool; takes effect at the switch's next renewal or reboot; before that `.51`/`.163` were the reservation addresses) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
 
 **Password state (2026-09-25):** the factory-default label password is
 REJECTED — the user rotated it. The 1Password item `Netgear GS108Ev4`
@@ -825,9 +826,10 @@ loss, ~2 ms to gateway) and at the BGW (0 Tx/Rx errors, only port 2
 live). Re-enable from DIAGNOSTICS → LOOP PREVENTION only if loop reports
 recur.
 
-**Status (2026-11-04):** reservation moved to `192.168.86.18` (below the pool) per the
-switch-grouping convention; the box keeps its old lease until it renews or reboots, so
-check the dnsmasq client table by MAC rather than assuming either address.
+**Status (2026-11-04):** reservation moved to `192.168.86.16` (below the pool, free once
+`tailscale-gw` moved to `.10`) per the switch-grouping convention; the box keeps its old
+lease until it renews or reboots, so check the dnsmasq client table by MAC rather than
+assuming either address.
 
 **Status (2026-10-30):** switch pinned at `192.168.86.163` by a real dnsmasq DHCP
 reservation (addon option `dhcp_client_settings`, added 2026-10-30). The old `.51`
@@ -1121,7 +1123,7 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | Hostname        | VMID | Private IP       | LAN IP (if any)    | Role                                        |
 | :-------------- | :--- | :--------------- | :----------------- | :------------------------------------------ |
 | `authentik`     | 100  | `172.16.0.20`    | -                  | SSO / OIDC provider                         |
-| `tailscale-gw`  | 101  | `172.16.0.1`     | `192.168.86.16` (static) | SDN VNet gateway + Tailscale subnet router  |
+| `tailscale-gw`  | 101  | `172.16.0.1`     | `192.168.86.10` (static) | SDN VNet gateway + Tailscale subnet router  |
 | `dns-01`        | 102  | `172.16.0.10`    | -                  | Bind9 authority for `chi.lab.amd-e.com`     |
 | `lb-01`         | 103  | `172.16.0.30`    | DHCP (`192.168.86.x`) | Nginx L7 reverse proxy                  |
 | `mail-01`       | 104  | `172.16.0.40`    | -                  | Postfix → iCloud SMTP relay                 |

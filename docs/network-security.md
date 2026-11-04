@@ -125,7 +125,7 @@ creates and stores the long-lived entry itself; nothing is hand-edited in
 brute-force protection — but note the failure mode: a stale token makes every
 failed request count, HA bans the source, and once banned EVERY request from
 that address gets `403: Forbidden` regardless of token validity. Because the
-private subnet egresses through `tailscale-gw` (`192.168.86.16`), one banned
+private subnet egresses through `tailscale-gw` (`192.168.86.10`), one banned
 address takes the whole SDN out of Home Assistant. On 2026-10-21 three
 consumers still held tokens whose refresh entry was deleted in the 10-18
 rotation (`iss 9e28d1a2…`), which is what produced the 10-18 ban of `.16` and

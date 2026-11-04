@@ -6,8 +6,8 @@ nothing is stored on disk or in this repo.
 
 | Script | Switch | IP | Notes |
 |---|---|---|---|
-| `query_netgear.py` | NETGEAR GS108Ev4 (8-port) | DHCP — reserved 192.168.86.18 (moved from .163 on 2026-11-04) | Upstream of pve01/02/03 (ports 3/4/5) and the two Mac Studios (7/8). It moves: the script now resolves it from the dnsmasq client table by MAC `28:94:01:77:1d:80`; `.14`/`.51`/`.62` in older notes are stale. |
-| `query_tplink.py`  | TP-Link TL-SG105E (5-port) | 192.168.86.15 | living-room switch, first hop off the Nest router |
+| `query_netgear.py` | NETGEAR GS108Ev4 (8-port) | DHCP — reserved 192.168.86.16 (moved from .163 on 2026-11-04) | Upstream of pve01/02/03 (ports 3/4/5) and the two Mac Studios (7/8). It moves: the script now resolves it from the dnsmasq client table by MAC `28:94:01:77:1d:80`; `.14`/`.51`/`.62` in older notes are stale. |
+| `query_tplink.py`  | TP-Link TL-SG105E (5-port) | 192.168.86.14 (reservation) | first hop off the Nest router |
 
 Unmanaged switches (basement, upstairs game room) have no management plane
 and are not queryable.
