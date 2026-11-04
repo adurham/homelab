@@ -2451,7 +2451,21 @@ groups:
               # host!~"tc-.*" excludes the disposable tanium_clients test
               # fleet -- see the matching exclusion + rationale on the
               # host_down rule earlier in this file.
-              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service|session-.*\\.scope", host!~"tc-.*"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
+              #
+              # unit!="init.scope" is load-bearing, NOT cosmetic: systemd
+              # emits its own "Failed to start <description>." records with
+              # _SYSTEMD_UNIT=init.scope (PID 1's own unit), so grouping by
+              # the journal `unit` label attributed every unit's start
+              # failure to one bogus "init.scope" series -- the 2026-11-04
+              # page read "init.scope on adblock-proxy-01 is restart-looping"
+              # when the real unit was adguard-log-shipper.service (verified:
+              # that exact Loki record carries unit=init.scope, while
+              # "Start request repeated too quickly for <unit>.service"
+              # records DO carry the real unit). Excluding init.scope keeps
+              # the actionable start-limit-hit signal with a correct unit
+              # label; a unit that merely fails to start (no loop) is still
+              # covered by the metric-based `systemd unit failed` rule.
+              expr: 'sum by (host, unit) (count_over_time({job="systemd-journal", unit!~"grafana-server.service|loki.service|alloy.service|session-.*\\.scope", unit!="init.scope", host!~"tc-.*"} |~ "Start request repeated too quickly|Failed to start" [10m]))'
               instant: false
               range: true
               intervalMs: 1000
