@@ -15,6 +15,7 @@ Usage:
     python3 query_tplink.py loop qos    # only matching sections
     python3 query_tplink.py --raw igmp  # dump raw inline JS for a section
 """
+import os
 import re
 import subprocess
 import sys
@@ -22,8 +23,10 @@ import urllib.parse
 import urllib.request
 import http.cookiejar
 
-HOST = "192.168.86.15"
-OP_ITEM = "TP-Link TL-SG105E"
+# Overridable so the same UI family (TL-SG105E, ES208G, ...) can be read
+# without editing the file: --host/--op-item, or TP_HOST/TP_OP_ITEM.
+HOST = os.environ.get("TP_HOST", "192.168.86.15")
+OP_ITEM = os.environ.get("TP_OP_ITEM", "TP-Link TL-SG105E")
 
 PAGES = [
     ("System Info",     "/SystemInfoRpm.htm"),
@@ -180,10 +183,23 @@ def show(name, path, html):
 
 
 def main():
+    global HOST, OP_ITEM
     args = sys.argv[1:]
     raw = "--raw" in args
     if raw:
         args.remove("--raw")
+    for flag, attr in (("--host", "HOST"), ("--op-item", "OP_ITEM")):
+        if flag in args:
+            i = args.index(flag)
+            try:
+                val = args[i + 1]
+            except IndexError:
+                raise SystemExit(f"{flag} needs a value")
+            if attr == "HOST":
+                HOST = val
+            else:
+                OP_ITEM = val
+            del args[i:i + 2]
     want = [a.lower() for a in args]
 
     sw = Switch()
