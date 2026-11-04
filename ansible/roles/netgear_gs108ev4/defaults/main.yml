@@ -14,4 +14,4 @@
 # netgear_gs108ev4_password is deliberately NOT sourced from the vault --
 # pass it via -e on the CLI if you ever actually run the discover tag.
 # pinned by the dnsmasq reservation added 2026-10-30 (it DHCPs and moves)
-netgear_gs108ev4_current_ip: "192.168.86.163"
+netgear_gs108ev4_current_ip: "192.168.86.18"
