@@ -807,8 +807,8 @@ for the GS108, `tailscale-gw` moved `.16` → `.10` the same day.
 
 | Device | Model | LAN IP | Notes |
 | :--- | :--- | :--- | :--- |
-| `tp-link-switch-es208g` | TP-Link ES208G v1.0, FW 1.0.7 | DHCP, reserved `192.168.86.14` (set 2026-11-04; it had been drifting on pool leases, `.209` then `.203`) | Under-desk switch between the basement trunk and the GS108; replaced the old under-desk Netgear. MAC `0C:EF:15:C3:7D:62`. HTTPS-only web UI (self-signed), no SNMP, no SSH. Loop prevention OFF per user (2026-11-04), as on every switch downstream of the Nest. 1Password item titled `192.168.86.203` holds the local admin login (title still carries the pre-move address). |
-| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | DHCP, reserved `192.168.86.16` (moved 2026-11-04 from `.163` so the switches sit below the DHCP pool; takes effect at the switch's next renewal or reboot; before that `.51`/`.163` were the reservation addresses) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
+| `tp-link-switch-es208g` | TP-Link ES208G v1.0, FW 1.0.7 | DHCP, reserved `192.168.86.15`, live there since 2026-11-04 (it had been drifting on pool leases, `.209` then `.203`) | Under-desk switch between the basement trunk and the GS108; replaced the old under-desk Netgear. MAC `0C:EF:15:C3:7D:62`. HTTPS-only web UI (self-signed), no SNMP, no SSH. Loop prevention OFF per user (2026-11-04), as on every switch downstream of the Nest. 1Password item `TP-Link ES208G` holds the local admin login. |
+| `netgear-switch-01` | GS108Ev4 (GS108E-400NAS) | DHCP, reserved `192.168.86.16`, live there since 2026-11-04 (before that `.51` then `.163`) | 8-port "Easy Smart" managed switch. No SSH/SNMP/API — CGI web-form config only. MAC `28:94:01:77:1d:80` confirmed on-device. Find it by hostname/MAC — older notes listed `.62` and `.14`, both STALE. Managed via `ansible/roles/netgear_gs108ev4/` + `ansible/manage_netgear_switch.yml`. |
 
 **Password state (2026-09-25):** the factory-default label password is
 REJECTED — the user rotated it. The 1Password item `Netgear GS108Ev4`
@@ -827,9 +827,8 @@ live). Re-enable from DIAGNOSTICS → LOOP PREVENTION only if loop reports
 recur.
 
 **Status (2026-11-04):** reservation moved to `192.168.86.16` (below the pool, free once
-`tailscale-gw` moved to `.10`) per the switch-grouping convention; the box keeps its old
-lease until it renews or reboots, so check the dnsmasq client table by MAC rather than
-assuming either address.
+`tailscale-gw` moved to `.10`) and the switch is live there. Resolve it from the dnsmasq
+client table by MAC — it DHCPs, so never hardcode the address.
 
 **Status (2026-10-30):** switch pinned at `192.168.86.163` by a real dnsmasq DHCP
 reservation (addon option `dhcp_client_settings`, added 2026-10-30). The old `.51`
