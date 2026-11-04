@@ -79,21 +79,26 @@ Physical topology upstream of pve01/02/03 and the exo cluster Mac Studios:
 ```
 AT&T BGW (IP Passthrough)
   -> Google Nest Wifi Pro (main unit, living room)
-       -> TP-Link TL-SG105E (5-port managed, .15) — first hop off the Nest
+       -> TP-Link TL-SG105E (5-port managed, .14) — first hop off the Nest
             -> 8-port basement "trunk" switch (unmanaged) — branch hub
-                 -> 5-port under-work-desk switch (unmanaged) — DIRECT cable
+                 -> TP-Link ES208G (8-port managed, .15) — DIRECT cable
                     from the trunk; no pod in the path (since 2026-09-30)
-                      -> NETGEAR GS108Ev4 (lab switch, .51) -> PVE
+                      -> NETGEAR GS108Ev4 (lab switch, .16) -> PVE
                          nodes + Mac Studios + Nest Wifi Pro basement pod
-                         (.40) as a LEAF (user, 2026-09-30: "off the homelab
+                         as a LEAF (user, 2026-09-30: "off the homelab
                          switch"; port not verified) — nothing on the pod's
                          LAN port, no structural traffic through it
                  -> game-room switch (unmanaged) — pod there was reset
-                    2026-09-25; a second Nest pod answers at .39 (uptime 3.7 d
-                    on 2026-09-30). That it IS the game-room pod, and how it
-                    is cabled, are NOT verified (rule: leaf only, nothing in
-                    its LAN port)
+                    2026-09-25
 ```
+
+**2026-11-04 verification:** full `/24` ARP sweep from pve01 plus the dnsmasq
+lease table turned up **no Nest/Google MAC anywhere except the Hello doorbell
+(`.149`)** — so the basement pod carries **no LAN-visible address**; it meshes
+wirelessly through the router. `.39`/`.40` in older notes are stale. Same day:
+both Mac Studios are DHCP at `.27` (Adams-Mac-Studio-M4-2) and `.171`
+(Adams-Mac-Studio-M4-1), and the three switches moved to the `.14`/`.15`/`.16`
+block (see the switch-group note further down).
 
 (Re-cabled 2026-09-30 14:50-14:56 CDT per the user: pod removed from the path
 — direct trunk -> under-desk cable, pod re-attached as a leaf. This replaces
