@@ -106,3 +106,17 @@ back to `ip_printfarm` for a from-scratch build.
 The app source lives in `~/repos/bambu2creality` on the controller
 (`printfarm_src`), the same single-source pattern as `ps5forge_src`; redeploy
 to publish changes.
+
+## Multi-plate and multi-filament source files
+
+A Bambu project can hold several plates and up to four filaments. The converter
+handles both, with one deliberate simplification:
+
+* every object's filament is clamped to the K2's single loaded filament (CFS
+  slot 1) — a source file that colours parts differently still prints in one
+  colour, and the source's colour list is collapsed to the chosen colour. Without
+  that clamp Creality Print rejects the whole project with `Filament nozzle
+  mapping is incomplete.` (rc=-51), per plate, which is the confusing part.
+* `--slice 0` slices every plate, so a 3-plate file returns `plate_1..3.gcode`;
+  the UI lists each plate with its own time/filament and its own print button.
+  The top-level numbers are the sum across plates.
