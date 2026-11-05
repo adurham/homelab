@@ -68,30 +68,72 @@ function scenario2(){
   });
 }
 
-// Scenario 3: search from the landing page (the reported bug)
+// Scenario 3: search from the landing page filters FOLDERS (containers), not images
 function scenario3(){
   const d3=mkdom(); const w3=d3.window; const doc3=w3.document;
-  waitUntil(()=>doc3.querySelectorAll('#folderGrid .folder').length>0, ()=>{
+  const folders=()=>Array.from(doc3.querySelectorAll('#folderGrid .folder')).map(f=>f.dataset.chat);
+  waitUntil(()=>folders().length>0, ()=>{
     typeSearch(w3,doc3,'person_11');
     setTimeout(()=>{
-      const s=stems(doc3);
-      T('landing search enters global results', s.length===2 && s.indexOf('l1')>=0 && s.indexOf('l2')>=0, s.join(','));
+      const f=folders();
+      T('landing search shows only the matching folder', f.length===1 && f[0]==='person_11', f.join(','));
+      T('landing search renders NO image tiles', stems(doc3).length===0, stems(doc3).join(','));
+      T('folder grid still visible during landing search', doc3.getElementById('folderGrid').style.display==='grid');
       T('landing search route = #s=person_11', w3.location.hash.indexOf('#s=person_11')===0, w3.location.hash);
-      T('landing grid hidden during search', doc3.getElementById('folderGrid').style.display==='none');
-      scenario4();
+      T('sub reports the folder count', /1 folder match/.test(doc3.getElementById('sub').textContent||''), doc3.getElementById('sub').textContent);
+      // open the matching folder, then come Back: the filter must survive
+      click(w3, doc3.querySelector('#folderGrid .folder'));
+      setTimeout(()=>{
+        T('opening the folder from a filtered landing works', stems(doc3).length===2, stems(doc3).join(','));
+        click(w3, doc3.getElementById('backBtn'));
+        setTimeout(()=>{
+          const f2=folders();
+          T('Back restores the folder filter', f2.length===1 && f2[0]==='person_11' && w3.location.hash.indexOf('#s=person_11')===0,
+            f2.join(',')+' hash='+w3.location.hash);
+          // Regression (consult review): an IN-FOLDER item query must never
+          // become a folder filter when a path returns to the landing page.
+          click(w3, doc3.querySelector('#folderGrid .folder'));
+          setTimeout(()=>{
+            typeSearch(w3,doc3,'l1');
+            setTimeout(()=>{
+              T('in-folder search still filters items', stems(doc3).length===1 && stems(doc3)[0]==='l1', stems(doc3).join(','));
+              click(w3, doc3.getElementById('backBtn'));
+              setTimeout(()=>{
+                const f3=folders();
+                T('an in-folder query never becomes a folder filter',
+                  f3.length===1 && f3[0]==='person_11' && doc3.getElementById('searchBox').value==='person_11',
+                  f3.join(',')+' box='+doc3.getElementById('searchBox').value);
+                typeSearch(w3,doc3,'zzz-no-such-model');
+                setTimeout(()=>{
+                  T('no matching folder shows the empty state', folders().length===0 && doc3.getElementById('state').style.display==='block',
+                    doc3.getElementById('state').textContent);
+                  typeSearch(w3,doc3,'');
+                  setTimeout(()=>{
+                    T('clearing the box restores every folder', folders().length===2, folders().join(','));
+                    scenario4();
+                  },300);
+                },300);
+              },400);
+            },300);
+          },400);
+        },400);
+      },400);
     },500);
   });
 }
 
-// Scenario 4: refresh while searching restores the results
+// Scenario 4: refresh while the folder filter is active restores it
 function scenario4(){
   const d4=mkdom('#s=person_11'); const w4=d4.window; const doc4=w4.document;
-  waitUntil(()=>stems(doc4).length===2, ()=>{
-    const s=stems(doc4);
-    T('refresh in search restores results', s.length===2 && w4.location.hash.indexOf('#s=person_11')===0, s.join(','));
+  const folders=()=>Array.from(doc4.querySelectorAll('#folderGrid .folder')).map(f=>f.dataset.chat);
+  waitUntil(()=>folders().length>0, ()=>{
+    const f=folders();
+    T('refresh restores the folder filter', f.length===1 && f[0]==='person_11' && w4.location.hash.indexOf('#s=person_11')===0,
+      f.join(',')+' hash='+w4.location.hash);
+    T('refresh in folder-search renders no image tiles', stems(doc4).length===0, stems(doc4).join(','));
     doc4.getElementById('searchBox').dispatchEvent(new w4.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
     setTimeout(()=>{
-      T('Escape exits search to landing', doc4.getElementById('folderGrid').style.display==='grid', 'hash='+w4.location.hash);
+      T('Escape exits the folder filter', folders().length===2 && !w4.location.hash, 'hash='+w4.location.hash);
       scenario5();
     },400);
   });

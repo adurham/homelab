@@ -795,6 +795,7 @@
   var elSearch=document.getElementById('searchBox');
   var elViewToggle=document.getElementById('viewToggle');
   var searchQuery='';      // active filter text (lowercased)
+  var landingFilter='';    // last folders-page filter, restored when Back is pressed
   var listView=false;      // grid vs details list
 
   // breadcrumb renderer (replaces the old single <h1> title)
@@ -1020,6 +1021,16 @@
 
   // ---------- LANDING ----------
   function renderFolders(){
+    // Every return to the folders page passes through here: the Back button,
+    // Escape, folder delete, upload completion and the background manifest
+    // reload all call it directly. If we arrive from inside a folder the box
+    // may still hold an in-folder ITEM query — that must never become a folder
+    // filter (and must not clobber the remembered landing filter). Restoring
+    // here makes every path correct by construction instead of per-call-site.
+    if(current!=null){
+      searchQuery=(landingFilter||'').toLowerCase();
+      if(elSearch) elSearch.value=landingFilter||'';
+    }
     current=null;
     elPhoto.style.display='none'; elPhoto.innerHTML='';
     var dv=document.getElementById('dupView'); if(dv) dv.style.display='none';
@@ -1031,8 +1042,23 @@
     document.getElementById('statusBar').classList.remove('show');
     hideUploadBar();
     setCrumb(null);
-    elSub.textContent=chats.length+' folders · '+visibleCount+' items total';
-    elState.style.display='none';
+    // 2026-11-05: on the landing page the search box filters CONTAINERS
+    // (folders = models), never items. Typing here must not pull image tiles
+    // into the view: a model IS the container, so "search" means "which
+    // folder am I looking for?" until you are inside one. In-folder search
+    // still filters that folder's items (runSearch/renderPhotos).
+    var q=(searchQuery||'').trim().toLowerCase();
+    // keep the RAW text for the box (casing the user typed), compare lowercased
+    landingFilter=q?((elSearch&&elSearch.value.trim())||searchQuery):'';
+    var shownChats=q?chats.filter(function(c){return c.toLowerCase().indexOf(q)>=0;}):chats;
+    var shownEmpty=q?emptyFolders.filter(function(n){return n.toLowerCase().indexOf(q)>=0;}):emptyFolders;
+    var nMatch=shownChats.length+shownEmpty.length;
+    elSearch.placeholder='Search folders…';
+    elSub.textContent = q
+      ? nMatch+' folder'+(nMatch===1?'':'s')+' match “'+searchQuery+'”'
+      : chats.length+' folders · '+visibleCount+' items total';
+    if(q && !nMatch){ elState.style.display='block'; elState.textContent='No folders match “'+searchQuery+'”.'; }
+    else elState.style.display='none';
 
     var frag=document.createDocumentFragment();
 
@@ -1079,16 +1105,16 @@
       return f;
     }
 
-    chats.forEach(function(c){
+    shownChats.forEach(function(c){
       var items=chatMap[c];
       frag.appendChild(makeFolder(c,items.length,folderCover(c,items)));
     });
     // user-created empty folders (no items yet)
-    emptyFolders.forEach(function(n){
+    shownEmpty.forEach(function(n){
       frag.appendChild(makeFolder(n,0,''));
     });
     elFolder.innerHTML=''; elFolder.appendChild(frag);
-    setRoute('');
+    setRoute(q?('#s='+encodeURIComponent(searchQuery)):'');
     // prune folder-selection of folders that no longer exist, refresh the bar
     if(typeof selectedFolders!=='undefined'){
       Array.from(selectedFolders).forEach(function(n){
@@ -1111,6 +1137,9 @@
       .then(function(r){
         if(r.status===200){
           emptyFolders.push(name);
+          // a fresh folder must be visible: an active folder filter would hide
+          // it, making creation look like it failed
+          searchQuery=''; landingFilter=''; if(elSearch) elSearch.value='';
           if(current===null) renderFolders();
           toast('✓ Created folder “'+name+'”','ok');
         }else{ toast('Create failed (HTTP '+r.status+')','err'); }
@@ -1140,7 +1169,6 @@
 
   // ---------- FOLDER VIEW ----------
   function openFolder(chat){
-    if(chat==='__search__'){ openSearchResults(); return; }   // reload while in search view
     // Only reset the selection when NAVIGATING to a different folder — NOT on a
     // same-folder re-render (e.g. the background reloadManifest timer calls
     // openFolder(current) to refresh, and must not wipe an in-progress selection).
@@ -1168,6 +1196,7 @@
     else { pruneSelection(); refreshBulkBar(); }  // same-folder refresh: keep valid selections
     hideUploadBar();
     setCrumb(name);
+    elSearch.placeholder='Search this folder…';
     elSub.textContent=items.length+' item'+(items.length===1?'':'s');
 
     renderPhotos();
@@ -1176,31 +1205,10 @@
     setRoute('#f='+encodeURIComponent(chat));
   }
 
-  // ---------- GLOBAL SEARCH RESULTS VIEW ----------
-  // Reached by typing in the search box while on the landing page. Shows every
-  // visible item (all folders) filtered by searchQuery, with the same grid /
-  // lightbox / selection behavior as a folder view.
-  function openSearchResults(){
-    current='__search__';
-    var items=manifest.filter(function(it){ return !it.hidden; });
-    applySort(items);
-    view=items;
-    elFolder.style.display='none'; elFolder.innerHTML='';
-    var dv=document.getElementById('dupView'); if(dv) dv.style.display='none';
-    var fbb=document.getElementById('fbulkBar'); if(fbb) fbb.classList.remove('show');
-    elPhoto.style.display='grid';
-    elBack.style.display='inline-block';
-    elSort.style.display='inline-block';
-    document.getElementById('zoom').style.display=listView?'none':'';
-    elUploadBtn.style.display='none';   // global aggregate; can't upload into it
-    clearSelection();
-    hideUploadBar();
-    setCrumb('Search results');
-    elSub.textContent=filteredView().length+' match'+(filteredView().length===1?'':'es');
-    renderPhotos();
-    renderFolderRail();
-    setRoute('#s='+encodeURIComponent(searchQuery));
-  }
+  // (2026-11-05) The global "search results" view is GONE by design: a search
+  // on the landing page now filters the folder grid (containers = models) and
+  // never loads image tiles. Filtering items still happens inside a folder,
+  // where the search box is scoped to that container.
 
   // items in the current folder after applying the search filter
   function filteredView(){
@@ -1713,6 +1721,9 @@
     if(e.ctrlKey||e.metaKey||e.shiftKey){ toggleSelect(parseInt(t.dataset.i,10),t,e); return; }
     openLb(parseInt(t.dataset.i,10));
   });
+  // Back from a folder lands on the folders page with the last folder filter
+  // still applied — renderFolders() restores it from landingFilter itself, so
+  // every return path (Back, Escape, delete, background reload) behaves alike.
   elBack.addEventListener('click',renderFolders);
 
   // ---------- SELECTION + BULK ACTIONS (always-on, no mode) ----------
@@ -1995,25 +2006,20 @@
   });
   lb.addEventListener('click',function(e){if(e.target===lb)closeLb();});
 
-  // ---------- SEARCH / FILTER ----------
-  // Works from ANYWHERE: in a folder it filters that folder's grid; on the
-  // landing page it switches into a global "search results" view across every
-  // folder (previously typing on the landing page did nothing at all —
-  // renderPhotos() was only ever reached when current!=null).
+  // ---------- SEARCH / SCOPED BY VIEW ----------
+  // Landing page  -> filters FOLDERS (containers/models). Never renders images.
+  // Inside folder -> filters that folder's items.
+  // The duplicate-review page ignores the box (its own filters apply).
   var _searchT=null;
   function runSearch(){
     searchQuery=elSearch.value.trim().toLowerCase();
-    if(current==='__search__'){
-      // already in the results view: re-filter in place, keep route + count fresh
-      if(!searchQuery){ renderFolders(); return; }
-      elSub.textContent=filteredView().length+' match'+(filteredView().length===1?'':'es');
-      renderPhotos();
-      setRoute('#s='+encodeURIComponent(searchQuery));
-    }else if(searchQuery && current==null){
-      // typing on the landing page -> enter the global results view
-      openSearchResults();
-    }else if(current!=null && current!=='__dup__'){
-      renderPhotos();   // in-folder filter
+    if(current==null){ renderFolders(); return; }   // landing: containers only
+    if(current!=='__dup__'){
+      renderPhotos();      // in-folder item filter
+      var n=filteredView().length;
+      elSub.textContent=searchQuery
+        ? n+' match'+(n===1?'':'es')+' of '+view.length+' item'+(view.length===1?'':'s')
+        : view.length+' item'+(view.length===1?'':'s');
     }
   }
   elSearch.addEventListener('input',function(){
@@ -2022,9 +2028,7 @@
   });
   elSearch.addEventListener('keydown',function(e){
     if(e.key==='Escape'){
-      elSearch.value=''; searchQuery='';
-      if(current==='__search__'){ renderFolders(); }
-      else if(current!=null && current!=='__dup__') renderPhotos();
+      elSearch.value=''; runSearch();
       elSearch.blur();
     }
     e.stopPropagation();   // don't trigger grid shortcuts while typing
@@ -2040,7 +2044,7 @@
   elZoom.addEventListener('input',function(){
     document.documentElement.style.setProperty('--tilesize', elZoom.value+'px');
   });
-  elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*'||current==='__search__')?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]); applySort(view); renderPhotos(); } });
+  elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*')?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]); applySort(view); renderPhotos(); } });
 
   // ---------- RIGHT-CLICK CONTEXT MENU ----------
   var elCtx=document.getElementById('ctxMenu');
@@ -2331,6 +2335,7 @@
     document.getElementById('zoom').style.display='none';
     document.getElementById('statusBar').classList.remove('show');
     setCrumb('Duplicates');
+    elSearch.placeholder='Search…';   // the box has no effect in this view
     elState.style.display='none';
     elDup.innerHTML='<div class="state">Loading duplicate report…</div>';
     fetch('/gallery/dedup.json',{credentials:'same-origin'})
@@ -2636,8 +2641,10 @@
           // folder no longer exists (renamed/deleted) -> fall back to landing
           setRoute('');
         } else if(rt.search){
+          // 2026-11-05: #s= means "landing page with the folder filter applied"
+          // (it used to mean the global item-results view, which is gone).
           elSearch.value=rt.search; searchQuery=rt.search.toLowerCase();
-          openSearchResults();
+          renderFolders();
         } else if(rt.view==='dup'){ showDuplicates(); }
       }
     })

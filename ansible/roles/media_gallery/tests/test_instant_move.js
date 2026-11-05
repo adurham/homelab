@@ -45,6 +45,12 @@ setTimeout(()=>{ try{
        console.log(src.indexOf('/F1/')>=0?'PASS thumb still loads from original F1 path':'FAIL thumb points to F2 (would 404)');
        process.exit(0);
      },200);
+   } else {
+     // The folder grid is emptied by openFolder, so after the move there is no
+     // tile to click. Without this branch the process just never exits and the
+     // harness reports a timeout instead of the real finding.
+     console.log('FAIL folder grid is empty after the move — cannot browse F2');
+     process.exit(1);
    }
  },150);
 }catch(e){console.log('EXCEPTION:',e.message,e.stack);process.exit(1);} },800);

@@ -23,7 +23,16 @@ const dom=new JSDOM(html,{runScripts:'dangerously',resources:'usable',url:'https
  window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';window.scrollTo=()=>{};
 }});
 const {window}=dom;const doc=window.document;
+// 2026-11-05: the landing-page search now filters FOLDERS, so the DOM-cap test
+// moves INSIDE one big folder, where a broad query still matches every item.
+// The cap must hold there too (a 16.6K-item folder is the real worst case).
 setTimeout(()=>{
+  const tiles0=Array.from(doc.querySelectorAll('#folderGrid .folder'));
+  const first=tiles0[0];
+  if(!first){ console.log('FAIL  folder grid never rendered'); process.exit(1); }
+  first.dispatchEvent(new window.MouseEvent('click',{bubbles:true,cancelable:true}));
+  const inFolder=manifest.filter(m=>m.chat===first.dataset.chat).length;
+  setTimeout(()=>{
   const sb=doc.getElementById('searchBox');
   sb.value='q_';
   const t0=Date.now();
@@ -31,22 +40,23 @@ setTimeout(()=>{
   setTimeout(()=>{
     const tiles=doc.querySelectorAll('#photoGrid .tile').length;
     const more=doc.querySelector('.showmore');
-    T('broad search does not blow up the DOM', tiles>0 && tiles<=2000, tiles+' tiles');
-    T('render stays bounded well under the match count', tiles<N/10, `${tiles} tiles for ${N} matches`);
+    T('broad in-folder search does not blow up the DOM', tiles>0 && tiles<=2000, tiles+' tiles');
+    T('render stays bounded well under the match count', tiles<inFolder/10, `${tiles} tiles for ${inFolder} matches`);
     T('Show-more affordance present', !!more, more?more.textContent.slice(0,50):'(none)');
+    T('sub count still reflects the FULL match set', new RegExp(inFolder.toLocaleString().replace(/,/g,'')).test((doc.getElementById('sub').textContent||'').replace(/,/g,'')), doc.getElementById('sub').textContent);
     if(more){
       more.dispatchEvent(new window.MouseEvent('click',{bubbles:true}));
       setTimeout(()=>{
         const t2=doc.querySelectorAll('#photoGrid .tile').length;
         T('Show more increases the rendered page', t2>tiles, `${tiles} -> ${t2}`);
-        T('sub count still reflects the FULL match set', /278,?607/.test(doc.getElementById('sub').textContent||''), doc.getElementById('sub').textContent);
         console.log(results.join('\n'));
         console.log(fails===0?'ALL PASS':(fails+' FAILURES'));
         process.exit(fails===0?0:1);
-      },500);
+      },800);
     }else{
       console.log(results.join('\n')); console.log(fails+' FAILURES'); process.exit(1);
     }
-  },400);
+  },600);
+  },600);
 },3000);
 setTimeout(()=>{ console.log('TIMEOUT — render never completed (the crash)'); console.log(results.join('\n')); process.exit(2); },60000);
