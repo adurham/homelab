@@ -231,21 +231,34 @@ forwards them to **AdGuard on this host (192.168.86.2)** — so any chi.lab name
 that tailnet clients (phones off-LAN, laptops away) need to resolve must exist
 as an **AdGuard DNS rewrite**, not only in dns-01's BIND zone.
 
-Current rewrites (AdGuard API: `GET /control/rewrite/list`):
+Current rewrites (AdGuard API: `GET /control/rewrite/list`): the **whole
+`chi.lab.amd-e.com` zone is mirrored** into AdGuard by
+`homeassistant/scripts/adguard_zone_mirror.py` — one rewrite per A record, so
+LAN and tailnet clients get the same answers dns-01 serves. Two entries are
+deliberate non-mirrors:
 
 | domain | answer | why |
 | --- | --- | --- |
-| `dns.chi.lab.amd-e.com` | `192.168.86.2` | the resolver itself |
-| `printbot.chi.lab.amd-e.com` | `172.16.0.30` | Bambu→K2 print service (lb-01 vhost) |
-| `deviceenrollment.apple.com`, `mdmenrollment.apple.com`, `iprofiles.apple.com` | `0.0.0.0` | block Apple MDM enrolment |
+| `dns.chi.lab.amd-e.com` | `192.168.86.2` | the resolver itself (DoT/DoH endpoint), not dns-01 |
+| `deviceenrollment.apple.com`, `mdmenrollment.apple.com`, `iprofiles.apple.com` | `0.0.0.0` | block Apple MDM enrolment (outside the zone; the mirror ignores them) |
 
-To add one:
+Run it after every `dns_server` deploy and any time a service IP changes:
 
 ```bash
-# via the AdGuard ingress API (session minted with the same HA websocket dance
-# adguard_log_shipper.py uses), POST /control/rewrite/add:
-#   {"domain": "<name>.chi.lab.amd-e.com", "answer": "<ip>"}
+python3 homeassistant/scripts/adguard_zone_mirror.py           # reconcile
+python3 homeassistant/scripts/adguard_zone_mirror.py --check   # exit 1 on drift
 ```
+
+It never deletes rewrites and never touches `/control/dns_config` (that
+rebinds the listeners on the P0 resolver); it only calls
+`/control/rewrite/{list,add,delete}` + `/control/cache_clear`, through the
+tailnet forwarder on `100.77.245.39:45158`.
+
+**Why mirroring is mandatory, not cosmetic (2026-11-05):** when the dns-01
+upstream was dropped, only `printbot` and `dns` were re-added as rewrites, so
+`gallery` and 33 other lab names answered NXDOMAIN for every DHCP client — the
+gallery app itself was healthy behind lb-01 the whole time. The zone lives in
+two places now, so it needs a reconciler rather than a hand-kept table.
 
 ### Landmines (both hit on 2026-11-05)
 
