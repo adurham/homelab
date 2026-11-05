@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the lab-phone capture redirect guard every 20s
+
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=20
+AccuracySec=1s
+Unit=phone-capture-guard.service
+
+[Install]
+WantedBy=timers.target

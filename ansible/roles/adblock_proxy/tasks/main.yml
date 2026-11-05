@@ -499,3 +499,120 @@
 
       Both options require trusting the mitmproxy CA cert once
       (http://mitm.it) before HTTPS traffic decrypts cleanly.
+
+# ─── Lab device full-traffic capture (added 2026-11-04) ───────────────────
+# A second mitmproxy instance that DECRYPTS everything from one device, so its
+# app traffic can actually be read. It cannot be the 8443 listener: ad_block.py
+# sets `data.ignore_connection = True` for every SNI that is not Discord/Reddit,
+# so that path relays everything else as opaque TLS by design, and it is what
+# the whole household's filtering rides on.
+#
+# The device arrives here because its DHCP reservation (HA dnsmasq app, tag
+# `opphone`) points its default gateway at this host, so its traffic lands on
+# eth1. The only thing that then steers it into the capture listener is the
+# source-scoped REDIRECT inserted by phone_redirect_guard.sh — which also FAILS
+# OPEN: if the listener dies, the rules come out, because a REDIRECT to a dead
+# port means the device loses the internet, not merely loses capture.
+#
+# The device must trust the mitmproxy CA for this to be useful (system store,
+# not user store — app traffic ignores user certs). On the OnePlus Open that is
+# the Magisk module `mitmca`, which overlays the Conscrypt APEX cacerts dir.
+#
+# Read the output with ~/bin/opcap on the Mac, or straight off
+# /var/log/mitmproxy/phone-capture.log here; bodies too large for the log are in
+# the phone-flows.mitm stream file (replay in mitmweb).
+#
+# Set adblock_phone_capture_enabled: false to tear it down — the units are
+# stopped and disabled, and the guard removes its rules within one tick.
+- name: Deploy Lab Device Capture Addon
+  ansible.builtin.copy:
+    src: phone_capture.py
+    dest: /opt/adblock-proxy/phone_capture.py
+    owner: mitmproxy
+    group: mitmproxy
+    mode: '0644'
+  notify: Restart Adblock Phone Capture
+  when: adblock_phone_capture_enabled
+  tags: [phone_capture]
+
+- name: Deploy Lab Device Redirect Guard
+  ansible.builtin.template:
+    src: phone_redirect_guard.sh.j2
+    dest: /opt/adblock-proxy/phone_redirect_guard.sh
+    owner: root
+    group: root
+    mode: '0755'
+  when: adblock_phone_capture_enabled
+  tags: [phone_capture]
+
+- name: Install Lab Device Capture Unit
+  ansible.builtin.template:
+    src: adblock-phone.service.j2
+    dest: /etc/systemd/system/adblock-phone.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Adblock Phone Capture
+  when: adblock_phone_capture_enabled
+  tags: [phone_capture]
+
+- name: Install Lab Device Capture Guard Unit
+  ansible.builtin.template:
+    src: phone-capture-guard.service.j2
+    dest: /etc/systemd/system/phone-capture-guard.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Lab Phone Capture Guard
+  when: adblock_phone_capture_enabled
+  tags: [phone_capture]
+
+- name: Install Lab Device Capture Guard Timer
+  ansible.builtin.template:
+    src: phone-capture-guard.timer.j2
+    dest: /etc/systemd/system/phone-capture-guard.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Lab Phone Capture Guard
+  when: adblock_phone_capture_enabled
+  tags: [phone_capture]
+
+- name: Enable & Start Lab Device Capture
+  ansible.builtin.systemd:
+    name: adblock-phone
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: adblock_phone_capture_enabled
+  tags: [phone_capture]
+
+- name: Enable & Start Lab Device Capture Guard Timer
+  ansible.builtin.systemd:
+    name: phone-capture-guard.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: adblock_phone_capture_enabled
+  tags: [phone_capture]
+
+# Idempotent: the guard only ever ensures/removes its own two rules and the
+# single UDP/443 REJECT for the captured address, so running it again is a
+# no-op on a healthy host.
+- name: Apply Lab Device Redirect Rules Now
+  ansible.builtin.command: /opt/adblock-proxy/phone_redirect_guard.sh
+  changed_when: false
+  when: adblock_phone_capture_enabled
+  tags: [phone_capture]
+
+- name: Tear Down Lab Device Capture (when disabled)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop:
+    - adblock-phone.service
+    - phone-capture-guard.timer
+  failed_when: false
+  when: not adblock_phone_capture_enabled
+  tags: [phone_capture]

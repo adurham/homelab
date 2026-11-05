@@ -27,3 +27,15 @@
     name: systemd-journald
     state: restarted
 
+- name: Restart Adblock Phone Capture
+  ansible.builtin.systemd:
+    name: adblock-phone
+    state: restarted
+    daemon_reload: true
+
+- name: Restart Lab Phone Capture Guard
+  ansible.builtin.systemd:
+    name: phone-capture-guard.timer
+    state: restarted
+    daemon_reload: true
+

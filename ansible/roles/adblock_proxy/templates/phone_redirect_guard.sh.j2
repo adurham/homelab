@@ -1,0 +1,55 @@
+#!/bin/bash
+# Keeps the captured lab device's traffic pointed at the FULL-capture mitmproxy
+# listener, and fails open the moment that listener is unhealthy.
+#
+# Why this exists separately from failopen_guard.sh: that guard owns the
+# household ad-blocking path (port 8443, all of eth1/tailscale0) and must never
+# be widened by an experiment. This one owns exactly one source address on
+# exactly one port pair, so a capture session can be started and stopped without
+# touching anything the house depends on.
+#
+# Fail-open matters for the same reason as the ad-block guard: a REDIRECT to a
+# dead port is not "no capture", it is the device losing the internet.
+set -uo pipefail
+
+PORT={{ adblock_phone_capture_port }}
+SRC="{{ adblock_phone_capture_src }}"
+IFACE=eth1
+PORTS="443 80"
+LOG_TAG="phone-capture"
+
+healthy=0
+systemctl is-active --quiet adblock-phone || healthy=-1
+if [ "$healthy" = 0 ] && ss -ltn "sport = :${PORT}" 2>/dev/null | grep -q LISTEN; then
+    healthy=1
+fi
+
+exists() { iptables -t nat -C PREROUTING -i "$IFACE" -s "$SRC" -p tcp --dport "$1" -j REDIRECT --to-ports "$PORT" 2>/dev/null; }
+del() {
+    while exists "$1"; do
+        iptables -t nat -D PREROUTING -i "$IFACE" -s "$SRC" -p tcp --dport "$1" -j REDIRECT --to-ports "$PORT" 2>/dev/null || break
+    done
+}
+add() { iptables -t nat -I PREROUTING 1 -i "$IFACE" -s "$SRC" -p tcp --dport "$1" -j REDIRECT --to-ports "$PORT"; }
+
+quic_blocked() { iptables -C FORWARD -i "$IFACE" -s "$SRC" -p udp --dport 443 -j REJECT 2>/dev/null; }
+
+if [ "$healthy" = 1 ]; then
+    for p in $PORTS; do exists "$p" || add "$p"; done
+    # QUIC cannot be intercepted, so an app that speaks HTTP/3 stays invisible.
+    # Rejecting UDP/443 from this one source makes clients fall back to TCP 443,
+    # which we do see. Scoped to the captured address only.
+    quic_blocked || iptables -I FORWARD 1 -i "$IFACE" -s "$SRC" -p udp --dport 443 -j REJECT
+    exit 0
+fi
+
+removed=0
+for p in $PORTS; do
+    if exists "$p"; then del "$p"; removed=$((removed + 1)); fi
+done
+if quic_blocked; then
+    iptables -D FORWARD -i "$IFACE" -s "$SRC" -p udp --dport 443 -j REJECT
+    removed=$((removed + 1))
+fi
+[ "$removed" -gt 0 ] && logger -t "$LOG_TAG" "capture listener unhealthy — removed ${removed} rule(s) for ${SRC}, failing open"
+exit 0

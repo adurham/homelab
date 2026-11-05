@@ -1,0 +1,45 @@
+[Unit]
+Description=Lab phone full-traffic capture (mitmproxy, source-scoped transparent)
+Documentation=file:///opt/adblock-proxy/phone_capture.py
+After=network-online.target adblock-proxy.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mitmproxy
+Group=mitmproxy
+WorkingDirectory=/opt/adblock-proxy
+Environment=HOME=/home/mitmproxy
+# Transparent mode on its own port, deliberately NOT 8443: the household
+# ad-blocking path keeps its SNI-filtered addon and its own fail-open guard, and
+# nothing here can reach into it. Traffic only lands on this port because
+# phone_redirect_guard.sh inserts a source-scoped REDIRECT for one address.
+#
+# NO tls_clienthello hook is loaded (that is the whole point — ad_block.py
+# passes unknown SNI through unencrypted and unreadable), so every flow that
+# arrives here is terminated and logged. The device therefore MUST trust the
+# mitmproxy CA or its HTTPS breaks rather than merely going uncaptured.
+#
+# --connection_strategy=lazy: mitmproxy defaults to eager, which opens the
+# upstream connection before the client's request arrives. In transparent mode
+# that misfires on connection reuse and long-poll (phone apps do both), so
+# connect on demand instead.
+ExecStart=/opt/adblock-proxy/venv/bin/mitmdump \
+  --mode transparent \
+  --listen-host 0.0.0.0 \
+  --listen-port {{ adblock_phone_capture_port }} \
+  --set confdir=/home/mitmproxy/.mitmproxy \
+  --set connection_strategy=lazy \
+  --save-stream-file /var/log/mitmproxy/phone-flows.mitm \
+  -s /opt/adblock-proxy/phone_capture.py
+
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/mitmproxy /opt/adblock-proxy
+LogsDirectory=mitmproxy
+AmbientCapabilities=CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target

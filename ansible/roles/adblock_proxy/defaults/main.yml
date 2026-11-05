@@ -1,0 +1,23 @@
+---
+# Lab phone full-traffic capture (added 2026-11-04).
+#
+# A second, source-scoped transparent mitmproxy instance on this host that
+# DECRYPTS everything from one device, so its app traffic can be read. It is
+# deliberately separate from the ad-blocking listener on 8443: ad_block.py
+# passes any non-Discord/Reddit SNI straight through as opaque TLS, so that
+# path can never show you a general app's traffic, and widening it would change
+# the filtering the whole house depends on.
+#
+# The device reaches this host because its dnsmasq reservation sets its default
+# gateway here (HA dnsmasq app, customisation tag `opphone`). On this side the
+# only thing that points its traffic at the capture listener is
+# phone_redirect_guard.sh, which fails open when the listener is unhealthy.
+adblock_phone_capture_enabled: true
+
+# Address of the captured device. This is the whole security boundary of the
+# feature: the REDIRECT rules and the guard script exist only for this source.
+adblock_phone_capture_src: "192.168.86.126"
+
+# Port for the capture listener. Anything but 8443 — that is the ad-blocking
+# listener, and this instance has no SNI filter.
+adblock_phone_capture_port: 8445

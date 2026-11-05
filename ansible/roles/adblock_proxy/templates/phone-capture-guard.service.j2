@@ -1,0 +1,6 @@
+[Unit]
+Description=Tick the lab-phone capture redirect guard (fail open if the listener dies)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/adblock-proxy/phone_redirect_guard.sh
