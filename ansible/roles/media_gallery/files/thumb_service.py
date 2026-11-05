@@ -396,6 +396,20 @@ def make_thumb(src_path: Path, dst_path: Path, is_video: bool):
         )
     else:
         with Image.open(src_path) as im:
+            # 2026-11-05: JPEG draft mode. The source images are phone/camera
+            # captures (often 3000-6000px on a side) and a full decode +
+            # LANCZOS down to ~400px is CPU-bound: on this 2-vCPU CT the
+            # backfill measured 0.63 thumbs/s with load 2.6, so the 83K missing
+            # thumbs were a ~2-day job. draft() makes libjpeg decode at the
+            # nearest DCT scale that still exceeds the target, i.e. 1/8 the
+            # pixels for a 400px thumb, which is visually identical here and
+            # several times faster. It is a no-op for formats/codecs that do
+            # not support it (PNG, and any image already smaller than the
+            # target), so failures are swallowed on purpose.
+            try:
+                im.draft("RGB", (THUMB_PX, THUMB_PX))
+            except Exception:  # noqa: BLE001 — draft is an optimisation, never a requirement
+                pass
             im = im.convert("RGB")
             im.thumbnail((THUMB_PX, THUMB_PX), Image.LANCZOS)
             im.save(dst_path, "JPEG", quality=80)

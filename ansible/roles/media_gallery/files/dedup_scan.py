@@ -359,6 +359,20 @@ def main():
         # negative-cache file — not attempted here to keep this change
         # focused on the actual perf bug found live.
         if still_missing:
+            # 2026-11-05: a cold batch (33.5K items with no thumbnail anywhere —
+            # the backfill was blocked behind THIS service, see below) made this
+            # fetch run for hours and, because the backfill unit is ordered
+            # After= this one, it also starved thumbnail generation: a feedback
+            # loop where dedup waited for thumbs the blocked backfill would have
+            # made. Thumbnails are user-visible; hashing is not urgent. So above
+            # a small threshold, defer the remainder to the next cycle (the
+            # backfill fills the cache, then these are hashed locally for free).
+            defer_max = int(os.environ.get("DEDUP_DEFER_THUMBS_MAX", "200"))
+            if len(still_missing) > defer_max:
+                log(f"deferring {len(still_missing)} un-thumbnailed item(s) to the "
+                    f"backfill (threshold {defer_max}) — they hash locally next cycle")
+                still_missing = still_missing[:0]
+        if still_missing:
             files_list = work / "files_from.txt"
             with open(files_list, "w") as f:
                 for s in still_missing:

@@ -249,6 +249,10 @@ def main():
                           "always use this path regardless of this flag -- see the "
                           "PERFORMANCE FIX docstring for why. Use this only if the "
                           "fast local path is ever suspected of producing bad output.")
+    ap.add_argument("--video-budget", type=int, default=300,
+                     help="max VIDEO posters per run (default: 300). Videos cost a "
+                          "full download + ffmpeg each, and unbounded they consume "
+                          "the entire budget before any image thumb is generated.")
     ap.add_argument("--workers", type=int, default=4,
                      help="parallel HTTP workers for VIDEO posters (default: 4). "
                           "Videos are I/O-bound HTTP range fetches against the "
@@ -347,6 +351,18 @@ def main():
         log("nothing to backfill — every item already has a thumbnail")
         return
 
+    # 2026-11-05: videos must not eat the whole budget. A video poster is a
+    # full original download + ffmpeg, and 3,890 pending videos meant every
+    # run spent its entire budget before touching a single one of the 41,786
+    # missing IMAGE thumbs — which is what the owner actually sees in the grid.
+    # Give videos a small slice per run so they still drain steadily, and let
+    # images take the rest (they are now ~7x cheaper after the JPEG draft fix).
+    if n_vid and args.video_budget is not None:
+        vids = [it for it in missing if it.get("type") == "video"][:args.video_budget]
+        rest = [it for it in missing if it.get("type") != "video"]
+        missing = vids + rest
+        log(f"video budget {args.video_budget}: {len(vids)} video + {len(rest)} image queued")
+
     if args.budget is not None:
         missing = missing[:args.budget]
         log(f"budget={args.budget}: processing {len(missing)} this run")
@@ -438,50 +454,21 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             list(pool.map(fetch_one, video_items))
 
-    # ----- Phase 2: images, serial local path with throttle -----
-    # Each image is a real download/resize/upload round trip through the shared
-    # thumb-service HTTP endpoint; keep this serial + delayed as before.
+    # ----- Phase 2: images, same bounded HTTP pool as videos -----
+    # 2026-11-05: this used to be serial with --delay 1.0, which capped the
+    # catch-up at ~0.87 thumbs/s (measured) — 46 hours for the 83K missing
+    # thumbs. The image path now goes through the thumb service's ?bg=1 pool
+    # like videos: the service owns concurrency (single-flight per stem, its
+    # own background slot limit) and reports saturation with 429, so the
+    # backfill does not need its own pacing. --delay is still honoured as an
+    # optional extra pause per item, default 0.
     if image_items:
-        log(f"phase 2: {len(image_items)} image(s), serial")
-    for it in image_items:
-        chat = it.get("chat") or ""
-        stem = it["stem"]
-        if args.http_fallback:
-            # HTTP path for images too, but keep the serial + delay pacing and
-            # count into the image counters (not the video phase counters).
-            url = f"{THUMB_SERVICE_URL}/thumb/{chat}/{stem}.jpg"
-            try:
-                with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310
-                    data = resp.read()
-                    bytes_seen += len(data)
-                    if resp.status == 200:
-                        done += 1
-                    else:
-                        failed += 1
-                        log(f"  {chat}/{stem}: HTTP {resp.status}")
-                        note_failure(chat, stem, f"HTTP {resp.status}")
-            except Exception as e:  # noqa: BLE001
-                failed += 1
-                log(f"  {chat}/{stem}: {type(e).__name__}: {e}")
-                note_failure(chat, stem, f"{type(e).__name__}: {e}")
-        else:
-            leaf = os.path.basename(it.get("file") or "")
-            if not leaf:
-                failed += 1
-                log(f"  {chat}/{stem}: no 'file' field in manifest item")
-                note_failure(chat, stem, "HTTP 404")  # unrecoverable metadata gap
-            else:
-                ok, size, err = generate_thumb_local(chat, leaf, stem, work)
-                bytes_seen += size
-                if ok:
-                    done += 1
-                    with _ledger_lock:
-                        fail_ledger.pop(f"{chat}/{stem}", None)
-                else:
-                    failed += 1
-                    log(f"  {chat}/{stem}: {err}")
-                    note_failure(chat, stem, err or "unknown error", size=it.get("size"))
-        time.sleep(args.delay)
+        workers = max(1, args.workers)
+        log(f"phase 2: {len(image_items)} image(s), {workers} worker(s)")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(fetch_one, image_items))
+        if args.delay:
+            time.sleep(args.delay)
 
     done += counters["done"]
     failed += counters["failed"]

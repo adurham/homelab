@@ -38,8 +38,13 @@ media_gallery_refresh_interval: "1h"
 # batch: ~7-20s. 400/run clears the real backlog in roughly a day, after
 # which runs go near-empty and cost nothing (self-stopping by design).
 media_gallery_thumb_backfill_interval: "5min"
-media_gallery_thumb_backfill_budget: 400
-media_gallery_thumb_backfill_delay: 1.0
+# 2026-11-05: the catch-up was running at 0.87 thumbs/s (delay-bound at 1.0s
+# AND capped by the background pool), so the 33% of the library with no thumb
+# would have taken ~46 hours to clear. Drive tolerates ~10-11 files/s; the
+# service now allows 4 interactive + 6 background generations at once, and the
+# backfill runs without an artificial delay.
+media_gallery_thumb_backfill_budget: 6000
+media_gallery_thumb_backfill_delay: 0.0
 # Parallel HTTP workers for the video phase (see thumb_backfill.py's --workers
 # help; 4-way was measured safe on this 2-vCPU CT and cuts a video batch's
 # wall clock ~4x). Images stay serial.

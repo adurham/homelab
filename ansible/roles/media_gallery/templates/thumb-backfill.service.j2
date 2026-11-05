@@ -1,11 +1,15 @@
 # Managed by Ansible — roles/media_gallery. Do not edit by hand.
 [Unit]
 Description=media-gallery thumbnail backfill (background auto-cron)
-# Never run alongside a refresh (which itself runs dedup_scan.py) -- both
-# would compete for the same Drive API quota and the same thumb_service.py
-# generation path. Simple ordering (not a hard dependency) is enough since
-# each is on its own independent timer.
-After=media-gallery-refresh.service
+# NO After=media-gallery-refresh.service (removed 2026-11-05). It looked
+# harmless, but a refresh that ran long (dedup hashing tens of thousands of
+# new thumbnails from Drive) left this unit in the "waiting" state for hours,
+# so nothing generated thumbnails at all — and the dedup scan was itself
+# waiting on thumbnails only this unit could produce. Thumbnails are the
+# user-visible path, so the backfill must never be ordered behind a refresh.
+# Contention is handled at the shared resource instead: thumb_service.py has
+# bounded pools (and single-flight), and Drive's rate limit is what really
+# bounds both.
 Wants=network-online.target
 After=network-online.target
 
