@@ -165,8 +165,13 @@ def main():
     except OSError as exc:
         print(f"canary: could not write state ({exc})", file=sys.stderr)
 
-    print(f"canary: {len(leases)} leased, {len(seen)} resolving via AdGuard, "
-          f"{len(silent)} UP but silent: {[s['ip'] for s in silent]}")
+    # The Nest advertises ITSELF as the IPv6 DNS server (RDNSS in its RAs), so a
+    # device that prefers v6 asks the Nest, which relays to AdGuard: the query is
+    # still filtered, but AdGuard logs it under 192.168.86.1, not the device. So
+    # "no direct queries" means relayed-or-bypassing, not "definitely bypassing".
+    print(f"canary: {len(leases)} leased, {len(seen)} seen directly, "
+          f"{len(silent)} never seen directly (relayed via the Nest or bypassing): "
+          f"{[s['ip'] for s in silent]}")
 
     metric = (
         f"adblock_silent_clients {len(silent)}\n"
