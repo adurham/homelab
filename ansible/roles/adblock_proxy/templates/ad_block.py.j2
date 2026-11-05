@@ -719,6 +719,65 @@ def _empty_fb_unit(line: str):
     return None
 
 
+# ------------------------------------------------ Facebook: hide ad cards in DOM
+# The feed stream cannot be rewritten without stalling it (see the parked strip
+# above), so Facebook's web ads are hidden in the page instead. The sponsored card
+# is not marked with a stable attribute — the only signal is the label text
+# ("Sponsored") inside the card's <h3> — so this injects a small script that
+# hides any [role="article"] whose heading reads exactly "Sponsored" and keeps
+# watching for streamed cards. Injected with the page's own CSP nonce, and only
+# into facebook.com HTML: the feed stream is never touched, so pagination cannot
+# stall.
+FB_HIDE_SCRIPT = """
+<script%s>
+(function(){
+  if (window.__abHide) { return; }
+  window.__abHide = 1;
+  function hide(){
+    var cards = document.querySelectorAll('div[role="article"]');
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      if (card.dataset.abHidden) { continue; }
+      var h = card.querySelector('h3');
+      if (h && /^\s*Sponsored\s*$/i.test(h.innerText || '')) {
+        card.dataset.abHidden = '1';
+        card.style.setProperty('display','none','important');
+      }
+    }
+  }
+  hide();
+  new MutationObserver(function(){ clearTimeout(window.__abT); window.__abT = setTimeout(hide, 250); })
+    .observe(document.body, {childList:true, subtree:true});
+})();
+</script>
+"""
+
+
+def _inject_facebook_hider(flow: http.HTTPFlow) -> None:
+    if not flow.response or flow.response.status_code != 200:
+        return
+    host = (flow.request.pretty_host or "").lower()
+    if "facebook.com" not in host:
+        return
+    ct = (flow.response.headers.get("content-type") or "").lower()
+    if "html" not in ct:
+        return
+    text = _response_text(flow)
+    if not text or "</body>" not in text:
+        return
+    csp = flow.response.headers.get("content-security-policy", "") or ""
+    match = re.search(r"'nonce-([^']+)'", csp)
+    nonce_attr = f' nonce="{match.group(1)}"' if match else ""
+    script = FB_HIDE_SCRIPT % nonce_attr
+    try:
+        _prepare_rewrite(flow)
+        flow.response.content = text.replace("</body>", script + "</body>", 1).encode()
+        ctx.log.info(f"[FACEBOOK] injected ad-hider (nonce={'yes' if nonce_attr else 'no'}) "
+                     f"into {flow.request.path[:40]}")
+    except Exception as exc:  # noqa: BLE001
+        ctx.log.warn(f"[FACEBOOK] inject failed: {exc}")
+
+
 def _strip_facebook_feed_ads(flow: http.HTTPFlow) -> None:
     if not flow.response or flow.response.status_code != 200:
         return
@@ -778,6 +837,7 @@ def response(flow: http.HTTPFlow) -> None:
         # delta, so there is no body rewrite that removes an ad without stalling
         # it. The strip code is kept for reference/experiments, not wired in.
         # _strip_facebook_feed_ads(flow)
+        _inject_facebook_hider(flow)
         # Log every Meta request path: the web feed endpoint has to be visible
         # before a rewrite can target it (the first two attempts guessed wrong).
         ctx.log.info(f"[META_REQ] {flow.request.method} {flow.request.path[:110]} "
