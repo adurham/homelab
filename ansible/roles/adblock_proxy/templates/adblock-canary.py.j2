@@ -46,9 +46,14 @@ def http_get(url, timeout=15):
         return json.loads(resp.read().decode())
 
 
-def arp_neighbours():
+def neighbours(family="-4"):
+    """ip -> mac for the LAN interface, for IPv4 or IPv6.
+
+    IPv6 matters here: a device that resolves over v6 shows up in AdGuard's
+    query log under its v6 address, so an IPv4-only view calls it silent and
+    reports a bypass that isn't happening."""
     out = subprocess.run(
-        ["ip", "neigh", "show", "dev", LAN_IFACE],
+        ["ip", family, "neigh", "show", "dev", LAN_IFACE],
         capture_output=True, text=True, check=False,
     ).stdout
     ips = {}
@@ -120,6 +125,11 @@ def main():
 
     seen = clients_seen(WINDOW_HOURS)
 
+    # every address we know for a device, so a v6-only resolver isn't called silent
+    addrs_by_mac = {}
+    for ip, mac in {**neighbours("-4"), **neighbours("-6")}.items():
+        addrs_by_mac.setdefault(mac.lower(), set()).add(ip)
+
     silent = []
     for ip, info in sorted(leases.items()):
         host = info["host"]
@@ -129,6 +139,8 @@ def main():
             continue
         if any(hint in host.lower() for hint in IGNORE_HOSTNAME_HINTS):
             continue
+        if info["mac"] and (addrs_by_mac.get(info["mac"].lower(), set()) & seen):
+            continue  # resolves over another of its addresses (usually v6)
         # Liveness before blame: a device that is simply off holds a lease but
         # isn't bypassing anything. The CT's OUTPUT chain allows LAN ICMP echo
         # specifically so this probe is meaningful.

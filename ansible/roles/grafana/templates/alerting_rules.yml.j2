@@ -4717,6 +4717,228 @@ groups:
           severity: critical
         isPaused: false
 
+      # ── Ad blocking / DNS chain (added 2026-11-05) ───────────────────────
+      # The house's DNS + DHCP live in HA apps on a 4 GB HA Green running
+      # AdGuard with ~2.1M rules. Nothing else on the network can answer for
+      # them, so these are "the whole household loses name resolution" alerts,
+      # not lab conveniences. Metrics come from the adblock-proxy CT's
+      # monitor timer (roles/adblock_proxy/templates/adblock-monitor.sh.j2).
+      - uid: adguard_down
+        title: AdGuard DNS not answering
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_agh_up
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "AdGuard Home (192.168.86.2) is not answering its API — the LAN has no resolver"
+          description: "Every client's DNS points at 192.168.86.2 (DHCP option 6 and the v6 RA DNS), so this is house-wide name resolution, not one app. Check the 'AdGuard Home' app state on the HA Green, then the box's memory (AdGuard with 2.1M rules is most of its load) and `/config/adguard/` logs. noData also fires: the probe path is the CT's monitor timer plus the socat forwarder in the Advanced SSH app on the HA host — if that app is stopped, this alert is the only symptom."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: dnsmasq_dhcp_down
+        title: dnsmasq DHCP app down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_dnsmasq_up
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "dnsmasq app is not answering — DHCP renewals will start failing"
+          description: "The dnsmasq app on the HA Green is the only DHCP server (the Nest's DHCP is off, AdGuard's is off). Leases are now 12h, so an outage is survivable for half a day — that is the window to fix it before every client starts losing its address. Also the source of the dhcp-host reservations and the cam/sw2 routing tags."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: adblock_addon_not_filtering
+        title: Interceptor listen but addon not filtering
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_addon_heartbeat_age_seconds
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [900]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "mitmproxy is listening but its addon has seen no TLS for 15+ minutes"
+          description: "The heartbeat file is written by the addon on every TLS ClientHello, so a stale heartbeat with a listening :8443 means the addon is dead, erroring, or its file write is blocked — exit-node clients keep browsing and Discord/Reddit ads come back with no other symptom. Quiet-network caveat: no clients online = stale heartbeat with nothing wrong; check the flow count in `journalctl -u adblock-proxy-transparent` before acting. Fix path: `systemctl restart adblock-proxy-transparent`, then confirm the heartbeat moves."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: adblock_dns_bypass_clients
+        title: Devices resolving past AdGuard
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 21600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_silent_clients
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [8]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 6h
+        annotations:
+          summary: "More devices are resolving somewhere other than the home resolver than expected"
+          description: "The daily canary (adblock-canary.timer on the CT) pings every leased device and checks AdGuard's query log: devices that answer but never query are resolving via a hardcoded DNS, their own DoH/DoT, or another gateway. Baseline at rollout was 4 (two switches and a Pi rig that never resolve anything, plus a PS5 and a heat pump worth a look). A jump means something new appeared or a device quietly changed servers — read the list in /var/lib/adblock-proxy/canary.json on the CT. Devices carrying dnsmasq tags are excluded: they are pointed at the inspection box on purpose."
+        labels:
+          severity: warning
+        isPaused: false
+
 # NOTE (2026-10-20): Grafana reads file-based alerting provisioning ONLY at
 # startup. A new rule appears in the UI/DB only after grafana-server has
 # restarted since this file changed — the "Restart Grafana" handler does
