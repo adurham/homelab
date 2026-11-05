@@ -178,6 +178,15 @@
   #lb .nav{position:absolute;top:50%;transform:translateY(-50%);
     font-size:30px;padding:10px 18px;}
   #lb .prev{left:18px;} #lb .next{right:18px;}
+  /* lightbox: playback state + autoplay, instead of a bare <video> */
+  #lb .lbstatus{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);
+    font-size:13px;color:#dfe3ea;background:rgba(0,0,0,.55);padding:6px 12px;border-radius:999px;
+    pointer-events:none;opacity:0;transition:opacity .15s;}
+  #lb .lbstatus.show{opacity:1;}
+  #lb .lbauto{position:absolute;bottom:18px;right:20px;font:inherit;font-size:12.5px;
+    padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.25);
+    background:rgba(0,0,0,.45);color:#e7eaf0;cursor:pointer;}
+  #lb .lbauto.on{border-color:var(--accent);color:var(--accent);}
   #lb .lbtrash{position:absolute;top:16px;right:74px;font-size:18px;
     padding:6px 12px;border-color:#5a3030;}
   #lb .lbtrash:hover{background:#d23b3b;border-color:#d23b3b;}
@@ -601,6 +610,8 @@
   <button class="nav prev" id="lbPrev">&#8249;</button>
   <div class="media" id="lbMedia"></div>
   <button class="nav next" id="lbNext">&#8250;</button>
+  <div class="lbstatus" id="lbStatus"></div>
+  <button class="lbauto" id="lbAuto">Autoplay next: Off</button>
 </div>
 
 <script>
@@ -1629,16 +1640,54 @@
   }
 
   // ---------- LIGHTBOX ----------
+  // 2026-11-05: video is a state machine, not a bare <video>. A cold 33K-video
+  // library means buffering, seeking and the occasional codec Safari cannot
+  // play; all three used to look like a black rectangle. Status line + an
+  // explicit autoplay-next toggle (persisted) instead.
+  var AUTO_KEY='gal.autoplay.v1';
+  function autoOn(){ try{ return localStorage.getItem(AUTO_KEY)==='1'; }catch(_){ return false; } }
+  function lbStatus(txt){
+    var s=document.getElementById('lbStatus'); if(!s) return;
+    s.textContent=txt||'';
+    s.className='lbstatus'+(txt?' show':'');
+  }
+  function lbAutoPaint(){
+    var b=document.getElementById('lbAuto'); if(!b) return;
+    var on=autoOn();
+    b.textContent='Autoplay next: '+(on?'On':'Off');
+    b.className='lbauto'+(on?' on':'');
+  }
   function openLb(i){
     lbIndex=i; var it=shown[i]; if(!it) return;
     if(current&&current!=='__dup__'&&current!=='*'){ resumeTouch(current,i,it.stem); seenMark(it.stem); }   // bookmark + seen
     lbMedia.innerHTML='';
+    lbStatus('');
+    lbAutoPaint();
     var el;
     if(it.type==='video'){
       el=document.createElement('video');
       el.controls=true; el.autoplay=true; el.playsInline=true;
       el.setAttribute('playsinline','');
+      el.preload='metadata';
       el.poster='/'+it.thumb; el.src='/'+it.file;
+      el.addEventListener('waiting',function(){ lbStatus('Buffering\u2026'); });
+      el.addEventListener('stalled',function(){ lbStatus('Buffering\u2026'); });
+      el.addEventListener('seeking',function(){ lbStatus('Seeking\u2026'); });
+      el.addEventListener('playing',function(){ lbStatus(''); });
+      el.addEventListener('error',function(){ lbStatus('Can\u2019t play this file \u2014 its codec is not supported here'); });
+      el.addEventListener('ended',function(){
+        if(!autoOn()) return;
+        if(lbIndex+1<shown.length){ navLb(1); } else { lbStatus('End of folder'); }
+      });
+      // a video with no poster looks identical to a broken one: say so
+      (function(){
+        var probe=new Image();
+        probe.onerror=function(){
+          lbStatus('Poster pending \u2014 generating\u2026');
+          setTimeout(function(){ var s=document.getElementById('lbStatus'); if(s&&/Poster pending/.test(s.textContent)) lbStatus(''); },5000);
+        };
+        probe.src='/'+it.thumb;
+      })();
     }else{
       el=document.createElement('img'); el.src='/'+it.file;
     }
@@ -2239,6 +2288,10 @@
   });
   document.getElementById('lbClose').addEventListener('click',closeLb);
   document.getElementById('lbPrev').addEventListener('click',function(){hideLbConfirm();hideMoveMenu();navLb(-1);});
+  document.getElementById('lbAuto').addEventListener('click',function(){
+    try{ localStorage.setItem(AUTO_KEY, autoOn()?'0':'1'); }catch(_){}
+    lbAutoPaint();
+  });
   document.getElementById('lbNext').addEventListener('click',function(){hideLbConfirm();hideMoveMenu();navLb(1);});
   lbTrashBtn.addEventListener('click',function(){
     lbConfirm.classList.add('show'); lbTrashBtn.style.display='none';
