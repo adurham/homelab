@@ -105,3 +105,9 @@ printfarm_deps:
   - libsoup-3.0-0
   - libwebkit2gtk-4.1-0
   - libgtk-3-0t64
+
+# The print watcher (k2-watch) is enabled but not started by the role: it is a
+# per-print recorder that exits when the print ends, so there is nothing to
+# supervise between prints. Set this true (extra-vars) to let the role's handler
+# restart a watcher that is live during a deploy.
+k2_watch_active: false

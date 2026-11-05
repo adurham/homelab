@@ -4,3 +4,12 @@
     name: bambu2creality
     state: restarted
     daemon_reload: true
+
+- name: Restart k2-watch
+  ansible.builtin.systemd:
+    name: k2-watch
+    state: restarted
+    daemon_reload: true
+  # the watcher exits at the end of a print; restarting it when nobody is
+  # printing would resurrect a watcher with no job, so only restart if live.
+  when: k2_watch_active | default(false)

@@ -183,6 +183,34 @@
     group: "{{ printfarm_user }}"
     mode: "0644"
 
+# Telemetry-only print watcher: records progress/faults on a box that stays up.
+# Started here (not by the app) so an app restart never costs the record.
+- name: Deploy Print Watcher
+  ansible.builtin.copy:
+    src: "{{ printfarm_src }}/watch_print.py"
+    dest: "{{ printfarm_dir }}/watch_print.py"
+    owner: "{{ printfarm_user }}"
+    group: "{{ printfarm_user }}"
+    mode: "0644"
+  notify: Restart k2-watch
+
+- name: Install the Print Watcher Unit
+  ansible.builtin.template:
+    src: k2-watch.service.j2
+    dest: /etc/systemd/system/k2-watch.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart k2-watch
+
+- name: Enable the Print Watcher
+  ansible.builtin.systemd:
+    name: k2-watch
+    enabled: true
+    daemon_reload: true
+    # deliberately NOT started here: the watcher is started when a print is
+    # pending, and it exits on its own when the print ends.
+
 - name: Install systemd Service
   ansible.builtin.template:
     src: bambu2creality.service.j2

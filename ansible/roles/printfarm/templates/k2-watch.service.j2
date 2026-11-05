@@ -1,0 +1,33 @@
+[Unit]
+Description=K2 print watcher (telemetry only, no printer commands)
+# Records a print's progress + faults on a box that stays up, so the overnight
+# record does not depend on anyone's laptop. Exits by itself when the print
+# reaches a terminal state; it is not a daemon that idles forever.
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User={{ printfarm_user }}
+Group={{ printfarm_user }}
+WorkingDirectory={{ printfarm_dir }}
+
+Environment=K2_HOST={{ printfarm_printer_host }}
+Environment=WATCH_STATE_DIR={{ printfarm_state }}
+Environment=WATCH_LOG=/var/log/printfarm/watch.log
+
+ExecStart=/usr/bin/python3 {{ printfarm_dir }}/watch_print.py
+
+# A watcher that dies mid-print should come back, not vanish.
+Restart=on-failure
+RestartSec=15
+StartLimitBurst=0
+
+LogsDirectory=printfarm
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths={{ printfarm_state }} /var/log/printfarm
+
+[Install]
+WantedBy=multi-user.target
