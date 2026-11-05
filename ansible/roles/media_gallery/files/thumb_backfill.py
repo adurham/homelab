@@ -102,6 +102,16 @@ RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "")
 GALLERY = REMOTE + "gallery"
 SRC = REMOTE + "by-chat"
 THUMBS = REMOTE + "thumbs"
+# 2026-11-05: "missing" is judged against the LOCAL cache, not the Drive
+# listing. Reason, found live: the crypt remote contains duplicated directory
+# entries (rclone: "Duplicate directory found in source - ignoring"), so the
+# remote listing reports ~205K thumb paths while only ~170K are actually
+# copied down by prewarm. Judging by the remote listing therefore marked ~35K
+# items as "already has a thumb" that in fact had NO local thumb — every view
+# of those paid a 2-4 s Drive round trip, which is exactly the "thumbnails take
+# too long" report. The local cache is what the browser actually hits, so the
+# local cache is the correct definition of done (and generation writes to it).
+THUMB_CACHE = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))
 THUMB_SERVICE_URL = os.environ.get("THUMB_SERVICE_URL", "http://172.16.0.46:8090")
 
 # ─── Failure ledger (2026-10-08) ─────────────────────────────────────────────
@@ -278,13 +288,18 @@ def main():
     items = [it for it in manifest if args.include_video or it.get("type") != "video"]
     log(f"manifest items considered: {len(items)}")
 
-    log("listing existing thumbnails on Drive (one pass, not per-item)…")
-    r = rclone("lsf", "-R", "--files-only", THUMBS)
-    if r.returncode != 0:
-        log("cannot list thumbs:", r.stderr[:200])
+    log("listing existing thumbnails in the local cache (what the browser hits)…")
+    existing = set()
+    try:
+        for p in THUMB_CACHE.rglob("*.jpg"):
+            try:
+                existing.add(str(p.relative_to(THUMB_CACHE)))
+            except ValueError:
+                continue
+    except OSError as e:
+        log("cannot scan local thumb cache:", str(e)[:200])
         sys.exit(1)
-    existing = set(r.stdout.splitlines())
-    log(f"existing thumbnails: {len(existing)}")
+    log(f"existing local thumbnails: {len(existing)}")
 
     missing = [it for it in items
                if f"{it.get('chat') or ''}/{it['stem']}.jpg" not in existing]
@@ -382,6 +397,12 @@ def main():
                 k = f"{chat}/{stem}"
                 rec = fail_ledger.get(k)
                 n = (rec.get("n", 0) if isinstance(rec, dict) else 0) + 1
+                # A deterministic 404 means the original itself is gone (dead
+                # temp uploads, deleted sources): retrying it three more times
+                # costs a Drive round trip each and, with thousands of them,
+                # starves the real work. Retire it to cooldown immediately.
+                if "404" in err and "transient" not in err:
+                    n = max(n, FAIL_MAX)
                 fail_ledger[k] = {"n": n, "t": time.time(), "sz": size}
         return
 
