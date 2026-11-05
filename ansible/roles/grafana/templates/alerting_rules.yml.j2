@@ -4939,6 +4939,64 @@ groups:
           severity: warning
         isPaused: false
 
+      # 2026-11-05: the proxy ran with a 1024-fd SOFT limit while the listener
+      # looked perfectly healthy; once it saturated, every accept failed with
+      # EMFILE and exit-node clients lost DNS and every app. Ratio, not absolute
+      # count, so it keeps working if the limit is ever retuned.
+      - uid: adblock_proxy_fd_pressure
+        title: Interceptor near its file-descriptor limit
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_proxy_open_fds / adblock_proxy_fd_soft_limit
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0.8]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "mitmproxy is above 80% of its fd limit — clients start failing at 100%"
+          description: "At the limit every accept fails with EMFILE while the listener still looks alive: exit-node clients lose DNS and app connectivity with no other signal (2026-11-05, Gmail 'no connection' on the owner's phone). Normal is a few dozen descriptors. A climb means stale half-open sockets from roaming devices; TCP keepalive on the CT is now 300s so they reap on their own, and the soft limit is 65536. If it is high: `systemctl restart adblock-proxy-transparent` clears it and the clients reconnect."
+        labels:
+          severity: critical
+        isPaused: false
+
 # NOTE (2026-10-20): Grafana reads file-based alerting provisioning ONLY at
 # startup. A new rule appears in the UI/DB only after grafana-server has
 # restarted since this file changed — the "Restart Grafana" handler does

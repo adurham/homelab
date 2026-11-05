@@ -33,14 +33,26 @@ code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "${DNSMASQ_UI}")
 listener=0
 ss -ltn 'sport = :8443' 2>/dev/null | grep -q LISTEN && listener=1
 
+# File descriptors: on 2026-11-05 the proxy hit its old 1024 soft limit and every
+# accept failed with EMFILE while the listener still looked healthy — exit-node
+# clients lost DNS and app connectivity with no obvious symptom. The limit is now
+# 65536, but the ratio is worth watching because it only ever ratchets up.
+PID=$(systemctl show -p MainPID --value adblock-proxy-transparent)
+fds=0
+soft=0
+if [ -n "${PID}" ] && [ -d "/proc/${PID}" ]; then
+    fds=$(ls "/proc/${PID}/fd" 2>/dev/null | wc -l)
+    soft=$(awk '/Max open files/ {print $4}' "/proc/${PID}/limits" 2>/dev/null)
+fi
+
 if [ -f "${HB}" ]; then
     age=$(( $(date +%s) - $(stat -c %Y "${HB}") ))
 else
     age=99999
 fi
 
-logger -t adblock-monitor "agh=${agh} dnsmasq=${dnsmasq} listener=${listener} heartbeat_age=${age}"
+logger -t adblock-monitor "agh=${agh} dnsmasq=${dnsmasq} listener=${listener} heartbeat_age=${age} fds=${fds}/${soft}"
 
-printf 'adblock_agh_up %d\nadblock_dnsmasq_up %d\nadblock_interceptor_listener %d\nadblock_addon_heartbeat_age_seconds %d\n' \
-    "${agh}" "${dnsmasq}" "${listener}" "${age}" \
+printf 'adblock_agh_up %d\nadblock_dnsmasq_up %d\nadblock_interceptor_listener %d\nadblock_addon_heartbeat_age_seconds %d\nadblock_proxy_open_fds %d\nadblock_proxy_fd_soft_limit %d\n' \
+    "${agh}" "${dnsmasq}" "${listener}" "${age}" "${fds}" "${soft}" \
     | curl -s -m 8 --data-binary @- "${VM}" >/dev/null
