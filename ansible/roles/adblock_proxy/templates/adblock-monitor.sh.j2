@@ -13,6 +13,23 @@
 #                             erroring addon looks identical from outside, so a
 #                             stale heartbeat is the only real "is it filtering?"
 #                             signal. Alerts should fire above ~900s.
+#   adblock_proxy_open_fds / _fd_soft_limit — descriptors. 2026-11-05: the process
+#                             saturated a 1024 soft limit and every accept failed
+#                             with EMFILE while the unit still looked healthy —
+#                             exit-node clients lost DNS and app connectivity.
+#   adblock_proxy_accept_errors — that same failure as a rate, so a flapping
+#                             incident is visible even if it self-heals between
+#                             scrapes (and the guard restarts on it).
+#   adblock_proxy_rss_bytes — memory creep in mitmproxy (MemoryMax caps it).
+#   adblock_nat_redirect_rules — 0 means the REDIRECTs are gone: either the guard
+#                             pulled them because the interceptor was unhealthy,
+#                             or something flushed nat.
+#   adblock_tailscale_exit_node — if this drops, every exit-node client silently
+#                             falls back to the ISP path: no filtering and no
+#                             resolver protection for their traffic, with nothing
+#                             else looking wrong.
+#   adblock_disk_used_percent — journald is capped, but a full rootfs takes the
+#                             interceptor down just as hard.
 set -uo pipefail
 
 AGH_API="http://100.77.245.39:45158"        # AdGuard admin API, loopback-only on HA,
@@ -21,6 +38,7 @@ AGH_API="http://100.77.245.39:45158"        # AdGuard admin API, loopback-only o
 DNSMASQ_UI="http://192.168.86.2:8976/"      # dnsmasq app web API
 VM="http://172.16.0.42:8428/api/v1/import/prometheus"
 HB=/var/lib/adblock-proxy/heartbeat
+UNIT=adblock-proxy-transparent
 
 agh=0
 curl -sf -m 5 -o /dev/null "${AGH_API}/control/status" && agh=1
@@ -33,26 +51,39 @@ code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "${DNSMASQ_UI}")
 listener=0
 ss -ltn 'sport = :8443' 2>/dev/null | grep -q LISTEN && listener=1
 
-# File descriptors: on 2026-11-05 the proxy hit its old 1024 soft limit and every
-# accept failed with EMFILE while the listener still looked healthy — exit-node
-# clients lost DNS and app connectivity with no obvious symptom. The limit is now
-# 65536, but the ratio is worth watching because it only ever ratchets up.
-PID=$(systemctl show -p MainPID --value adblock-proxy-transparent)
-fds=0
-soft=0
-if [ -n "${PID}" ] && [ -d "/proc/${PID}" ]; then
-    fds=$(ls "/proc/${PID}/fd" 2>/dev/null | wc -l)
-    soft=$(awk '/Max open files/ {print $4}' "/proc/${PID}/limits" 2>/dev/null)
-fi
-
 if [ -f "${HB}" ]; then
     age=$(( $(date +%s) - $(stat -c %Y "${HB}") ))
 else
     age=99999
 fi
 
-logger -t adblock-monitor "agh=${agh} dnsmasq=${dnsmasq} listener=${listener} heartbeat_age=${age} fds=${fds}/${soft}"
+PID=$(systemctl show -p MainPID --value "$UNIT")
+fds=0
+soft=0
+rss=0
+if [ -n "${PID}" ] && [ -d "/proc/${PID}" ]; then
+    fds=$(ls "/proc/${PID}/fd" 2>/dev/null | wc -l)
+    soft=$(awk '/Max open files/ {print $4}' "/proc/${PID}/limits" 2>/dev/null)
+    rss=$(awk '/VmRSS/ {print $2 * 1024}' "/proc/${PID}/status" 2>/dev/null)
+fi
 
-printf 'adblock_agh_up %d\nadblock_dnsmasq_up %d\nadblock_interceptor_listener %d\nadblock_addon_heartbeat_age_seconds %d\nadblock_proxy_open_fds %d\nadblock_proxy_fd_soft_limit %d\n' \
+accept_errors=$(journalctl -u "$UNIT" --since "-5 min" --no-pager 2>/dev/null \
+                | grep -cE "Too many open files|EMFILE")
+
+nat_rules=$(iptables -t nat -S PREROUTING 2>/dev/null | grep -c REDIRECT)
+
+exit_node=0
+if tailscale status --json 2>/dev/null \
+   | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("Self",{}).get("ExitNodeOption") else 1)'; then
+    exit_node=1
+fi
+
+disk=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
+disk=${disk:-0}
+
+logger -t adblock-monitor "agh=${agh} dnsmasq=${dnsmasq} listener=${listener} heartbeat_age=${age} fds=${fds}/${soft} accept_errors=${accept_errors} nat=${nat_rules} exit_node=${exit_node} disk=${disk}%"
+
+printf 'adblock_agh_up %d\nadblock_dnsmasq_up %d\nadblock_interceptor_listener %d\nadblock_addon_heartbeat_age_seconds %d\nadblock_proxy_open_fds %d\nadblock_proxy_fd_soft_limit %d\nadblock_proxy_accept_errors %d\nadblock_proxy_rss_bytes %d\nadblock_nat_redirect_rules %d\nadblock_tailscale_exit_node %d\nadblock_disk_used_percent %d\n' \
     "${agh}" "${dnsmasq}" "${listener}" "${age}" "${fds}" "${soft}" \
+    "${accept_errors}" "${rss}" "${nat_rules}" "${exit_node}" "${disk}" \
     | curl -s -m 8 --data-binary @- "${VM}" >/dev/null

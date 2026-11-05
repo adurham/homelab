@@ -4997,6 +4997,222 @@ groups:
           severity: critical
         isPaused: false
 
+      - uid: adblock_accept_errors
+        title: Interceptor rejecting connections (fd exhaustion)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_proxy_accept_errors
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "mitmproxy is failing accepts — exit-node clients are losing connectivity"
+          description: "A non-zero sustained rate means the same failure as 2026-11-05: the process ran out of descriptors and every new connection failed while the unit and the listener both looked healthy. The fail-open guard restarts it once the count passes 20 in the lookback window, so this alert also catches flapping. Check adblock_proxy_open_fds against adblock_proxy_fd_soft_limit, and `journalctl -u adblock-proxy-transparent | grep EMFILE`."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: adblock_nat_rules_missing
+        title: Interceptor redirect rules are gone
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_nat_redirect_rules
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Traffic is not being redirected into the interceptor — no Discord/Reddit stripping for exit-node clients"
+          description: "The PREROUTING REDIRECTs are pulled by the fail-open guard whenever the interceptor is unhealthy, and re-added when it recovers. Sitting at 0 for five minutes means either the interceptor never came back or something flushed nat: check `systemctl is-active adblock-proxy-transparent`, then `iptables -t nat -S PREROUTING`. Persisted in /etc/iptables/rules.v4, so a reboot restores them."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: adblock_exit_node_lost
+        title: Interceptor stopped advertising as exit node
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_tailscale_exit_node
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "Exit-node clients have silently fallen back to the ISP path"
+          description: "Everything still works for those devices, which is exactly why this is easy to miss: their traffic bypasses the proxy AND their DNS leaves via the CT's own resolver path rather than AdGuard-per-request filtering. Check `tailscale status --json | .Self.ExitNodeOption` and `tailscale up --advertise-exit-node --accept-dns=false` on the CT."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: adblock_ct_disk_high
+        title: Interceptor host disk filling
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_disk_used_percent
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [85]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 30m
+        annotations:
+          summary: "The CT running the interceptor is above 85% disk"
+          description: "journald is capped at 150M and the Reddit capture dir at 200 files, so this growing means something else is: check `du -sh /var/log/* /var/lib/*` on the CT. A full rootfs stops the interceptor just as hard as a crash."
+        labels:
+          severity: warning
+        isPaused: false
+
 # NOTE (2026-10-20): Grafana reads file-based alerting provisioning ONLY at
 # startup. A new rule appears in the UI/DB only after grafana-server has
 # restarted since this file changed — the "Restart Grafana" handler does

@@ -10,6 +10,13 @@
 # beats no internet, so: pull the REDIRECT rules while unhealthy, put them back
 # once the listener is up again. The window is at most one timer interval.
 #
+# "Unhealthy" includes a process that is UP but cannot accept connections. On
+# 2026-11-05 the proxy saturated a 1024-fd soft limit: the unit stayed active,
+# the port stayed LISTEN, and every accept failed with EMFILE — so the port
+# check above called it healthy while exit-node clients had no DNS and no app
+# connectivity. Accept errors are therefore their own unhealthy signal, and the
+# remedy there is a restart (which clears the descriptors), not just fail-open.
+#
 # Exit status is always 0: the timer runs this as a oneshot unit, and a
 # deliberate fail-open is not a unit failure (a real failure would be the guard
 # itself not running).
@@ -18,11 +25,39 @@ set -uo pipefail
 PORT=8443
 IFACES="tailscale0 eth1"
 PORTS="443 80"
+UNIT=adblock-proxy-transparent
+STAMP=/var/lib/adblock-proxy/last_guard_restart
+RESTART_QUIET_SECONDS=120   # never restart more often than this (loop guard)
+ACCEPT_ERROR_LIMIT=20       # errors inside the lookback window that mean EMFILE
 
 healthy=0
-systemctl is-active --quiet adblock-proxy-transparent || healthy=-1
+systemctl is-active --quiet "$UNIT" || healthy=-1
 if [ "$healthy" = 0 ] && ss -ltn "sport = :${PORT}" 2>/dev/null | grep -q LISTEN; then
     healthy=1
+fi
+
+# An up-but-EMFILE process: count accept errors only since the unit last
+# started, so a fresh restart is not immediately re-flagged by its own history.
+if [ "$healthy" = 1 ]; then
+    started=$(systemctl show -p ActiveEnterTimestamp --value "$UNIT")
+    now=$(date +%s)
+    started_epoch=$(date -d "$started" +%s 2>/dev/null || echo 0)
+    if [ $((now - started_epoch)) -lt 180 ]; then since="$started"; else since="-3 min"; fi
+    errors=$(journalctl -u "$UNIT" --since "$since" --no-pager 2>/dev/null \
+             | grep -cE "Too many open files|EMFILE")
+    if [ "${errors:-0}" -gt "$ACCEPT_ERROR_LIMIT" ]; then
+        last=0
+        [ -f "$STAMP" ] && last=$(cat "$STAMP" 2>/dev/null || echo 0)
+        if [ $((now - last)) -gt "$RESTART_QUIET_SECONDS" ]; then
+            echo "$now" > "$STAMP" 2>/dev/null || true
+            logger -t adblock-guard "interceptor logged ${errors} accept errors (fd exhaustion) — restarting it"
+            systemctl restart "$UNIT"
+            healthy=-1   # fail open until it is serving again
+        else
+            logger -t adblock-guard "interceptor still logging accept errors, restart suppressed (last <${RESTART_QUIET_SECONDS}s ago)"
+            healthy=-1
+        fi
+    fi
 fi
 
 nat_rule() { iptables -t nat -C PREROUTING -i "$1" -p tcp --dport "$2" -j REDIRECT --to-ports "$PORT" 2>/dev/null; }
