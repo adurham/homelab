@@ -94,7 +94,14 @@ filter list, same domain-blocking pattern as ads.discord.com):
   - pixel.reddit.com        - tracking pixel
   - gateway.reddit.com      - ad gateway
 """
+import gzip
 import json
+import zlib
+
+try:  # brotli ships with mitmproxy, but never let its absence break the addon
+    import brotli
+except ImportError:  # pragma: no cover
+    brotli = None
 import re
 import time
 from pathlib import Path
@@ -129,6 +136,9 @@ REDDIT_CONTENT_SUFFIXES = (".reddit.com",)
 
 REDDIT_CAPTURE_DIR = Path("/var/log/mitmproxy/reddit_capture")
 REDDIT_CAPTURE_MAX_FILES = 200  # hard cap so this can never fill the CT's 8G rootfs
+# NOTE: capture runs AFTER ad-stripping, so saved bodies are post-strip. For a
+# pre-strip sample, comment out the _strip_reddit_ads() call in response() and
+# restart; the field names still appear in stripped bodies, the ad edges do not.
 
 LOG_TAG_DISCORD = "DISCORD_TRAFFIC"
 LOG_TAG_REDDIT = "REDDIT_TRAFFIC"
@@ -285,6 +295,34 @@ def _strip_ad_edges(obj):
     return removed
 
 
+def _response_text(flow: http.HTTPFlow):
+    """Decoded body text, or None when the body can't be read.
+
+    mitmproxy normally hands addons already-decoded content, so .text works.
+    When it doesn't (content-encoding still on the message), decode it here
+    rather than silently skipping the rewrite — a compressed feed is exactly
+    the case that must not fail open into "no ads stripped".
+    """
+    try:
+        text = flow.response.text
+        if text is not None:
+            return text
+    except Exception:  # noqa: BLE001 - fall through to manual decoding
+        pass
+    raw = flow.response.content or b""
+    enc = (flow.response.headers.get("content-encoding") or "").lower().strip()
+    try:
+        if enc == "gzip":
+            raw = gzip.decompress(raw)
+        elif enc == "deflate":
+            raw = zlib.decompress(raw)
+        elif enc == "br" and brotli is not None:
+            raw = brotli.decompress(raw)
+    except Exception:  # noqa: BLE001 - give up quietly, leave the body alone
+        return None
+    return raw.decode("utf-8", "replace")
+
+
 def _strip_reddit_ads(flow: http.HTTPFlow) -> None:
     """Remove promoted items from Reddit's JSON feed responses.
 
@@ -295,11 +333,13 @@ def _strip_reddit_ads(flow: http.HTTPFlow) -> None:
     """
     if not flow.response or flow.response.status_code != 200:
         return
-    try:
-        text = flow.response.text
-    except Exception:  # noqa: BLE001 - opaque/undecodable body, leave alone
+    text = _response_text(flow)
+    if text is None:
         return
-    if not text or '"adPayload":{' not in text:
+    # Match on the field name, not on '"adPayload":{' — a whitespace difference
+    # in the serialisation would silently disable stripping (exactly what the
+    # first synthetic test hit). json.loads below is the real test.
+    if not text or '"adPayload"' not in text:
         return
     try:
         payload = json.loads(text)
@@ -334,6 +374,11 @@ def response(flow: http.HTTPFlow) -> None:
     if "json" not in content_type.lower():
         return
 
+    # Strip BEFORE the capture block: that block returns early once the file cap
+    # is reached, and when it did (2026-11-05, dir at 200/200) the early return
+    # silently skipped ad-stripping entirely.
+    _strip_reddit_ads(flow)
+
     try:
         REDDIT_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
         existing = list(REDDIT_CAPTURE_DIR.glob("*.json"))
@@ -347,6 +392,4 @@ def response(flow: http.HTTPFlow) -> None:
         ctx.log.info(f"[{LOG_TAG_REDDIT}] captured {host}{flow.request.path} -> {out_path.name} ({len(existing) + 1}/{REDDIT_CAPTURE_MAX_FILES})")
     except Exception as exc:  # noqa: BLE001 - never let capture logic break real traffic
         ctx.log.warn(f"[{LOG_TAG_REDDIT}] capture failed for {host}{flow.request.path}: {exc}")
-
-    _strip_reddit_ads(flow)
 
