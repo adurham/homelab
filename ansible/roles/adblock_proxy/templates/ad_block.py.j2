@@ -214,7 +214,8 @@ META_INTERCEPT_RULES = {
     # while proving whether the phone's SYSTEM trust store accepts our leaf for
     # an instagram.com name — Safari is the test client. If Safari loads it, the
     # certificate is fine and the app's rejection is app-specific by construction.
-    "100.101.211.44": ("www.instagram.com",),
+    "100.101.211.44": ("www.instagram.com", "www.facebook.com",
+                       "web.facebook.com", "m.facebook.com"),
 }
 
 
@@ -733,24 +734,55 @@ FB_HIDE_SCRIPT = """
 (function(){
   if (window.__abHide) { return; }
   window.__abHide = 1;
+  function cardFor(el){
+    var node = el;
+    for (var up = 0; up < 14 && node.parentElement; up++) {
+      node = node.parentElement;
+      var r = node.getBoundingClientRect();
+      if (r.height >= 120 && r.height <= window.innerHeight * 3) { return node; }
+    }
+    return null;
+  }
+  function beacon(lab, hid, seen){
+    try {
+      if (window.__abLast === lab + ':' + hid) { return; }
+      window.__abLast = lab + ':' + hid;
+      (new Image()).src = '/__abprobe?lab=' + lab + '&hid=' + hid + '&seen=' + seen + '&v=' + Math.round(window.innerHeight) + '&r=' + Math.random();
+    } catch (e) {}
+  }
   function hide(){
-    var cards = document.querySelectorAll('div[role="article"]');
-    for (var i = 0; i < cards.length; i++) {
-      var card = cards[i];
-      if (card.dataset.abHidden) { continue; }
-      var h = card.querySelector('h3');
-      var head = h ? (h.innerText || '') : '';
-      var txt = (card.innerText || '').slice(0, 80);
-      var labelled = card.querySelector('[aria-label="Sponsored"],[aria-label*="Sponsored"]');
-      if (/^\s*Sponsored\b/i.test(head) || /^\s*Sponsored\b/i.test(txt) || labelled) {
+    var lab = 0, hid = 0;
+    var all = document.querySelectorAll('span,a,div,h3');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.dataset && el.dataset.abHidden) { continue; }
+      var t = (el.textContent || '').replace(/\u200b/g, '').trim();
+      if (!t || t.length > 30) { continue; }
+      if (!/^sponsored/i.test(t)) { continue; }
+      lab++;
+      var card = cardFor(el);
+      if (card) {
         card.dataset.abHidden = '1';
         card.style.setProperty('display','none','important');
+        hid++;
       }
     }
+    var arts = document.querySelectorAll('div[role="article"]');
+    for (var j = 0; j < arts.length; j++) {
+      var a = arts[j];
+      if (a.dataset.abHidden) { continue; }
+      var h = a.querySelector('h3');
+      if (h && /^\s*sponsored/i.test((h.innerText || '').replace(/\u200b/g, ''))) {
+        a.dataset.abHidden = '1';
+        a.style.setProperty('display','none','important');
+        hid++;
+      }
+    }
+    beacon(lab, hid, all.length);
   }
   hide();
   new MutationObserver(function(){ clearTimeout(window.__abT); window.__abT = setTimeout(hide, 250); })
-    .observe(document.body, {childList:true, subtree:true});
+    .observe(document.documentElement, {childList:true, subtree:true});
 })();
 </script>
 """
