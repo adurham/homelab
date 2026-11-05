@@ -91,7 +91,14 @@ quic_expected_prefix() {
 }
 
 quic_layout_ok() {
-    [ "$(iptables -S FORWARD 2>/dev/null | head -n 5)" = "$(quic_expected_prefix)" ]
+    # compare the same NUMBER of lines — head -n 5 against a 4-line expectation
+    # never matched, so the guard rebuilt the policy on every tick (counter churn
+    # and log spam, not a functional break, but it hid the packets-per-rule view).
+    local expected count actual
+    expected="$(quic_expected_prefix)"
+    count="$(printf '%s\n' "$expected" | wc -l)"
+    actual="$(iptables -S FORWARD 2>/dev/null | head -n "$count")"
+    [ "$actual" = "$expected" ]
 }
 
 quic_place() {
