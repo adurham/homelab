@@ -367,18 +367,25 @@ def response(flow: http.HTTPFlow) -> None:
     ad-blocking behavior for Discord/Reddit tracking domains is
     unaffected either way)."""
     host = flow.request.pretty_host
-    if not _is_reddit_content_host(host):
-        return
-
     content_type = flow.response.headers.get("content-type", "") if flow.response else ""
     if "json" not in content_type.lower():
         return
 
-    # Strip BEFORE the capture block: that block returns early once the file cap
-    # is reached, and when it did (2026-11-05, dir at 200/200) the early return
-    # silently skipped ad-stripping entirely.
+    # Strip on CONTENT, not on host. The iOS app's Reddit traffic reaches us
+    # with the connection's IP as the flow host (no usable SNI/authority), so
+    # host matching silently never fires — measured 2026-11-05: the app's
+    # ad-impression beacons arrived as "GET https://151.101.193.140/svc/..." .
+    # Only Reddit/Discord SNIs are decrypted at all (tls_clienthello), so this
+    # inspects a small set of bodies and _strip_reddit_ads is a cheap
+    # substring check first.
     _strip_reddit_ads(flow)
 
+    if not _is_reddit_content_host(host):
+        return
+
+    # Capture runs after stripping and returns early at the file cap; the strip
+    # call above is deliberately outside that path so a full capture dir can
+    # never disable ad-stripping again (it did, 2026-11-05, at 200/200).
     try:
         REDDIT_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
         existing = list(REDDIT_CAPTURE_DIR.glob("*.json"))
