@@ -445,7 +445,16 @@ all:
     printfarm:
       hosts:
         print-01:
-          ansible_host: "{{ ip_printfarm }}"
+          # Managed over its TAILNET address: the CT peers directly, and after
+          # the join the subnet-routed private path (172.16.0.51) stops
+          # answering this Mac entirely — measured: no ping, no port 22, while
+          # the tailnet address answers both over a direct peer link. The role
+          # re-points this host at the tailnet address automatically once the
+          # CT has one, falling back to ip_printfarm for a from-scratch build.
+          ansible_host: 100.120.18.93
+          # No ProxyCommand: the private_subnet jump host exists for the
+          # private-SDN leg, which is exactly the leg this CT stops using.
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
           vmid: 119
           target_node: pve01
       vars:
@@ -472,7 +481,6 @@ all:
         media_gallery:
         media_ingest:
         media_ingest_02:
-        printfarm:
 
     # Tanium Cluster
     tanium_cluster:

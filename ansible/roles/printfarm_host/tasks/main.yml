@@ -158,18 +158,33 @@
   delegate_to: "{{ ct_node }}"
   changed_when: false
 
-- name: Wait for Print Service Container SSH
-  # The controller reaches the private SDN through tailscale-gw (tailnet
-  # subnet route) — the same path that manages every other private-only CT.
-  ansible.builtin.wait_for:
-    host: "{{ ip_printfarm }}"
-    port: 22
-    timeout: 90
-  delegate_to: localhost
+- name: Read the Container's Tailnet Address (empty until it has joined)
+  # Ansible manages this CT over its TAILNET address once it has one: the CT
+  # peers directly, and the subnet-routed private path then goes asymmetric for
+  # control traffic — measured on this very CT: after the join, 172.16.0.51
+  # stops answering this Mac (no ping, no port 22) while 100.120.18.93 answers
+  # both, over a direct (non-DERP) peer link. The private address is only used
+  # for the initial deploy, before there is a tailnet identity.
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct exec 119 -- tailscale ip -4 2>/dev/null | head -1
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ ct_node }}"
+  register: printfarm_ts_probe
+  changed_when: false
+  failed_when: false
 
 - name: Add Print Service Host to In-Memory Inventory
   ansible.builtin.add_host:
     name: print-01
-    ansible_host: "{{ ip_printfarm }}"
+    ansible_host: "{{ (printfarm_ts_probe.stdout | trim) or ip_printfarm }}"
     ansible_user: root
     groups: printfarm
+
+- name: Wait for Print Service Container SSH
+  ansible.builtin.wait_for:
+    host: "{{ (printfarm_ts_probe.stdout | trim) or ip_printfarm }}"
+    port: 22
+    timeout: 90
+  delegate_to: localhost

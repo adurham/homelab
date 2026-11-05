@@ -11,7 +11,10 @@ printfarm_dir: /opt/bambu2creality        # app code (python, stdlib only)
 printfarm_state: /var/lib/printfarm       # HOME + job scratch for the service
 printfarm_port: 8765
 printfarm_printer_host: "192.168.86.43"   # K2-6556 Moonraker (no auth on the LAN)
-printfarm_tailscale_hostname: print-01
+# Tailnet node name. Deliberately NOT "print-01": this is the address a person
+# types, so it should read as a service, not an inventory item.
+# -> https://print.tail19c543.ts.net
+printfarm_tailscale_hostname: print
 
 # Creality Print itself: the slicing engine. The AppImage is extracted (not
 # FUSE-mounted) so it can live on a plain CT filesystem.

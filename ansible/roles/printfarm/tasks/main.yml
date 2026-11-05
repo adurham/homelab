@@ -25,7 +25,12 @@
     executable: /bin/bash
 
 - name: Check Tailscale auth state
-  ansible.builtin.command: tailscale status --self --peers=false
+  # Probed with `tailscale ip -4` rather than `tailscale status`: status exits
+  # non-zero whenever it has a health note to print (e.g. "--accept-routes is
+  # false" while peers advertise routes — which is exactly this CT's intended
+  # state), so an rc check there falsely reports "not authed" on a healthy node.
+  # `ip -4` prints the node's address when authed and nothing when logged out.
+  ansible.builtin.command: tailscale ip -4
   register: printfarm_tailscale_status
   failed_when: false
   changed_when: false
@@ -36,14 +41,14 @@
       Tailscale on print-01 is installed but not authed. Authorize the node
       (the browser link prints after this command), then re-run this playbook:
 
-          ssh root@pve01 'pct exec 119 -- tailscale up --hostname=print-01 \
+          ssh root@pve01 'pct exec 119 -- tailscale up --hostname={{ printfarm_tailscale_hostname }} \
               --accept-dns=false --accept-routes=false'
 
       --accept-routes MUST stay false: tailscale-gw advertises 172.16.0.0/24
       and this CT lives ON 172.16.0.0/24, so accepting that route sends
       subnet-local return traffic out of tailscale0 instead of eth0
       (asymmetric routing; live-debugged in media_gallery).
-  when: printfarm_tailscale_status.rc != 0 or 'Logged out' in printfarm_tailscale_status.stdout
+  when: printfarm_tailscale_status.rc != 0 or printfarm_tailscale_status.stdout | trim == ''
 
 - name: Ensure Tailscale is up with the service flags
   ansible.builtin.command: >-
@@ -190,8 +195,23 @@
   delay: 4
   until: printfarm_health.status == 200
 
+- name: Serve the UI over HTTPS on the Tailnet
+  # `tailscale serve` terminates TLS with a real (Let's Encrypt, tailnet-issued)
+  # certificate for <node>.<tailnet>.ts.net and proxies to the app, so the UI
+  # is https://print.tail19c543.ts.net with no cert plumbing and no extra port
+  # open. Needs HTTPS certificates enabled in the tailnet admin console
+  # (Settings -> HTTPS Certificates); if that is off this reports the reason
+  # and the raw http port still works.
+  ansible.builtin.command: >-
+    tailscale serve --bg --https=443 http://{{ printfarm_bind_ip }}:{{ printfarm_port }}
+  register: printfarm_serve
+  changed_when: printfarm_serve.rc == 0
+  failed_when:
+    - printfarm_serve.rc != 0
+    - "'HTTPS' not in printfarm_serve.stderr"
+
 - name: Report Service State
   ansible.builtin.debug:
     msg: >-
-      print-01 up: http://{{ printfarm_tailscale_hostname }}.tail19c543.ts.net:{{ printfarm_port }}
-      ({{ printfarm_bind_ip }}), printer {{ printfarm_printer_host }}
+      print-01 up: https://{{ printfarm_tailscale_hostname }}.tail19c543.ts.net
+      (also http://{{ printfarm_bind_ip }}:{{ printfarm_port }}), printer {{ printfarm_printer_host }}

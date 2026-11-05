@@ -1151,10 +1151,17 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | `media-ingest-01` | 116 | `172.16.0.47`   | -                  | Media collector (outbound-only)             |
 | `media-ingest-02` | 117 | `172.16.0.48`   | -                  | Secondary-source gallery collector (outbound-only) |
 | `adblock-proxy-01` | 118 | `172.16.0.49`  | DHCP (`192.168.86.x`) | mitmproxy explicit HTTPS proxy for personal-device Discord ad-stripping (Tailscale-only ingress, joins tailnet directly like hermes-gw-01) |
-| `print-01`      | 119  | `172.16.0.51`    | DHCP (`192.168.86.x`) | Bambu/MakerWorld → Creality K2 converter + slicer web app (Creality Print CLI headless; Tailscale-only ingress, joins tailnet directly) |
+| `print-01`      | 119  | `172.16.0.51`    | -                  | Bambu/MakerWorld → Creality K2 converter + slicer web app (Creality Print CLI headless; private-SDN only, joins the tailnet for ingress) |
 | `frigate-01`    | 170  | `172.16.0.45`    | `192.168.86.17` (static) | Frigate NVR (Docker-in-LXC); eth0 on vmbr0 for RTSP/HA + eth1 on `private` |
 
 `172.16.0.40` was previously assigned to **both** `mail-01` and `vm-01` (ARP race). Resolved 2026-05-01 — moved `vm-01` to `.42`. See commit `12bb4c2`.
+
+`172.16.0.51` carries two rows: `print-01` (live, CT 119) and `ts-01` (the
+planned Tanium server, VMID 200). **VM 200 does not exist** — the built Tanium
+VMs are 210–214/222–223 and all are stopped — so the `ts-01` row is plan-only.
+If that VM is ever built, move `print-01` first (a stale host key at this
+address already caused one `REMOTE HOST IDENTIFICATION HAS CHANGED` failure
+against the new CT).
 
 ## Monitoring & metrics ingestion into VictoriaMetrics (vm-01)
 
