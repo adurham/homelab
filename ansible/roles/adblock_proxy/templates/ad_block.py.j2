@@ -204,9 +204,11 @@ META_HOST_SUFFIXES = (
 # name it immediately and this entry comes straight back out.
 META_INTERCEPT_RULES = {
     "100.66.19.20": META_HOST_SUFFIXES,
-    # The iPhone entry is staged but OFF: an untested pinned app would break in
-    # the owner's hand with no warning. Add "100.101.211.44": ("instagram.com",)
-    # back only while actively testing, with a known-good addon snapshot ready.
+    # iPhone entry REMOVED 2026-11-05 after a live test: the Instagram app
+    # rejects the proxy's certificate on gateway.instagram.com ("client
+    # disconnected during the handshake"), i.e. it pins. Do not re-add for
+    # Instagram — a pinned app cannot be MITM'd, and intercepting it only
+    # breaks the app.
 }
 META_TEST_CLIENTS = set(META_INTERCEPT_RULES)
 
@@ -354,6 +356,17 @@ def _strip_ad_edges(obj):
 
 
 HTML_AD_ELEMENTS = ("shreddit-ad-post",)
+
+# Measured dead ends (2026-11-05) — do not re-litigate without new evidence:
+#   * Instagram app: pins. Intercepting it makes the app drop the connection
+#     ("Client TLS handshake failed ... gateway.instagram.com ... does not trust
+#     the proxy's certificate"), and it aborts before fetching its feed, so
+#     there is nothing to strip.
+#   * Instagram web: the feed is not an HTTP response. The page opens WebSockets
+#     (/ws/realtime, /ws/lightspeed, /chat) and serves the timeline from a
+#     service-worker cache, so no response body carries the ads.
+# Net: Meta feed ads are out of reach for this proxy. Do not add Meta hosts to
+# META_INTERCEPT_RULES for a phone.
 
 
 def _strip_reddit_html_ads(flow: http.HTTPFlow) -> None:
