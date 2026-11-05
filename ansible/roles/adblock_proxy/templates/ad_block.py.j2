@@ -232,7 +232,9 @@ META_TEST_CLIENTS = set(META_INTERCEPT_RULES)
 
 META_CAPTURE_DIR = Path("/var/log/mitmproxy/meta_capture")
 META_CAPTURE_MAX_FILES = 120
-META_CAPTURE_MAX_BYTES = 1024 * 1024
+# Facebook's feed GraphQL answers several MB; the old 1 MB ceiling captured
+# nothing at all while /api/graphql/ was being hit 29 times in a single session.
+META_CAPTURE_MAX_BYTES = 8 * 1024 * 1024
 
 
 def _is_meta_host(host: str) -> bool:
@@ -521,7 +523,11 @@ def _capture_meta_body(flow: http.HTTPFlow) -> None:
         return
     try:
         body = flow.response.content or b""
-        if not body or len(body) > META_CAPTURE_MAX_BYTES:
+        if not body:
+            return
+        if len(body) > META_CAPTURE_MAX_BYTES:
+            ctx.log.info(f"[META] {flow.request.path[:60]} body {len(body)}B exceeds "
+                         f"capture cap, skipped")
             return
         # no marker filter: host/path already scoped this to Meta, and the cap
         # keeps it bounded — filtering here is what hid the feed on the first pass
@@ -532,7 +538,17 @@ def _capture_meta_body(flow: http.HTTPFlow) -> None:
         META_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
         existing = sorted(META_CAPTURE_DIR.glob("*.json"))
         if len(existing) >= META_CAPTURE_MAX_FILES:
-            return
+            # rotate instead of going silent: a full dir used to stop all capture
+            # with no log line, which is how the Facebook feed stayed invisible
+            # while /api/graphql/ was answering 56 times a session.
+            drop = existing[: max(1, len(existing) // 4)]
+            for old in drop:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+            existing = sorted(META_CAPTURE_DIR.glob("*.json"))
+            ctx.log.info(f"[META] capture dir full, rotated out {len(drop)} file(s)")
         safe = re.sub(r"[^A-Za-z0-9._-]+", "_", flow.request.path)[:70]
         stamp = int(time.time() * 1000)
         (META_CAPTURE_DIR / f"{stamp}_{flow.request.pretty_host}__{safe}.json").write_bytes(body)
@@ -641,6 +657,45 @@ def _strip_instagram_feed_ads(flow: http.HTTPFlow) -> None:
         ctx.log.warn(f"[INSTAGRAM] strip failed: {exc}")
 
 
+# ------------------------------------------------------- Facebook feed ads (web)
+# Facebook's desktop feed is NOT one JSON document: it is a stream of JSON lines,
+# one feed unit per line, each of the shape
+#   {"label":"CometNewsFeed_viewerConnection$stream$...","path":["viewer","news_feed","edges"],"data":{...}}
+# Measured 2026-11-05 on real traffic (served with content-type text/html, bodies
+# 0.4-1.5 MB): an organic unit carries "brs_content_label":"60"; a sponsored unit
+# carries "brs_content_label":null and its node's comet_sections.metadata[0].story
+# .ghl_label holds a key containing "sponsoredLabel".
+# So the strip is line-level: drop the sponsored unit and leave the rest of the
+# stream intact. Each line is an independent GraphQL delta, which is what makes
+# this safe — unlike dropping a field inside one shared document.
+FB_FEED_HINT = "CometNewsFeed_viewerConnection"
+FB_SPONSORED_HINTS = ("sponsoredLabel", '"SponsoredData"')
+
+
+def _strip_facebook_feed_ads(flow: http.HTTPFlow) -> None:
+    if not flow.response or flow.response.status_code != 200:
+        return
+    text = _response_text(flow)
+    if not text or FB_FEED_HINT not in text:
+        return
+    kept, removed = [], 0
+    for line in text.split("\n"):
+        if (FB_FEED_HINT in line
+                and any(hint in line for hint in FB_SPONSORED_HINTS)):
+            removed += 1
+            continue
+        kept.append(line)
+    if not removed:
+        return
+    try:
+        flow.response.headers.pop("content-encoding", None)
+        flow.response.content = "\n".join(kept).encode()
+        ctx.log.info(f"[FACEBOOK] stripped {removed} sponsored feed unit(s) "
+                     f"({len(text)} -> {len(flow.response.content)} chars)")
+    except Exception as exc:  # noqa: BLE001
+        ctx.log.warn(f"[FACEBOOK] strip failed: {exc}")
+
+
 def response(flow: http.HTTPFlow) -> None:
     """Capture-only for Reddit content-host JSON responses, to build the
     real-traffic sample needed to identify the actual promoted-post
@@ -660,6 +715,7 @@ def response(flow: http.HTTPFlow) -> None:
     # even decrypted, so a path hint is safe here.
     if _is_meta_host(host) or _looks_like_meta_path(flow.request.path):
         _strip_instagram_feed_ads(flow)
+        _strip_facebook_feed_ads(flow)
         # Log every Meta request path: the web feed endpoint has to be visible
         # before a rewrite can target it (the first two attempts guessed wrong).
         ctx.log.info(f"[META_REQ] {flow.request.method} {flow.request.path[:110]} "
