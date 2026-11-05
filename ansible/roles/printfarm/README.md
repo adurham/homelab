@@ -120,3 +120,12 @@ handles both, with one deliberate simplification:
 * `--slice 0` slices every plate, so a 3-plate file returns `plate_1..3.gcode`;
   the UI lists each plate with its own time/filament and its own print button.
   The top-level numbers are the sum across plates.
+
+Support on/off is **not** part of the `safe` profile — it is carried from the
+source project (`enable_support` + the `support_*` family + `raft_layers`), so a
+Bambu file that supports an internal ledge still gets that support on the K2.
+The profile only owns adhesion and speed. (Before 2026-11-05 the profile pinned
+`enable_support = 0`, and the service's slice of the tissue-box middle section
+had zero support where Creality Print's own GUI slice had 126 layers.)
+Support material changes the job's numbers, so the summary and the per-plate
+rows are re-read from whatever the slicer actually produced.
