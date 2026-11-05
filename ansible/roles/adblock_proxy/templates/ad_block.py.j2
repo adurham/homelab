@@ -202,14 +202,26 @@ META_HOST_SUFFIXES = (
 # to instagram.com ONLY so that intercepting it cannot break Facebook/WhatsApp
 # on the same phone; if Instagram's app turns out to pin, the handshake failures
 # name it immediately and this entry comes straight back out.
+# Exact hostnames by default; a "*" prefix means "any subdomain of".
+# The iPhone gets i.instagram.com ONLY: the first attempt decrypted the whole
+# instagram.com suffix set, the app died on gateway.instagram.com and never
+# reached a feed request, so nothing was learned. One variable per test.
 META_INTERCEPT_RULES = {
-    "100.66.19.20": META_HOST_SUFFIXES,
-    # iPhone entry REMOVED 2026-11-05 after a live test: the Instagram app
-    # rejects the proxy's certificate on gateway.instagram.com ("client
-    # disconnected during the handshake"), i.e. it pins. Do not re-add for
-    # Instagram — a pinned app cannot be MITM'd, and intercepting it only
-    # breaks the app.
+    "100.66.19.20": tuple("*" + suf for suf in META_HOST_SUFFIXES),
+    "100.101.211.44": ("i.instagram.com",),
 }
+
+
+def _sni_matches(sni: str, rules) -> bool:
+    """Exact hostname, or any subdomain when the rule starts with '*'."""
+    for rule in rules:
+        if rule.startswith("*"):
+            base = rule[1:]
+            if sni == base or sni.endswith("." + base):
+                return True
+        elif sni == rule:
+            return True
+    return False
 META_TEST_CLIENTS = set(META_INTERCEPT_RULES)
 
 META_CAPTURE_DIR = Path("/var/log/mitmproxy/meta_capture")
@@ -259,8 +271,8 @@ def tls_clienthello(data: tls.ClientHelloData) -> None:
         return
     if sni == "mitm.it":
         return
-    suffixes = META_INTERCEPT_RULES.get(client)
-    if suffixes and any(sni == suf or ('.' + suf) in sni for suf in suffixes):
+    rules = META_INTERCEPT_RULES.get(client)
+    if rules and _sni_matches(sni, rules):
         ctx.log.info(f"[META] sni={sni} client={client} intercept=True")
         return
     if _is_meta_host(sni):

@@ -68,7 +68,26 @@ if [ "$healthy" = 1 ]; then
     fi
 fi
 
+# The QUIC reject only works ABOVE Tailscale's `-j ts-forward` jump: ts-forward
+# marks and ACCEPTs every packet arriving on tailscale0, so a copy sitting below
+# it never matches a single packet (measured 2026-11-05: rule present, 0 packets,
+# QUIC flowing freely — the existence check below was satisfied by an ineffective
+# copy). So: check for the rule *in first position*, and place it there.
 quic_rule() { iptables -C FORWARD -i "$QUIC_REJECT_IFACE" -p udp --dport 443 -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; }
+quic_rule_first() {
+    iptables -S FORWARD 2>/dev/null | sed -n '2p' \
+        | grep -q -- "-i $QUIC_REJECT_IFACE -p udp -m udp --dport 443 -j REJECT"
+}
+quic_place() {
+    # drop any copy anywhere in the chain, then insert at the top
+    while quic_rule; do
+        iptables -D FORWARD -i "$QUIC_REJECT_IFACE" -p udp --dport 443 \
+            -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || break
+    done
+    iptables -I FORWARD 1 -i "$QUIC_REJECT_IFACE" -p udp --dport 443 \
+        -j REJECT --reject-with icmp-port-unreachable 2>/dev/null \
+        && logger -t adblock-guard "QUIC (UDP 443) reject enforced in FORWARD position 1"
+}
 
 nat_rule() { iptables -t nat -C PREROUTING -i "$1" -p tcp --dport "$2" -j REDIRECT --to-ports "$PORT" 2>/dev/null; }
 add_rule() { iptables -t nat -A PREROUTING -i "$1" -p tcp --dport "$2" -j REDIRECT --to-ports "$PORT" 2>/dev/null; }
@@ -78,9 +97,7 @@ if [ "$healthy" = 1 ]; then
     for i in $IFACES; do for p in $PORTS; do
         nat_rule "$i" "$p" || add_rule "$i" "$p"
     done; done
-    quic_rule || { iptables -I FORWARD 1 -i "$QUIC_REJECT_IFACE" -p udp --dport 443 \
-                   -j REJECT --reject-with icmp-port-unreachable 2>/dev/null \
-                   && logger -t adblock-guard "restored the QUIC (UDP 443) reject rule"; }
+    quic_rule_first || quic_place
     exit 0
 fi
 
