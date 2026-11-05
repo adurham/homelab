@@ -62,15 +62,6 @@
   #filterBar button{cursor:pointer;}
   #filterBar button.on{border-color:var(--accent);color:var(--accent);}
   #filterBar .fb-count{font-size:12.5px;color:var(--muted);margin-left:4px;}
-  /* "On this day" strip (landing page) */
-  #otdBar{display:none;margin:0 0 16px;}
-  #otdBar .otd-head{font-size:12.5px;color:var(--muted);margin:0 0 8px;}
-  #otdBar .otd-row{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;}
-  #otdBar .otd-tile{position:relative;flex:0 0 auto;width:112px;height:112px;padding:0;border-radius:10px;
-    overflow:hidden;border:1px solid var(--border);background:var(--panel);cursor:pointer;}
-  #otdBar .otd-tile img{width:100%;height:100%;object-fit:cover;display:block;}
-  #otdBar .otd-yr{position:absolute;left:6px;bottom:6px;font-size:11px;padding:2px 6px;border-radius:999px;
-    background:rgba(0,0,0,.6);color:#e7eaf0;}
   /* resume bar (landing page): continue-where-you-left-off + recent folders */
   #resumeBar{display:none;margin:0 0 16px;}
   #resumeBar.show{display:block;}
@@ -561,7 +552,6 @@
     <button id="fbulkClear">Clear</button>
   </div>
   <div id="resumeBar"></div>
-  <div id="otdBar"></div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
   <div id="filterBar" style="display:none"></div>
@@ -1226,7 +1216,6 @@
     elFolder.innerHTML=''; elFolder.appendChild(frag);
     setRoute(q?('#s='+encodeURIComponent(searchQuery)):'');
     renderResumeBar();
-    renderOnThisDay();
     // prune folder-selection of folders that no longer exist, refresh the bar
     if(typeof selectedFolders!=='undefined'){
       Array.from(selectedFolders).forEach(function(n){
@@ -1476,53 +1465,6 @@
       rail.appendChild(b);
     });
   }
-  var _otdCache={key:'',items:null};
-  function otdItems(){
-    var now=new Date();
-    var mm=('0'+(now.getMonth()+1)).slice(-2), dd=('0'+(now.getDate())).slice(-2);
-    var key=mm+'-'+dd+'-'+(manifest.length);
-    if(_otdCache.key===key) return _otdCache.items;
-    var hits=[];
-    for(var i=0;i<manifest.length && hits.length<60;i++){
-      var it=manifest[i];
-      if(it.hidden||!it.date) continue;
-      var d=String(it.date);
-      if(d.slice(5,7)===mm && d.slice(8,10)===dd) hits.push(it);
-    }
-    _otdCache={key:key,items:hits};
-    return hits;
-  }
-  function renderOnThisDay(){
-    var bar=document.getElementById('otdBar'); if(!bar) return;
-    if((searchQuery||'').trim()){ bar.style.display='none'; bar.innerHTML=''; return; }
-    var hits=otdItems();
-    if(hits.length<3){ bar.style.display='none'; bar.innerHTML=''; return; }
-    var years={}; hits.forEach(function(it){ years[String(it.date).slice(0,4)]=1; });
-    var nYears=Object.keys(years).length;
-    bar.innerHTML=''; bar.style.display='block';
-    var head=document.createElement('div'); head.className='otd-head';
-    head.textContent='On this day \u00B7 '+hits.length+' file'+(hits.length===1?'':'s')+' from '+nYears+' year'+(nYears===1?'':'s');
-    bar.appendChild(head);
-    var row=document.createElement('div'); row.className='otd-row';
-    hits.slice(0,12).forEach(function(it){
-      var b=document.createElement('button'); b.className='otd-tile'; b.type='button';
-      b.title=it.stem+' \u00B7 '+String(it.date).slice(0,10);
-      var img=document.createElement('img'); img.loading='lazy'; img.src='/'+it.thumb; img.alt='';
-      b.appendChild(img);
-      var y=document.createElement('span'); y.className='otd-yr'; y.textContent=String(it.date).slice(0,4);
-      b.appendChild(y);
-      b.addEventListener('click',function(){
-        var folder=it.chat, stem=it.stem;
-        openFolder(folder);
-        setTimeout(function(){
-          for(var i=0;i<view.length;i++){ if(view[i].stem===stem){ openLb(i); return; } }
-        },60);
-      });
-      row.appendChild(b);
-    });
-    bar.appendChild(row);
-  }
-
   // ---------- FOLDER FILTERS (type / year / size / unseen) ----------
   // Filename matching cannot answer "show videos from 2021" or "what have I not
   // opened yet". These ride on the items already loaded for the open folder, so

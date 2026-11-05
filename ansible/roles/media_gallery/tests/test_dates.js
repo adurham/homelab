@@ -1,7 +1,8 @@
 const fs=require('fs');const {JSDOM}=require('jsdom');
-// 2026-11-05: date entry points — the in-folder year rail and the landing-page
-// "On this day" strip. A 253K-item chronological library needs somewhere to
-// start other than scrolling.
+// 2026-11-05: in-folder date navigation. The landing-page "On this day" strip
+// was removed (owner's call: it is a personal-memories feature, not a browsing
+// tool for this library). The year rail stays — a 253K-item chronological
+// library still needs a way to jump to a year without scrolling.
 const HTML_PATH=require('path').resolve(__dirname,'../files/gallery_index.html');
 const html=fs.readFileSync(HTML_PATH,'utf8');
 const now=new Date();
@@ -11,7 +12,7 @@ const manifest=[
   {stem:'a19',chat:'model_a',thumb:'t/a19.jpg',file:'by-chat/model_a/a19.jpg',type:'image',date:'2019-05-02T00:00:00',size:1},
   {stem:'b21',chat:'model_a',thumb:'t/b21.jpg',file:'by-chat/model_a/b21.jpg',type:'image',date:'2021-07-09T00:00:00',size:1},
   {stem:'c21',chat:'model_a',thumb:'t/c21.jpg',file:'by-chat/model_a/c21.jpg',type:'image',date:'2021-08-10T00:00:00',size:1},
-  // three files sharing today's month/day, across two folders
+  // today's month/day across folders — must NOT resurface as a strip
   {stem:'o25',chat:'model_a',thumb:'t/o25.jpg',file:'by-chat/model_a/o25.jpg',type:'image',date:'2025-'+mm+'-'+dd+'T10:00:00',size:1},
   {stem:'o23',chat:'model_b',thumb:'t/o23.jpg',file:'by-chat/model_b/o23.jpg',type:'image',date:'2023-'+mm+'-'+dd+'T11:00:00',size:1},
   {stem:'o20',chat:'model_b',thumb:'t/o20.jpg',file:'by-chat/model_b/o20.jpg',type:'image',date:'2020-'+mm+'-'+dd+'T12:00:00',size:1}
@@ -29,12 +30,7 @@ const dom=new JSDOM(html,{runScripts:'dangerously',resources:'usable',url:'https
 const w=dom.window, doc=w.document;
 function wait(fn,cb,t){t=t===undefined?60:t; if(fn()||t<=0)return cb(); setTimeout(()=>wait(fn,cb,t-1),100);}
 wait(()=>doc.querySelectorAll('#folderGrid .folder').length>0, ()=>{
-  const otd=doc.getElementById('otdBar');
-  T('On this day strip renders on the landing page', otd.style.display==='block', otd.style.display);
-  const tiles=otd.querySelectorAll('.otd-tile');
-  T('it shows at least the three same-day files', tiles.length>=3, tiles.length+' tiles');
-  T('each tile is labelled with its year', /20\d\d/.test((otd.querySelector('.otd-yr')||{}).textContent||''), (otd.querySelector('.otd-yr')||{}).textContent);
-  T('caption counts years', /from \d year/.test((otd.querySelector('.otd-head')||{}).textContent||''), (otd.querySelector('.otd-head')||{}).textContent);
+  T('the landing page has no "On this day" strip', !doc.getElementById('otdBar') && !doc.querySelector('.otd-tile'), 'removed');
   // open the two-year folder and check the rail
   doc.querySelector('#folderGrid .folder[data-chat="model_a"]').dispatchEvent(new w.MouseEvent('click',{bubbles:true,cancelable:true}));
   wait(()=>doc.querySelectorAll('#photoGrid .tile').length>0, ()=>{
