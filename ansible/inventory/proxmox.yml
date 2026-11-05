@@ -443,7 +443,12 @@ all:
       hosts:
         print-01:
           ansible_host: print-01.tail19c543.ts.net
-          ansible_ssh_common_args: ""
+          # Same accept-new default as group_vars/all.yml, kept explicit: this
+          # group must NOT inherit private_subnet's ProxyCommand (it would
+          # loop back through the Mac's own tailscale IP), and an empty value
+          # here would also drop accept-new, breaking the first connection to
+          # a brand-new CT ("Host key verification failed").
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
           vmid: 119
           target_node: pve01
       vars:
