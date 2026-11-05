@@ -134,21 +134,33 @@
   when: printfarm_tun_cgroup.changed or printfarm_tun_mount.changed
   changed_when: true
 
-- name: Wait for Print Service Container SSH after TUN restart
-  ansible.builtin.wait_for:
-    host: "{{ ip_printfarm }}"
-    port: 22
-    timeout: 90
-  when: printfarm_tun_cgroup.changed or printfarm_tun_mount.changed
-  delegate_to: localhost
+- name: Wait for Print Service Container LAN Leg after TUN restart
+  # The wait is on the LAN leg (eth1), NOT ip_printfarm: this controller is a
+  # tailnet member, so 172.16.0.0/24 resolves to a utun route and a CT that
+  # peers directly makes that subnet-routed path asymmetric — measured on
+  # adblock-proxy-01: no ping, no port 22 at its private address. The LAN leg
+  # is the one that also gives the CT printer reachability, so use it.
+  ansible.builtin.shell: |
+    set -o pipefail
+    for i in $(seq 1 36); do
+      if pct exec 119 -- ip route show | grep -q "^default"; then
+        echo "default route present after $((i * 5))s"
+        exit 0
+      fi
+      if [ $((i % 4)) -eq 0 ]; then
+        pct exec 119 -- networkctl reload || true
+      fi
+      sleep 5
+    done
+    echo "default route still absent after 180s"
+    exit 1
+  delegate_to: "{{ ct_node }}"
+  changed_when: false
 
 - name: Read the LAN Address of the Print Service Container
   # Ansible reaches the CT over the HOME LAN (eth1, vmbr0 DHCP) for the first
-  # deploy. The private-SDN address is NOT usable from the controller: this
-  # MacBook is a tailnet member, so 172.16.0.0/24 resolves to a utun route,
-  # and once a CT peers directly that subnet-routed path goes asymmetric
-  # (measured: no ping, no port 22 on adblock-proxy-01's private IP). The LAN
-  # leg is the same one that gives the CT printer reachability anyway.
+  # deploy; the service role re-points this at MagicDNS once the CT has joined
+  # the tailnet.
   ansible.builtin.shell: |
     set -o pipefail
     pct exec 119 -- ip -4 -o addr show dev eth1 | awk '{print $4}' | cut -d/ -f1
@@ -158,9 +170,14 @@
   register: printfarm_lan_ip
   changed_when: false
 
+- name: Wait for Print Service Container SSH on the LAN Address
+  ansible.builtin.wait_for:
+    host: "{{ printfarm_lan_ip.stdout | trim }}"
+    port: 22
+    timeout: 90
+  delegate_to: localhost
+
 - name: Add Print Service Host to In-Memory Inventory
-  # LAN address now; the service role re-points this at the MagicDNS name once
-  # the CT has joined the tailnet (the image's ingress is tailnet-only).
   ansible.builtin.add_host:
     name: print-01
     ansible_host: "{{ printfarm_lan_ip.stdout | trim }}"
