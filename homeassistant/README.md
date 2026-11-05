@@ -223,3 +223,41 @@ The deploy playbook runs `yamllint homeassistant/` locally before any scp,
 takes a `ha core backup` on the host, copies files, runs `ha core check`,
 then either reloads automations via REST or restarts core depending on
 `ha_restart`.
+
+## DNS: how `*.chi.lab.amd-e.com` resolves for tailnet clients
+
+Tailscale's split DNS for `chi.lab.amd-e.com` sends queries to MagicDNS, which
+forwards them to **AdGuard on this host (192.168.86.2)** — so any chi.lab name
+that tailnet clients (phones off-LAN, laptops away) need to resolve must exist
+as an **AdGuard DNS rewrite**, not only in dns-01's BIND zone.
+
+Current rewrites (AdGuard API: `GET /control/rewrite/list`):
+
+| domain | answer | why |
+| --- | --- | --- |
+| `dns.chi.lab.amd-e.com` | `192.168.86.2` | the resolver itself |
+| `printbot.chi.lab.amd-e.com` | `172.16.0.30` | Bambu→K2 print service (lb-01 vhost) |
+| `deviceenrollment.apple.com`, `mdmenrollment.apple.com`, `iprofiles.apple.com` | `0.0.0.0` | block Apple MDM enrolment |
+
+To add one:
+
+```bash
+# via the AdGuard ingress API (session minted with the same HA websocket dance
+# adguard_log_shipper.py uses), POST /control/rewrite/add:
+#   {"domain": "<name>.chi.lab.amd-e.com", "answer": "<ip>"}
+```
+
+### Landmines (both hit on 2026-11-05)
+
+* **Do not point a per-domain upstream at dns-01.** The HA host has no route to
+  the private SDN — `172.16.0.10:53` is unreachable from here (`nc -z -w3
+  172.16.0.10 53` fails) — so `[/chi.lab.amd-e.com/]172.16.0.10` makes every
+  chi.lab query hang until it times out. Use a rewrite instead.
+* **`POST /control/dns_config` reconfigures (and rebinds) the whole DNS
+  server.** Doing that while the add-on held a stale IPv6 listener
+  (`2600:1702:768c:9cf:...`) failed with `bind: cannot assign requested
+  address` and left **192.168.86.2:53 refusing connections** — i.e. the LAN's
+  DNS server down, because the DHCP hands that address out. Recovery:
+  `ssh -p 2222 root@homeassistant.local 'ha apps restart a0d7b954_adguard'`.
+  Read the config with `GET /control/dns_info`; keep the API-side edit to
+  rewrites, which do not rebind listeners.
