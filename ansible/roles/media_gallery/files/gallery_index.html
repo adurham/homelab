@@ -2848,6 +2848,59 @@
       })
       .catch(function(){ toast('Could not start scan','err'); });
   }
+  var _dupGroups=[];      // the live-filtered groups behind the current render
+  // 2026-11-05: bulk curation. Keeping/hiding one group at a time across
+  // hundreds of groups is the last fully-manual chore. A group is "high
+  // confidence" only when the recommended copy is clearly better than the
+  // runner-up (same size within 2% = almost certainly a byte-identical
+  // re-upload, or >=1.5x the size). Everything else stays manual.
+  var NOTDUP_KEY='gal.notdup.v1';
+  function notDupSet(){ try{ return new Set(JSON.parse(localStorage.getItem(NOTDUP_KEY)||'[]')); }catch(_){ return new Set(); } }
+  function notDupAdd(sig){
+    var s=notDupSet(); s.add(sig);
+    var arr=Array.from(s); if(arr.length>500) arr=arr.slice(-500);
+    try{ localStorage.setItem(NOTDUP_KEY, JSON.stringify(arr)); }catch(_){}
+  }
+  function groupSig(g){ return g.map(function(m){return m.stem;}).sort().join('|'); }
+  function recommendKeep(g){
+    return g.slice().sort(function(a,b){
+      return (b.size||0)-(a.size||0) || String(b.date||'').localeCompare(String(a.date||''));
+    })[0];
+  }
+  function isHighConfidence(g,keep){
+    var rest=g.filter(function(m){ return m.stem!==keep.stem; });
+    var second=Math.max.apply(null, rest.map(function(m){ return m.size||0; }));
+    if(!keep.size||!second) return false;
+    if(Math.abs(second-keep.size)/keep.size < 0.02) return true;   // byte-identical re-upload
+    return keep.size >= second*1.5;                                 // clearly the better copy
+  }
+  function computeBulkPlan(groups){
+    var out={groups:[],stems:[]};
+    (groups||[]).forEach(function(g){
+      if(g.length<2) return;
+      var keep=recommendKeep(g);
+      if(!isHighConfidence(g,keep)) return;
+      var losers=g.filter(function(m){ return m.stem!==keep.stem; }).map(function(m){ return m.stem; });
+      if(!losers.length) return;
+      out.groups.push({sig:groupSig(g),keep:keep.stem,losers:losers});
+      out.stems=out.stems.concat(losers);
+    });
+    return out;
+  }
+  function toastUndoHidden(msg, stems){
+    if(!_toastEl) _toastEl=document.getElementById('toast');
+    if(!_toastEl){ return; }
+    _toastEl.className='show ok';
+    _toastEl.innerHTML='<span>'+msg+'</span><button class="toast-undo">Undo</button>';
+    var btn=_toastEl.querySelector('.toast-undo');
+    btn.addEventListener('click',function(){
+      sethidden(stems,false);
+      toast('↩ Restored '+stems.length+' item'+(stems.length===1?'':'s')+' to browsing','ok');
+      toastHide();
+    });
+    if(_toastTimer){ clearTimeout(_toastTimer); }
+    _toastTimer=setTimeout(function(){ _toastEl.classList.remove('show'); }, 15000);
+  }
   function renderDuplicates(rep){
     dupAction={};
     _dupReport=rep;   // remember the current report so deletes update it in place
@@ -2882,7 +2935,13 @@
         liveTotal += kept.length;
         return kept;
       }).filter(function(g){ return g.length>=2; });
+      // groups the owner has declared "not duplicates" (browser-local: the
+      // server has no exclusion store for groupings yet, so say so in the UI)
+      var nd=notDupSet();
+      groups = groups.filter(function(g){ return !nd.has(groupSig(g)); });
     }
+    _dupGroups=groups;
+    var plan0=computeBulkPlan(groups); var bulkN=plan0.groups.length;
     var html='<div id="dupBar">'+
       '<b>'+groups.length+' duplicate group'+(groups.length===1?'':'s')+'</b> · '+
       (manifestReady?liveTotal:(rep.dup_items||0))+' items · scanned '+(rep.scanned||0)+
@@ -2890,6 +2949,7 @@
       ' · <span title="Non-newest members of each duplicate group have been set to hidden:true server-side, so they stay out of normal folder browsing. Click Keep/KEEP on a card to unhide it.">non-newest members are hidden from browsing automatically</span>'+
       ' <span class="grow"></span>'+
       '<span id="dupCount">0 marked for deletion</span>'+
+      (bulkN?'<button id="dupBulk" title="Hide every non-best copy in groups where the best copy is clearly better">Keep recommended in '+bulkN+' group'+(bulkN===1?'':'s')+'</button>':'')+
       '<button id="dupTrash">🗑 Trash marked</button>'+
       '<button id="dupRescan">↻ Rescan</button></div>';
     if(!groups.length){
@@ -2907,6 +2967,7 @@
         '<span class="grow"></span>'+
         '<button class="dg-mark" data-g="'+gi+'" data-act="keepfirst">Keep newest only</button>'+
         '<button class="dg-mark" data-g="'+gi+'" data-act="keepall">Keep all</button>'+
+        '<button class="dg-mark" data-g="'+gi+'" data-act="notdup" title="These are different files: stop showing this group (this browser)">Not duplicates</button>'+
         '</div><div class="dg-items">';
       g.forEach(function(m,mi){
         // default: keep the first (newest), trash the rest
@@ -2947,6 +3008,14 @@
       btn.addEventListener('click',function(){
         var gi=parseInt(btn.dataset.g,10), mode=btn.dataset.act;
         var cards=elDup.querySelectorAll('.dupgroup[data-g="'+gi+'"] .dupcard');
+        if(mode==='notdup'){
+          var g=_dupGroups[gi]||[];
+          if(g.length){ notDupAdd(groupSig(g)); }
+          var card=elDup.querySelector('.dupgroup[data-g="'+gi+'"]');
+          if(card&&card.parentNode) card.parentNode.removeChild(card);
+          toast('Marked as not duplicates (this browser)','ok');
+          return;
+        }
         cards.forEach(function(c,idx){
           if(mode==='keepall') setDupCard(c,'keep');
           else setDupCard(c, idx===0?'keep':'trash');   // keepfirst
@@ -3018,6 +3087,18 @@
   function wireDupBar(){
     var rs=document.getElementById('dupRescan'); if(rs) rs.addEventListener('click',triggerDupScan);
     var tr=document.getElementById('dupTrash'); if(tr) tr.addEventListener('click',trashMarkedDups);
+    var bu=document.getElementById('dupBulk');
+    if(bu) bu.addEventListener('click',function(){
+      var plan=computeBulkPlan(_dupGroups);
+      if(!plan.groups.length){ toast('No high-confidence groups to apply.','err'); return; }
+      var msg='Hide '+plan.stems.length+' duplicate item'+(plan.stems.length===1?'':'s')+
+              ' across '+plan.groups.length+' group'+(plan.groups.length===1?'':'s')+', keeping one copy in each.';
+      if(!confirm(msg+'\n\nNothing is deleted: hidden copies stay in this review page and Undo puts them back in browsing.')) return;
+      sethidden(plan.stems,true);
+      plan.stems.forEach(function(s){ for(var i=0;i<manifest.length;i++){ if(manifest[i].stem===s){ manifest[i].hidden=true; break; } } });
+      toastUndoHidden('\u2713 '+msg, plan.stems);
+      var bu2=document.getElementById('dupBulk'); if(bu2) bu2.disabled=true;
+    });
   }
   function trashMarkedDups(){
     // group the 'trash' stems by their folder, fire one /trashbatch per folder
