@@ -385,7 +385,7 @@ def main():
     def fetch_one(it):
         chat = it.get("chat") or ""
         stem = it["stem"]
-        url = f"{THUMB_SERVICE_URL}/thumb/{chat}/{stem}.jpg"
+        url = f"{THUMB_SERVICE_URL}/thumb/{chat}/{stem}.jpg?bg=1"
         err = None
         nbytes = 0
         try:
@@ -402,7 +402,11 @@ def main():
             # Fall back to the classic message when the header is absent
             # (older service build), where 404 is the deterministic signal.
             reason = (he.headers or {}).get("X-Thumb-Reason", "")
-            if reason == "transient":
+            if he.code == 429:
+                # service saturated (interactive requests take priority): back
+                # off, do NOT record a failure — nothing is wrong with this stem
+                err = f"URLError: saturated (429, retry after {he.headers.get('Retry-After','30')}s)"
+            elif reason == "transient":
                 err = f"URLError: transient 404 (reason=transient)"
             else:
                 err = f"HTTPError: HTTP Error {he.code}: {he.reason}"

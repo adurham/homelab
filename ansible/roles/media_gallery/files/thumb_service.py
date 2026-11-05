@@ -242,6 +242,34 @@ _reserved_bytes = [0]
 SPACE_MARGIN = int(os.environ.get("THUMB_SPACE_MARGIN_MB", "256")) * 1024 * 1024
 _big_lock = threading.Lock()  # serializes the largest fetches for forward progress
 
+# ---- 2026-11-05: request priority + single-flight ---------------------------
+# Two problems this fixes, both visible on a cold 15,865-item folder:
+#   1. The background backfill and a real browser tab competed for the same
+#      generation capacity, so the thumbnails the owner was actually looking at
+#      queued behind thousands of warming requests.
+#   2. N tabs (or a re-render) asking for the SAME stem all generated it
+#      independently, multiplying Drive traffic and ffmpeg work.
+# Interactive requests (the browser, ?bg absent) get their own slots; background
+# warming (?bg=1, sent by thumb_backfill.py) is capped separately so it can
+# never occupy the whole service. When a request cannot get a slot in time the
+# service says so (429 + Retry-After) instead of piling up threads.
+THUMB_MAX_CONCURRENT = int(os.environ.get("THUMB_MAX_CONCURRENT", "4"))
+THUMB_BG_CONCURRENT = int(os.environ.get("THUMB_BG_CONCURRENT", "1"))
+_interactive_slots = threading.BoundedSemaphore(max(1, THUMB_MAX_CONCURRENT))
+_background_slots = threading.BoundedSemaphore(max(1, THUMB_BG_CONCURRENT))
+_inflight = {}
+_inflight_lock = threading.Lock()
+
+
+def _cached_thumb(chat, stem):
+    local = LOCAL_CACHE / chat / f"{stem}.jpg"
+    try:
+        if local.exists() and local.stat().st_size > 0:
+            return local
+    except OSError:
+        pass
+    return None
+
 
 def _free_bytes() -> int:
     try:
@@ -640,8 +668,10 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        # path: /thumb/<chat>/<stem>.jpg
-        p = unquote(self.path)
+        # path: /thumb/<chat>/<stem>.jpg[?bg=1]
+        raw = self.path
+        bg = ("bg=1" in raw)
+        p = unquote(raw.split("?", 1)[0])
         if not p.startswith("/thumb/"):
             self.send_error(404)
             return
@@ -656,7 +686,50 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(400)
             return
         _gen_reason.value = None  # clear before ensure_thumb classifies the outcome
-        thumb = ensure_thumb(chat, stem)
+        key = f"{chat}/{stem}"
+        # Single-flight: whoever gets here first generates; everyone else waits
+        # for that one generation and then serves the cached file.
+        with _inflight_lock:
+            ev = _inflight.get(key)
+            owner = ev is None
+            if owner:
+                ev = threading.Event()
+                _inflight[key] = ev
+        if not owner:
+            ev.wait(timeout=120)
+            thumb = _cached_thumb(chat, stem)
+            if thumb is None:
+                reason = "transient"
+                body = json.dumps({"error": "thumb not available", "reason": reason}).encode()
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Retry-After", "5")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+        else:
+            slots = _background_slots if bg else _interactive_slots
+            got = slots.acquire(timeout=120 if bg else 60)
+            if not got:
+                with _inflight_lock:
+                    _inflight.pop(key, None)
+                ev.set()
+                body = json.dumps({"error": "thumb service saturated"}).encode()
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Retry-After", "30" if bg else "10")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            try:
+                thumb = ensure_thumb(chat, stem)
+            finally:
+                slots.release()
+                with _inflight_lock:
+                    _inflight.pop(key, None)
+                ev.set()
         if not thumb:
             # Report WHY generation failed so batch consumers (the backfill)
             # can tell a permanent decode verdict from a transient hiccup.
