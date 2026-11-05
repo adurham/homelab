@@ -208,11 +208,13 @@ META_HOST_SUFFIXES = (
 # reached a feed request, so nothing was learned. One variable per test.
 META_INTERCEPT_RULES = {
     "100.66.19.20": tuple("*" + suf for suf in META_HOST_SUFFIXES),
-    # iPhone: REMOVED for good (clean test 2026-11-05). With QUIC rejected and a
-    # cold launch — a baseline that was proven normal speed — decrypting only
-    # i.instagram.com produced four client handshake failures inside one second:
-    # the app pins the API host too, not just gateway.instagram.com. There is no
-    # interceptable Instagram host left, so this rule can only break the app.
+    # iPhone: the app pins i.instagram.com and gateway.instagram.com (documented
+    # above). www.instagram.com is here ONLY as a trust cross-check: the app
+    # barely touches it (2 connections in 3h), so decrypting it costs nothing
+    # while proving whether the phone's SYSTEM trust store accepts our leaf for
+    # an instagram.com name — Safari is the test client. If Safari loads it, the
+    # certificate is fine and the app's rejection is app-specific by construction.
+    "100.101.211.44": ("www.instagram.com",),
 }
 
 
