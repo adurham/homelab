@@ -154,3 +154,25 @@ for the GUI slice that failed.
 
 The UI's other profile, `stock`, is the model's own settings and is labelled
 comparison-only for exactly this reason.
+
+## Risk estimate: what this printer's history actually supports
+
+Every convert now reports `report.risk` — the chance the job finishes, from the
+machine's own record rather than a hunch:
+
+- `build_dataset.py` (in the bambu2creality repo) joins Moonraker's job history to
+  each gcode still on the printer (8 KB head + 128 KB tail, Range requests) →
+  `dataset.json`.
+- `risk_fit.py` classifies a stop as a **user abort** (<35% progress) or a
+  **mid-print failure** (≥35%), then fits a Beta-smoothed frequency — not a
+  classifier. Rebuild with those two scripts after a batch of prints; the model
+  file is `risk_model.json` and the app needs no ML dependency to score.
+
+Numbers as of the first build (105 prints with recoverable configs): 89 finished,
+10 aborted by the owner, **6 mid-print failures** → 6.3% failure (95% CI
+2.9–13.1%), i.e. **93.7% finish (86.9–97.1%)**. All six failures ran wall flow
+≥ 16.8 mm³/s, but so did 80 prints that finished — so flow is a risk factor, not a
+verdict, and a logistic model on 14 slice settings only reached CV AUC ~0.60.
+That is why the app quotes the base rate, the same model's own record (Beta-shrunk,
+prior strength 6) and physical ceilings as flags instead of pretending to model
+the rest.
