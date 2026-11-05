@@ -540,6 +540,50 @@ def _capture_meta_body(flow: http.HTTPFlow) -> None:
         ctx.log.warn(f"[META] capture failed: {exc}")
 
 
+# ---------------------------------------------------------------- Meta WebSocket
+# Instagram's desktop web never asks the feed over HTTP: with QUIC genuinely
+# rejected (2026-11-05) and the page freshly loaded, the only traffic to Meta is
+# the dgw gateway (gateway.instagram.com /ws/realtime, /ws/lightspeed, /chat).
+# So the timeline travels as WebSocket messages, not as a response body.
+# This hook is PASSIVE for now: it measures what those frames contain (text vs
+# binary, size, whether ad markers appear) and keeps a capped sample, because
+# rewriting a live feed socket blind is how you corrupt a frame and break the page.
+META_WS_CAPTURE_DIR = Path("/var/log/mitmproxy/meta_ws_capture")
+META_WS_CAPTURE_MAX_FILES = 60
+META_WS_MARKERS = (b"is_sponsored", b"ad_id", b"ad_metadata", b"sponsored",
+                   b"advertiser", b"promoted")
+
+
+def _meta_ws_flow(flow: http.HTTPFlow) -> bool:
+    host = (flow.request.pretty_host or "").lower()
+    return _is_meta_host(host) or _looks_like_meta_path(flow.request.path)
+
+
+def websocket_message(flow: http.HTTPFlow) -> None:
+    try:
+        if not flow.websocket or not _meta_ws_flow(flow):
+            return
+        msg = flow.websocket.messages[-1]
+        body = msg.content or b""
+        if not body:
+            return
+        kind = "text" if msg.is_text else "binary"
+        hits = [m.decode() for m in META_WS_MARKERS if m.lower() in body.lower()]
+        ctx.log.info(f"[META_WS] {kind} frame {len(body)}B from "
+                     f"{'server' if msg.from_client is False else 'client'} "
+                     f"path={flow.request.path[:40]} markers={hits or 'none'}")
+        if hits and len(body) <= 1048576:
+            META_WS_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+            existing = sorted(META_WS_CAPTURE_DIR.glob("*.bin"))
+            if len(existing) < META_WS_CAPTURE_MAX_FILES:
+                stamp = int(time.time() * 1000)
+                (META_WS_CAPTURE_DIR / f"{stamp}_{kind}.bin").write_bytes(body)
+                ctx.log.info(f"[META_WS] captured {kind} frame with ad markers "
+                             f"({len(existing) + 1}/{META_WS_CAPTURE_MAX_FILES})")
+    except Exception as exc:  # noqa: BLE001 - never break a live socket for logging
+        ctx.log.warn(f"[META_WS] observe failed: {exc}")
+
+
 def response(flow: http.HTTPFlow) -> None:
     """Capture-only for Reddit content-host JSON responses, to build the
     real-traffic sample needed to identify the actual promoted-post
