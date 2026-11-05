@@ -70,6 +70,12 @@ fi
 accept_errors=$(journalctl -u "$UNIT" --since "-5 min" --no-pager 2>/dev/null \
                 | grep -cE "Too many open files|EMFILE")
 
+# Addon exceptions: the heartbeat proves the addon is loaded and seeing TLS, but
+# not that its matching logic still works. Tracebacks are the other half of that
+# picture, so they get their own gauge.
+addon_errors=$(journalctl -u "$UNIT" --since "-5 min" --no-pager 2>/dev/null \
+               | grep -cE "Traceback|Unhandled error in task")
+
 nat_rules=$(iptables -t nat -S PREROUTING 2>/dev/null | grep -c REDIRECT)
 
 exit_node=0
@@ -81,9 +87,9 @@ fi
 disk=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
 disk=${disk:-0}
 
-logger -t adblock-monitor "agh=${agh} dnsmasq=${dnsmasq} listener=${listener} heartbeat_age=${age} fds=${fds}/${soft} accept_errors=${accept_errors} nat=${nat_rules} exit_node=${exit_node} disk=${disk}%"
+logger -t adblock-monitor "agh=${agh} dnsmasq=${dnsmasq} listener=${listener} heartbeat_age=${age} fds=${fds}/${soft} accept_errors=${accept_errors} addon_errors=${addon_errors} nat=${nat_rules} exit_node=${exit_node} disk=${disk}%"
 
-printf 'adblock_agh_up %d\nadblock_dnsmasq_up %d\nadblock_interceptor_listener %d\nadblock_addon_heartbeat_age_seconds %d\nadblock_proxy_open_fds %d\nadblock_proxy_fd_soft_limit %d\nadblock_proxy_accept_errors %d\nadblock_proxy_rss_bytes %d\nadblock_nat_redirect_rules %d\nadblock_tailscale_exit_node %d\nadblock_disk_used_percent %d\n' \
+printf 'adblock_agh_up %d\nadblock_dnsmasq_up %d\nadblock_interceptor_listener %d\nadblock_addon_heartbeat_age_seconds %d\nadblock_proxy_open_fds %d\nadblock_proxy_fd_soft_limit %d\nadblock_proxy_accept_errors %d\nadblock_proxy_rss_bytes %d\nadblock_nat_redirect_rules %d\nadblock_tailscale_exit_node %d\nadblock_disk_used_percent %d\nadblock_addon_errors %d\n' \
     "${agh}" "${dnsmasq}" "${listener}" "${age}" "${fds}" "${soft}" \
-    "${accept_errors}" "${rss}" "${nat_rules}" "${exit_node}" "${disk}" \
+    "${accept_errors}" "${rss}" "${nat_rules}" "${exit_node}" "${disk}" "${addon_errors}" \
     | curl -s -m 8 --data-binary @- "${VM}" >/dev/null

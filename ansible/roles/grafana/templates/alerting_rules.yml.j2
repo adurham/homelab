@@ -4767,7 +4767,7 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        noDataState: Alerting
+        noDataState: OK
         execErrState: Alerting
         for: 5m
         annotations:
@@ -4821,7 +4821,7 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        noDataState: Alerting
+        noDataState: OK
         execErrState: Alerting
         for: 10m
         annotations:
@@ -5209,6 +5209,114 @@ groups:
         annotations:
           summary: "The CT running the interceptor is above 85% disk"
           description: "journald is capped at 150M and the Reddit capture dir at 200 files, so this growing means something else is: check `du -sh /var/log/* /var/lib/*` on the CT. A full rootfs stops the interceptor just as hard as a crash."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: adblock_monitor_stale
+        title: Adblock health monitor stopped reporting
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: absent_over_time(adblock_agh_up[10m])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "The CT stopped pushing its health gauges — this alert suite is blind until it resumes"
+          description: "All the other adblock rules read metrics from that timer; without this one, a dead monitor looks the same as a healthy system (their thresholds simply stop evaluating). Check `systemctl status adblock-monitor.timer` and `journalctl -t adblock-monitor` on the adblock-proxy CT, and that the CT is up."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: adblock_addon_errors
+        title: Interceptor addon throwing exceptions
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: adblock_addon_errors
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "mitmproxy is still passing traffic but its addon is erroring — stripping may be partial"
+          description: "The heartbeat only proves the addon is loaded and seeing TLS; tracebacks mean its hooks are failing, so some requests are passing unfiltered or erroring out. Read `journalctl -u adblock-proxy-transparent | grep -A5 Traceback` on the CT, then `systemctl restart adblock-proxy-transparent` after fixing the cause."
         labels:
           severity: warning
         isPaused: false

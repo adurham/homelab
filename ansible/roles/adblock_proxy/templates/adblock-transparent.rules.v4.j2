@@ -43,6 +43,15 @@ COMMIT
 *filter
 :INPUT ACCEPT [0:0]
 :OUTPUT ACCEPT [0:0]
+# NOTE: the FORWARD chain is deliberately NOT managed in this file. Tailscale
+# owns it (ts-forward / ts-input, re-added by tailscaled) and exit-node relaying
+# depends on those rules, so writing a flush-and-restore FORWARD here would drop
+# forwarding on every playbook run. Rules that belong in FORWARD are enforced
+# instead by failopen_guard.sh on its 20s timer — today that is the QUIC reject
+# (UDP 443 in on tailscale0), which forces clients off HTTP/3 and back onto the
+# TCP/443 path that PREROUTING redirects into the interceptor. Verified live
+# 2026-11-05: the MacBook was sending QUIC to Google IPs and bypassing the proxy
+# entirely; after the reject it gets ICMP unreachable and falls back to TCP.
 # LOCK DOWN the LAN-facing eth1 (added 2026-08-21 solely so Tailscale can
 # hole-punch a direct peer connection instead of relaying through DERP —
 # see roles/adblock_proxy_host's "Ensure Adblock Proxy Container Has
