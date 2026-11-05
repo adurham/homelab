@@ -129,3 +129,28 @@ The profile only owns adhesion and speed. (Before 2026-11-05 the profile pinned
 had zero support where Creality Print's own GUI slice had 126 layers.)
 Support material changes the job's numbers, so the summary and the per-plate
 rows are re-read from whatever the slicer actually produced.
+
+## What "safe" means (the app's reason to exist)
+
+Filament and bed are constants here; the model and the slicer settings are the
+variables. So the service must never depend on a GUI profile being sane — the
+`safe` profile owns the settings that decide whether a print survives:
+
+- **Flow ceiling**: `filament_max_volumetric_speed = 12` mm³/s. A 150–200 mm/s
+  wall at 0.2 × 0.4 mm demands ~16 mm³/s; the GUI "Custom" slice of 纸巾盒 came
+  out beaded and stringy from the first layer and the K2's own AI monitor
+  cancelled it at 49.6%. With the cap the slicer slows down instead.
+- **Speeds**: outer 90 / inner 120 / top 90 / gap fill 45 mm/s, travel 400.
+- **Thermal + adhesion**: 215 °C, bed 55 (60 first layer), fan 80% after 3
+  layers, 0.25 mm first layer, 8 mm outer brim, z-hop 0.8 spiral, retract 0.8@30.
+- **Shells**: 3 walls, 5 top / 4 bottom, gyroid infill at the file's density.
+- **Support style is ours**, not the model's: normal(auto)/grid, 0.8 mm XY gap,
+  3-layer interface, 0.2 mm top gap. `enable_support` still comes from the model,
+  because whether a part needs support is geometry, not profile.
+
+Measured on the 3-plate 纸巾盒 file after the change: plate 2 = 302 layers /
+46.05 mm / 53.96 g / 136 min, 87 support sections — versus 230 layers / 66 min
+for the GUI slice that failed.
+
+The UI's other profile, `stock`, is the model's own settings and is labelled
+comparison-only for exactly this reason.
