@@ -3158,10 +3158,10 @@
   // restores the value before scripts run regardless.
   elSort.value='new';
   // ---- two-stage boot (2026-11-05) --------------------------------------
-  // Stage 1 paints the folders page from folders_meta.json (~1MB): names,
+  // Stage 1 paints the folders page from folders_meta.json (75KB): names,
   // counts, covers, shard keys. Stage 2 fetches the full manifest (~76MB) in
-  // the BACKGROUND, because cross-folder views (On this day, the duplicate
-  // live-filter, "All items") need every item — but nobody should wait for it
+  // the BACKGROUND, because cross-folder views (the duplicate live-filter,
+  // "All items") need every item — but nobody should wait for it
   // to start browsing. A folder's items arrive when that folder is opened.
   // If folders_meta.json is missing (older build), this degrades to the old
   // manifest-first boot.
