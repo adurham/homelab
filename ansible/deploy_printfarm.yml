@@ -1,0 +1,31 @@
+---
+# Two-stage deploy of the Bambu/MakerWorld -> Creality K2 print service:
+#   1. printfarm_host creates the LXC (vmid 119, ip_printfarm, hostname
+#      print-01) on whichever node HA says it lives on, injects SSH keys and
+#      passes /dev/net/tun through so Tailscale can run inside it.
+#   2. printfarm installs the Creality Print AppImage (the slicing engine),
+#      joins the tailnet, deploys the app code and brings up the
+#      bambu2creality systemd unit, bound to the tailscale0 address.
+#
+# Why this exists: a MakerWorld/Bambu 3MF carries the author's printer profile
+# (Bambu Lab P1S, Bambu PLA, 256mm bed, Marlin start gcode). Creality Print
+# either refuses such a file ("created by a newer version") or slices it with
+# settings the K2 cannot honour. This service does the whole conversion --
+# printer/filament/process graft, brim, wall count, speeds tuned for thin
+# walls, plate layout -- and can hand the finished gcode straight to the
+# printer over Moonraker. Tati uses it from a phone/iPad/MacBook browser; no
+# slicer install needed on the client.
+#
+# Reachable at http://print-01.tail19c543.ts.net:8765 (tailnet only).
+
+- name: Provision Print Service Container
+  hosts: pve01
+  gather_facts: false
+  roles:
+    - printfarm_host
+
+- name: Deploy Print Service
+  hosts: printfarm
+  gather_facts: true
+  roles:
+    - printfarm

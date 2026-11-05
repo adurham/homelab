@@ -1,0 +1,207 @@
+---
+# Installs the Bambu/MakerWorld -> Creality K2 print service inside print-01.
+# Pattern: apt runtime -> tailscale (auth gate) -> service user -> Creality
+# Print AppImage (the slicing engine) -> app code -> systemd -> health check.
+#
+# The app is stdlib-only Python; the only heavyweight piece is Creality Print
+# itself, which is used headlessly through its own CLI (`--cli --slice`), i.e.
+# the same engine the desktop GUI drives. No GUI automation anywhere.
+
+- name: Install Base OS Packages
+  ansible.builtin.apt:
+    name: "{{ printfarm_deps }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ─── Tailscale (the only way in: the service binds the tailscale0 address) ──
+
+- name: Install Tailscale
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://tailscale.com/install.sh | sh
+  args:
+    creates: /usr/bin/tailscale
+    executable: /bin/bash
+
+- name: Check Tailscale auth state
+  ansible.builtin.command: tailscale status --self --peers=false
+  register: printfarm_tailscale_status
+  failed_when: false
+  changed_when: false
+
+- name: Fail with manual-step instructions if Tailscale is not authed
+  ansible.builtin.fail:
+    msg: |
+      Tailscale on print-01 is installed but not authed. Authorize the node
+      (the browser link prints after this command), then re-run this playbook:
+
+          ssh root@pve01 'pct exec 119 -- tailscale up --hostname=print-01 \
+              --accept-dns=false --accept-routes=false'
+
+      --accept-routes MUST stay false: tailscale-gw advertises 172.16.0.0/24
+      and this CT lives ON 172.16.0.0/24, so accepting that route sends
+      subnet-local return traffic out of tailscale0 instead of eth0
+      (asymmetric routing; live-debugged in media_gallery).
+  when: printfarm_tailscale_status.rc != 0 or 'Logged out' in printfarm_tailscale_status.stdout
+
+- name: Ensure Tailscale is up with the service flags
+  ansible.builtin.command: >-
+    tailscale up --hostname={{ printfarm_tailscale_hostname }}
+    --accept-dns=false --accept-routes=false
+  changed_when: true
+
+- name: Get Tailscale IPv4
+  ansible.builtin.command: tailscale ip -4
+  register: printfarm_ts_ip
+  changed_when: false
+
+- name: Set bind address fact
+  ansible.builtin.set_fact:
+    printfarm_bind_ip: "{{ printfarm_ts_ip.stdout | trim }}"
+
+# ─── Service account + layout ───────────────────────────────────────────────
+
+- name: Create Service Account
+  ansible.builtin.user:
+    name: "{{ printfarm_user }}"
+    system: true
+    home: "{{ printfarm_state }}"
+    create_home: true
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Create Application Directory
+  ansible.builtin.file:
+    path: "{{ printfarm_dir }}"
+    state: directory
+    owner: "{{ printfarm_user }}"
+    group: "{{ printfarm_user }}"
+    mode: "0755"
+
+- name: Create Creality Print Directory
+  ansible.builtin.file:
+    path: "{{ printfarm_creality_dir }}"
+    state: directory
+    owner: "{{ printfarm_user }}"
+    group: "{{ printfarm_user }}"
+    mode: "0755"
+
+- name: Restrict State Directory
+  ansible.builtin.file:
+    path: "{{ printfarm_state }}"
+    state: directory
+    owner: "{{ printfarm_user }}"
+    group: "{{ printfarm_user }}"
+    mode: "0700"
+
+# ─── Creality Print (slicing engine) ───────────────────────────────────────
+
+- name: Download Creality Print AppImage
+  ansible.builtin.get_url:
+    url: "{{ printfarm_appimage_url }}"
+    dest: "{{ printfarm_creality_dir }}/CrealityPrint.AppImage"
+    mode: "0755"
+    owner: "{{ printfarm_user }}"
+    group: "{{ printfarm_user }}"
+    checksum: "{{ (printfarm_appimage_sha256 | length > 0) | ternary('sha256:' + printfarm_appimage_sha256, omit) }}"
+    timeout: 600
+
+# Extracted, not FUSE-mounted: keeps it on a plain CT rootfs with no
+# /dev/fuse dependency. --appimage-extract needs no display.
+- name: Extract Creality Print AppImage
+  ansible.builtin.command: ./CrealityPrint.AppImage --appimage-extract
+  args:
+    chdir: "{{ printfarm_creality_dir }}"
+    creates: "{{ printfarm_creality_dir }}/squashfs-root"
+  changed_when: true
+
+- name: Smoke-test the Slicer CLI
+  # Real proof the engine runs headless: it must print its CLI usage. The
+  # binary links WebKit/GTK3 directly, so a missing runtime lib shows up here
+  # rather than halfway through someone's first slice.
+  ansible.builtin.command: "{{ printfarm_creality_dir }}/squashfs-root/AppRun --cli --help"
+  environment:
+    HOME: "{{ printfarm_state }}"
+    QT_QPA_PLATFORM: offscreen
+  register: printfarm_cli_help
+  changed_when: false
+  failed_when: "'Usage: CrealityPrint' not in printfarm_cli_help.stdout"
+
+# ─── App code ───────────────────────────────────────────────────────────────
+
+- name: Deploy Engine Module
+  ansible.builtin.copy:
+    src: "{{ printfarm_src }}/b2c.py"
+    dest: "{{ printfarm_dir }}/b2c.py"
+    owner: "{{ printfarm_user }}"
+    group: "{{ printfarm_user }}"
+    mode: "0644"
+
+- name: Deploy Web Application
+  ansible.builtin.copy:
+    src: "{{ printfarm_src }}/serve.py"
+    dest: "{{ printfarm_dir }}/serve.py"
+    owner: "{{ printfarm_user }}"
+    group: "{{ printfarm_user }}"
+    mode: "0644"
+
+- name: Deploy CLI Front-End
+  ansible.builtin.copy:
+    src: "{{ printfarm_src }}/cli.py"
+    dest: "{{ printfarm_dir }}/cli.py"
+    owner: "{{ printfarm_user }}"
+    group: "{{ printfarm_user }}"
+    mode: "0644"
+
+- name: Deploy Web Assets
+  ansible.builtin.copy:
+    src: "{{ printfarm_src }}/web/"
+    dest: "{{ printfarm_dir }}/web/"
+    owner: "{{ printfarm_user }}"
+    group: "{{ printfarm_user }}"
+    mode: "0644"
+
+- name: Re-point Inventory at the Tailnet Name
+  # Ansible reached this host over the private subnet; once the CT peers
+  # directly, the subnet-routed path gets unreliable (documented for
+  # hermes-gw-01). Future runs go via MagicDNS.
+  ansible.builtin.add_host:
+    name: print-01
+    ansible_host: "{{ printfarm_tailscale_hostname }}.tail19c543.ts.net"
+    ansible_user: root
+    groups: printfarm
+
+- name: Install systemd Service
+  ansible.builtin.template:
+    src: bambu2creality.service.j2
+    dest: /etc/systemd/system/bambu2creality.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart bambu2creality
+
+- name: Enable and Start the Print Service
+  ansible.builtin.systemd:
+    name: bambu2creality
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Flush Handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the Service to Answer
+  ansible.builtin.uri:
+    url: "http://{{ printfarm_bind_ip }}:{{ printfarm_port }}/api/health"
+    timeout: 30
+  register: printfarm_health
+  retries: 15
+  delay: 4
+  until: printfarm_health.status == 200
+
+- name: Report Service State
+  ansible.builtin.debug:
+    msg: >-
+      print-01 up: http://{{ printfarm_tailscale_hostname }}.tail19c543.ts.net:{{ printfarm_port }}
+      ({{ printfarm_bind_ip }}), printer {{ printfarm_printer_host }}

@@ -1151,6 +1151,7 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | `media-ingest-01` | 116 | `172.16.0.47`   | -                  | Media collector (outbound-only)             |
 | `media-ingest-02` | 117 | `172.16.0.48`   | -                  | Secondary-source gallery collector (outbound-only) |
 | `adblock-proxy-01` | 118 | `172.16.0.49`  | DHCP (`192.168.86.x`) | mitmproxy explicit HTTPS proxy for personal-device Discord ad-stripping (Tailscale-only ingress, joins tailnet directly like hermes-gw-01) |
+| `print-01`      | 119  | `172.16.0.51`    | DHCP (`192.168.86.x`) | Bambu/MakerWorld → Creality K2 converter + slicer web app (Creality Print CLI headless; Tailscale-only ingress, joins tailnet directly) |
 | `frigate-01`    | 170  | `172.16.0.45`    | `192.168.86.17` (static) | Frigate NVR (Docker-in-LXC); eth0 on vmbr0 for RTSP/HA + eth1 on `private` |
 
 `172.16.0.40` was previously assigned to **both** `mail-01` and `vm-01` (ARP race). Resolved 2026-05-01 — moved `vm-01` to `.42`. See commit `12bb4c2`.
@@ -1353,7 +1354,7 @@ VMIDs 300-313, IPs `172.16.0.60–73`. See `inventory/proxmox.yml` under `tanium
 ## VMID conventions
 
 - **100–113** — core service CTs (authentik, dns-01, ntp-01, etc.)
-- **115–118** — personal/media service CTs (gallery-01, media-ingest-01/02, adblock-proxy-01)
+- **115–119** — personal/media service CTs (gallery-01, media-ingest-01/02, adblock-proxy-01, print-01)
 - **114** — BWT lab service CTs (`bwt-dhcp`)
 - **200–219** — existing `tanium_cluster` placeholders (ts-01/02, tms-01/02, tzs-01/02)
 - **220–249** — BWT lab TanOS VMs (`bwt-ts`, `bwt-zs-01..04`)

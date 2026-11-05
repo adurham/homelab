@@ -1,0 +1,44 @@
+[Unit]
+Description=Bambu/MakerWorld -> Creality K2 print service (bambu2creality)
+# tailscaled is what provides the bind address; without it ExecStart fails to
+# bind and the unit would flap.
+After=network-online.target tailscaled.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User={{ printfarm_user }}
+Group={{ printfarm_user }}
+WorkingDirectory={{ printfarm_dir }}
+
+# HOME/XDG under the state dir: the Creality CLI writes its config + print
+# caches relative to HOME, and the service account's home is that dir.
+Environment=HOME={{ printfarm_state }}
+Environment=XDG_CACHE_HOME={{ printfarm_state }}/.cache
+Environment=XDG_CONFIG_HOME={{ printfarm_state }}/.config
+
+# The slicing engine (extracted AppImage) and the printer it talks to.
+Environment=B2C_SLICER={{ printfarm_creality_dir }}/squashfs-root/AppRun
+Environment=K2_HOST={{ printfarm_printer_host }}
+
+# Qt, headless. The CLI never opens a window; offscreen keeps it from trying.
+Environment=QT_QPA_PLATFORM=offscreen
+
+# Bound to the tailscale0 address on purpose: the CT also has a LAN NIC (for
+# printer reachability + Tailscale hole-punching), and this keeps the web UI
+# off that LAN interface -- tailnet-only, same posture as adblock-proxy-01.
+ExecStart=/usr/bin/python3 {{ printfarm_dir }}/serve.py --host {{ printfarm_bind_ip }} --port {{ printfarm_port }}
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+# The service shells out to the slicer and writes job scratch under HOME.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths={{ printfarm_state }} {{ printfarm_dir }}
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,104 @@
+---
+# Deploy layout for the Bambu/MakerWorld -> Creality K2 print service.
+
+# Controller-side dev tree. Same single-source pattern as ps5forge_src: the
+# app is developed in its own repo and the role copies the runtime files out
+# of it, so there is no second copy to drift.
+printfarm_src: /Users/adam.durham/repos/bambu2creality
+
+printfarm_user: printfarm
+printfarm_dir: /opt/bambu2creality        # app code (python, stdlib only)
+printfarm_state: /var/lib/printfarm       # HOME + job scratch for the service
+printfarm_port: 8765
+printfarm_printer_host: "192.168.86.43"   # K2-6556 Moonraker (no auth on the LAN)
+printfarm_tailscale_hostname: print-01
+
+# Creality Print itself: the slicing engine. The AppImage is extracted (not
+# FUSE-mounted) so it can live on a plain CT filesystem.
+printfarm_creality_dir: /opt/creality-print
+printfarm_appimage_url: >-
+  https://github.com/CrealityOfficial/CrealityPrint/releases/download/v7.3.1/CrealityPrint-V7.3.1.6378-x86_64-Release.AppImage
+printfarm_appimage_sha256: ""             # empty = verify size only (see tasks)
+
+# Runtime libs for the AppImage CLI. The binary links WebKit/GTK3/GStreamer
+# directly, so these are not optional — on Ubuntu 24.04 the CLI aborts with
+# "error while loading shared libraries" until all of them are present.
+# Verified by ldd against CrealityPrint-V7.3.1.6378 x86_64.
+printfarm_deps:
+  - python3
+  - curl
+  - ca-certificates
+  - xvfb
+  - libatomic1
+  - libgl1
+  - libglu1-mesa
+  - libegl1
+  - libopengl0
+  - libx11-6
+  - libxext6
+  - libxrender1
+  - libsm6
+  - libice6
+  - libfontconfig1
+  - libglib2.0-0
+  - libxkbcommon0
+  - libxkbcommon-x11-0
+  - libdbus-1-3
+  - libnss3
+  - libxcb1
+  - libxcb-cursor0
+  - libxcb-xinerama0
+  - libxcb-icccm4
+  - libxcb-image0
+  - libxcb-keysyms1
+  - libxcb-randr0
+  - libxcb-render-util0
+  - libxcb-shape0
+  - libxcb-sync1
+  - libxcb-xfixes0
+  - libxcb-xkb1
+  - libxcb-xinput0
+  - libxdamage1
+  - libxfixes3
+  - libxcomposite1
+  - libxi6
+  - libxcursor1
+  - libxrandr2
+  - libxinerama1
+  - libxtst6
+  - libpulse0
+  - libgomp1
+  - libzstd1
+  - libdouble-conversion3
+  - libpcre2-16-0
+  - libmd4c0
+  - libpango-1.0-0
+  - libpangocairo-1.0-0
+  - libatk1.0-0
+  - libatspi2.0-0
+  - libcairo2
+  - libcairo-gobject2
+  - libgdk-pixbuf-2.0-0
+  - libharfbuzz0b
+  - libtiff6
+  - libwayland-cursor0
+  - libwayland-client0
+  - libwayland-server0
+  - libwayland-egl1
+  - libasound2t64
+  - libspeexdsp1
+  - libsrtp2-1
+  - libgstreamer1.0-0
+  - libgstreamer-plugins-base1.0-0
+  - libdeflate0
+  - libx264-164
+  - libwebp7
+  - libwebpmux3
+  - libjpeg-turbo8
+  - libopenjp2-7
+  - libexpat1
+  - libuuid1
+  - libmspack0
+  - libsoup-3.0-0
+  - libwebkit2gtk-4.1-0
+  - libgtk-3-0t64

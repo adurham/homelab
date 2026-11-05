@@ -1,0 +1,6 @@
+---
+- name: Restart bambu2creality
+  ansible.builtin.systemd:
+    name: bambu2creality
+    state: restarted
+    daemon_reload: true

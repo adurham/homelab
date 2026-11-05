@@ -431,6 +431,24 @@ all:
         ansible_user: amd
         ansible_become: true
 
+    # Bambu/MakerWorld -> Creality K2 print service (print-01, CT 119).
+    # Runs Creality Print headlessly (extracted AppImage + its bundled vendor
+    # presets) behind a small web app, so a MakerWorld 3MF drops in and comes
+    # back as a sliced K2 project. Joins the tailnet directly and binds the
+    # web UI to tailscale0: the CT also has a LAN NIC (printer reachability +
+    # Tailscale hole-punching) and the UI must stay off it. Not a child of
+    # private_subnet — same reasoning as adblock_proxy (the ProxyCommand would
+    # loop back through the Mac's own tailscale IP).
+    printfarm:
+      hosts:
+        print-01:
+          ansible_host: print-01.tail19c543.ts.net
+          ansible_ssh_common_args: ""
+          vmid: 119
+          target_node: pve01
+      vars:
+        ansible_user: root
+
     # Parent group for all CTs on the 172.16.0.0/24 private subnet that need
     # to be reached through the personal MacBook (Tailscale jump host) when
     # ansible is invoked from the work MacBook. The actual ProxyCommand lives
