@@ -1212,8 +1212,11 @@ Three independent paths feed vm-01, covering different layers:
   (storage pool usage) — directly usable for alerting on the 2026-08-04
   replication-burst root-cause fix and the frigate HA node-affinity
   rule. Verify: `curl http://172.16.0.42:8428/api/v1/query?query=up{job="pve_exporter"}`.
-- **windows_exporter (added 2026-08-04, same day) — BUILT, NOT YET
-  DEPLOYED** — closes the remaining gap: the Windows VMs
+- **windows_exporter (added 2026-08-04) — BUILT, NEVER DEPLOYED, and now
+  moot**: its only intended targets (the 250–258 Windows test VMs) were
+  destroyed 2026-11-05. Keep it for a future Windows guest; the role and its
+  `windows_exporter_scrape_targets` list stay empty, so nothing scrapes a dead
+  host. Original note: this closed the remaining gap — the Windows VMs
   (`win-sql-01`/`win-ts-01`/`win-tms-01`/`win-tzs-01`, VMIDs 250-253,
   see "VMID conventions" below) run neither Alloy (its install role has
   no Windows package logic) nor anything else, so they had zero
@@ -1365,8 +1368,11 @@ VMIDs 300-313, IPs `172.16.0.60–73`. See `inventory/proxmox.yml` under `tanium
 - **114** — BWT lab service CTs (`bwt-dhcp`)
 - **200–219** — existing `tanium_cluster` placeholders (ts-01/02, tms-01/02, tzs-01/02)
 - **220–249** — BWT lab TanOS VMs (`bwt-ts`, `bwt-zs-01..04`)
-- **250–253** — Windows test VMs (win-sql-01, win-ts-01, win-tms-01, win-tzs-01)
-- **254–258** — Windows *case-1* test VMs (win-sql-case1-01, win-ts-case1-01, win-tms-case1-01, win-tzs-case1-01, win-dc-case1-01) — live on pve01, stopped (verified live 2026-10-02; same `onboot=0` by-design status as the 250-253 set)
+- **250–253** — Windows test VMs (win-sql-01, win-ts-01, win-tms-01, win-tzs-01) — **destroyed 2026-11-05** (owner instruction; configs archived at `/root/vm-deletion-record-20261105/` on pve01)
+- **254–258** — Windows *case-1* test VMs (win-sql-case1-01, win-ts-case1-01, win-tms-case1-01, win-tzs-case1-01, win-dc-case1-01) — **destroyed 2026-11-05**
+- **270–272** — `bnp-ts-a/b/c`, case-00289742 (PLAT-17722 seal-deletion repro) — **destroyed 2026-11-05**
+- **210–214, 222–225** — `usda-*` lab VMs — **destroyed 2026-11-05**
+- **200–205** — Tanium test VMs (ts-01/02, tms-01/02, tzs-01/02) — still present on pve03, not backed up by design
 - **300–319** — existing `tanium_clients` LXC endpoints (VMIDs 301-306, 307-310, 312-314; 300 and 311 unassigned)
 - **320–339** — BWT lab LXC clients (`bwt-tc-01..08` = 320-327)
 - **400+** — reserved / ad-hoc test VMs (e.g. 400 = Some-Other-ECF-Testing)
