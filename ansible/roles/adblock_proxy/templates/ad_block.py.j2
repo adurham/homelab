@@ -189,6 +189,39 @@ def _is_reddit_host(host: str) -> bool:
     return _is_reddit_tracking_host(host) or _is_reddit_content_host(host)
 
 
+META_HOST_SUFFIXES = (
+    "instagram.com",
+    "facebook.com",
+    "fbcdn.net",
+    "cdninstagram.com",
+    "fb.com",
+)
+
+# Which clients get Meta interception, and for which hosts.
+# The Mac (browser, never pins) is the measurement surface. The iPhone is scoped
+# to instagram.com ONLY so that intercepting it cannot break Facebook/WhatsApp
+# on the same phone; if Instagram's app turns out to pin, the handshake failures
+# name it immediately and this entry comes straight back out.
+META_INTERCEPT_RULES = {
+    "100.66.19.20": META_HOST_SUFFIXES,
+    # The iPhone entry is staged but OFF: an untested pinned app would break in
+    # the owner's hand with no warning. Add "100.101.211.44": ("instagram.com",)
+    # back only while actively testing, with a known-good addon snapshot ready.
+}
+META_TEST_CLIENTS = set(META_INTERCEPT_RULES)
+
+META_CAPTURE_DIR = Path("/var/log/mitmproxy/meta_capture")
+META_CAPTURE_MAX_FILES = 120
+META_CAPTURE_MAX_BYTES = 1024 * 1024
+
+
+def _is_meta_host(host: str) -> bool:
+    if not host:
+        return False
+    host = host.lower().strip(".")
+    return any(host == suf or host.endswith("." + suf) for suf in META_HOST_SUFFIXES)
+
+
 def tls_clienthello(data: tls.ClientHelloData) -> None:
     """Transparent-mode only: skip TLS interception entirely for any SNI
     that isn't a Discord or Reddit hostname. Explicit-proxy mode (port
@@ -206,7 +239,31 @@ def tls_clienthello(data: tls.ClientHelloData) -> None:
     link got a 404 until this exclusion was added."""
     _heartbeat()
     sni = data.client_hello.sni
-    if sni and sni != "mitm.it" and not _is_discord_host(sni) and not _is_reddit_host(sni):
+    # mitmproxy 11 dropped ClientHelloData.client_conn in favour of .context;
+    # try both so a version bump doesn't silently turn client scoping off
+    # (it did exactly that — every Meta decision logged client=UNKNOWN).
+    client = ""
+    for getter in (lambda: data.context.client.peername,
+                   lambda: data.client_conn.peername):  # type: ignore[attr-defined]
+        try:
+            peer = getter()
+            if peer:
+                client = peer[0]
+                break
+        except Exception:  # noqa: BLE001 - try the next accessor
+            continue
+    if not sni:
+        ctx.log.info(f"[TLS] clienthello with NO SNI from {client or 'UNKNOWN'}")
+        return
+    if sni == "mitm.it":
+        return
+    suffixes = META_INTERCEPT_RULES.get(client)
+    if suffixes and any(sni == suf or ('.' + suf) in sni for suf in suffixes):
+        ctx.log.info(f"[META] sni={sni} client={client} intercept=True")
+        return
+    if _is_meta_host(sni):
+        ctx.log.info(f"[META] sni={sni} client={client or 'UNKNOWN'} intercept=False")
+    if not _is_discord_host(sni) and not _is_reddit_host(sni):
         data.ignore_connection = True
 
 
@@ -417,6 +474,43 @@ def _strip_reddit_ads(flow: http.HTTPFlow) -> None:
         ctx.log.warn(f"[{LOG_TAG_REDDIT}] ad strip failed: {exc}")
 
 
+META_PATH_HINTS = ("/api/v1/", "/api/graphql", "/graphql", "/awake", "/api/v1/feed/")
+
+
+def _looks_like_meta_path(path: str) -> bool:
+    if not path:
+        return False
+    path = path.lower()
+    return any(hint in path for hint in META_PATH_HINTS)
+
+
+def _capture_meta_body(flow: http.HTTPFlow) -> None:
+    """Save a capped sample of a Meta response so the ad markers can be found."""
+    if not flow.response or flow.response.status_code != 200:
+        return
+    try:
+        body = flow.response.content or b""
+        if not body or len(body) > META_CAPTURE_MAX_BYTES:
+            return
+        # no marker filter: host/path already scoped this to Meta, and the cap
+        # keeps it bounded — filtering here is what hid the feed on the first pass
+
+        ct = (flow.response.headers.get("content-type") or "").lower()
+        if "json" not in ct and "text" not in ct:
+            return  # images/video: nothing to read, don't burn the cap
+        META_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+        existing = sorted(META_CAPTURE_DIR.glob("*.json"))
+        if len(existing) >= META_CAPTURE_MAX_FILES:
+            return
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", flow.request.path)[:70]
+        stamp = int(time.time() * 1000)
+        (META_CAPTURE_DIR / f"{stamp}_{flow.request.pretty_host}__{safe}.json").write_bytes(body)
+        ctx.log.info(f"[META] captured {flow.request.pretty_host}{flow.request.path[:80]} "
+                     f"({len(body)}B, {len(existing) + 1}/{META_CAPTURE_MAX_FILES})")
+    except Exception as exc:  # noqa: BLE001
+        ctx.log.warn(f"[META] capture failed: {exc}")
+
+
 def response(flow: http.HTTPFlow) -> None:
     """Capture-only for Reddit content-host JSON responses, to build the
     real-traffic sample needed to identify the actual promoted-post
@@ -429,6 +523,18 @@ def response(flow: http.HTTPFlow) -> None:
     host = flow.request.pretty_host
     content_type = flow.response.headers.get("content-type", "") if flow.response else ""
     lowered = content_type.lower()
+
+    # Meta's XHRs arrive with the CDN IP as the flow host (measured: GET
+    # https://57.144.204.34/api/v1/users/...), so scoping by host misses them.
+    # Their API paths are unmistakable, and only Meta/Microsoft-ish hosts are
+    # even decrypted, so a path hint is safe here.
+    if _is_meta_host(host) or _looks_like_meta_path(flow.request.path):
+        # Log every Meta request path: the web feed endpoint has to be visible
+        # before a rewrite can target it (the first two attempts guessed wrong).
+        ctx.log.info(f"[META_REQ] {flow.request.method} {flow.request.path[:110]} "
+                     f"ct={lowered[:30]} len={len(flow.response.content or b'') if flow.response else 0}")
+        _capture_meta_body(flow)
+        return
 
     if "html" in lowered:
         # The web feed arrives as HTML fragments (shreddit custom elements), not
