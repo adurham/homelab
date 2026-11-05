@@ -755,17 +755,32 @@ FB_HIDE_SCRIPT = """
     } catch (e) {}
     return out.join('|');
   }
-  function beacon(lab, hid, seen){
+  function beacon(lab, hid, seen, tag){
     try {
       var smp = samples();
-      var key = lab + ':' + hid + ':' + smp;
+      var key = (tag || '') + lab + ':' + hid + ':' + seen + ':' + smp
+        + ':' + ((document.body && document.body.innerText) ? document.body.innerText.length : -1);
       if (window.__abLast === key) { return; }
       window.__abLast = key;
       var body = (document.body ? document.body.innerText.length : -1);
+      var ifs = [];
+      try {
+        var fs = document.querySelectorAll('iframe');
+        for (var k = 0; k < fs.length && k < 3; k++) {
+          ifs.push((fs[k].getAttribute('src') || 'srcdoc').slice(0, 40));
+        }
+      } catch (e) {}
+      var sh = 0;
+      try {
+        var allEls = document.querySelectorAll('*');
+        for (var q = 0; q < allEls.length; q++) { if (allEls[q].shadowRoot) { sh++; } }
+      } catch (e) {}
       (new Image()).src = '/__abprobe?lab=' + lab + '&hid=' + hid + '&seen=' + seen
         + '&v=' + Math.round(window.innerHeight) + '&txt=' + body
         + '&ifr=' + document.querySelectorAll('iframe').length
-        + '&smp=' + encodeURIComponent(smp).slice(0, 220)
+        + '&smp=' + encodeURIComponent(smp).slice(0, 160)
+        + '&sh=' + sh
+        + '&ifs=' + encodeURIComponent(ifs.join(','))
         + '&r=' + Math.random();
     } catch (e) {}
   }
@@ -801,7 +816,7 @@ FB_HIDE_SCRIPT = """
         hid++;
       }
     }
-    beacon(lab, hid, all.length);
+    beacon(lab, hid, all.length, window.__abTag || '');
   }
   hide();
   new MutationObserver(function(){ clearTimeout(window.__abT); window.__abT = setTimeout(hide, 250); })
@@ -809,6 +824,9 @@ FB_HIDE_SCRIPT = """
   // the first run happens before the client renders anything (beacons showed
   // 14 elements seen), so also poll while the feed fills in
   setInterval(hide, 1500);
+  // one forced post-render report, so a page that fills in after our first run is
+  // still measured even when nothing matched
+  setTimeout(function(){ window.__abTag = 'post'; hide(); window.__abTag = ''; }, 7000);
 })();
 </script>
 """
