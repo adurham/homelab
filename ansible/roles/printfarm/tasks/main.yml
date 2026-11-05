@@ -121,6 +121,22 @@
     creates: "{{ printfarm_creality_dir }}/squashfs-root"
   changed_when: true
 
+- name: Check Extracted Slicer Permissions
+  ansible.builtin.stat:
+    path: "{{ printfarm_creality_dir }}/squashfs-root/resources/profiles"
+  register: printfarm_profiles_stat
+
+- name: Make the Extracted Slicer Readable by the Service Account
+  # `--appimage-extract` preserves the image's modes and the app's own tree is
+  # 0700 root:root — the service account cannot even list resources/profiles,
+  # and the preset lookup fails with "no Creality Print presets found under
+  # /opt/creality-print/squashfs-root/resources/profiles". Read+traverse for
+  # everyone; the slicer only ever writes under HOME.
+  ansible.builtin.command: chmod -R a+rX {{ printfarm_creality_dir }}/squashfs-root
+  when: >-
+    printfarm_profiles_stat.stat.exists and
+    (printfarm_profiles_stat.stat.mode[-1] not in ['5', '7'])
+
 - name: Smoke-test the Slicer CLI
   # Real proof the engine runs headless: it must print its CLI usage. The
   # binary links WebKit/GTK3 directly, so a missing runtime lib shows up here

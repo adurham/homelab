@@ -932,6 +932,59 @@ server {
     server_name hermes-api.chi.lab.amd-e.com;
     return 301 https://$host$request_uri;
 }
+    # --- printbot.chi.lab.amd-e.com ---------------------------------------
+    # Bambu/MakerWorld -> Creality K2 print service (CT 119 "print-01").
+    # Internal ACL only (LAN / private SDN / Tailscale): this app can start
+    # prints on the K2, so it must never be internet-reachable -- same
+    # $is_internal guard as every other internal vhost. No forward-auth:
+    # household users on the tailnet, and the printer's own Moonraker API is
+    # already unauthenticated on the LAN.
+    # Upstream is the CT's TAILNET address (see upstream_printfarm in
+    # group_vars/all/vars.yml): lb-01 cannot reach its private-SDN address.
+    server {
+        listen 80;
+        server_name printbot.chi.lab.amd-e.com;
+        return 301 https://$host$request_uri;
+    }
+
+    server {
+        # No fastopen=3 here on purpose: nginx rejects "duplicate listen
+        # options for 0.0.0.0:443" when a second server block adds socket
+        # options the first listener did not set, and the proxmox vhost
+        # already carries fastopen=3. (Cost a failed deploy to learn.)
+        listen 443 ssl http2;
+        server_name printbot.chi.lab.amd-e.com;
+
+        if ($is_internal = 0) {
+            return 403;
+        }
+
+        ssl_certificate /etc/nginx/ssl/wildcard.fullchain.cer;
+        ssl_certificate_key /etc/nginx/ssl/wildcard.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+{{ security_headers_self_frame }}
+
+        # 3MF uploads run to tens of MB (nginx default cap is 1m) and a slice
+        # takes minutes on a 2-core CT, so buffering off + generous timeouts.
+        client_max_body_size 512m;
+        proxy_request_buffering off;
+
+        location / {
+            proxy_pass http://{{ upstream_printfarm }};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_connect_timeout 15s;
+            proxy_send_timeout 600s;
+            proxy_read_timeout 600s;
+        }
+    }
+
+
 
 # Hermes API (CLI leg) — api_server on hermes-gw-01:8642 (bearer-token
 # /v1/runs API that `hermes submit` / hermes-cli talk to).

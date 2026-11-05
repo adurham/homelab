@@ -280,5 +280,12 @@
 
   notify: Restart Nginx
 
+- name: Apply Nginx Changes Before the DDNS Step
+  # Validate + reload nginx HERE, not at end-of-play: the trailing ddclient
+  # task can fail on a sudo-policy quirk (seen on lb-01, "Incorrect sudo
+  # password"), and a failed play never flushes the validate/restart handlers
+  # — so a freshly written vhost would silently never take effect.
+  ansible.builtin.meta: flush_handlers
+
 - name: Configure DDNS (No-IP)
   ansible.builtin.include_tasks: ddns.yml

@@ -60,6 +60,13 @@ victoriametrics IN      A       {{ ip_loadbalancer }}
 gallery         IN      A       {{ ip_loadbalancer }} ; TG collector gallery (Authentik-gated)
 homeassistant   IN      A       {{ ip_loadbalancer }} ; HA has its own auth (local + OIDC SSO), no forward-auth wrapper
 
+; Bambu/MakerWorld -> Creality K2 print service (CT 119 print-01), front by
+; lb-01 with the internal-only ACL (LAN / private SDN / Tailscale) and NO
+; forward-auth: users are household members on the tailnet, and the K2's own
+; Moonraker API is already unauthenticated on the LAN. nginx proxies to the
+; CT's tailnet address (lb-01 cannot reach its private-SDN address).
+printbot        IN      A       {{ ip_loadbalancer }} ; Bambu->K2 print service (internal-only)
+
 ; Hermes persistent gateway (front by lb-01 — internal-only ACL in nginx).
 ; hermes = GUI (Hermes's own native OIDC-to-Authentik login);
 ; hermes-api = CLI (hermes submit / api_server, Authentik M2M forward-auth).

@@ -66,6 +66,12 @@ media_gallery_serve_port: 8093
 # transparent/network-wide. See roles/adblock_proxy{,_host}.
 ip_adblock_proxy: "172.16.0.49"
 ip_printfarm: "172.16.0.51"   # print-01: Bambu -> K2 converter/slicer web app (tailnet-exposed)
+# print-01's TAILNET address, used as the nginx upstream for
+# printbot.chi.lab.amd-e.com on lb-01. lb-01 cannot reach the CT's private-SDN
+# address — 172.16.0.51:8765 is closed from lb-01 (measured; same asymmetric
+# subnet-route behaviour documented in roles/printfarm_host) while
+# 100.120.18.93:8765 answers 200. Port included so nginx can use it directly.
+upstream_printfarm: "100.120.18.93:8765"
 adblock_proxy_pac_port: 8090
 # Frigate NVR (CT 170, pve01). Private-subnet IP for the eth1 interface; eth0
 # is DHCP on the LAN so Frigate can reach the go2rtc RTSP source + HA MQTT.

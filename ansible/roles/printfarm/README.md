@@ -4,8 +4,23 @@ Bambu/MakerWorld **3MF → Creality K2** print service, running in CT 119
 (`print-01`) and exposed **on the tailnet only**.
 
 ```
-http://print-01.tail19c543.ts.net:8765
+https://printbot.chi.lab.amd-e.com   <- pretty name: internal DNS -> lb-01 vhost
+https://print.tail19c543.ts.net      <- tailnet node name is "print"
 ```
+
+Two front doors, both TLS:
+
+* **printbot.chi.lab.amd-e.com** — an lb-01 vhost using the existing
+  `*.chi.lab.amd-e.com` wildcard cert, internal-only ACL (LAN / private SDN /
+  Tailscale, `$is_internal`), no forward-auth. nginx proxies to the CT's
+  tailnet address because lb-01 cannot reach its private-SDN one. Resolves for
+  anything using the lab resolver (dns-01) — including the CT itself. NOTE:
+  `*.chi.lab.amd-e.com` does **not** resolve through Tailscale's split DNS
+  today (MagicDNS answers NXDOMAIN while dns-01 answers correctly), so a
+  tailnet-only client off-LAN needs that tailnet DNS setting fixed before this
+  name is useful to it.
+* **print.tail19c543.ts.net** — `tailscale serve`, tailnet-issued cert, works
+  from any tailnet device anywhere, no DNS dependency beyond MagicDNS.
 
 ## What problem it solves
 
@@ -77,10 +92,16 @@ could be created here instead and the manual step removed.
 
 ```bash
 ansible-playbook deploy_printfarm.yml            # idempotent
-ansible-playbook deploy_printfarm.yml --tags=... # n/a: single role, no tags
-ssh root@<print-01> systemctl status bambu2creality
-ssh root@<print-01> journalctl -u bambu2creality -n 50
+ssh root@100.120.18.93 systemctl status bambu2creality
+ssh root@100.120.18.93 journalctl -u bambu2creality -n 50
+ssh root@100.120.18.93 tailscale serve status
 ```
+
+Ansible reaches the CT over its **tailnet** address: after the join, the
+subnet-routed private leg stops answering this Mac (measured — no ping, no port
+22 at 172.16.0.51) while the tailnet address answers both over a direct peer
+link. The host role detects this and sets `ansible_host` accordingly, falling
+back to `ip_printfarm` for a from-scratch build.
 
 The app source lives in `~/repos/bambu2creality` on the controller
 (`printfarm_src`), the same single-source pattern as `ps5forge_src`; redeploy
