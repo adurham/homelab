@@ -68,13 +68,39 @@ def neighbours(family="-4"):
 
 
 def clients_seen(hours):
-    """Collect client IPs that appear anywhere in the query log over `hours`."""
+    """Clients that resolved through AdGuard in the stats window.
+
+    One call to /control/stats rather than paging /control/querylog: this LAN
+    does ~570k queries a day, so the log walk was ~114 pages of 5000 rows, and on
+    2026-11-05 a single chunked-read timeout part-way through killed the whole
+    canary (systemd marked it failed, the health alert fired, and the run's
+    partial state was left on disk). stats.top_clients is the same information
+    AdGuard already aggregates per client, in one request.
+    """
+    try:
+        stats = http_get(f"{AGH}/control/stats", timeout=30)
+    except Exception as exc:
+        print(f"canary: stats lookup failed ({exc}), falling back to the query log",
+              file=sys.stderr)
+        stats = {}
     seen = set()
+    for entry in stats.get("top_clients") or []:
+        if isinstance(entry, dict):
+            seen.update(entry.keys())
+    if seen:
+        return seen
+    # Fallback for an AdGuard that does not populate top_clients: walk the log,
+    # but never let one bad page take the run down.
     url = f"{AGH}/control/querylog?limit=5000"
     deadline = time.time() - hours * 3600
     pages = 0
     while url and pages < 400:
-        data = http_get(url)
+        try:
+            data = http_get(url, timeout=30)
+        except Exception as exc:
+            print(f"canary: query log page {pages} failed ({exc}); using what we have",
+                  file=sys.stderr)
+            break
         rows = data.get("data") or []
         if not rows:
             break
