@@ -9,17 +9,19 @@
 #   inject SSH key -> TUN passthrough (Tailscale inside the CT) -> add to the
 #   in-memory inventory.
 #
-# NETWORKING (why two NICs):
-#   eth0 = private SDN (172.16.0.0/24), no gateway -- admin/private leg.
-#   eth1 = vmbr0, DHCP -- the DEFAULT ROUTE and, critically, LAN L2 access to
-#          the printer at 192.168.86.43 (Moonraker has no auth, but it is only
-#          routable from the home LAN). It also lets Tailscale hole-punch a
-#          direct peer connection instead of falling back to a DERP relay
-#          (same reasoning documented in adblock_proxy_host).
-#   A LAN NIC on a CT that also holds private-SDN reach is why eth0 must NOT
-#   carry a gateway: a static default on eth0 (metric 0) beats eth1's DHCP
-#   default (metric 1024) and Tailscale's portmapper then can never open a
-#   mapping. Verified live in adblock_proxy_host 2026-08-21.
+# NETWORKING (single NIC, private SDN only):
+#   eth0 = private SDN (172.16.0.0/24) with gw 172.16.0.1 (tailscale-gw), which
+#          NATs 172.16.0.0/24 out to the home LAN and the internet. Both things
+#          this CT needs ride that: Moonraker on the K2 (192.168.86.43:7125) and
+#          the tailnet itself. Verified from a private-only CT (media-ingest-02,
+#          eth0 only): ping 192.168.86.43 OK, Moonraker /server/info HTTP 200.
+#   NO LAN NIC. The earlier LAN leg was copied from adblock_proxy_host, where it
+#          exists for proxy throughput; here it was pure liability — a second
+#          interface on vmbr0 is exactly the dual-homing that makes the return
+#          path asymmetric for CONTROL traffic (measured on adblock-proxy-01:
+#          from this Mac, no ping and no port 22 at 172.16.0.49, while the
+#          private-only media-ingest-02 answers both). Less surface, and the web
+#          UI can never be reachable from the LAN by construction.
 
 - name: Update Template Database
   ansible.builtin.command: pveam update
@@ -47,8 +49,7 @@
     --hostname print-01
     --cores 2 --memory 3072 --swap 2048
     --rootfs nvme-data:16
-    --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_printfarm }}/24,mtu={{ net_private_mtu }}
-    --net1 name=eth1,bridge=vmbr0,ip=dhcp
+    --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_printfarm }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
     --unprivileged 1
     --features nesting=1
     --password "{{ vault_printfarm_root_pass | default('changeme-printfarm') }}"
@@ -134,45 +135,34 @@
   when: printfarm_tun_cgroup.changed or printfarm_tun_mount.changed
   changed_when: true
 
-- name: Wait for Print Service Container LAN Leg after TUN restart
-  # The wait is on the LAN leg (eth1), NOT ip_printfarm: this controller is a
-  # tailnet member, so 172.16.0.0/24 resolves to a utun route and a CT that
-  # peers directly makes that subnet-routed path asymmetric — measured on
-  # adblock-proxy-01: no ping, no port 22 at its private address. The LAN leg
-  # is the one that also gives the CT printer reachability, so use it.
+- name: Wait for Print Service Container Network (default route + printer reach)
+  # Checked from inside the CT over pct exec, so it does not depend on the
+  # controller's own path to 172.16.0.0/24. It asserts the two things the CT
+  # actually needs its egress for: a default route via tailscale-gw (172.16.0.1)
+  # and a real Moonraker answer from the K2 on the home LAN (192.168.86.43:7125,
+  # reached through tailscale-gw's NAT — no LAN NIC on this CT). A broken
+  # private-SDN egress therefore fails the deploy, not someone's first print.
   ansible.builtin.shell: |
     set -o pipefail
     for i in $(seq 1 36); do
-      if pct exec 119 -- ip route show | grep -q "^default"; then
-        echo "default route present after $((i * 5))s"
+      if pct exec 119 -- sh -c 'ip route show | grep -q "^default" && curl -s -m 6 -o /dev/null http://192.168.86.43:7125/server/info'; then
+        echo "default route + printer reach after $((i * 5))s"
         exit 0
-      fi
-      if [ $((i % 4)) -eq 0 ]; then
-        pct exec 119 -- networkctl reload || true
       fi
       sleep 5
     done
-    echo "default route still absent after 180s"
+    echo "no default route / no printer reach after 180s"
     exit 1
-  delegate_to: "{{ ct_node }}"
-  changed_when: false
-
-- name: Read the LAN Address of the Print Service Container
-  # Ansible reaches the CT over the HOME LAN (eth1, vmbr0 DHCP) for the first
-  # deploy; the service role re-points this at MagicDNS once the CT has joined
-  # the tailnet.
-  ansible.builtin.shell: |
-    set -o pipefail
-    pct exec 119 -- ip -4 -o addr show dev eth1 | awk '{print $4}' | cut -d/ -f1
   args:
     executable: /bin/bash
   delegate_to: "{{ ct_node }}"
-  register: printfarm_lan_ip
   changed_when: false
 
-- name: Wait for Print Service Container SSH on the LAN Address
+- name: Wait for Print Service Container SSH
+  # The controller reaches the private SDN through tailscale-gw (tailnet
+  # subnet route) — the same path that manages every other private-only CT.
   ansible.builtin.wait_for:
-    host: "{{ printfarm_lan_ip.stdout | trim }}"
+    host: "{{ ip_printfarm }}"
     port: 22
     timeout: 90
   delegate_to: localhost
@@ -180,6 +170,6 @@
 - name: Add Print Service Host to In-Memory Inventory
   ansible.builtin.add_host:
     name: print-01
-    ansible_host: "{{ printfarm_lan_ip.stdout | trim }}"
+    ansible_host: "{{ ip_printfarm }}"
     ansible_user: root
     groups: printfarm

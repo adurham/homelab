@@ -434,21 +434,18 @@ all:
     # Bambu/MakerWorld -> Creality K2 print service (print-01, CT 119).
     # Runs Creality Print headlessly (extracted AppImage + its bundled vendor
     # presets) behind a small web app, so a MakerWorld 3MF drops in and comes
-    # back as a sliced K2 project. Joins the tailnet directly and binds the
-    # web UI to tailscale0: the CT also has a LAN NIC (printer reachability +
-    # Tailscale hole-punching) and the UI must stay off it. Not a child of
-    # private_subnet — same reasoning as adblock_proxy (the ProxyCommand would
-    # loop back through the Mac's own tailscale IP).
+    # back as a sliced K2 project. Private-SDN only, like every other service
+    # CT: it joins the tailnet itself for ingress, and it reaches the K2 on the
+    # home LAN through tailscale-gw's MASQUERADE (verified: ping + Moonraker
+    # /server/info 200 from a private-only CT). No LAN NIC on purpose — a second
+    # interface on vmbr0 is what makes the return path asymmetric for control
+    # traffic (adblock-proxy-01 has that problem; media-ingest-02, private-only,
+    # does not). Member of private_subnet above, so it inherits the MacBook jump
+    # host used when ansible runs from the work MacBook.
     printfarm:
       hosts:
         print-01:
-          ansible_host: print-01.tail19c543.ts.net
-          # Same accept-new default as group_vars/all.yml, kept explicit: this
-          # group must NOT inherit private_subnet's ProxyCommand (it would
-          # loop back through the Mac's own tailscale IP), and an empty value
-          # here would also drop accept-new, breaking the first connection to
-          # a brand-new CT ("Host key verification failed").
-          ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+          ansible_host: "{{ ip_printfarm }}"
           vmid: 119
           target_node: pve01
       vars:
@@ -475,6 +472,7 @@ all:
         media_gallery:
         media_ingest:
         media_ingest_02:
+        printfarm:
 
     # Tanium Cluster
     tanium_cluster:

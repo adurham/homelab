@@ -162,16 +162,6 @@
     group: "{{ printfarm_user }}"
     mode: "0644"
 
-- name: Re-point Inventory at the Tailnet Name
-  # Ansible reached this host over the private subnet; once the CT peers
-  # directly, the subnet-routed path gets unreliable (documented for
-  # hermes-gw-01). Future runs go via MagicDNS.
-  ansible.builtin.add_host:
-    name: print-01
-    ansible_host: "{{ printfarm_tailscale_hostname }}.tail19c543.ts.net"
-    ansible_user: root
-    groups: printfarm
-
 - name: Install systemd Service
   ansible.builtin.template:
     src: bambu2creality.service.j2
