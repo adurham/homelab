@@ -94,7 +94,13 @@
   notify: Reload Sysctl (Adblock Proxy)
 
 - name: Advertise Adblock Proxy as a Tailscale exit node
-  ansible.builtin.command: tailscale up --hostname=adblock-proxy-01 --advertise-exit-node --reset
+  # --accept-dns=false is passed HERE as well as in the later task: `--reset`
+  # re-enables tailscaled's DNS management, and a re-run of just this task
+  # (or any manual `tailscale up --reset`) silently repointed resolv.conf at
+  # MagicDNS. Observed live 2026-11-05: CorpDNS was true even though the role
+  # sets it false, so exit-node DNS resolution was riding an accidental
+  # fallback chain instead of AdGuard.
+  ansible.builtin.command: tailscale up --hostname=adblock-proxy-01 --advertise-exit-node --accept-dns=false --reset
   changed_when: true
   # tailscaled persists this in its own state file (not the systemd unit),
   # so it's safe to re-run idempotently; --reset just re-applies flags.
