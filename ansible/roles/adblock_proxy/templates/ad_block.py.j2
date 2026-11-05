@@ -584,6 +584,61 @@ def websocket_message(flow: http.HTTPFlow) -> None:
         ctx.log.warn(f"[META_WS] observe failed: {exc}")
 
 
+# ------------------------------------------------------- Instagram web feed ads
+# Instagram's desktop feed is a GraphQL POST (measured: POST https://157.240.254.174
+# /graphql/query — the CDN IP is the flow host, so no hostname rule can find it).
+# Response shape:
+#   {"data": {"xdt_api__v1__feed__timeline__connection": {"edges": [ {node}, ... ]}}}
+# Organic nodes carry "media"; a promoted node carries a non-null "ad" object with
+# an "ad_id" — 2 of 10 edges in the captured samples. Drop the whole edge, exactly
+# like the Reddit adPayload case.
+IG_FEED_MARKER = "xdt_api__v1__feed__"
+
+
+def _drop_ad_edges(node) -> int:
+    """Remove feed edges whose node carries an ad payload; return how many."""
+    removed = 0
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "edges" and isinstance(value, list):
+                kept = []
+                for edge in value:
+                    n = edge.get("node") if isinstance(edge, dict) else None
+                    if isinstance(n, dict) and n.get("ad"):
+                        removed += 1
+                        continue
+                    kept.append(edge)
+                node[key] = kept
+            else:
+                removed += _drop_ad_edges(value)
+    elif isinstance(node, list):
+        for item in node:
+            removed += _drop_ad_edges(item)
+    return removed
+
+
+def _strip_instagram_feed_ads(flow: http.HTTPFlow) -> None:
+    if not flow.response or flow.response.status_code != 200:
+        return
+    text = _response_text(flow)
+    if not text or IG_FEED_MARKER not in text:
+        return
+    try:
+        doc = json.loads(text)
+    except Exception:  # noqa: BLE001 - not JSON, leave it alone
+        return
+    removed = _drop_ad_edges(doc)
+    if not removed:
+        return
+    try:
+        flow.response.headers.pop("content-encoding", None)
+        flow.response.content = json.dumps(doc, separators=(",", ":")).encode()
+        ctx.log.info(f"[INSTAGRAM] stripped {removed} promoted feed item(s) "
+                     f"({len(text)} -> {len(flow.response.content)} chars)")
+    except Exception as exc:  # noqa: BLE001
+        ctx.log.warn(f"[INSTAGRAM] strip failed: {exc}")
+
+
 def response(flow: http.HTTPFlow) -> None:
     """Capture-only for Reddit content-host JSON responses, to build the
     real-traffic sample needed to identify the actual promoted-post
@@ -602,6 +657,7 @@ def response(flow: http.HTTPFlow) -> None:
     # Their API paths are unmistakable, and only Meta/Microsoft-ish hosts are
     # even decrypted, so a path hint is safe here.
     if _is_meta_host(host) or _looks_like_meta_path(flow.request.path):
+        _strip_instagram_feed_ads(flow)
         # Log every Meta request path: the web feed endpoint has to be visible
         # before a rewrite can target it (the first two attempts guessed wrong).
         ctx.log.info(f"[META_REQ] {flow.request.method} {flow.request.path[:110]} "
