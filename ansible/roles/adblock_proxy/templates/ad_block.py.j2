@@ -730,103 +730,121 @@ def _empty_fb_unit(line: str):
 # into facebook.com HTML: the feed stream is never touched, so pagination cannot
 # stall.
 FB_HIDE_SCRIPT = """
+<style>[data-ab-hide]{display:none!important}</style>
 <script%s>
 (function(){
   if (window.__abHide) { return; }
   window.__abHide = 1;
+  var st = {attach:0, attachSamples:[], empty:0, arts:0, matched:0, hidden:0, roots:0, errs:0, errMsg:''};
+  try {
+    window.addEventListener('error', function(e){ st.errs++; if (!st.errMsg) { st.errMsg = String((e && e.message) || '').slice(0, 60); } });
+  } catch (e) {}
+
+  try {
+    var orig = Element.prototype.attachShadow;
+    if (orig && !orig.__abPatched) {
+      var patched = function(init){
+        st.attach++;
+        if (st.attachSamples.length < 5) {
+          try { st.attachSamples.push(String(this.tagName || '') + '.' + String(this.className || '').slice(0, 22)); } catch (e) {}
+        }
+        if (init && init.mode === 'closed') { init = Object.assign({}, init, {mode: 'open'}); }
+        else if (init && typeof init === 'object' && !('mode' in init)) { init = Object.assign({}, init); }
+        return orig.call(this, init);
+      };
+      try { Object.defineProperty(patched, 'name', {value: orig.name}); } catch (e) {}
+      patched.__abPatched = 1;
+      Element.prototype.attachShadow = patched;
+    }
+  } catch (e) {}
+
+  function roots(){
+    var out = [document], queue = [document], guard = 0;
+    while (queue.length && guard < 300) {
+      guard++;
+      var r = queue.shift(), els;
+      try { els = r.querySelectorAll('*'); } catch (e) { continue; }
+      for (var i = 0; i < els.length; i++) {
+        var sr = null;
+        try { sr = els[i].shadowRoot; } catch (e) {}
+        if (sr && out.indexOf(sr) < 0) { out.push(sr); queue.push(sr); }
+      }
+    }
+    st.roots = out.length - 1;
+    return out;
+  }
+
   function cardFor(el){
-    var node = el;
-    for (var up = 0; up < 14 && node.parentElement; up++) {
-      node = node.parentElement;
-      var r = node.getBoundingClientRect();
-      if (r.height >= 120 && r.height <= window.innerHeight * 3) { return node; }
+    var n = el;
+    for (var up = 0; up < 16 && n && n.parentElement; up++) {
+      n = n.parentElement;
+      var role = n.getAttribute && n.getAttribute('role');
+      var pl = n.getAttribute && n.getAttribute('data-pagelet');
+      if (role === 'article' || (pl && pl.indexOf('FeedUnit') === 0)) { return n; }
     }
     return null;
   }
-  function samples(){
-    var out = [], n = 0;
+
+  function scan(){
+    // articles is the calibration number: a scan with 0 articles is void
+    st.arts = document.querySelectorAll('[role="article"],[data-pagelet^="FeedUnit"]').length;
+
+    st.empty = 0;
     try {
-      var w = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
-      while (w.nextNode() && n < 4000) {
-        n++;
-        var v = w.currentNode.nodeValue;
-        if (v && /sponsor/i.test(v)) { out.push(v.trim().slice(0, 28)); if (out.length >= 4) { break; } }
+      var boxes = document.querySelectorAll('div,section,article');
+      for (var b = 0; b < boxes.length; b++) {
+        var bx = boxes[b];
+        if (bx.childElementCount !== 0) { continue; }
+        if ((bx.textContent || '').trim()) { continue; }
+        if (/^(IMG|CANVAS|VIDEO|IFRAME|SVG|INPUT|TEXTAREA|PICTURE)$/.test(bx.tagName)) { continue; }
+        var r = bx.getBoundingClientRect();
+        if (r.height > 80 && r.width > 200) { st.empty++; }
       }
     } catch (e) {}
-    return out.join('|');
+
+    st.matched = 0; st.hidden = 0;
+    var rs = roots();
+    for (var ri = 0; ri < rs.length; ri++) {
+      var els;
+      try { els = rs[ri].querySelectorAll('span,a,div,h3,abbr'); } catch (e) { continue; }
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        if (el.getAttribute && el.getAttribute('data-ab-hide') !== null) { continue; }
+        var t = (el.textContent || '').replace(/\u200b/g, '').trim();
+        if (!t || t.length > 40) { continue; }
+        if (!/sponsored/i.test(t)) { continue; }
+        st.matched++;
+        var card = cardFor(el);
+        if (card) { card.setAttribute('data-ab-hide', '1'); st.hidden++; }
+      }
+    }
+    beacon();
   }
-  function beacon(lab, hid, seen, tag){
+
+  function beacon(){
     try {
-      var smp = samples();
-      var key = (tag || '') + lab + ':' + hid + ':' + seen + ':' + smp
-        + ':' + ((document.body && document.body.innerText) ? document.body.innerText.length : -1);
+      var txt = (document.body ? (document.body.textContent || '').length : -1);
+      var key = [st.arts, st.attach, st.empty, st.matched, st.hidden, st.roots, st.errs, txt].join(':');
       if (window.__abLast === key) { return; }
       window.__abLast = key;
-      var body = (document.body ? document.body.innerText.length : -1);
-      var ifs = [];
-      try {
-        var fs = document.querySelectorAll('iframe');
-        for (var k = 0; k < fs.length && k < 3; k++) {
-          ifs.push((fs[k].getAttribute('src') || 'srcdoc').slice(0, 40));
-        }
-      } catch (e) {}
-      var sh = 0;
-      try {
-        var allEls = document.querySelectorAll('*');
-        for (var q = 0; q < allEls.length; q++) { if (allEls[q].shadowRoot) { sh++; } }
-      } catch (e) {}
-      (new Image()).src = '/__abprobe?lab=' + lab + '&hid=' + hid + '&seen=' + seen
-        + '&v=' + Math.round(window.innerHeight) + '&txt=' + body
-        + '&ifr=' + document.querySelectorAll('iframe').length
-        + '&smp=' + encodeURIComponent(smp).slice(0, 160)
-        + '&sh=' + sh
-        + '&ifs=' + encodeURIComponent(ifs.join(','))
+      var ifr = document.querySelectorAll('iframe').length;
+      (new Image()).src = '/__abprobe?v4=1'
+        + '&arts=' + st.arts + '&att=' + st.attach + '&emp=' + st.empty
+        + '&lab=' + st.matched + '&hid=' + st.hidden + '&roots=' + st.roots
+        + '&err=' + st.errs + '&em=' + encodeURIComponent(st.errMsg).slice(0, 40)
+        + '&as=' + encodeURIComponent(st.attachSamples.join(',')).slice(0, 120)
+        + '&txt=' + txt + '&ifr=' + ifr + '&v=' + Math.round(window.innerHeight)
         + '&r=' + Math.random();
     } catch (e) {}
   }
-  function hide(){
-    var lab = 0, hid = 0;
-    var all = document.querySelectorAll('span,a,div,h3');
-    for (var i = 0; i < all.length; i++) {
-      var el = all[i];
-      if (el.dataset && el.dataset.abHidden) { continue; }
-      var t = (el.textContent || '').replace(/\u200b/g, '').trim();
-      if (!t || t.length > 60) { continue; }
-      // mobile renders labels as 'Creality 3D · Sponsored' / 'Sponsored · …',
-      // desktop as bare 'Sponsored' — anchoring at the start missed the mobile
-      // form, which is why every beacon reported lab=0 while an ad was on screen
-      if (!/sponsored/i.test(t)) { continue; }
-      if (t.length > 14 && t.indexOf('\u00b7') < 0 && t.indexOf('|') < 0 && t.indexOf('\u2022') < 0) { continue; }
-      lab++;
-      var card = cardFor(el);
-      if (card) {
-        card.dataset.abHidden = '1';
-        card.style.setProperty('display','none','important');
-        hid++;
-      }
-    }
-    var arts = document.querySelectorAll('div[role="article"]');
-    for (var j = 0; j < arts.length; j++) {
-      var a = arts[j];
-      if (a.dataset.abHidden) { continue; }
-      var h = a.querySelector('h3');
-      if (h && /^\s*sponsored/i.test((h.innerText || '').replace(/\u200b/g, ''))) {
-        a.dataset.abHidden = '1';
-        a.style.setProperty('display','none','important');
-        hid++;
-      }
-    }
-    beacon(lab, hid, all.length, window.__abTag || '');
-  }
-  hide();
-  new MutationObserver(function(){ clearTimeout(window.__abT); window.__abT = setTimeout(hide, 250); })
+
+  function boot(){ scan(); }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else { boot(); }
+  new MutationObserver(function(){ clearTimeout(window.__abT); window.__abT = setTimeout(scan, 300); })
     .observe(document.documentElement, {childList:true, subtree:true, characterData:true});
-  // the first run happens before the client renders anything (beacons showed
-  // 14 elements seen), so also poll while the feed fills in
-  setInterval(hide, 1500);
-  // one forced post-render report, so a page that fills in after our first run is
-  // still measured even when nothing matched
-  setTimeout(function(){ window.__abTag = 'post'; hide(); window.__abTag = ''; }, 7000);
+  setInterval(scan, 1500);
 })();
 </script>
 """
@@ -847,10 +865,24 @@ def _inject_facebook_hider(flow: http.HTTPFlow) -> None:
     csp = flow.response.headers.get("content-security-policy", "") or ""
     match = re.search(r"'nonce-([^']+)'", csp)
     nonce_attr = f' nonce="{match.group(1)}"' if match else ""
+    if "__abHide" in text:
+        return
     script = FB_HIDE_SCRIPT % nonce_attr
+    # Head, not </body>: attachShadow must be patched before Facebook's bundle
+    # creates any roots. Placed after the charset meta so the 1024-byte encoding
+    # window is never pushed out.
+    charset = re.search(r"<meta[^>]+charset[^>]*>", text[:2048], re.I)
+    if charset:
+        at = charset.end()
+    elif "<head" in text[:4096]:
+        at = text.index(">", text.index("<head")) + 1
+    elif "</body>" in text:
+        at = text.rindex("</body>")
+    else:
+        return
     try:
         _prepare_rewrite(flow)
-        flow.response.content = text.replace("</body>", script + "</body>", 1).encode()
+        flow.response.content = (text[:at] + script + text[at:]).encode()
         ctx.log.info(f"[FACEBOOK] injected ad-hider (nonce={'yes' if nonce_attr else 'no'}) "
                      f"into {flow.request.path[:40]}")
     except Exception as exc:  # noqa: BLE001
