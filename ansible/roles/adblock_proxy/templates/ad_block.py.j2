@@ -59,7 +59,10 @@ Discord endpoint reference (Discord's undocumented API is versioned
                                               here too in case that
                                               changes
 
-REDDIT STATUS (added 2026-08-21): unlike Discord, Reddit's promoted
+REDDIT STATUS: promoted posts in the iOS app ARE stripped now (2026-11-05) —
+they ride the GraphQL feed response from gql-fed.reddit.com, so _strip_reddit_ads
+removes any feed edge whose node carries an adPayload. Original note (2026-08-21),
+kept for the reasoning that led here: unlike Discord, Reddit's promoted
 posts are NOT served from separate ad-decision endpoints — they're
 embedded inline in the same feed/listing JSON as organic posts
 (data.children[].data with some ad-marker field), because that's how
@@ -249,6 +252,71 @@ def request(flow: http.HTTPFlow) -> None:
     _handle_reddit_request(flow, host)
 
 
+def _strip_ad_edges(obj):
+    """Drop feed edges whose node carries an adPayload; returns how many.
+
+    Reddit's home feed is a GraphQL response where elements.edges[].node is a
+    CellGroup: organic posts have "adPayload": null, promoted ones carry an
+    AdPayload object (with alb.reddit.com impression beacons inside it).
+    Verified against a real captured feed 2026-11-05 — 2 of 27 edges in one
+    response were promoted. Removing the edge removes the ad and all of its
+    cells, and leaves every organic post exactly as it was.
+    """
+    removed = 0
+    if isinstance(obj, dict):
+        edges = obj.get("edges")
+        if isinstance(edges, list):
+            keep = []
+            for edge in edges:
+                node = edge.get("node") if isinstance(edge, dict) else None
+                if isinstance(node, dict) and node.get("adPayload"):
+                    removed += 1
+                    continue
+                keep.append(edge)
+            if removed:
+                obj["edges"] = keep
+        for value in list(obj.values()):
+            if isinstance(value, (dict, list)):
+                removed += _strip_ad_edges(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            if isinstance(value, (dict, list)):
+                removed += _strip_ad_edges(value)
+    return removed
+
+
+def _strip_reddit_ads(flow: http.HTTPFlow) -> None:
+    """Remove promoted items from Reddit's JSON feed responses.
+
+    This is the one ad class no DNS or domain rule can reach: the promoted
+    payload is stitched into the same authenticated response that carries the
+    organic posts, so the app renders it before any tracker is fetched. The
+    marker is structural (see _strip_ad_edges), not a domain.
+    """
+    if not flow.response or flow.response.status_code != 200:
+        return
+    try:
+        text = flow.response.text
+    except Exception:  # noqa: BLE001 - opaque/undecodable body, leave alone
+        return
+    if not text or '"adPayload":{' not in text:
+        return
+    try:
+        payload = json.loads(text)
+    except Exception:  # noqa: BLE001 - not JSON we can rewrite
+        return
+    removed = _strip_ad_edges(payload)
+    if not removed:
+        return
+    try:
+        flow.response.headers.pop("content-encoding", None)
+        flow.response.text = json.dumps(payload, separators=(",", ":"))
+        ctx.log.info(f"[{LOG_TAG_REDDIT}] stripped {removed} promoted feed item(s) "
+                     f"from {flow.request.pretty_host}{flow.request.path}")
+    except Exception as exc:  # noqa: BLE001 - never break real traffic over an ad
+        ctx.log.warn(f"[{LOG_TAG_REDDIT}] ad strip failed: {exc}")
+
+
 def response(flow: http.HTTPFlow) -> None:
     """Capture-only for Reddit content-host JSON responses, to build the
     real-traffic sample needed to identify the actual promoted-post
@@ -279,4 +347,6 @@ def response(flow: http.HTTPFlow) -> None:
         ctx.log.info(f"[{LOG_TAG_REDDIT}] captured {host}{flow.request.path} -> {out_path.name} ({len(existing) + 1}/{REDDIT_CAPTURE_MAX_FILES})")
     except Exception as exc:  # noqa: BLE001 - never let capture logic break real traffic
         ctx.log.warn(f"[{LOG_TAG_REDDIT}] capture failed for {host}{flow.request.path}: {exc}")
+
+    _strip_reddit_ads(flow)
 
