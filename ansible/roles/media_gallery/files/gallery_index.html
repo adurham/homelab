@@ -651,6 +651,11 @@
 <script>
 (function(){
   var manifest=[], chats=[], chatMap={};
+  // 2026-11-05: per-folder metadata, so the SPA can paint the folders page
+  // without downloading the whole library. folderCount/folderKey/folderCoverPath
+  // come from folders_meta.json; chatMap[name] is only populated once that
+  // folder's shard (or the background full manifest) has loaded.
+  var folderCount={}, folderKey={}, folderCoverPath={}, folderLoading={}, metaReady=false;
   var emptyFolders=[];     // user-created folders not yet in manifest
   var current=null;        // null = landing; "*" all; else chat name
   // True once the initial manifest.json fetch (BOOT, bottom of file) has
@@ -675,6 +680,13 @@
       for(var i=0;i<items.length;i++){ if(items[i].stem===fm.cover) return '/'+items[i].thumb; }
     }
     return items&&items[0]?'/'+items[0].thumb:'';
+  }
+  // cover without the items loaded (folders page from folders_meta.json)
+  function coverPathFor(name){
+    if(folderCoverPath[name]) return '/'+folderCoverPath[name];
+    var fm=folderMeta[name];
+    if(fm && fm.cover) return '/thumb/'+name+'/'+fm.cover+'.jpg';
+    return '';
   }
 
   // ---- toast (visible feedback for every action) ----
@@ -980,6 +992,27 @@
     manifest=out;
     savePending();   // persist the (now-pruned) pending state across refreshes
   }
+  // ---- folders page from metadata (no full manifest needed) ----
+  // 2026-11-05: builds the folder grid from folders_meta.json so the landing
+  // page paints before (or without) the 76MB manifest. chatMap holds items
+  // only for folders actually opened; folderCount is the authoritative count
+  // until the background manifest lands.
+  function applyMeta(meta){
+    var fs=(meta&&meta.folders)||[];
+    if(!fs.length) return false;
+    chats=[]; folderCount={}; folderKey={}; folderCoverPath={};
+    fs.forEach(function(f){
+      if(!f||!f.name) return;
+      chats.push(f.name);
+      folderCount[f.name]=f.count||0;
+      if(f.key) folderKey[f.name]=f.key;
+      if(f.cover) folderCoverPath[f.name]=f.cover;
+    });
+    chats.sort(function(a,b){ return (folderCount[b]||0)-(folderCount[a]||0); });
+    visibleCount=chats.reduce(function(n,c){ return n+(folderCount[c]||0); },0);
+    metaReady=true;
+    return true;
+  }
   function buildChats(){
     applyFolderRenames();   // reapply optimistic folder renames (survives refresh)
     applyFolderDeletes();   // hide optimistically-deleted folders (survives refresh)
@@ -1005,6 +1038,9 @@
       chatMap[c].push(it);
     });
     chats.sort(function(a,b){return chatMap[b].length-chatMap[a].length;});
+    // folder counts are now known precisely; keep the meta map in sync so the
+    // landing page and resume card agree after a background manifest load
+    chats.forEach(function(c){ folderCount[c]=chatMap[c].length; });
     // drop any user-created empty folders that now have real items
     emptyFolders=emptyFolders.filter(function(n){return !chatMap[n];});
   }
@@ -1180,7 +1216,8 @@
 
     shownChats.forEach(function(c){
       var items=chatMap[c];
-      frag.appendChild(makeFolder(c,items.length,folderCover(c,items)));
+      var n=(items?items.length:(folderCount[c]||0));
+      frag.appendChild(makeFolder(c,n, items?folderCover(c,items):coverPathFor(c)));
     });
     // user-created empty folders (no items yet)
     shownEmpty.forEach(function(n){
@@ -1337,6 +1374,21 @@
     var items=(chat==='*')
       ? manifest.filter(function(it){ return !it.hidden; })
       : (chatMap[chat]?chatMap[chat].slice():[]);
+    // Lazy shard load: on the folders-from-metadata path chatMap holds nothing
+    // until this folder is opened. Fetch its shard once, then re-enter.
+    if(chat!=='*' && !chatMap[chat] && !folderLoading[chat] && folderKey[chat]){
+      folderLoading[chat]=true;
+      (function(name,key){
+        fetch('/gallery/items/'+key+'.json',{credentials:'same-origin',cache:'no-cache'})
+          .then(function(r){ return r.ok?r.json():null; })
+          .then(function(j){
+            folderLoading[name]=false;
+            if(j && Array.isArray(j.items)){ chatMap[name]=j.items; folderCount[name]=j.items.length; }
+            if(current===name) openFolder(name);
+          })
+          .catch(function(){ folderLoading[name]=false; toast('Could not load '+name,'err'); });
+      })(chat, folderKey[chat]);
+    }
     var name=(chat==='*')?'All items':chat;
     applySort(items);
     view=items;
@@ -1355,7 +1407,7 @@
     hideUploadBar();
     setCrumb(name);
     elSearch.placeholder='Search this folder…';
-    elSub.textContent=items.length+' item'+(items.length===1?'':'s');
+    elSub.textContent=(folderLoading[chat]&&!items.length)?'Loading…':(items.length+' item'+(items.length===1?'':'s'));
 
     renderPhotos();
     renderFilterBar();
@@ -3163,53 +3215,76 @@
   // this explicit reset is belt-and-suspenders in case any browser/version
   // restores the value before scripts run regardless.
   elSort.value='new';
-  // load the manifest AND the full folder list (incl. empty folders) in parallel
+  // ---- two-stage boot (2026-11-05) --------------------------------------
+  // Stage 1 paints the folders page from folders_meta.json (~1MB): names,
+  // counts, covers, shard keys. Stage 2 fetches the full manifest (~76MB) in
+  // the BACKGROUND, because cross-folder views (On this day, the duplicate
+  // live-filter, "All items") need every item — but nobody should wait for it
+  // to start browsing. A folder's items arrive when that folder is opened.
+  // If folders_meta.json is missing (older build), this degrades to the old
+  // manifest-first boot.
+  function bootChrome(allFolders, fmeta){
+    folderMeta=(fmeta&&typeof fmeta==='object')?fmeta:{};
+    // retire any pending folder-delete the server's folders.json no longer
+    // lists (delete fully propagated). Until then, keep hiding it.
+    Object.keys(pendingRmdir).forEach(function(f){
+      if(allFolders.indexOf(f)<0){ delete pendingRmdir[f]; }
+    });
+    savePendingRmdir();
+    // seed emptyFolders = server folders with no items, honoring an optimistic
+    // rename and skipping a folder the user just deleted
+    allFolders.forEach(function(f){
+      if(pendingRmdir[f]) return;
+      var nm=pendingRename[f]||f;
+      if(pendingRmdir[nm]) return;
+      if(!chatMap[nm] && !folderCount[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
+    });
+    renderFolders();   // always render landing (so "+ New folder" is available)
+    bgPoll();
+  }
+  function bootRoute(rt){
+    if(!rt) return;
+    if(rt.folder && (chatMap[rt.folder]||emptyFolders.indexOf(rt.folder)>=0||folderKey[rt.folder])){ openFolder(rt.folder); }
+    else if(rt.folder){ setRoute(''); }
+    else if(rt.search){
+      // #s= means "landing page with the folder filter applied"
+      elSearch.value=rt.search; searchQuery=rt.search.toLowerCase();
+      renderFolders();
+    } else if(rt.view==='dup'){ showDuplicates(); }
+  }
   Promise.all([
-    fetch('/gallery/manifest.json').then(function(r){if(!r.ok)throw new Error(r.status);return r.json();}),
+    fetch('/gallery/folders_meta.json').then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
     fetch('/gallery/folders.json').then(function(r){return r.ok?r.json():[];}).catch(function(){return [];}),
     fetch('/foldermeta?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():{};}).catch(function(){return {};})
   ]).then(function(res){
-      manifest=Array.isArray(res[0])?res[0]:[];
-      bootDone=true;
+      var meta=res[0];
       var allFolders=Array.isArray(res[1])?res[1]:[];
-      folderMeta=(res[2]&&typeof res[2]==='object')?res[2]:{};
-      buildChats();
-      // retire any pending folder-delete the server's folders.json no longer
-      // lists (delete fully propagated). Until then, keep hiding it.
-      Object.keys(pendingRmdir).forEach(function(f){
-        if(allFolders.indexOf(f)<0){ delete pendingRmdir[f]; }
-      });
-      savePendingRmdir();
-      // seed emptyFolders = server folders that have no items in the manifest,
-      // but honor an optimistic rename (don't re-add the OLD name) and SKIP any
-      // folder the user just deleted (still listed until the server rebuild lands).
-      allFolders.forEach(function(f){
-        if(pendingRmdir[f]) return;                 // optimistically deleted — skip
-        var nm=pendingRename[f]||f;
-        if(pendingRmdir[nm]) return;
-        if(!chatMap[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
-      });
+      var fmeta=res[2];
+      var haveMeta=!!(meta&&meta.folders&&meta.folders.length);
       // Capture the incoming route BEFORE anything renders — renderFolders()
-      // writes setRoute('') as part of a normal landing render, which would
-      // otherwise wipe the hash we're about to restore from.
+      // writes setRoute('') as part of a normal landing render.
       var rt=routeTarget();
-      renderFolders();   // always render landing (so "+ New folder" is available)
-      bgPoll();          // show the background-delete indicator if a queue is draining
-      // ---- restore the route from the URL hash (survives a refresh) ----
-      // Previously every load landed on the folders page regardless of what
-      // you were viewing, so refreshing inside a folder kicked you out.
-      if(rt){
-        if(rt.folder && (chatMap[rt.folder]||emptyFolders.indexOf(rt.folder)>=0)){ openFolder(rt.folder); }
-        else if(rt.folder){
-          // folder no longer exists (renamed/deleted) -> fall back to landing
-          setRoute('');
-        } else if(rt.search){
-          // 2026-11-05: #s= means "landing page with the folder filter applied"
-          // (it used to mean the global item-results view, which is gone).
-          elSearch.value=rt.search; searchQuery=rt.search.toLowerCase();
-          renderFolders();
-        } else if(rt.view==='dup'){ showDuplicates(); }
+      if(haveMeta){
+        applyMeta(meta);
+        bootChrome(allFolders, fmeta);
+        bootRoute(rt);
       }
+      return fetch('/gallery/manifest.json',{credentials:'same-origin'})
+        .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function(m){
+          manifest=Array.isArray(m)?m:[];
+          bootDone=true;
+          buildChats();
+          if(!haveMeta){ bootChrome(allFolders, fmeta); bootRoute(rt); return; }
+          // refresh whatever the owner is looking at with the complete data
+          if(current==null) renderFolders();
+          else if(current==='__dup__') showDuplicates();
+          else openFolder(current);
+        })
+        .catch(function(err){
+          if(!haveMeta){ elState.textContent='Failed to load gallery: '+err.message; }
+          // with meta the folders page is already usable — no error splash
+        });
     })
     .catch(function(err){
       elState.textContent='Failed to load gallery: '+err.message;

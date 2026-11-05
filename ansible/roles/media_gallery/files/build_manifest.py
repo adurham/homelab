@@ -358,6 +358,59 @@ async def main():
     except Exception as e:  # noqa: BLE001
         log(f"folders.json skipped: {e}")
 
+    # ---- per-folder item shards + folders_meta (2026-11-05) ----------------
+    # WHY: the SPA downloaded the whole manifest (~76MB / 253K items) before it
+    # could draw anything, so the folders page cost a full library transfer —
+    # brutal over the tailnet from a phone. Now the SPA boots from
+    # folders_meta.json (names, counts, covers, shard keys; ~1MB), paints the
+    # folders page immediately, and fetches ONE folder's items when you open it.
+    # The full manifest still exists and still loads in the background, because
+    # cross-folder views (On this day, the duplicate live-filter, "All items")
+    # need it.
+    try:
+        import hashlib
+
+        def _shard_key(name: str) -> str:
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", name)[:80] or "_"
+            return safe + "-" + hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+
+        by_chat = {}
+        for it in manifest:
+            if it.get("hidden"):
+                continue            # hidden duplicates are not browsable
+            by_chat.setdefault(it.get("chat") or "", []).append(it)
+        by_chat.pop("", None)
+
+        items_dir = work / "items"
+        items_dir.mkdir(exist_ok=True)
+        meta = {"generated": manifest[0].get("date") if manifest else None, "folders": []}
+        for name in sorted(by_chat):
+            items = by_chat[name]           # already date-desc from the manifest
+            k = _shard_key(name)
+            sp = items_dir / (k + ".json")
+            sp.write_text(json.dumps({"folder": name, "items": items},
+                                     separators=(",", ":")))
+            meta["folders"].append({
+                "name": name,
+                "count": len(items),
+                "key": k,
+                "cover": items[0].get("thumb") if items else None,
+            })
+        mfp = work / "folders_meta.json"
+        mfp.write_text(json.dumps(meta, separators=(",", ":")))
+        rclone("copyto", str(mfp), f"{GALLERY}/folders_meta.json")
+        publish_local(mfp, "folders_meta.json")
+        mfp.unlink()
+        # one directory copy for all shards (516 individual copyto calls would
+        # serialise on Drive metadata round-trips, ~4s each)
+        rclone("copy", str(items_dir) + "/", f"{GALLERY}/items/")
+        for sp in items_dir.iterdir():
+            publish_local(sp, "items/" + sp.name)
+            sp.unlink()
+        log(f"folder shards published ({len(meta['folders'])} folders) — DONE")
+    except Exception as e:  # noqa: BLE001
+        log(f"folder shards skipped: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

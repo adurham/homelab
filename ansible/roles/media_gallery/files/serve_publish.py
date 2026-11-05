@@ -61,12 +61,13 @@ def publish_local(src: Path, name: str, log=print) -> None:
         d = SERVE_DIR / "gallery"
         d.mkdir(parents=True, exist_ok=True)
         target = d / name
+        target.parent.mkdir(parents=True, exist_ok=True)   # supports items/<key>.json
         prev = None
         try:
             prev = target.stat().st_mtime
         except OSError:
             pass
-        tmp = d / f".{name}.tmp-{os.getpid()}"
+        tmp = target.parent / f".{target.name}.tmp-{os.getpid()}"
         shutil.copyfile(src, tmp)
         os.replace(tmp, target)
         now = time.time()
