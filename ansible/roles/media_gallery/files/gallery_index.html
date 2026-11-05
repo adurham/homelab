@@ -48,6 +48,14 @@
   /* photo grid */
   #photoGrid{display:grid;gap:10px;min-height:140px;
     grid-template-columns:repeat(auto-fill,minmax(var(--tilesize,170px),1fr));}
+  /* filter bar (inside a folder): type / year / size / unseen */
+  #filterBar{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;}
+  #filterBar .fb-lab{font-size:12px;color:var(--muted);}
+  #filterBar select,#filterBar button{font:inherit;font-size:12.5px;padding:6px 9px;border-radius:8px;
+    border:1px solid var(--border);background:var(--panel);color:inherit;}
+  #filterBar button{cursor:pointer;}
+  #filterBar button.on{border-color:var(--accent);color:var(--accent);}
+  #filterBar .fb-count{font-size:12.5px;color:var(--muted);margin-left:4px;}
   /* resume bar (landing page): continue-where-you-left-off + recent folders */
   #resumeBar{display:none;margin:0 0 16px;}
   #resumeBar.show{display:block;}
@@ -514,6 +522,7 @@
   <div id="resumeBar"></div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
+  <div id="filterBar" style="display:none"></div>
   <div id="dupView" style="display:none"></div>
   <div id="state" class="state">Loading…</div>
   <div id="statusBar"><span id="statusLeft"></span><span id="statusRight"></span></div>
@@ -1071,6 +1080,7 @@
     var shownEmpty=q?emptyFolders.filter(function(n){return n.toLowerCase().indexOf(q)>=0;}):emptyFolders;
     var nMatch=shownChats.length+shownEmpty.length;
     elSearch.placeholder='Search folders…';
+    var fb=document.getElementById('filterBar'); if(fb){ fb.style.display='none'; fb.innerHTML=''; }
     elSub.textContent = q
       ? nMatch+' folder'+(nMatch===1?'':'s')+' match “'+searchQuery+'”'
       : chats.length+' folders · '+visibleCount+' items total';
@@ -1293,7 +1303,7 @@
     document.getElementById('zoom').style.display=listView?'none':'';
     // "All items" is a virtual aggregate; can't upload into it
     elUploadBtn.style.display=(chat==='*')?'none':'inline-block';
-    if(navigating){ clearSelection(); searchQuery=''; if(elSearch) elSearch.value=''; }
+    if(navigating){ clearSelection(); searchQuery=''; ff={type:'',year:'',size:'',unseen:false}; if(elSearch) elSearch.value=''; }
     else { pruneSelection(); refreshBulkBar(); }  // same-folder refresh: keep valid selections
     hideUploadBar();
     setCrumb(name);
@@ -1301,6 +1311,7 @@
     elSub.textContent=items.length+' item'+(items.length===1?'':'s');
 
     renderPhotos();
+    renderFilterBar();
     renderFolderRail();   // drop targets for drag-to-move
     if(navigating) window.scrollTo(0,0);
     // Resume: put the saved item back under the cursor AFTER the reset-to-top
@@ -1321,12 +1332,89 @@
 
   // items in the current folder after applying the search filter
   function filteredView(){
-    if(!searchQuery) return view;
+    if(!searchQuery && !ffActive()) return view;
     return view.filter(function(it){
-      return (it.stem||'').toLowerCase().indexOf(searchQuery)>=0 ||
-             (it.chat||'').toLowerCase().indexOf(searchQuery)>=0 ||
-             (it.file||'').toLowerCase().indexOf(searchQuery)>=0;
+      if(searchQuery){
+        var hit=(it.stem||'').toLowerCase().indexOf(searchQuery)>=0 ||
+                (it.chat||'').toLowerCase().indexOf(searchQuery)>=0 ||
+                (it.file||'').toLowerCase().indexOf(searchQuery)>=0;
+        if(!hit) return false;
+      }
+      return ffMatch(it);
     });
+  }
+
+  // ---------- FOLDER FILTERS (type / year / size / unseen) ----------
+  // Filename matching cannot answer "show videos from 2021" or "what have I not
+  // opened yet". These ride on the items already loaded for the open folder, so
+  // they cost nothing on the server.
+  var SEEN_KEY='gal.seen.v1';
+  var ff={type:'',year:'',size:'',unseen:false};
+  var _seen=null;
+  function seenInit(){
+    if(!_seen){
+      try{ var a=JSON.parse(localStorage.getItem(SEEN_KEY)||'[]'); _seen=new Set(Array.isArray(a)?a:[]); }
+      catch(_){ _seen=new Set(); }
+    }
+    return _seen;
+  }
+  function seenHas(stem){ return seenInit().has(stem); }
+  function seenMark(stem){
+    var s=seenInit(); if(!stem||s.has(stem)) return;
+    s.add(stem);
+    var arr=Array.from(s);
+    if(arr.length>20000) arr=arr.slice(arr.length-20000);   // bounded, oldest dropped
+    try{ localStorage.setItem(SEEN_KEY, JSON.stringify(arr)); }catch(_){}
+  }
+  function ffActive(){ return !!(ff.type||ff.year||ff.size||ff.unseen); }
+  function ffMatch(it){
+    if(ff.type && (it.type||'image')!==ff.type) return false;
+    if(ff.year && String(it.date||'').slice(0,4)!==ff.year) return false;
+    if(ff.size){
+      var s=it.size||0, MB=1024*1024;
+      if(ff.size==='s' && s>=10*MB) return false;
+      if(ff.size==='m' && (s<10*MB||s>=100*MB)) return false;
+      if(ff.size==='l' && s<100*MB) return false;
+    }
+    if(ff.unseen && seenHas(it.stem)) return false;
+    return true;
+  }
+  function renderFilterBar(){
+    var bar=document.getElementById('filterBar'); if(!bar) return;
+    if(current==null||current==='__dup__'){ bar.style.display='none'; bar.innerHTML=''; return; }
+    bar.style.display='flex';
+    var years={};
+    view.forEach(function(it){ var y=String(it.date||'').slice(0,4); if(/^\d{4}$/.test(y)) years[y]=1; });
+    var ylist=Object.keys(years).sort().reverse();
+    bar.innerHTML='';
+    function mkSel(opts,val,onchange,label){
+      var s=document.createElement('select');
+      s.title=label||'';
+      opts.forEach(function(o){ var op=document.createElement('option'); op.value=o[0]; op.textContent=o[1]; if(o[0]===val) op.selected=true; s.appendChild(op); });
+      s.addEventListener('change',function(){ onchange(s.value); });
+      bar.appendChild(s); return s;
+    }
+    mkSel([['','All types'],['image','Images'],['video','Videos']], ff.type, function(v){ ff.type=v; renderPhotos(); },
+      'Filter by type');
+    if(ylist.length>1){
+      mkSel([['','All years']].concat(ylist.map(function(y){return [y,y];})), ff.year, function(v){ ff.year=v; renderPhotos(); },
+        'Filter by file year');
+    }
+    mkSel([['','Any size'],['s','< 10 MB'],['m','10-100 MB'],['l','> 100 MB']], ff.size, function(v){ ff.size=v; renderPhotos(); },
+      'Filter by size');
+    var un=document.createElement('button'); un.type='button';
+    un.textContent=ff.unseen?'Unseen only ✓':'Unseen only';
+    if(ff.unseen) un.className='on';
+    un.addEventListener('click',function(){ ff.unseen=!ff.unseen; renderFilterBar(); renderPhotos(); });
+    bar.appendChild(un);
+    if(ffActive()){
+      var cl=document.createElement('button'); cl.type='button'; cl.textContent='Clear filters';
+      cl.addEventListener('click',function(){ ff={type:'',year:'',size:'',unseen:false}; renderFilterBar(); renderPhotos(); });
+      bar.appendChild(cl);
+      var c=document.createElement('span'); c.className='fb-count';
+      c.textContent=filteredView().length.toLocaleString()+' of '+view.length.toLocaleString()+' match';
+      bar.appendChild(c);
+    }
   }
   function updateStatusBar(shown){
     var sb=document.getElementById('statusBar');
@@ -1543,7 +1631,7 @@
   // ---------- LIGHTBOX ----------
   function openLb(i){
     lbIndex=i; var it=shown[i]; if(!it) return;
-    if(current&&current!=='__dup__'&&current!=='*') resumeTouch(current,i,it.stem);   // bookmark the exact photo
+    if(current&&current!=='__dup__'&&current!=='*'){ resumeTouch(current,i,it.stem); seenMark(it.stem); }   // bookmark + seen
     lbMedia.innerHTML='';
     var el;
     if(it.type==='video'){
