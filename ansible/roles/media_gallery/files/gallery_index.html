@@ -48,6 +48,12 @@
   /* photo grid */
   #photoGrid{display:grid;gap:10px;min-height:140px;
     grid-template-columns:repeat(auto-fill,minmax(var(--tilesize,170px),1fr));}
+  /* in-folder date rail: jump to a year instead of scrolling 15,000 tiles */
+  #dateRail{display:none;gap:6px;flex-wrap:wrap;margin:0 0 10px;}
+  #dateRail .yr{font:inherit;font-size:12.5px;padding:6px 11px;border-radius:999px;
+    border:1px solid var(--border);background:var(--panel);color:inherit;cursor:pointer;}
+  #dateRail .yr:hover{border-color:var(--accent);}
+  #dateRail .yr .n{color:var(--muted);margin-left:5px;font-size:11.5px;}
   /* filter bar (inside a folder): type / year / size / unseen */
   #filterBar{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;}
   #filterBar .fb-lab{font-size:12px;color:var(--muted);}
@@ -56,6 +62,15 @@
   #filterBar button{cursor:pointer;}
   #filterBar button.on{border-color:var(--accent);color:var(--accent);}
   #filterBar .fb-count{font-size:12.5px;color:var(--muted);margin-left:4px;}
+  /* "On this day" strip (landing page) */
+  #otdBar{display:none;margin:0 0 16px;}
+  #otdBar .otd-head{font-size:12.5px;color:var(--muted);margin:0 0 8px;}
+  #otdBar .otd-row{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;}
+  #otdBar .otd-tile{position:relative;flex:0 0 auto;width:112px;height:112px;padding:0;border-radius:10px;
+    overflow:hidden;border:1px solid var(--border);background:var(--panel);cursor:pointer;}
+  #otdBar .otd-tile img{width:100%;height:100%;object-fit:cover;display:block;}
+  #otdBar .otd-yr{position:absolute;left:6px;bottom:6px;font-size:11px;padding:2px 6px;border-radius:999px;
+    background:rgba(0,0,0,.6);color:#e7eaf0;}
   /* resume bar (landing page): continue-where-you-left-off + recent folders */
   #resumeBar{display:none;margin:0 0 16px;}
   #resumeBar.show{display:block;}
@@ -105,6 +120,23 @@
   .tile:hover .trash{opacity:1;}
   .trash:hover{background:#d23b3b;border:none;}
   /* on touch devices, always show */
+  /* 2026-11-05: TOUCH. The app is also used from a phone over the tailnet, where
+     hover affordances never appear and 26-28 px targets are a miss-fest. On a
+     coarse pointer every control gets >=44 px and is always visible, the search
+     box gets 16 px text (iOS zooms on anything smaller), and the lightbox nav
+     becomes thumb-sized. */
+  @media (pointer:coarse){
+    .tile .selbox,.tile .trash{width:44px;height:44px;font-size:20px;opacity:.92;top:4px;}
+    .tile .selbox{left:4px;} .tile .trash{right:4px;}
+    .folder .frename,.folder .fdelete,.folder .fselbox{width:44px;height:44px;font-size:18px;opacity:.92;}
+    .folder .fdelete{right:58px;}
+    #searchBox{font-size:16px;padding:10px 14px;}
+    #filterBar select,#filterBar button{min-height:44px;font-size:14px;}
+    #lb .nav{font-size:34px;padding:16px 20px;}
+    #lb .close{font-size:32px;top:10px;right:12px;}
+    #lb .lbtrash{top:10px;right:66px;font-size:22px;padding:10px 14px;}
+    #lb .lbauto{bottom:14px;right:12px;padding:12px 16px;font-size:14px;}
+  }
   @media(hover:none){.tile .trash{opacity:.85;}}
   /* inline confirm pill */
   .confirm{position:absolute;top:6px;left:6px;right:6px;z-index:4;display:flex;
@@ -529,9 +561,11 @@
     <button id="fbulkClear">Clear</button>
   </div>
   <div id="resumeBar"></div>
+  <div id="otdBar"></div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
   <div id="filterBar" style="display:none"></div>
+  <div id="dateRail" style="display:none"></div>
   <div id="dupView" style="display:none"></div>
   <div id="state" class="state">Loading…</div>
   <div id="statusBar"><span id="statusLeft"></span><span id="statusRight"></span></div>
@@ -1092,6 +1126,7 @@
     var nMatch=shownChats.length+shownEmpty.length;
     elSearch.placeholder='Search folders…';
     var fb=document.getElementById('filterBar'); if(fb){ fb.style.display='none'; fb.innerHTML=''; }
+    var dr=document.getElementById('dateRail'); if(dr){ dr.style.display='none'; dr.innerHTML=''; }
     elSub.textContent = q
       ? nMatch+' folder'+(nMatch===1?'':'s')+' match “'+searchQuery+'”'
       : chats.length+' folders · '+visibleCount+' items total';
@@ -1154,6 +1189,7 @@
     elFolder.innerHTML=''; elFolder.appendChild(frag);
     setRoute(q?('#s='+encodeURIComponent(searchQuery)):'');
     renderResumeBar();
+    renderOnThisDay();
     // prune folder-selection of folders that no longer exist, refresh the bar
     if(typeof selectedFolders!=='undefined'){
       Array.from(selectedFolders).forEach(function(n){
@@ -1323,6 +1359,7 @@
 
     renderPhotos();
     renderFilterBar();
+    renderDateRail();
     renderFolderRail();   // drop targets for drag-to-move
     if(navigating) window.scrollTo(0,0);
     // Resume: put the saved item back under the cursor AFTER the reset-to-top
@@ -1353,6 +1390,85 @@
       }
       return ffMatch(it);
     });
+  }
+
+  // ---------- DATE RAIL + ON THIS DAY ----------
+  // A chronological library of 253K items needs entry points other than a
+  // bigger grid: jump to a year inside a folder, and a small "on this day"
+  // strip on the landing page. Dates are FILE dates (message dates from the
+  // source), so the label says "file date" where it could be mistaken.
+  function renderDateRail(){
+    var rail=document.getElementById('dateRail'); if(!rail) return;
+    var dateSorted=(elSort.value==='new'||elSort.value==='old');
+    if(current==null||current==='__dup__'||!dateSorted){ rail.style.display='none'; rail.innerHTML=''; return; }
+    var counts={}, order=[];
+    shown.forEach(function(it){
+      var y=String(it.date||'').slice(0,4);
+      if(!/^\d{4}$/.test(y)) return;
+      if(counts[y]===undefined){ counts[y]=0; order.push(y); }
+      counts[y]++;
+    });
+    if(order.length<2){ rail.style.display='none'; rail.innerHTML=''; return; }
+    order.sort(function(a,b){ return elSort.value==='old'?(a-b):(b-a); });
+    rail.innerHTML=''; rail.style.display='flex';
+    order.forEach(function(y){
+      var b=document.createElement('button'); b.className='yr'; b.type='button'; b.title='Jump to '+y+' (file date)';
+      b.textContent=y;
+      var n=document.createElement('span'); n.className='n'; n.textContent=counts[y];
+      b.appendChild(n);
+      b.addEventListener('click',function(){
+        for(var i=0;i<shown.length;i++){
+          if(String(shown[i].date||'').slice(0,4)===y){ vgScrollToIndex(i,0); return; }
+        }
+      });
+      rail.appendChild(b);
+    });
+  }
+  var _otdCache={key:'',items:null};
+  function otdItems(){
+    var now=new Date();
+    var mm=('0'+(now.getMonth()+1)).slice(-2), dd=('0'+(now.getDate())).slice(-2);
+    var key=mm+'-'+dd+'-'+(manifest.length);
+    if(_otdCache.key===key) return _otdCache.items;
+    var hits=[];
+    for(var i=0;i<manifest.length && hits.length<60;i++){
+      var it=manifest[i];
+      if(it.hidden||!it.date) continue;
+      var d=String(it.date);
+      if(d.slice(5,7)===mm && d.slice(8,10)===dd) hits.push(it);
+    }
+    _otdCache={key:key,items:hits};
+    return hits;
+  }
+  function renderOnThisDay(){
+    var bar=document.getElementById('otdBar'); if(!bar) return;
+    if((searchQuery||'').trim()){ bar.style.display='none'; bar.innerHTML=''; return; }
+    var hits=otdItems();
+    if(hits.length<3){ bar.style.display='none'; bar.innerHTML=''; return; }
+    var years={}; hits.forEach(function(it){ years[String(it.date).slice(0,4)]=1; });
+    var nYears=Object.keys(years).length;
+    bar.innerHTML=''; bar.style.display='block';
+    var head=document.createElement('div'); head.className='otd-head';
+    head.textContent='On this day \u00B7 '+hits.length+' file'+(hits.length===1?'':'s')+' from '+nYears+' year'+(nYears===1?'':'s');
+    bar.appendChild(head);
+    var row=document.createElement('div'); row.className='otd-row';
+    hits.slice(0,12).forEach(function(it){
+      var b=document.createElement('button'); b.className='otd-tile'; b.type='button';
+      b.title=it.stem+' \u00B7 '+String(it.date).slice(0,10);
+      var img=document.createElement('img'); img.loading='lazy'; img.src='/'+it.thumb; img.alt='';
+      b.appendChild(img);
+      var y=document.createElement('span'); y.className='otd-yr'; y.textContent=String(it.date).slice(0,4);
+      b.appendChild(y);
+      b.addEventListener('click',function(){
+        var folder=it.chat, stem=it.stem;
+        openFolder(folder);
+        setTimeout(function(){
+          for(var i=0;i<view.length;i++){ if(view[i].stem===stem){ openLb(i); return; } }
+        },60);
+      });
+      row.appendChild(b);
+    });
+    bar.appendChild(row);
   }
 
   // ---------- FOLDER FILTERS (type / year / size / unseen) ----------
@@ -2288,6 +2404,22 @@
   });
   document.getElementById('lbClose').addEventListener('click',closeLb);
   document.getElementById('lbPrev').addEventListener('click',function(){hideLbConfirm();hideMoveMenu();navLb(-1);});
+  // swipe between items on touch (never over a video: scrubbing owns that surface)
+  (function(){
+    var sx=0, sy=0, tracking=false;
+    var el=document.getElementById('lb');
+    el.addEventListener('pointerdown',function(e){
+      if(e.target && e.target.tagName==='VIDEO') { tracking=false; return; }
+      if(e.pointerType==='mouse') { tracking=false; return; }
+      sx=e.clientX; sy=e.clientY; tracking=true;
+    },{passive:true});
+    el.addEventListener('pointerup',function(e){
+      if(!tracking) return; tracking=false;
+      var dx=e.clientX-sx, dy=e.clientY-sy;
+      if(Math.abs(dx)<44 || Math.abs(dx)<Math.abs(dy)*1.4) return;
+      hideLbConfirm(); hideMoveMenu(); navLb(dx<0?1:-1);
+    },{passive:true});
+  })();
   document.getElementById('lbAuto').addEventListener('click',function(){
     try{ localStorage.setItem(AUTO_KEY, autoOn()?'0':'1'); }catch(_){}
     lbAutoPaint();
@@ -2394,7 +2526,7 @@
     document.documentElement.style.setProperty('--tilesize', elZoom.value+'px');
     if(!listView && vg.sizer) renderPhotos();   // virtual grid: re-flow at the new size
   });
-  elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*')?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]); applySort(view); renderPhotos(); } });
+  elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*')?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]); applySort(view); renderPhotos(); renderDateRail(); } });
 
   // ---------- RIGHT-CLICK CONTEXT MENU ----------
   var elCtx=document.getElementById('ctxMenu');
