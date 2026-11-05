@@ -743,11 +743,30 @@ FB_HIDE_SCRIPT = """
     }
     return null;
   }
+  function samples(){
+    var out = [], n = 0;
+    try {
+      var w = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+      while (w.nextNode() && n < 4000) {
+        n++;
+        var v = w.currentNode.nodeValue;
+        if (v && /sponsor/i.test(v)) { out.push(v.trim().slice(0, 28)); if (out.length >= 4) { break; } }
+      }
+    } catch (e) {}
+    return out.join('|');
+  }
   function beacon(lab, hid, seen){
     try {
-      if (window.__abLast === lab + ':' + hid) { return; }
-      window.__abLast = lab + ':' + hid;
-      (new Image()).src = '/__abprobe?lab=' + lab + '&hid=' + hid + '&seen=' + seen + '&v=' + Math.round(window.innerHeight) + '&r=' + Math.random();
+      var smp = samples();
+      var key = lab + ':' + hid + ':' + smp;
+      if (window.__abLast === key) { return; }
+      window.__abLast = key;
+      var body = (document.body ? document.body.innerText.length : -1);
+      (new Image()).src = '/__abprobe?lab=' + lab + '&hid=' + hid + '&seen=' + seen
+        + '&v=' + Math.round(window.innerHeight) + '&txt=' + body
+        + '&ifr=' + document.querySelectorAll('iframe').length
+        + '&smp=' + encodeURIComponent(smp).slice(0, 220)
+        + '&r=' + Math.random();
     } catch (e) {}
   }
   function hide(){
@@ -757,8 +776,12 @@ FB_HIDE_SCRIPT = """
       var el = all[i];
       if (el.dataset && el.dataset.abHidden) { continue; }
       var t = (el.textContent || '').replace(/\u200b/g, '').trim();
-      if (!t || t.length > 30) { continue; }
-      if (!/^sponsored/i.test(t)) { continue; }
+      if (!t || t.length > 60) { continue; }
+      // mobile renders labels as 'Creality 3D · Sponsored' / 'Sponsored · …',
+      // desktop as bare 'Sponsored' — anchoring at the start missed the mobile
+      // form, which is why every beacon reported lab=0 while an ad was on screen
+      if (!/sponsored/i.test(t)) { continue; }
+      if (t.length > 14 && t.indexOf('\u00b7') < 0 && t.indexOf('|') < 0 && t.indexOf('\u2022') < 0) { continue; }
       lab++;
       var card = cardFor(el);
       if (card) {
@@ -782,7 +805,10 @@ FB_HIDE_SCRIPT = """
   }
   hide();
   new MutationObserver(function(){ clearTimeout(window.__abT); window.__abT = setTimeout(hide, 250); })
-    .observe(document.documentElement, {childList:true, subtree:true});
+    .observe(document.documentElement, {childList:true, subtree:true, characterData:true});
+  // the first run happens before the client renders anything (beacons showed
+  // 14 elements seen), so also poll while the feed fills in
+  setInterval(hide, 1500);
 })();
 </script>
 """
