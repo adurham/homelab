@@ -3550,7 +3550,7 @@ groups:
               # (vm-backup-watchdog.timer watches it) rather than vzdump.
               # The anchored regex is deliberate: an unanchored `vm-01`
               # alternative would also exclude a future `vm-011`.
-              expr: 'max by (id) (pve_not_backed_up_info{id=~"lxc/.+"} == 1) * on (id) group_left(name) max by (id, name) (pve_guest_info{id=~"lxc/.+", name!~"^(tc-.*|vm-01)$"})'
+              expr: 'max by (id) (pve_not_backed_up_info{id=~"lxc/(1[0-9][0-9]|17[0-9])",id!="lxc/106"} == 1) * on (id) group_left(name) max by (id, name) (pve_guest_info{id=~"lxc/.+", name!~"^(tc-.*|vm-01)$"})'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200

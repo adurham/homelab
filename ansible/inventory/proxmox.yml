@@ -55,7 +55,10 @@ all:
           # bwt-dhcp on 2026-09-11). With one identical union list on all
           # three jobs, whichever node currently hosts a guest backs it up
           # exactly once per night and coverage follows HA migrations
-          # automatically. vm-01 (106) is deliberately NOT here -- it has
+          # automatically. print-01 (119) was missing until 2026-11-05: the print farm
+          # was deployed after this list was written, so it had never been in any
+          # job -- exactly the silent-omission failure this comment describes.
+          # vm-01 (106) is deliberately NOT here -- it has
           # its own encrypted GDrive DR (roles/vm_backup +
           # vm-backup-watchdog.timer); tc-* test clients and the stopped
           # TanOS/win/usda lab VMs are likewise excluded. The Grafana
@@ -63,7 +66,7 @@ all:
           # out of this coverage again.
           pve_backup_job_id: "41c3b19b-20ea-4ba0-b760-52a79d1cb83a"
           pve_backup_schedule: "Mon..Sun 02:00"
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 107, 108, 113, 114, 115, 116, 117, 118, 170, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 240, 241]
         pve02:
           ansible_host: 192.168.86.12
           pve_sync_vlan_ip: "172.20.0.12"
@@ -72,7 +75,7 @@ all:
           pve_backup_job_id: "08bcc363-a9bf-4de3-9c73-5c4581cc0b78"
           pve_backup_schedule: "Mon..Sun 02:30"
           # Same union vmid list as pve01 -- migration-proof; see the comment there.
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 107, 108, 113, 114, 115, 116, 117, 118, 170, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 240, 241]
           # SMART textfile export (roles/smartctl_exporter) added
           # 2026-09-16 -- pve02's boot HDD (ST500LM034-2GH17A, 35k+
           # power-on hrs) has no spare to replace it with, so tracking
@@ -94,7 +97,7 @@ all:
           pve_backup_job_id: "52cb07d6-1400-4437-9591-568cad479879"
           pve_backup_schedule: "Mon..Sun 03:00"
           # Same union vmid list as pve01 -- migration-proof; see the comment there.
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 107, 108, 113, 114, 115, 116, 117, 118, 170, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 240, 241]
           # Same as pve02 -- see comment there. pve03's boot HDD
           # (ST500LM021-1KJ152) is the one that actually corrupted
           # pve-cluster's config.db on 2026-09-10.
