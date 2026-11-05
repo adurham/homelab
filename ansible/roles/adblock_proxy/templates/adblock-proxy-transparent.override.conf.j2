@@ -15,3 +15,8 @@ RestartSec=3
 # recycle the process instead of the kernel OOM-killing something else in the
 # container (or the container itself, which takes the exit node down).
 MemoryMax=1200M
+
+# The addon writes a heartbeat file per TLS connection; ProtectSystem=strict
+# leaves /var/lib read-only unless it is listed here (silent EROFS -> the
+# except: OSError in the addon swallowed it, and the monitor saw a dead addon).
+ReadWritePaths=/var/lib/adblock-proxy

@@ -130,6 +130,26 @@ REDDIT_CAPTURE_MAX_FILES = 200  # hard cap so this can never fill the CT's 8G ro
 LOG_TAG_DISCORD = "DISCORD_TRAFFIC"
 LOG_TAG_REDDIT = "REDDIT_TRAFFIC"
 
+HEARTBEAT_PATH = Path("/var/lib/adblock-proxy/heartbeat")
+_HEARTBEAT_MIN_INTERVAL = 5
+_last_heartbeat = 0.0
+
+
+def _heartbeat() -> None:
+    # Record that the addon is alive and seeing TLS (throttled to 5s).
+    # An external monitor compares the file mtime: a listening mitmdump with a
+    # dead or broken addon looks identical from the outside, so "port 8443 is
+    # open" is not a health signal on its own.
+    global _last_heartbeat
+    now = time.time()
+    if now - _last_heartbeat < _HEARTBEAT_MIN_INTERVAL:
+        return
+    _last_heartbeat = now
+    try:
+        HEARTBEAT_PATH.write_text(str(int(now)))
+    except OSError:
+        pass
+
 
 def _is_discord_host(host: str) -> bool:
     if not host:
@@ -170,6 +190,7 @@ def tls_clienthello(data: tls.ClientHelloData) -> None:
     GitHub Pages static site, not affiliated with this proxy) 404s on
     /cert/pem. Confirmed live 2026-07-27: an iPhone tapping the cert
     link got a 404 until this exclusion was added."""
+    _heartbeat()
     sni = data.client_hello.sni
     if sni and sni != "mitm.it" and not _is_discord_host(sni) and not _is_reddit_host(sni):
         data.ignore_connection = True

@@ -84,6 +84,11 @@ COMMIT
 # the same host.
 -A OUTPUT -d {{ ip_homeassistant }} -p tcp --dport 8123 -j ACCEPT
 -A OUTPUT -d {{ ip_homeassistant }} -p tcp --dport 53 -j ACCEPT
+# dnsmasq app web API (lease table) — read by the bypass canary.
+-A OUTPUT -d {{ ip_homeassistant }} -p tcp --dport 8976 -j ACCEPT
+# ICMP echo to the LAN only, so the canary can tell "device is off" from
+# "device is up but resolving somewhere else". No TCP access is granted.
+-A OUTPUT -d {{ net_lan_range }} -p icmp --icmp-type echo-request -j ACCEPT
 -A OUTPUT -d {{ ip_homeassistant }} -p udp --dport 53 -j ACCEPT
 # DNS resolution for this CT's own outbound lookups (apt, tailscale
 # control plane, blocklist-adjacent hostnames) — same AdGuard resolver

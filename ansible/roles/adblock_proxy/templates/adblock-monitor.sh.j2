@@ -1,0 +1,46 @@
+#!/bin/bash
+# Health push for the parts whose failure actually breaks the household.
+# Runs every 60s from adblock-monitor.timer; metrics land in VictoriaMetrics.
+#
+# Why each gauge exists:
+#   adblock_agh_up          — AdGuard is the LAN's only resolver. 0 = every client
+#                             loses DNS within a lease/cache TTL.
+#   adblock_dnsmasq_up      — DHCP is the other single point of failure on the HA box.
+#   adblock_interceptor_listener — mitmdump bound :8443 (fail-open guard covers the
+#                             routing side; this is the raw liveness signal).
+#   adblock_addon_heartbeat_age_seconds — the addon touches a file per TLS
+#                             connection. A listening mitmdump with a dead or
+#                             erroring addon looks identical from outside, so a
+#                             stale heartbeat is the only real "is it filtering?"
+#                             signal. Alerts should fire above ~900s.
+set -uo pipefail
+
+AGH_API="http://100.77.245.39:45158"        # AdGuard admin API, loopback-only on HA,
+                                            # exposed on the HA box's tailnet IP by a
+                                            # socat forwarder in the Advanced SSH app
+DNSMASQ_UI="http://192.168.86.2:8976/"      # dnsmasq app web API
+VM="http://172.16.0.42:8428/api/v1/import/prometheus"
+HB=/var/lib/adblock-proxy/heartbeat
+
+agh=0
+curl -sf -m 5 -o /dev/null "${AGH_API}/control/status" && agh=1
+
+dnsmasq=0
+code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "${DNSMASQ_UI}")
+# any HTTP answer means the server is alive; 400 is the expected bare-GET reply
+[ "${code}" != "000" ] && dnsmasq=1
+
+listener=0
+ss -ltn 'sport = :8443' 2>/dev/null | grep -q LISTEN && listener=1
+
+if [ -f "${HB}" ]; then
+    age=$(( $(date +%s) - $(stat -c %Y "${HB}") ))
+else
+    age=99999
+fi
+
+logger -t adblock-monitor "agh=${agh} dnsmasq=${dnsmasq} listener=${listener} heartbeat_age=${age}"
+
+printf 'adblock_agh_up %d\nadblock_dnsmasq_up %d\nadblock_interceptor_listener %d\nadblock_addon_heartbeat_age_seconds %d\n' \
+    "${agh}" "${dnsmasq}" "${listener}" "${age}" \
+    | curl -s -m 8 --data-binary @- "${VM}" >/dev/null

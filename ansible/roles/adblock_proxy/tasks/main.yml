@@ -338,6 +338,88 @@
   ansible.builtin.command: journalctl --vacuum-size=150M
   changed_when: false
 
+# ─── Monitoring the real single point of failure (added 2026-11-05) ────────
+# The proxy CT was hardened while the box that actually owns DNS + DHCP for the
+# whole house — a 4 GB HA Green running AdGuard (2.1M rules) — had no telemetry
+# at all. These push four gauges a minute into VictoriaMetrics:
+#   adblock_agh_up, adblock_dnsmasq_up, adblock_interceptor_listener,
+#   adblock_addon_heartbeat_age_seconds
+# AdGuard's admin API is loopback-only on the HA host; it is exposed on that
+# host's tailnet IP by a socat forwarder inside the Advanced SSH app. If that
+# app is stopped, adblock_agh_up goes 0 and the alert tells you why.
+- name: Deploy Adblock Health Monitor Script
+  ansible.builtin.template:
+    src: adblock-monitor.sh.j2
+    dest: /opt/adblock-proxy/monitor_push.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install Adblock Health Monitor Unit
+  ansible.builtin.template:
+    src: adblock-monitor.service.j2
+    dest: /etc/systemd/system/adblock-monitor.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install Adblock Health Monitor Timer
+  ansible.builtin.template:
+    src: adblock-monitor.timer.j2
+    dest: /etc/systemd/system/adblock-monitor.timer
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable & Start Adblock Health Monitor Timer
+  ansible.builtin.systemd:
+    name: adblock-monitor.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# ─── Bypass canary (added 2026-11-05) ──────────────────────────────────────
+# Configuration can't tell you a device is resolving somewhere else (hardcoded
+# 8.8.8.8, app DoH, DoT to a public resolver). This does: every device with a
+# lease that answers ICMP but has zero AdGuard queries in 24h is a bypass.
+# Devices carrying a dnsmasq tag are excluded — they're pointed at another
+# gateway deliberately (cameras, the Switch).
+- name: Install python3-websocket (lease table read)
+  ansible.builtin.apt:
+    name: python3-websocket
+    state: present
+
+- name: Deploy Bypass Canary
+  ansible.builtin.template:
+    src: adblock-canary.py.j2
+    dest: /opt/adblock-proxy/bypass_canary.py
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install Bypass Canary Unit
+  ansible.builtin.template:
+    src: adblock-canary.service.j2
+    dest: /etc/systemd/system/adblock-canary.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install Bypass Canary Timer
+  ansible.builtin.template:
+    src: adblock-canary.timer.j2
+    dest: /etc/systemd/system/adblock-canary.timer
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable & Start Bypass Canary Timer
+  ansible.builtin.systemd:
+    name: adblock-canary.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
 # ─── DNS-level ad/tracker blocking (exit-node path only) ───────────────────
 # The Discord SNI filter above only covers Discord. Every other app on a
 # phone routing through this exit node gets zero ad/tracker blocking

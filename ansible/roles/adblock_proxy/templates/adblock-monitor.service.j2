@@ -1,0 +1,7 @@
+[Unit]
+Description=Push adblock-stack health gauges to VictoriaMetrics
+After=adblock-proxy-transparent.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/adblock-proxy/monitor_push.sh

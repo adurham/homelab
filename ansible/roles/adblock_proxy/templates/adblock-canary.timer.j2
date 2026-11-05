@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the bypass canary daily
+
+[Timer]
+OnBootSec=10min
+OnCalendar=*-*-* 04:20:00
+Persistent=true
+AccuracySec=5min
+Unit=adblock-canary.service
+
+[Install]
+WantedBy=timers.target

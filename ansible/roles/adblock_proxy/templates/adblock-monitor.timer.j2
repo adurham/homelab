@@ -1,0 +1,11 @@
+[Unit]
+Description=Push adblock-stack health gauges every minute
+
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=60
+AccuracySec=5
+Unit=adblock-monitor.service
+
+[Install]
+WantedBy=timers.target

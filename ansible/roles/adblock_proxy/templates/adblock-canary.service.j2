@@ -1,0 +1,7 @@
+[Unit]
+Description=AdGuard bypass canary (LAN devices that never ask the resolver)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/adblock-proxy/bypass_canary.py

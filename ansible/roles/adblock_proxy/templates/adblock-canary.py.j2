@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Bypass canary: find LAN devices that are UP but never ask the home resolver.
+
+WHY: every "silent bypass" class looks identical from the outside — a device
+with a hardcoded 8.8.8.8, an app with its own DoH, a DoT-to-Cloudflare client.
+Configuration can't tell you they're happening; this can. A device that has a
+live ARP entry (so it's awake and on the LAN) but zero AdGuard queries in the
+window is resolving somewhere else.
+
+Output: one line into the journal, a JSON snapshot, and a metric that Grafana
+can alert on (adblock_silent_clients). Run daily from adblock-canary.timer.
+
+Requires: AdGuard's admin API (loopback on the HA box, exposed on its tailnet IP
+by the socat forwarder in the Advanced SSH app) and read access to the LAN ARP
+table of the interface facing 192.168.86.0/24.
+"""
+import json
+import subprocess
+import sys
+import time
+import urllib.request
+
+AGH = "http://100.77.245.39:45158"
+VM = "http://172.16.0.42:8428/api/v1/import/prometheus"
+LAN_IFACE = "eth1"
+WINDOW_HOURS = 24
+STATE_PATH = "/var/lib/adblock-proxy/canary.json"
+
+# Devices that legitimately never use DNS for HTTP: pure local-protocol gear.
+# Keep this list SHORT and justified — it's where blind spots hide.
+IGNORE_IPS = {
+    "192.168.86.1",    # the router itself
+    "192.168.86.2",    # the resolver
+    "192.168.86.41",   # this host
+    "192.168.86.56",   # inspection box (tagged onto its own gateway)
+}
+
+# Hosts that only ever speak mDNS/SSDP/NTP and have no reason to resolve names.
+IGNORE_HOSTNAME_HINTS = ("hue", "sync-box", "tasmota", "shelly", "esphome", "kasa",
+                          "cam-", "switch2", "nest-cam")
+
+
+def http_get(url, timeout=15):
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def arp_neighbours():
+    out = subprocess.run(
+        ["ip", "neigh", "show", "dev", LAN_IFACE],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    ips = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        ip = parts[0]
+        if "lladdr" in parts:
+            ips[ip] = parts[parts.index("lladdr") + 1]
+    return ips
+
+
+def clients_seen(hours):
+    """Collect client IPs that appear anywhere in the query log over `hours`."""
+    seen = set()
+    url = f"{AGH}/control/querylog?limit=5000"
+    deadline = time.time() - hours * 3600
+    pages = 0
+    while url and pages < 400:
+        data = http_get(url)
+        rows = data.get("data") or []
+        if not rows:
+            break
+        for row in rows:
+            client = row.get("client")
+            if client:
+                seen.add(client)
+        oldest = data.get("oldest") or ""
+        page_time = rows[-1].get("time", "")
+        if not oldest:
+            break
+        # stop once the page is older than the window
+        try:
+            stamp = time.mktime(time.strptime(page_time[:19], "%Y-%m-%dT%H:%M:%S"))
+        except Exception:
+            break
+        if stamp < deadline:
+            break
+        url = f"{AGH}/control/querylog?limit=5000&older_than={oldest}"
+        pages += 1
+    return seen
+
+
+def main():
+    leases = {}  # ip -> hostname, for reporting
+    try:
+        import websocket  # type: ignore
+        ws = websocket.create_connection("ws://192.168.86.2:8976/ws", timeout=10)
+        # the dnsmasq app pushes its whole state on connect; no command needed
+        raw = ws.recv()
+        ws.close()
+        for client in json.loads(raw).get("current_clients", []):
+            lease = client.get("lease") or {}
+            ip = lease.get("ip_addr")
+            if not ip or "." not in ip:  # IPv4 only; link-local v6 is noise
+                continue
+            leases[ip] = {
+                "host": lease.get("hostname") or "",
+                "mac": lease.get("mac_addr") or "",
+                # devices carrying a dnsmasq tag are deliberately pointed at a
+                # different gateway/DNS (cameras -> .56, the Switch -> .56), so
+                # their silence is by design, not a bypass
+                "tags": client.get("tags") or [],
+            }
+    except Exception as exc:
+        print(f"canary: lease lookup failed ({exc})", file=sys.stderr)
+        return 1
+
+    seen = clients_seen(WINDOW_HOURS)
+
+    silent = []
+    for ip, info in sorted(leases.items()):
+        host = info["host"]
+        if ip in IGNORE_IPS or ip in seen:
+            continue
+        if info["tags"]:
+            continue
+        if any(hint in host.lower() for hint in IGNORE_HOSTNAME_HINTS):
+            continue
+        # Liveness before blame: a device that is simply off holds a lease but
+        # isn't bypassing anything. The CT's OUTPUT chain allows LAN ICMP echo
+        # specifically so this probe is meaningful.
+        alive = subprocess.run(
+            ["ping", "-c", "1", "-W", "1", ip],
+            capture_output=True, check=False,
+        ).returncode == 0
+        if not alive:
+            continue
+        silent.append({"ip": ip, "host": host, "mac": info["mac"]})
+
+    payload = {
+        "checked_at": int(time.time()),
+        "window_hours": WINDOW_HOURS,
+        "leases": len(leases),
+        "clients_resolving": len(seen),
+        "silent": silent,
+    }
+    try:
+        with open(STATE_PATH, "w") as fh:
+            json.dump(payload, fh, indent=1)
+    except OSError as exc:
+        print(f"canary: could not write state ({exc})", file=sys.stderr)
+
+    print(f"canary: {len(leases)} leased, {len(seen)} resolving via AdGuard, "
+          f"{len(silent)} UP but silent: {[s['ip'] for s in silent]}")
+
+    metric = (
+        f"adblock_silent_clients {len(silent)}\n"
+        f"adblock_leased_clients {len(leases)}\n"
+        f"adblock_clients_resolving {len(seen)}\n"
+    ).encode()
+    try:
+        urllib.request.urlopen(
+            urllib.request.Request(f"{VM}", data=metric, method="POST"), timeout=10
+        )
+    except Exception as exc:
+        print(f"canary: metric push failed ({exc})", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
