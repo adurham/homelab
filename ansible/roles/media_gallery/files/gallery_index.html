@@ -48,6 +48,21 @@
   /* photo grid */
   #photoGrid{display:grid;gap:10px;min-height:140px;
     grid-template-columns:repeat(auto-fill,minmax(var(--tilesize,170px),1fr));}
+  /* resume bar (landing page): continue-where-you-left-off + recent folders */
+  #resumeBar{display:none;margin:0 0 16px;}
+  #resumeBar.show{display:block;}
+  #resumeBar .rcontinue{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
+    padding:14px 16px;border-radius:12px;border:1px solid var(--border);background:var(--panel);
+    color:inherit;font:inherit;cursor:pointer;transition:border-color .12s,transform .12s;}
+  #resumeBar .rcontinue:hover{border-color:var(--accent);transform:translateY(-1px);}
+  #resumeBar .rplay{font-size:22px;line-height:1;color:var(--accent);}
+  #resumeBar .rtext{display:flex;flex-direction:column;gap:3px;min-width:0;}
+  #resumeBar .rtitle{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #resumeBar .rsub{font-size:12.5px;color:var(--muted);}
+  #resumeBar .rrecent{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  #resumeBar .rchip{padding:7px 12px;border-radius:999px;border:1px solid var(--border);
+    background:var(--panel2);color:inherit;font:inherit;font-size:12.5px;cursor:pointer;}
+  #resumeBar .rchip:hover{border-color:var(--accent);}
   #zoom{width:90px;vertical-align:middle;}
   .tile{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;
     cursor:pointer;background:var(--panel);border:1px solid var(--border);}
@@ -496,6 +511,7 @@
     <button id="fbulkDelete" class="danger">&#128465; Delete folders</button>
     <button id="fbulkClear">Clear</button>
   </div>
+  <div id="resumeBar"></div>
   <div id="folderGrid"></div>
   <div id="photoGrid" style="display:none"></div>
   <div id="dupView" style="display:none"></div>
@@ -1021,6 +1037,7 @@
 
   // ---------- LANDING ----------
   function renderFolders(){
+    saveResumeNow();   // bookmark the folder we are leaving (no-op on landing)
     // Every return to the folders page passes through here: the Back button,
     // Escape, folder delete, upload completion and the background manifest
     // reload all call it directly. If we arrive from inside a folder the box
@@ -1115,6 +1132,7 @@
     });
     elFolder.innerHTML=''; elFolder.appendChild(frag);
     setRoute(q?('#s='+encodeURIComponent(searchQuery)):'');
+    renderResumeBar();
     // prune folder-selection of folders that no longer exist, refresh the bar
     if(typeof selectedFolders!=='undefined'){
       Array.from(selectedFolders).forEach(function(n){
@@ -1167,12 +1185,95 @@
     return null;
   }
 
+  // ---------- RESUME / RECENT FOLDERS ----------
+  // 2026-11-05: 516 folders and up to 15,865 items each meant reopening the app
+  // required remembering which folder, which sort and roughly where you were.
+  // This keeps a tiny per-folder bookmark — the anchored item's STEM (stable
+  // across manifest rebuilds, unlike an index), the sort mode and the time —
+  // in localStorage (metadata only, never media) and puts a "Continue" card at
+  // the top of the folders page.
+  var RESUME_KEY='gal.resume.v1';
+  var RESUME_MAX_RECENT=5;
+  var _resumeTimer=null;
+  function resumeState(){
+    try{
+      var o=JSON.parse(localStorage.getItem(RESUME_KEY)||'{}');
+      if(!o.by||typeof o.by!=='object') o.by={};
+      if(!Array.isArray(o.recent)) o.recent=[];
+      return o;
+    }catch(_){ return {by:{},recent:[]}; }
+  }
+  function resumeWrite(o){ try{ localStorage.setItem(RESUME_KEY, JSON.stringify(o)); }catch(_){} }
+  function resumeTouch(folder,i,stem){
+    if(!folder||folder==='__dup__'||folder==='*'||!stem) return;
+    var o=resumeState();
+    o.by[folder]={i:i||0,stem:stem,sort:elSort.value||'new',ts:Date.now(),n:(view&&view.length)||0};
+    o.recent=[folder].concat(o.recent.filter(function(n){return n!==folder;})).slice(0,RESUME_MAX_RECENT);
+    resumeWrite(o);
+  }
+  function resumeFor(folder){ return resumeState().by[folder]||null; }
+  function ago(ts){
+    var s=Math.max(1,Math.round((Date.now()-ts)/1000));
+    if(s<90) return 'just now';
+    var m=Math.round(s/60); if(m<60) return m+' min ago';
+    var h=Math.round(m/60); if(h<36) return h+' h ago';
+    var d=Math.round(h/24); return d===1?'yesterday':d+' days ago';
+  }
+  function renderResumeBar(){
+    var bar=document.getElementById('resumeBar'); if(!bar) return;
+    if((searchQuery||'').trim()){ bar.className=''; bar.innerHTML=''; return; }   // keep a filtered list clean
+    var o=resumeState();
+    var last=o.recent[0];
+    var known=function(n){ return chats.indexOf(n)>=0 || emptyFolders.indexOf(n)>=0; };
+    if(!last||!known(last)){ bar.className=''; bar.innerHTML=''; return; }
+    var r=o.by[last]||null;
+    bar.innerHTML='';
+    var btn=document.createElement('button');
+    btn.className='rcontinue'; btn.type='button';
+    var ic=document.createElement('span'); ic.className='rplay'; ic.textContent='\u25B6'; btn.appendChild(ic);
+    var tx=document.createElement('span'); tx.className='rtext'; btn.appendChild(tx);
+    var ti=document.createElement('span'); ti.className='rtitle'; ti.textContent='Continue: '+last;
+    var su=document.createElement('span'); su.className='rsub';
+    var total=chatMap[last]?chatMap[last].length:0;
+    var bits=[];
+    if(r) bits.push('item '+(r.i+1).toLocaleString()+' of '+(total||r.n||0).toLocaleString());
+    if(r) bits.push(ago(r.ts));
+    su.textContent=bits.join(' \u00B7 ');
+    tx.appendChild(ti); tx.appendChild(su);
+    btn.addEventListener('click',function(){ openFolder(last); });
+    bar.appendChild(btn);
+    if(o.recent.length>1){
+      var row=document.createElement('div'); row.className='rrecent';
+      o.recent.slice(1).forEach(function(n){
+        if(!known(n)) return;
+        var c=document.createElement('button'); c.className='rchip'; c.type='button'; c.textContent=n;
+        c.addEventListener('click',function(){ openFolder(n); });
+        row.appendChild(c);
+      });
+      if(row.children.length) bar.appendChild(row);
+    }
+    bar.className='show';
+  }
+  function saveResumeNow(){
+    if(!vg.sizer||!shown.length) return;
+    if(current==null||current==='__dup__'||current==='*') return;
+    var i=vgFirstVisible();
+    // Top of the grid is not a position worth bookmarking: keep whatever the
+    // last real action recorded (an opened photo), otherwise Back from a folder
+    // you never scrolled would erase the bookmark you actually wanted.
+    if(i<=0) return;
+    if(shown[i]) resumeTouch(current,i,shown[i].stem);
+  }
+
   // ---------- FOLDER VIEW ----------
   function openFolder(chat){
     // Only reset the selection when NAVIGATING to a different folder — NOT on a
     // same-folder re-render (e.g. the background reloadManifest timer calls
     // openFolder(current) to refresh, and must not wipe an in-progress selection).
     var navigating = (chat !== current);
+    if(navigating) saveResumeNow();          // bookmark the folder we are leaving
+    var rs=navigating?resumeFor(chat):null;  // restore its sort before laying it out
+    if(rs && rs.sort) elSort.value=rs.sort;
     current=chat;
     // "All items" reads manifest directly (bypassing chatMap), so apply the
     // same hidden-flag filter here that buildChats() applies to real folders.
@@ -1202,6 +1303,14 @@
     renderPhotos();
     renderFolderRail();   // drop targets for drag-to-move
     if(navigating) window.scrollTo(0,0);
+    // Resume: put the saved item back under the cursor AFTER the reset-to-top
+    // (stem-anchored, so a rebuild that shifts indices still lands on the same
+    // photo). Only when there is a real position to return to.
+    if(rs && rs.stem){
+      var at=-1;
+      for(var k=0;k<view.length;k++){ if(view[k].stem===rs.stem){ at=k; break; } }
+      if(at>0 && vg.sizer && vgScrollToIndex(at,1)) toast('Resumed at item '+(at+1).toLocaleString()+' of '+view.length.toLocaleString(),'ok');
+    }
     setRoute('#f='+encodeURIComponent(chat));
   }
 
@@ -1252,81 +1361,178 @@
 
   // shown[] = the array the grid + lightbox actually operate on (filtered+sorted)
   var shown=[];
-  // 2026-09-30: DOM-TILE RENDER CAP. renderPhotos() used to materialize one
-  // tile per matched item. That is fine for a normal folder, but a broad
-  // search ("a" matches every stem) selects all ~278K manifest items and the
-  // tab dies building 278K DOM subtrees + IntersectionObserver entries — the
-  // reported "page crashed" on search. The full match set stays in `shown`
-  // (lightbox, keyboard nav, selection all still span it); only the DOM is
-  // paged, with an explicit "Show more" affordance so nothing is hidden
-  // silently. 1200 keeps the initial render fast even for the biggest folders
-  // (a large folder here is 16.6K items) while feeling like a full grid.
+  // 2026-11-05: VIRTUAL GRID. The grid used to materialize a capped page of
+  // 1200 tiles and hide the rest behind a "Show more" sentinel, so a 15,865-item
+  // folder was chopped into 13 artificial pages and the scrollbar lied about
+  // how much there was. Now the grid renders only the rows in view (+overscan)
+  // inside a sizer of the full height: honest scrollbar, drag-to-jump, and a
+  // constant DOM cost no matter how big the folder is. The capped renderer is
+  // kept for LIST view (rows have variable height and it is rarely used at
+  // scale) — see renderListCapped().
   var RENDER_PAGE=1200;
   var renderLimit=RENDER_PAGE;
   var renderCtx=null;      // current view+query key; a change resets the page
-  function renderPhotos(){
-    var ctx=(current===null?'~landing':current)+'\u0000'+searchQuery;
-    if(ctx!==renderCtx){ renderCtx=ctx; renderLimit=RENDER_PAGE; }
-    shown=filteredView();
-    var limit=Math.min(shown.length, renderLimit);
+
+  // ---- one tile: shared by the virtual grid and the capped list view ----
+  function makeTile(it,i){
+    var t=document.createElement('div');
+    t.className='tile'; t.dataset.i=i; t.dataset.stem=it.stem;
+    if(selected.has(it.stem)) t.classList.add('selected');
+    var sh=document.createElement('div'); sh.className='shimmer'; t.appendChild(sh);
+    var img=document.createElement('img');
+    img.loading='lazy'; img.decoding='async';
+    t.appendChild(img);
+    // defer the actual thumb load until the tile nears the viewport — at 1000+
+    // items this stops the browser from queueing every thumbnail at once (the
+    // ~6-conn-per-host cap was serializing them) and cuts initial render cost.
+    img.dataset.src='/'+it.thumb;
+    if(_io){ _io.observe(t); } else { wireImg(t,img,img.dataset.src); }
+    if(it.type==='video'){
+      var b=document.createElement('div'); b.className='badge'; t.appendChild(b);
+      var vt=document.createElement('div'); vt.className='vtag'; vt.textContent='VIDEO'; t.appendChild(vt);
+    }
+    var dl=fmtDate(it.date);
+    if(dl){var d=document.createElement('div'); d.className='dlabel'; d.textContent=dl; t.appendChild(d);}
+    // list-view extra columns (hidden in grid via CSS)
+    var ext=(it.file||'').split('.').pop().toLowerCase();
+    var ln=document.createElement('div'); ln.className='li-name'; ln.textContent=it.stem+'.'+ext; t.appendChild(ln);
+    var lm=document.createElement('div'); lm.className='li-meta';
+    lm.textContent=(it.type||'')+(it.size?(' · '+fmtBytes(it.size)):'')+(dl?(' · '+dl):''); t.appendChild(lm);
+    // ALWAYS-visible selection checkbox (top-left, mirror of trash top-right)
+    var sb=document.createElement('div'); sb.className='selbox';
+    sb.innerHTML=selected.has(it.stem)?'&#10003;':'';
+    sb.addEventListener('click',function(e){ e.stopPropagation(); toggleSelect(i,t,e); });
+    t.appendChild(sb);
+    // draggable for drag-to-move
+    t.draggable=true;
+    (function(tile,item,idx){
+      var tb=document.createElement('button'); tb.className='trash';
+      tb.title='Delete'; tb.innerHTML='&#128465;';
+      tb.addEventListener('click',function(e){
+        e.stopPropagation(); showTileConfirm(tile,item,tb);
+      });
+      tile.appendChild(tb);
+      tile.addEventListener('dragstart',function(e){ onTileDragStart(e,idx,tile); });
+      tile.addEventListener('dragend',function(e){ onTileDragEnd(e,tile); });
+      tile.addEventListener('contextmenu',function(e){ openCtxMenu(e,idx,tile); });
+    })(t,it,i);
+    return t;
+  }
+
+  // ---- virtual grid engine ----
+  var vg={sizer:null,cols:1,tileW:0,rowH:0,gap:10,rows:0,start:-1,end:-1,raf:0};
+  var VG_OVERSCAN=2;         // extra rows rendered above and below the viewport
+  function vgMetrics(){
+    var cs=getComputedStyle(document.documentElement);
+    var ts=parseInt(cs.getPropertyValue('--tilesize'))||170;
+    var gap=10;
+    var w=elPhoto.clientWidth||document.documentElement.clientWidth||900;
+    var cols=Math.max(1,Math.floor((w+gap)/(ts+gap)));
+    var tw=Math.floor((w-(cols-1)*gap)/cols);
+    if(tw<60) tw=ts;
+    return {cols:cols,tileW:tw,rowH:tw+gap,gap:gap};
+  }
+  function vgLayout(){
+    var m=vgMetrics();
+    vg.cols=m.cols; vg.tileW=m.tileW; vg.rowH=m.rowH; vg.gap=m.gap;
+    vg.rows=Math.max(1,Math.ceil(shown.length/vg.cols));
+    if(vg.sizer) vg.sizer.style.height=Math.max(0,vg.rows*vg.rowH-vg.gap)+'px';
+  }
+  function vgWindow(force){
+    if(!vg.sizer) return;
+    var vh=window.innerHeight||800;
+    var scrollY=window.pageYOffset||document.documentElement.scrollTop||0;
+    var top=vg.sizer.getBoundingClientRect().top+scrollY;    // absolute document offset
+    var firstRow=Math.max(0,Math.floor((scrollY-top)/vg.rowH)-VG_OVERSCAN);
+    var visRows=Math.ceil(vh/vg.rowH)+VG_OVERSCAN*2;
+    var lastRow=Math.min(vg.rows-1,firstRow+visRows);
+    if(!force && firstRow===vg.start && lastRow===vg.end) return;
+    vg.start=firstRow; vg.end=lastRow;
     var frag=document.createDocumentFragment();
-    shown.slice(0,limit).forEach(function(it,i){
-      var t=document.createElement('div');
-      t.className='tile'; t.dataset.i=i; t.dataset.stem=it.stem;
-      if(selected.has(it.stem)) t.classList.add('selected');
-      var sh=document.createElement('div'); sh.className='shimmer'; t.appendChild(sh);
-      var img=document.createElement('img');
-      img.loading='lazy'; img.decoding='async';
-      t.appendChild(img);
-      // defer the actual thumb load until the tile nears the viewport — at 1000+
-      // items this stops the browser from queueing every thumbnail at once (the
-      // ~6-conn-per-host cap was serializing them) and cuts initial render cost.
-      img.dataset.src='/'+it.thumb;
-      if(_io){ _io.observe(t); } else { wireImg(t,img,img.dataset.src); }
-      if(it.type==='video'){
-        var b=document.createElement('div'); b.className='badge'; t.appendChild(b);
-        var vt=document.createElement('div'); vt.className='vtag'; vt.textContent='VIDEO'; t.appendChild(vt);
+    for(var r=firstRow;r<=lastRow;r++){
+      for(var c=0;c<vg.cols;c++){
+        var i=r*vg.cols+c;
+        if(i>=shown.length) break;
+        var t=makeTile(shown[i],i);
+        t.style.position='absolute';
+        t.style.left=(c*(vg.tileW+vg.gap))+'px';
+        t.style.top=(r*vg.rowH)+'px';
+        t.style.width=vg.tileW+'px';
+        t.style.height=vg.tileW+'px';
+        frag.appendChild(t);
       }
-      var dl=fmtDate(it.date);
-      if(dl){var d=document.createElement('div'); d.className='dlabel'; d.textContent=dl; t.appendChild(d);}
-      // list-view extra columns (hidden in grid via CSS)
-      var ext=(it.file||'').split('.').pop().toLowerCase();
-      var ln=document.createElement('div'); ln.className='li-name'; ln.textContent=it.stem+'.'+ext; t.appendChild(ln);
-      var lm=document.createElement('div'); lm.className='li-meta';
-      lm.textContent=(it.type||'')+(it.size?(' · '+fmtBytes(it.size)):'')+(dl?(' · '+dl):''); t.appendChild(lm);
-      // ALWAYS-visible selection checkbox (top-left, mirror of trash top-right)
-      var sb=document.createElement('div'); sb.className='selbox';
-      sb.innerHTML=selected.has(it.stem)?'&#10003;':'';
-      sb.addEventListener('click',function(e){ e.stopPropagation(); toggleSelect(i,t,e); });
-      t.appendChild(sb);
-      // draggable for drag-to-move
-      t.draggable=true;
-      (function(tile,item,idx){
-        var tb=document.createElement('button'); tb.className='trash';
-        tb.title='Delete'; tb.innerHTML='&#128465;';
-        tb.addEventListener('click',function(e){
-          e.stopPropagation(); showTileConfirm(tile,item,tb);
-        });
-        tile.appendChild(tb);
-        tile.addEventListener('dragstart',function(e){ onTileDragStart(e,idx,tile); });
-        tile.addEventListener('dragend',function(e){ onTileDragEnd(e,tile); });
-        tile.addEventListener('contextmenu',function(e){ openCtxMenu(e,idx,tile); });
-      })(t,it,i);
-      frag.appendChild(t);
+    }
+    vg.sizer.innerHTML=''; vg.sizer.appendChild(frag);
+  }
+  function vgKick(){
+    if(vg.raf) return;
+    vg.raf=requestAnimationFrame(function(){ vg.raf=0; vgWindow(false); });
+  }
+  // index (into `shown`) of the first fully visible tile — the resume anchor
+  function vgFirstVisible(){
+    if(!vg.sizer||!vg.rowH) return 0;
+    var scrollY=window.pageYOffset||document.documentElement.scrollTop||0;
+    var top=vg.sizer.getBoundingClientRect().top+scrollY;
+    var row=Math.max(0,Math.round((scrollY-top)/vg.rowH));
+    return Math.min(Math.max(0,shown.length-1),row*vg.cols);
+  }
+  // Scroll to a given index (used by resume + the date rail). Fractional
+  // `offsetRows` shifts the item away from the very top edge.
+  function vgScrollToIndex(i,offsetRows){
+    if(!vg.sizer) return false;
+    vgLayout();
+    var row=Math.floor(i/vg.cols);
+    var target=vg.sizer.getBoundingClientRect().top+(window.pageYOffset||0)+row*vg.rowH-(offsetRows||0)*vg.rowH;
+    window.scrollTo(0,Math.max(0,target));
+    vgWindow(true);
+    return true;
+  }
+  if(typeof window!=='undefined'){
+    window.addEventListener('scroll',function(){
+      if(vg.sizer) vgKick();
+      // bookmark the scroll position while browsing (throttled: one write / 700ms)
+      if(vg.sizer && !_resumeTimer){
+        _resumeTimer=setTimeout(function(){ _resumeTimer=null; saveResumeNow(); },700);
+      }
+    },{passive:true});
+    window.addEventListener('resize',function(){ if(vg.sizer){ vg.start=-1; vg.end=-1; vgLayout(); vgWindow(true); } });
+    document.addEventListener('visibilitychange',function(){
+      if(document.visibilityState==='hidden') saveResumeNow();
     });
+  }
+
+  // ---- capped renderer (LIST view only) ----
+  function renderListCapped(){
+    var limit=Math.min(shown.length,renderLimit);
+    var frag=document.createDocumentFragment();
+    shown.slice(0,limit).forEach(function(it,i){ frag.appendChild(makeTile(it,i)); });
     elPhoto.innerHTML=''; elPhoto.appendChild(frag);
-    // "Show more" sentinel: renderPhotos only materializes renderLimit tiles
-    // (see RENDER_PAGE above) — surface that honestly instead of silently
-    // truncating the grid.
     if(shown.length>limit){
       var more=document.createElement('div');
       more.className='showmore';
       more.textContent='Showing '+limit.toLocaleString()+' of '+shown.length.toLocaleString()+' — click to show more';
-      more.addEventListener('click',function(){
-        renderLimit+=RENDER_PAGE*4;
-        renderPhotos();
-      });
+      more.addEventListener('click',function(){ renderLimit+=RENDER_PAGE*4; renderPhotos(); });
       elPhoto.appendChild(more);
+    }
+  }
+
+  function renderPhotos(){
+    var ctx=(current===null?'~landing':current)+'\u0000'+searchQuery;
+    if(ctx!==renderCtx){ renderCtx=ctx; renderLimit=RENDER_PAGE; }
+    shown=filteredView();
+    if(listView){
+      vg.sizer=null;
+      renderListCapped();
+    }else{
+      elPhoto.style.display='block';
+      var sizer=document.createElement('div');
+      sizer.className='pgsizer';
+      sizer.style.position='relative';
+      sizer.style.width='100%';
+      elPhoto.innerHTML=''; elPhoto.appendChild(sizer);
+      vg.sizer=sizer; vg.start=-1; vg.end=-1;
+      vgLayout();
+      vgWindow(true);
     }
     kbFocus=-1;
     updateStatusBar(current!=null && current!=='__landing__');
@@ -1337,6 +1543,7 @@
   // ---------- LIGHTBOX ----------
   function openLb(i){
     lbIndex=i; var it=shown[i]; if(!it) return;
+    if(current&&current!=='__dup__'&&current!=='*') resumeTouch(current,i,it.stem);   // bookmark the exact photo
     lbMedia.innerHTML='';
     var el;
     if(it.type==='video'){
@@ -2039,10 +2246,12 @@
     listView=!listView; document.body.classList.toggle('listview',listView);
     elViewToggle.innerHTML=listView?'&#9783;':'&#9776;';  // grid vs list glyph
     elZoom.style.display=listView?'none':'';
+    if(current!==null) renderPhotos();   // re-lay the grid after the mode switch
   });
   var elZoom=document.getElementById('zoom');
   elZoom.addEventListener('input',function(){
     document.documentElement.style.setProperty('--tilesize', elZoom.value+'px');
+    if(!listView && vg.sizer) renderPhotos();   // virtual grid: re-flow at the new size
   });
   elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*')?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]); applySort(view); renderPhotos(); } });
 
