@@ -602,6 +602,19 @@ def websocket_message(flow: http.HTTPFlow) -> None:
         ctx.log.warn(f"[META_WS] observe failed: {exc}")
 
 
+def _prepare_rewrite(flow: http.HTTPFlow) -> None:
+    """Strip framing headers before replacing a body.
+
+    Facebook streams its feed with Transfer-Encoding: chunked. Leaving that header
+    in place while substituting the body produced a page that never finished
+    loading ("not loading properly", 2026-11-05) even though every remaining line
+    was valid JSON. Content-Length is recalculated by mitmproxy once the body is
+    set, so all three headers are removed here.
+    """
+    for header in ("content-encoding", "transfer-encoding", "content-length"):
+        flow.response.headers.pop(header, None)
+
+
 # ------------------------------------------------------- Instagram web feed ads
 # Instagram's desktop feed is a GraphQL POST (measured: POST https://157.240.254.174
 # /graphql/query — the CDN IP is the flow host, so no hostname rule can find it).
@@ -649,7 +662,7 @@ def _strip_instagram_feed_ads(flow: http.HTTPFlow) -> None:
     if not removed:
         return
     try:
-        flow.response.headers.pop("content-encoding", None)
+        _prepare_rewrite(flow)
         flow.response.content = json.dumps(doc, separators=(",", ":")).encode()
         ctx.log.info(f"[INSTAGRAM] stripped {removed} promoted feed item(s) "
                      f"({len(text)} -> {len(flow.response.content)} chars)")
@@ -672,23 +685,62 @@ FB_FEED_HINT = "CometNewsFeed_viewerConnection"
 FB_SPONSORED_HINTS = ("sponsoredLabel", '"SponsoredData"')
 
 
+def _empty_fb_unit(line: str):
+    """Turn a sponsored feed unit into the same delta with no stories.
+
+    Dropping the line outright stalled the feed ("not loading properly"): each
+    /api/graphql/ reply ANSWERS a specific next-story request, so a missing reply
+    leaves the client waiting on a promise that never resolves. The unit is
+    therefore answered with an empty edges list instead — same label and path,
+    valid GraphQL delta, zero items.
+    """
+    try:
+        doc = json.loads(line)
+    except Exception:  # noqa: BLE001
+        return None
+    data = doc.get("data")
+    if not isinstance(data, dict):
+        return None
+    edges = (((data.get("viewer") or {}).get("news_feed") or {}).get("edges"))
+    if isinstance(edges, list):
+        doc_label = doc.get("label")
+        doc["data"]["viewer"]["news_feed"]["edges"] = []
+        ctx.log.info(f"[FACEBOOK] emptied unit (edges) label={str(doc_label)[:36]} "
+                     f"was {len(edges)} edge(s)")
+        return json.dumps(doc, separators=(",", ":"))
+    if data.get("node") is not None:
+        # The common shape: one unit = one story at data.node, path
+        # [viewer, news_feed, edges]. Null it so the reply still answers the
+        # client's next-story request but carries no story to render.
+        name = str((data.get("node") or {}).get("__typename"))[:20]
+        data["node"] = None
+        ctx.log.info(f"[FACEBOOK] emptied unit (node) was {name}")
+        return json.dumps(doc, separators=(",", ":"))
+    return None
+
+
 def _strip_facebook_feed_ads(flow: http.HTTPFlow) -> None:
     if not flow.response or flow.response.status_code != 200:
         return
     text = _response_text(flow)
     if not text or FB_FEED_HINT not in text:
         return
+    ctx.log.info(f"[FACEBOOK] pre-rewrite te={flow.response.headers.get('transfer-encoding')} "
+                 f"cl={flow.response.headers.get('content-length')} body={len(text)}B")
     kept, removed = [], 0
     for line in text.split("\n"):
         if (FB_FEED_HINT in line
                 and any(hint in line for hint in FB_SPONSORED_HINTS)):
+            emptied = _empty_fb_unit(line)
             removed += 1
+            if emptied is not None:
+                kept.append(emptied)
             continue
         kept.append(line)
     if not removed:
         return
     try:
-        flow.response.headers.pop("content-encoding", None)
+        _prepare_rewrite(flow)
         flow.response.content = "\n".join(kept).encode()
         ctx.log.info(f"[FACEBOOK] stripped {removed} sponsored feed unit(s) "
                      f"({len(text)} -> {len(flow.response.content)} chars)")
@@ -715,7 +767,17 @@ def response(flow: http.HTTPFlow) -> None:
     # even decrypted, so a path hint is safe here.
     if _is_meta_host(host) or _looks_like_meta_path(flow.request.path):
         _strip_instagram_feed_ads(flow)
-        _strip_facebook_feed_ads(flow)
+        # FACEBOOK WEB ADS: measured dead end, do not re-enable without new
+        # evidence. Both suppression strategies break the page ("not loading
+        # properly", twice, 2026-11-05):
+        #   (a) delete the sponsored unit  -> the client's next-story request is
+        #       never answered and pagination freezes;
+        #   (b) reply with data.node = null -> same failure, the client treats the
+        #       null story as a broken delta and stops.
+        # The feed is a one-story-per-reply relay stream and it validates every
+        # delta, so there is no body rewrite that removes an ad without stalling
+        # it. The strip code is kept for reference/experiments, not wired in.
+        # _strip_facebook_feed_ads(flow)
         # Log every Meta request path: the web feed endpoint has to be visible
         # before a rewrite can target it (the first two attempts guessed wrong).
         ctx.log.info(f"[META_REQ] {flow.request.method} {flow.request.path[:110]} "
