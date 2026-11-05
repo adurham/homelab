@@ -136,6 +136,7 @@ REDDIT_CONTENT_SUFFIXES = (".reddit.com",)
 
 REDDIT_CAPTURE_DIR = Path("/var/log/mitmproxy/reddit_capture")
 REDDIT_CAPTURE_MAX_FILES = 200  # hard cap so this can never fill the CT's 8G rootfs
+REDDIT_CAPTURE_MAX_BYTES = 2 * 1024 * 1024  # one fragment can be large; skip the giants
 # NOTE: capture runs AFTER ad-stripping, so saved bodies are post-strip. For a
 # pre-strip sample, comment out the _strip_reddit_ads() call in response() and
 # restart; the field names still appear in stripped bodies, the ad edges do not.
@@ -295,6 +296,65 @@ def _strip_ad_edges(obj):
     return removed
 
 
+HTML_AD_ELEMENTS = ("shreddit-ad-post",)
+
+
+def _strip_reddit_html_ads(flow: http.HTTPFlow) -> None:
+    """Remove Reddit's ad custom-elements from HTML fragments.
+
+    Shreddit renders a promoted post as an <shreddit-ad-post> element inside the
+    feed fragments fetched from /svc/shreddit/... . Custom elements are safe to
+    cut wholesale: the tag pair is balanced and self-contained, unlike divs.
+    """
+    if not flow.response or flow.response.status_code != 200:
+        return
+    try:
+        body = flow.response.content or b""
+    except Exception:  # noqa: BLE001
+        return
+    if not body or b"shreddit-ad" not in body:
+        return
+    original = body
+    removed = 0
+    for tag in HTML_AD_ELEMENTS:
+        pattern = re.compile(rb"<" + tag.encode() + rb"\b.*?</" + tag.encode() + rb">", re.S | re.I)
+        body, count = pattern.subn(b"", body)
+        removed += count
+    if not removed:
+        ctx.log.info(f"[{LOG_TAG_REDDIT}] saw shreddit-ad markup but no removable element "
+                     f"({len(original)} bytes) at {flow.request.pretty_host}{flow.request.path}")
+        return
+    try:
+        flow.response.headers.pop("content-encoding", None)
+        flow.response.content = body
+        ctx.log.info(f"[{LOG_TAG_REDDIT}] stripped {removed} promoted HTML block(s) "
+                     f"({len(original)} -> {len(body)} bytes) at {flow.request.pretty_host}{flow.request.path}")
+    except Exception as exc:  # noqa: BLE001
+        ctx.log.warn(f"[{LOG_TAG_REDDIT}] html ad strip failed: {exc}")
+
+
+def _capture_reddit_body(flow: http.HTTPFlow, suffix: str = "json") -> None:
+    """Save a capped sample of a Reddit body for diagnosis."""
+    if not flow.response or flow.response.status_code != 200:
+        return
+    try:
+        body = flow.response.content or b""
+        if not body or len(body) > REDDIT_CAPTURE_MAX_BYTES:
+            return
+        REDDIT_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+        existing = sorted(REDDIT_CAPTURE_DIR.glob("*.json")) + sorted(REDDIT_CAPTURE_DIR.glob("*.html"))
+        if len(existing) >= REDDIT_CAPTURE_MAX_FILES:
+            return
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", flow.request.path)[:80]
+        stamp = int(time.time() * 1000)
+        target = REDDIT_CAPTURE_DIR / f"{stamp}_{flow.request.pretty_host}__{safe}.{suffix}"
+        target.write_bytes(body)
+        ctx.log.info(f"[{LOG_TAG_REDDIT}] captured {flow.request.pretty_host}{flow.request.path} "
+                     f"-> {target.name} ({len(existing) + 1}/{REDDIT_CAPTURE_MAX_FILES})")
+    except Exception as exc:  # noqa: BLE001 - never let capture logic break real traffic
+        ctx.log.warn(f"[{LOG_TAG_REDDIT}] capture failed: {exc}")
+
+
 def _response_text(flow: http.HTTPFlow):
     """Decoded body text, or None when the body can't be read.
 
@@ -368,7 +428,17 @@ def response(flow: http.HTTPFlow) -> None:
     unaffected either way)."""
     host = flow.request.pretty_host
     content_type = flow.response.headers.get("content-type", "") if flow.response else ""
-    if "json" not in content_type.lower():
+    lowered = content_type.lower()
+
+    if "html" in lowered:
+        # The web feed arrives as HTML fragments (shreddit custom elements), not
+        # JSON, so the app-side rewrite cannot see it. Strip the ad element and
+        # keep the fragments (capped) so a markup change is diagnosable.
+        _strip_reddit_html_ads(flow)
+        _capture_reddit_body(flow, suffix="html")
+        return
+
+    if "json" not in lowered:
         return
 
     # Strip on CONTENT, not on host. The iOS app's Reddit traffic reaches us
