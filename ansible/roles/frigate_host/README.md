@@ -25,6 +25,41 @@ proxmox host — so the whole stand-up is one play against `pve01`.
   fires the timer once and never re-arms, so each Nest WebRTC session dies
   ~5 min in). The patched binary re-arms in a loop indefinitely.
 
+### Upgrading the patched go2rtc binary
+
+The binary has to track upstream: HA's `go2rtc` integration raises a
+`recommended_version` repair whenever the connected server is older than the
+version it recommends (`current_version < recommended_version`), and
+`configuration.yaml` points HA at this Frigate's go2rtc on `:1984`. Version
+2026.11 recommends **1.9.15**; the binary shipped here was `1.9.14+dev.dc1685e`.
+
+The carried patch lives in `files/go2rtc-nest.patch` and applies cleanly to
+upstream `v1.9.15`. `files/build-go2rtc-patched.sh` does the whole cycle on
+frigate-01 (build needs no root; the install step is sudo/YubiKey-gated):
+
+```
+scp ansible/roles/frigate_host/files/{go2rtc-nest.patch,build-go2rtc-patched.sh} amd@frigate-01:/tmp/
+ssh -tt -A amd@frigate-01 'bash /tmp/build-go2rtc-patched.sh 1.9.15 --install'
+```
+
+Notes that cost time to rediscover:
+
+- **Static build only** (`CGO_ENABLED=0`) — a dynamic build from a newer glibc
+  dies in Frigate's Bookworm image (`Verneed record`). The old failing binary is
+  still on disk as `go2rtc_patched.broken`; ignore/remove it.
+- Build the Go toolchain locally under `~/go-toolchain`; the CT ships no Go.
+  v1.9.15's `go.mod` requires `go >= 1.26`.
+- The version string comes from VCS stamping, so a patched tree reports
+  `1.9.15+dev.<sha>` — that is intentionally *greater* than `1.9.15` for
+  awesomeversion and clears the repair.
+- **sudo on fleet hosts needs a TTY plus agent forwarding** (`ssh -tt -A` with
+  `~/.ssh/id_ansible`); without `-tt`, `sudo` fails with "a password is
+  required" even though the YubiKey is signing.
+- HA never deletes the `recommended_version` issue once raised (the component
+  only deletes `unsupported_version`); after upgrading, clear the stale entry
+  with `repairs/ignore_issue {domain: go2rtc, issue_id: recommended_version}` —
+  it would otherwise linger until a Core restart deactivates it.
+
 ## Architecture
 
 Nest WebRTC sources are defined **directly in Frigate's go2rtc config block**

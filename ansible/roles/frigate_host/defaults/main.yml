@@ -28,6 +28,12 @@ net_private_ip: "{{ ip_frigate }}/24"
 
 # Frigate container (single container, custom go2rtc binary at /config/go2rtc).
 frigate_image: "ghcr.io/blakeblackshear/frigate:stable"
+# Upstream go2rtc tag the mounted patched binary is built from. Home Assistant
+# raises an `recommended_version` repair whenever the go2rtc server is older
+# than the version its own integration recommends (2026.11 recommends 1.9.15),
+# so this must track upstream. Rebuild + redeploy with
+# files/build-go2rtc-patched.sh whenever this changes — see README.
+frigate_go2rtc_version: "1.9.15"
 # LAN IP of the LXC host — used for go2rtc WebRTC candidates so Google's SDM
 # API can send UDP packets back (Docker bridge IP is unreachable externally).
 frigate_lan_ip: "192.168.86.17"
