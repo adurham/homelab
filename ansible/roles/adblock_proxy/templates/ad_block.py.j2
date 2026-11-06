@@ -208,7 +208,13 @@ META_HOST_SUFFIXES = (
 # instagram.com suffix set, the app died on gateway.instagram.com and never
 # reached a feed request, so nothing was learned. One variable per test.
 META_INTERCEPT_RULES = {
-    "100.66.19.20": tuple("*" + suf for suf in META_HOST_SUFFIXES),
+    # Mac: Facebook is deliberately ABSENT (2026-11-06, owner request). The DOM
+    # hider was the only Facebook consumer here and it is off (FB_HIDER_ENABLED),
+    # so decrypting facebook.com bought nothing while still forcing a full
+    # document reload and refusing the service worker on every load. Instagram
+    # keeps its interception — its web strip works and needs it.
+    "100.66.19.20": tuple("*" + suf for suf in META_HOST_SUFFIXES
+                          if suf not in ("facebook.com", "fb.com")),
     # iPhone: the app pins i.instagram.com and gateway.instagram.com (documented
     # above). www.instagram.com is here ONLY as a trust cross-check: the app
     # barely touches it (2 connections in 3h), so decrypting it costs nothing
@@ -783,6 +789,15 @@ def _empty_fb_unit(line: str):
 # watching for streamed cards. Injected with the page's own CSP nonce, and only
 # into facebook.com HTML: the feed stream is never touched, so pagination cannot
 # stall.
+# Facebook DOM hider: OFF (2026-11-06, owner request).
+# The hider never reliably removed a sponsored card, and its diagnostics showed
+# up as a red bar plus a badge fixed to the bottom of every Facebook page. With
+# Facebook also out of META_INTERCEPT_RULES there is nothing to inject into, so
+# the whole surface is plain passthrough again. The flag stays so the mechanism
+# can be re-armed for a future experiment without rebuilding it from scratch.
+FB_HIDER_ENABLED = False
+
+
 FB_HIDE_SCRIPT = """
 <style>[data-ab-hide]{display:none!important}</style>
 <div id="__ab_html_marker" style="position:fixed;left:0;bottom:0;width:100%;height:10px;background:#c00;z-index:2147483647;pointer-events:none"></div>
@@ -1187,8 +1202,11 @@ def response(flow: http.HTTPFlow) -> None:
         # it. The strip code is kept for reference/experiments, not wired in.
         # _strip_facebook_feed_ads(flow)
         # The phone no longer intercepts Facebook (measured wall, see
-        # META_INTERCEPT_RULES), so this path now serves the desktop clients only.
-        _inject_facebook_hider(flow)
+        # META_INTERCEPT_RULES), and neither does the Mac any more: FB_HIDER_ENABLED
+        # is False and facebook.com is out of that client's intercept tuple, so this
+        # branch now serves Instagram only.
+        if FB_HIDER_ENABLED:
+            _inject_facebook_hider(flow)
         # Log every Meta request path: the web feed endpoint has to be visible
         # before a rewrite can target it (the first two attempts guessed wrong).
         ctx.log.info(f"[META_REQ] {flow.request.method} {flow.request.path[:110]} "
