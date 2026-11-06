@@ -1186,9 +1186,9 @@ def response(flow: http.HTTPFlow) -> None:
         # delta, so there is no body rewrite that removes an ad without stalling
         # it. The strip code is kept for reference/experiments, not wired in.
         # _strip_facebook_feed_ads(flow)
-        # TEMPORARY: injection disabled to isolate whether what we add to the page
-        # is what makes Facebook answer "This browser isn't supported".
-        # _inject_facebook_hider(flow)
+        # The phone no longer intercepts Facebook (measured wall, see
+        # META_INTERCEPT_RULES), so this path now serves the desktop clients only.
+        _inject_facebook_hider(flow)
         # Log every Meta request path: the web feed endpoint has to be visible
         # before a rewrite can target it (the first two attempts guessed wrong).
         ctx.log.info(f"[META_REQ] {flow.request.method} {flow.request.path[:110]} "
