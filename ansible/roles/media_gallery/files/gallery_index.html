@@ -1194,8 +1194,20 @@
   var _gsIdx=null, _gsPromise=null;
   function ensureGlobalIndex(){
     if(_gsPromise) return _gsPromise;
-    _gsPromise=fetch('/gallery/search.txt',{credentials:'same-origin'})
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+    // Prefer the gzipped index (15MB of text -> ~2.5MB): nginx proxies these
+    // gallery files to the Python serve process, so gzip_static can't compress
+    // them for us and the browser must inflate it itself.
+    _gsPromise=fetch('/gallery/search.txt.gz',{credentials:'same-origin'})
+      .then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        if(typeof DecompressionStream==='undefined' || !r.body) return r.text();
+        return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text();
+      })
+      .catch(function(){
+        // no .gz in this build — fall back to the plain index
+        return fetch('/gallery/search.txt',{credentials:'same-origin'})
+          .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); });
+      })
       .then(function(txt){
         var lines=txt.split('\n'), stems=[], folders=[], n=0;
         for(var i=0;i<lines.length;i++){

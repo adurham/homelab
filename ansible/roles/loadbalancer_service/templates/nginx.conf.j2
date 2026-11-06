@@ -741,7 +741,7 @@ server {
     # 2026-11-05: folders_meta.json + per-folder items/<key>.json are the SPA's
     # boot payload and per-folder fetch; they must take the local fast path or
     # the whole point of splitting the manifest is lost.
-    location ~ ^/gallery/(index\.html|manifest\.json|dedup\.json|folders\.json|folders_meta\.json|search\.txt|items/[A-Za-z0-9._-]+\.json)$ {
+    location ~ ^/gallery/(index\.html|manifest\.json|dedup\.json|folders\.json|folders_meta\.json|search\.txt(\.gz)?|items/[A-Za-z0-9._-]+\.json)$ {
         auth_request /outpost.goauthentik.io/auth/nginx;
         error_page 401 = @goauthentik_proxy_signin;
         auth_request_set $auth_cookie $upstream_http_set_cookie;

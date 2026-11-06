@@ -416,9 +416,19 @@ async def main():
                 if it.get("hidden"):
                     continue
                 f.write(f"{it.get('stem','')}\t{it.get('chat','')}\n")
-        rclone("copyto", str(sfp), f"{GALLERY}/search.txt")
-        publish_local(sfp, "search.txt")
-        sfp.unlink()
+        # Ship a pre-compressed copy too: nginx proxies the gallery JSON to the
+        # Python serve process, so gzip_static can't apply to these responses.
+        # 15MB of text is ~2.5MB gzipped, and the SPA decompresses with
+        # DecompressionStream — that is the difference between a 15MB and a
+        # 2.5MB first search over the tailnet.
+        import gzip as _gzip
+        sgp = work / "search.txt.gz"
+        with open(sfp, "rb") as src, _gzip.GzipFile(fileobj=open(sgp, "wb"), mode="wb", mtime=0) as dst:
+            dst.write(src.read())
+        for p, name in ((sfp, "search.txt"), (sgp, "search.txt.gz")):
+            rclone("copyto", str(p), f"{GALLERY}/{name}")
+            publish_local(p, name)
+            p.unlink()
         # one directory copy for all shards (516 individual copyto calls would
         # serialise on Drive metadata round-trips, ~4s each)
         rclone("copy", str(items_dir) + "/", f"{GALLERY}/items/")
