@@ -95,6 +95,7 @@ filter list, same domain-blocking pattern as ads.discord.com):
   - gateway.reddit.com      - ad gateway
 """
 import gzip
+import hashlib
 import json
 import zlib
 
@@ -735,6 +736,7 @@ FB_HIDE_SCRIPT = """
 (function(){
   if (window.__abHide) { return; }
   window.__abHide = 1;
+  try { (new Image()).src = '/__abprobe?start=1&t=' + Date.now(); } catch (e) {}
   var st = {attach:0, attachSamples:[], empty:0, arts:0, matched:0, hidden:0, roots:0, errs:0, errMsg:''};
   try {
     window.addEventListener('error', function(e){ st.errs++; if (!st.errMsg) { st.errMsg = String((e && e.message) || '').slice(0, 60); } });
@@ -786,6 +788,11 @@ FB_HIDE_SCRIPT = """
   }
 
   function scan(){
+    try { scanBody(); }
+    catch (e) { st.errs++; st.errMsg = String((e && e.message) || e).slice(0, 80); beacon(); }
+  }
+
+  function scanBody(){
     // articles is the calibration number: a scan with 0 articles is void
     st.arts = document.querySelectorAll('[role="article"],[data-pagelet^="FeedUnit"]').length;
 
@@ -828,7 +835,46 @@ FB_HIDE_SCRIPT = """
       if (window.__abLast === key) { return; }
       window.__abLast = key;
       var ifr = document.querySelectorAll('iframe').length;
-      (new Image()).src = '/__abprobe?v4=1'
+      var tc = (document.body ? (document.body.textContent || '') : '');
+      var low = tc.toLowerCase();
+      var idx = low.indexOf('ponsored');
+      var ctx = idx >= 0 ? tc.slice(Math.max(0, idx - 45), idx + 25) : '';
+      var ariaHits = 0;
+      try { ariaHits = document.querySelectorAll('[aria-label*="ponsored" i]').length; } catch (e) {}
+      // the visible feed may live in a same-origin frame (about:blank/blob inherit
+      // the parent origin, so those ARE readable) — probe each one instead of
+      // assuming the top document is what the user scrolls
+      var fr = [];
+      try {
+        var frames = document.querySelectorAll('iframe');
+        for (var fi = 0; fi < frames.length && fi < 4; fi++) {
+          var fd = null, note = '';
+          try { fd = frames[fi].contentDocument; } catch (e) { note = 'x-origin'; }
+          if (!fd) { fr.push('closed' + (note ? ':' + note : '')); continue; }
+          var ft = '';
+          try { ft = (fd.body ? (fd.body.textContent || '') : ''); } catch (e) {}
+          var fsi = ft.toLowerCase().indexOf('ponsored');
+          fr.push('doc:' + ft.length + ':si' + fsi + ':src' + String(frames[fi].getAttribute('src') || 'blank').slice(0, 24));
+        }
+      } catch (e) {}
+      var lang = (document.documentElement.getAttribute('lang') || '?').slice(0, 8);
+      var head = ((document.body ? (document.body.textContent || '') : '') || '')
+                   .replace(/\s+/g, ' ').trim().slice(0, 90);
+      var locales = 0, lw = ['patrocinado', 'gesponsert', 'sponsoris', 'patrocinado', 'реклама'];
+      var lowAll = (document.body ? (document.body.textContent || '') : '').toLowerCase();
+      for (var li = 0; li < lw.length; li++) { if (lowAll.indexOf(lw[li]) >= 0) { locales++; } }
+      var pagelet = 0, feedRole = 0;
+      try {
+        pagelet = document.querySelectorAll('[data-pagelet]').length;
+        feedRole = document.querySelectorAll('[role="feed"]').length;
+      } catch (e) {}
+      (new Image()).src = '/__abprobe?v5=1'
+        + '&si=' + idx + '&aria=' + ariaHits
+        + '&ctx=' + encodeURIComponent(ctx.replace(/\s+/g, ' ')).slice(0, 130)
+        + '&pl=' + pagelet + '&feed=' + feedRole
+        + '&fr=' + encodeURIComponent(fr.join(',')).slice(0, 150)
+        + '&lang=' + lang + '&loc=' + locales
+        + '&head=' + encodeURIComponent(head).slice(0, 140)
         + '&arts=' + st.arts + '&att=' + st.attach + '&emp=' + st.empty
         + '&lab=' + st.matched + '&hid=' + st.hidden + '&roots=' + st.roots
         + '&err=' + st.errs + '&em=' + encodeURIComponent(st.errMsg).slice(0, 40)
@@ -880,11 +926,18 @@ def _inject_facebook_hider(flow: http.HTTPFlow) -> None:
         at = text.rindex("</body>")
     else:
         return
+    digest = hashlib.sha256(script.encode()).hexdigest()[:8]
     try:
         _prepare_rewrite(flow)
         flow.response.content = (text[:at] + script + text[at:]).encode()
+        # A cached HTML response means the injected script never runs and every
+        # beacon silently reports the previous build's page — that already cost a
+        # measurement round. Facebook HTML is never served from cache now.
+        flow.response.headers["cache-control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        for stale in ("etag", "last-modified", "expires"):
+            flow.response.headers.pop(stale, None)
         ctx.log.info(f"[FACEBOOK] injected ad-hider (nonce={'yes' if nonce_attr else 'no'}) "
-                     f"into {flow.request.path[:40]}")
+                     f"sha={digest} len={len(script)} into {flow.request.path[:40]}")
     except Exception as exc:  # noqa: BLE001
         ctx.log.warn(f"[FACEBOOK] inject failed: {exc}")
 
