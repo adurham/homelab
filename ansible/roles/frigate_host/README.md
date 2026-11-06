@@ -83,9 +83,9 @@ sensor), `homeassistant/configuration.yaml` (go2rtc url),
 `automations/mailbox_truck.yaml`, `automations/frigate_watchdog.yaml`, the
 Grafana alert description, and the pet-accident detector's out-of-repo copy.
 
-The Basement camera's generic entry is disabled on purpose: that Nest camera is
-offline in Google's cloud (see `defaults/main.yml`), so `src=basement` 404s in
-go2rtc and has no still image.
+The Basement camera is live as of 2026-11-05 (it was offline in Google's cloud
+from 2026-10-23 and dropped from Frigate in the interim — see the dated note in
+`defaults/main.yml`). Its entry follows the same two URLs as the rest.
 
 ## Architecture
 
