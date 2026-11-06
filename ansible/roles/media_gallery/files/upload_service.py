@@ -160,6 +160,35 @@ def save_folder_meta(meta: dict) -> None:
         daemon=True,
     ).start()
 
+
+# ─── "not duplicates" verdicts (2026-11-05) ─────────────────────────────────
+# These were browser-localStorage only, so marking a group "these are different
+# files" didn't follow the owner to another device. Stored on the SERVER, in a
+# file the hourly refresh never rewrites (a verdict is user intent, not derived
+# data), written atomically, keyed by the group SIGNATURE (sorted member stems)
+# rather than a group index — indices shift on every rescan.
+NOTDUP_FILE = Path(os.environ.get("TG_NOTDUP_FILE", "/var/lib/media-gallery/not_dup.json"))
+_notdup_lock = threading.Lock()
+
+
+def load_notdup() -> set:
+    try:
+        d = json.loads(NOTDUP_FILE.read_text())
+        if isinstance(d, list):
+            return set(str(x) for x in d if x)
+        if isinstance(d, dict):
+            return set(str(x) for x in d.get("sigs", []) if x)
+    except (OSError, ValueError):
+        pass
+    return set()
+
+
+def save_notdup(sigs: set) -> None:
+    NOTDUP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(NOTDUP_FILE) + ".tmp"
+    Path(tmp).write_text(json.dumps(sorted(sigs), separators=(",", ":")))
+    os.replace(tmp, NOTDUP_FILE)
+
 # JWKS client (cached; refreshes keys automatically on unknown kid)
 _jwk_client = None
 
@@ -645,6 +674,10 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/foldermeta":
             # browser reads this to render covers; collector reads chat_ids to route
             return self._json(200, load_folder_meta())
+        if p == "/notdup":
+            # "these are different files" verdicts — server-side so they follow
+            # the owner between devices (they used to live in localStorage)
+            return self._json(200, {"sigs": sorted(load_notdup())})
         self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -689,6 +722,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._sethidden()
             if p == "/have":
                 return self._have()
+            if p == "/notdup":
+                return self._notdup()
             self._json(404, {"error": "not found"})
         except Exception as e:  # noqa: BLE001 — surface the real error, don't bare-500
             import traceback
@@ -1148,6 +1183,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "invalid stem in list"})
         have = load_have_cached()
         return self._json(200, {"have": [s for s in stems if s in have]})
+
+    def _notdup(self):
+        """POST /notdup  body {"sig": "<group signature>", "undo": bool}
+
+        Records (or clears) a "these are different files" verdict for a
+        duplicate group. Keyed by the group SIGNATURE (sorted member stems),
+        never by a group index — indices shift on every rescan. Stored in a
+        file the hourly refresh never rewrites, so it survives rebuilds.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, OSError) as e:
+            return self._json(400, {"error": f"bad json body: {e}"})
+        sig = str(body.get("sig") or "").strip()
+        if not sig:
+            return self._json(400, {"error": "want non-empty 'sig'"})
+        undo = bool(body.get("undo"))
+        with _notdup_lock:
+            sigs = load_notdup()
+            if undo:
+                sigs.discard(sig)
+            else:
+                sigs.add(sig)
+            save_notdup(sigs)
+        return self._json(200, {"ok": True, "count": len(sigs), "undo": undo})
 
     def _sethidden(self):
         """POST /sethidden  body {"stems": [...], "hidden": bool}

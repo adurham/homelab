@@ -762,10 +762,27 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         data = thumb.read_bytes()
+        # 2026-11-05: ETag so a revalidating client can 304 instead of
+        # re-downloading; the URL carries no version, so max-age stays modest
+        # (a regenerated poster must become visible within a week).
+        try:
+            st = thumb.stat()
+            etag = '"%x-%x"' % (st.st_mtime_ns, st.st_size)
+        except OSError:
+            etag = None
+        inm = self.headers.get("If-None-Match")
+        if etag and inm and inm.strip() == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "public, max-age=604800")
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Content-Type", "image/jpeg")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "public, max-age=604800")
+        if etag:
+            self.send_header("ETag", etag)
         self.end_headers()
         self.wfile.write(data)
 

@@ -395,12 +395,30 @@ async def main():
                 "count": len(items),
                 "key": k,
                 "cover": items[0].get("thumb") if items else None,
+                # newest item date — lets the landing page sort "recently
+                # updated" without the full manifest (count alone can't tell
+                # a dormant 5,000-item folder from one touched today)
+                "newest": (items[0].get("date") or "")[:10] if items else None,
             })
         mfp = work / "folders_meta.json"
         mfp.write_text(json.dumps(meta, separators=(",", ":")))
         rclone("copyto", str(mfp), f"{GALLERY}/folders_meta.json")
         publish_local(mfp, "folders_meta.json")
         mfp.unlink()
+        # Compact cross-folder search index: one "stem<TAB>folder" line per
+        # visible item (~3MB gzipped for 253K items). This is what makes
+        # "search every item" possible without downloading the 75MB manifest —
+        # the SPA loads it only when the owner actually asks for a global
+        # search, and matches with a plain substring scan.
+        sfp = work / "search.txt"
+        with open(sfp, "w", encoding="utf-8") as f:
+            for it in manifest:
+                if it.get("hidden"):
+                    continue
+                f.write(f"{it.get('stem','')}\t{it.get('chat','')}\n")
+        rclone("copyto", str(sfp), f"{GALLERY}/search.txt")
+        publish_local(sfp, "search.txt")
+        sfp.unlink()
         # one directory copy for all shards (516 individual copyto calls would
         # serialise on Drive metadata round-trips, ~4s each)
         rclone("copy", str(items_dir) + "/", f"{GALLERY}/items/")

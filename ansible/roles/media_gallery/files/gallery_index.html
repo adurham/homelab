@@ -62,7 +62,19 @@
   #filterBar button{cursor:pointer;}
   #filterBar button.on{border-color:var(--accent);color:var(--accent);}
   #filterBar .fb-count{font-size:12.5px;color:var(--muted);margin-left:4px;}
-  /* resume bar (landing page): continue-where-you-left-off + recent folders */
+  /* global item search (landing → all folders) */
+  #gsRow{margin:14px 0 0;}
+  #gsRow .gs-cta{display:inline-block;padding:9px 14px;border-radius:9px;cursor:pointer;
+    border:1px solid var(--border);background:var(--panel);color:var(--accent);font-size:13px;}
+  #gsRow .gs-cta:hover{border-color:var(--accent);}
+  #gsRow .gs-cta{display:inline-block;font:inherit;}
+  #dupView .gs-list{display:flex;flex-direction:column;gap:6px;margin-top:12px;}
+  #dupView .gs-row{display:flex;align-items:center;gap:12px;padding:6px 8px;border-radius:9px;
+    border:1px solid var(--border);background:var(--panel);cursor:pointer;text-align:left;
+    color:inherit;font:inherit;width:100%;}
+  #dupView .gs-row:hover{border-color:var(--accent);}
+  #dupView .gs-row img{width:56px;height:56px;object-fit:cover;border-radius:6px;display:block;flex:0 0 auto;}
+  #dupView .gs-row span{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   #resumeBar{display:none;margin:0 0 16px;}
   #resumeBar.show{display:block;}
   #resumeBar .rcontinue{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
@@ -529,6 +541,11 @@
     <option value="size">Largest first</option>
     <option value="type">Type</option>
   </select>
+  <select id="folderSort" autocomplete="off" title="Sort folders">
+    <option value="count">Most items</option>
+    <option value="recent">Recently updated</option>
+    <option value="name">Name A–Z</option>
+  </select>
   <input type="file" id="fileInput" multiple accept="image/*,video/*" style="display:none">
 </header>
 <main>
@@ -553,6 +570,7 @@
   </div>
   <div id="resumeBar"></div>
   <div id="folderGrid"></div>
+  <div id="gsRow"></div>
   <div id="photoGrid" style="display:none"></div>
   <div id="filterBar" style="display:none"></div>
   <div id="dateRail" style="display:none"></div>
@@ -641,6 +659,13 @@
 <script>
 (function(){
   var manifest=[], chats=[], chatMap={};
+  // 2026-11-05: the full manifest is now LAZY. It used to be fetched (75MB,
+  // 253K objects) on every page load even though ordinary browsing never
+  // needs it: the folders page comes from folders_meta.json and a folder's
+  // items come from its shard. Only the duplicate view needs every item, so
+  // ensureManifest() is the ONE way to obtain it and callers render a loading
+  // state while it resolves.
+  var manifestPromise=null;
   // 2026-11-05: per-folder metadata, so the SPA can paint the folders page
   // without downloading the whole library. folderCount/folderKey/folderCoverPath
   // come from folders_meta.json; chatMap[name] is only populated once that
@@ -982,6 +1007,27 @@
     manifest=out;
     savePending();   // persist the (now-pruned) pending state across refreshes
   }
+  // Single entry point for the whole-library data. Never call
+  // fetch('/gallery/manifest.json') anywhere else: every cross-folder view
+  // must go through this so there is exactly one loading state and one place
+  // that knows the manifest is a heavyweight dependency.
+  function ensureManifest(){
+    if(manifestPromise) return manifestPromise;
+    manifestPromise=fetch('/gallery/manifest.json',{credentials:'same-origin'})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(m){
+        manifest=Array.isArray(m)?m:[];
+        bootDone=true;
+        applyPending();
+        buildChats();
+        return manifest;
+      })
+      .catch(function(err){
+        manifestPromise=null;   // allow a retry
+        throw err;
+      });
+    return manifestPromise;
+  }
   // ---- folders page from metadata (no full manifest needed) ----
   // 2026-11-05: builds the folder grid from folders_meta.json so the landing
   // page paints before (or without) the 76MB manifest. chatMap holds items
@@ -990,13 +1036,14 @@
   function applyMeta(meta){
     var fs=(meta&&meta.folders)||[];
     if(!fs.length) return false;
-    chats=[]; folderCount={}; folderKey={}; folderCoverPath={};
+    chats=[]; folderCount={}; folderKey={}; folderCoverPath={}; folderNewest={};
     fs.forEach(function(f){
       if(!f||!f.name) return;
       chats.push(f.name);
       folderCount[f.name]=f.count||0;
       if(f.key) folderKey[f.name]=f.key;
       if(f.cover) folderCoverPath[f.name]=f.cover;
+      if(f.newest) folderNewest[f.name]=f.newest;
     });
     chats.sort(function(a,b){ return (folderCount[b]||0)-(folderCount[a]||0); });
     visibleCount=chats.reduce(function(n,c){ return n+(folderCount[c]||0); },0);
@@ -1116,6 +1163,105 @@
   }
 
   // ---------- LANDING ----------
+  // ---------- FOLDER SORT (landing) ----------
+  // Count alone can't tell a dormant 5,000-item folder from one touched today,
+  // so folders_meta carries each folder's newest item date.
+  var FOLDER_SORT_KEY='gal.fsort.v1';
+  var folderSortMode='count';
+  try{ folderSortMode=localStorage.getItem(FOLDER_SORT_KEY)||'count'; }catch(_){}
+  var folderNewest={};
+  function sortFolders(list){
+    var out=list.slice();
+    if(folderSortMode==='recent'){
+      out.sort(function(a,b){
+        var A=String(folderNewest[a]||''), B=String(folderNewest[b]||'');
+        if(A===B) return (folderCount[b]||0)-(folderCount[a]||0);
+        return A<B?1:-1;
+      });
+    } else if(folderSortMode==='name'){
+      out.sort(function(a,b){ return a.localeCompare(b,undefined,{sensitivity:'base'}); });
+    } else {
+      out.sort(function(a,b){ return (folderCount[b]||0)-(folderCount[a]||0); });
+    }
+    return out;
+  }
+
+  // ---------- GLOBAL ITEM SEARCH (cross-folder) ----------
+  // The landing search ONLY filters folders (a model IS the container). This is
+  // the explicit second action: search every item name across the library
+  // without the 75MB manifest, using the compact search.txt index
+  // ("stem<TAB>folder", ~3MB gzipped) which is fetched on first use only.
+  var _gsIdx=null, _gsPromise=null;
+  function ensureGlobalIndex(){
+    if(_gsPromise) return _gsPromise;
+    _gsPromise=fetch('/gallery/search.txt',{credentials:'same-origin'})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+      .then(function(txt){
+        var lines=txt.split('\n'), stems=[], folders=[], n=0;
+        for(var i=0;i<lines.length;i++){
+          var l=lines[i]; if(!l) continue;
+          var t=l.indexOf('\t'); if(t<0) continue;
+          stems[n]=l.slice(0,t).toLowerCase(); folders[n]=l.slice(t+1); n++;
+        }
+        _gsIdx={stems:stems,folders:folders,n:n};
+        return _gsIdx;
+      })
+      .catch(function(e){ _gsPromise=null; throw e; });
+    return _gsPromise;
+  }
+  function openFolderAtItem(folder,stem){
+    openFolder(folder);
+    var tries=0;
+    (function look(){
+      if(current===folder && view && view.length){
+        for(var i=0;i<view.length;i++){ if(view[i].stem===stem){ openLb(i); return; } }
+      }
+      if(tries++<40) setTimeout(look,150);
+    })();
+  }
+  function globalSearch(q){
+    var query=(q||'').trim().toLowerCase();
+    if(!query) return;
+    current='__gsearch__';
+    setRoute('#q='+encodeURIComponent(query));
+    elFolder.style.display='none'; elPhoto.style.display='none'; elDup.style.display='block';
+    elBack.style.display='inline-block'; elSort.style.display='none'; elUploadBtn.style.display='none';
+    var fsel=document.getElementById('folderSort'); if(fsel) fsel.style.display='none';
+    var gs=document.getElementById('gsRow'); if(gs) gs.innerHTML='';
+    setCrumb('All items');
+    elDup.innerHTML='';
+    var st=document.createElement('div'); st.className='state'; st.textContent='Searching every item…';
+    elDup.appendChild(st);
+    ensureGlobalIndex().then(function(idx){
+      var hits=[];
+      for(var i=0;i<idx.n && hits.length<501;i++){ if(idx.stems[i].indexOf(query)>=0) hits.push(i); }
+      elDup.innerHTML='';
+      var head=document.createElement('div'); head.className='state';
+      head.textContent=hits.length>500
+        ? ('First 500 matches for “'+query+'” (refine the search to narrow it)')
+        : (hits.length+' item'+(hits.length===1?'':'s')+' match “'+query+'”');
+      elDup.appendChild(head);
+      var list=document.createElement('div'); list.className='gs-list';
+      hits.slice(0,500).forEach(function(i){
+        var stem=idx.stems[i], folder=idx.folders[i];
+        var b=document.createElement('button'); b.className='gs-row'; b.type='button';
+        var img=document.createElement('img'); img.loading='lazy';
+        img.src='/thumb/'+encodeURIComponent(folder)+'/'+encodeURIComponent(stem)+'.jpg'; img.alt='';
+        b.appendChild(img);
+        var sp=document.createElement('span'); sp.textContent=folder+' / '+stem;
+        b.appendChild(sp);
+        b.addEventListener('click',function(){ openFolderAtItem(folder,stem); });
+        list.appendChild(b);
+      });
+      elDup.appendChild(list);
+    }).catch(function(e){
+      elDup.innerHTML='';
+      var box=document.createElement('div'); box.className='state';
+      box.textContent='Could not search all items: '+e.message;
+      elDup.appendChild(box);
+    });
+  }
+
   function renderFolders(){
     saveResumeNow();   // bookmark the folder we are leaving (no-op on landing)
     // Every return to the folders page passes through here: the Back button,
@@ -1147,7 +1293,7 @@
     var q=(searchQuery||'').trim().toLowerCase();
     // keep the RAW text for the box (casing the user typed), compare lowercased
     landingFilter=q?((elSearch&&elSearch.value.trim())||searchQuery):'';
-    var shownChats=q?chats.filter(function(c){return c.toLowerCase().indexOf(q)>=0;}):chats;
+    var shownChats=sortFolders(q?chats.filter(function(c){return c.toLowerCase().indexOf(q)>=0;}):chats);
     var shownEmpty=q?emptyFolders.filter(function(n){return n.toLowerCase().indexOf(q)>=0;}):emptyFolders;
     var nMatch=shownChats.length+shownEmpty.length;
     elSearch.placeholder='Search folders…';
@@ -1214,6 +1360,21 @@
       frag.appendChild(makeFolder(n,0,''));
     });
     elFolder.innerHTML=''; elFolder.appendChild(frag);
+    // explicit cross-folder search affordance — the landing box filters folders
+    // by design, so this is the only way to search item NAMES from here
+    var gsRow=document.getElementById('gsRow');
+    if(gsRow){
+      gsRow.innerHTML='';
+      if(q){
+        var gsb=document.createElement('button');
+        gsb.className='gs-cta'; gsb.type='button';
+        gsb.textContent='Also search all '+visibleCount.toLocaleString()+' item names for “'+searchQuery+'”';
+        gsb.addEventListener('click',function(){ globalSearch(searchQuery); });
+        gsRow.appendChild(gsb);
+      }
+    }
+    var fsSel=document.getElementById('folderSort');
+    if(fsSel){ fsSel.style.display=''; fsSel.value=folderSortMode; }
     setRoute(q?('#s='+encodeURIComponent(searchQuery)):'');
     renderResumeBar();
     // prune folder-selection of folders that no longer exist, refresh the bar
@@ -1263,9 +1424,45 @@
     var h=(location.hash||'').replace(/^#/,'');
     if(!h) return null;
     if(h==='dup') return {view:'dup'};
-    if(h.indexOf('f=')===0){ try{ return {folder:decodeURIComponent(h.slice(2))}; }catch(_){ return null; } }
+    // 2026-11-05: an open folder carries its whole UI state — query, type/year/
+    // size/unseen filters and the open lightbox item — so a refresh, a bookmark
+    // or a link restores exactly what you were looking at.
+    if(h.indexOf('f=')===0){
+      var p;
+      try{ p=new URLSearchParams(h); }catch(_){ return null; }
+      var folder=p.get('f'); if(folder===null) return null;
+      return {
+        folder:folder,
+        search:p.get('q')||'',
+        filters:{type:p.get('t')||'',year:p.get('y')||'',size:p.get('z')||'',unseen:p.get('u')==='1'},
+        item:p.get('i')||''
+      };
+    }
     if(h.indexOf('s=')===0){ try{ return {search:decodeURIComponent(h.slice(2))}; }catch(_){ return null; } }
+    if(h.indexOf('q=')===0){ try{ return {gsearch:decodeURIComponent(h.slice(2))}; }catch(_){ return null; } }
     return null;
+  }
+  // Mirror the current view into the hash. replaceState (not pushState) so
+  // typing in the search box doesn't fill the Back stack with one entry per
+  // keystroke.
+  function syncRoute(){
+    if(current==null){
+      var lq=(elSearch&&elSearch.value.trim())||'';
+      setRoute(lq?('#s='+encodeURIComponent(lq)):'');
+      return;
+    }
+    if(current==='__dup__'){ setRoute('#dup'); return; }
+    if(current==='__gsearch__'||current==='*') return;   // those set their own hash
+    var p=new URLSearchParams();
+    p.set('f',current);
+    var q=(elSearch&&elSearch.value.trim())||'';
+    if(q) p.set('q',q);
+    if(ff.type) p.set('t',ff.type);
+    if(ff.year) p.set('y',ff.year);
+    if(ff.size) p.set('z',ff.size);
+    if(ff.unseen) p.set('u','1');
+    if(lbIndex>=0 && shown[lbIndex]) p.set('i',shown[lbIndex].stem);
+    setRoute('#'+p.toString());
   }
 
   // ---------- RESUME / RECENT FOLDERS ----------
@@ -1379,6 +1576,8 @@
       })(chat, folderKey[chat]);
     }
     var name=(chat==='*')?'All items':chat;
+    var _gsRow=document.getElementById('gsRow'); if(_gsRow) _gsRow.innerHTML='';
+    var _fsSel=document.getElementById('folderSort'); if(_fsSel) _fsSel.style.display='none';
     applySort(items);
     view=items;
 
@@ -1747,6 +1946,7 @@
     updateStatusBar(current!=null && current!=='__landing__');
     if(!shown.length){ elState.style.display='block'; elState.textContent=searchQuery?'No matches.':'No items in this folder.'; }
     else elState.style.display='none';
+    syncRoute();
   }
 
   // ---------- LIGHTBOX ----------
@@ -1803,17 +2003,35 @@
     }
     lbMedia.appendChild(el);
     lb.classList.add('open');
+    syncRoute();   // the open item is part of the linkable state
+    // 2026-11-05: prefetch ONE image in the direction of travel. Originals are
+    // multi-MB and come from Drive, so pressing → twice otherwise means a
+    // multi-second blank every time. Videos are deliberately excluded: their
+    // bytes are far larger and the shared Drive budget is better spent on
+    // thumbnails still being generated.
+    prefetchLb(lbIndex+lbDir);
+  }
+  var lbDir=1, _lbPre=null;
+  function prefetchLb(n){
+    if(!shown || !shown.length) return;
+    if(n<0) n=shown.length-1;
+    if(n>=shown.length) n=0;
+    var it=shown[n];
+    if(!it || it.type==='video') return;
+    try{ _lbPre=new Image(); _lbPre.src='/'+it.file; }catch(_){}
   }
   function closeLb(){
     lb.classList.remove('open');
     lbMedia.innerHTML=''; // stop playback
     lbIndex=-1;
+    syncRoute();          // drop the item from the link, keep folder + filters
     delete lb.dataset.dupmode; delete lb.dataset.dupdi;
     if(typeof hideLbConfirm==='function') hideLbConfirm();
     if(typeof hideMoveMenu==='function') hideMoveMenu();
   }
   function navLb(d){
     if(lbIndex<0) return;
+    lbDir=d;
     var n=lbIndex+d;
     if(n<0) n=shown.length-1; if(n>=shown.length) n=0;
     openLb(n);
@@ -2521,6 +2739,15 @@
     if(!listView && vg.sizer) renderPhotos();   // virtual grid: re-flow at the new size
   });
   elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*')?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]); applySort(view); renderPhotos(); renderDateRail(); } });
+  var fsEl=document.getElementById('folderSort');
+  if(fsEl){
+    try{ fsEl.value=folderSortMode; }catch(_){}
+    fsEl.addEventListener('change',function(){
+      folderSortMode=fsEl.value||'count';
+      try{ localStorage.setItem(FOLDER_SORT_KEY,folderSortMode); }catch(_){}
+      if(current==null) renderFolders();
+    });
+  }
 
   // ---------- RIGHT-CLICK CONTEXT MENU ----------
   var elCtx=document.getElementById('ctxMenu');
@@ -2803,6 +3030,36 @@
   var dupAction={};
   var _dupReport=null;   // the current in-memory dedup report (kept fresh after deletes)
   function showDuplicates(){
+    // The duplicate view is the one screen that needs EVERY item (it
+    // cross-references stems against the live library). The manifest is lazy
+    // now, so fetch it here — once — with an explicit loading state rather
+    // than silently showing a report full of ghosts.
+    if(!bootDone){
+      current='__dup__';
+      setRoute('#dup');
+      elFolder.style.display='none'; elPhoto.style.display='none';
+      elDup.style.display='block'; elBack.style.display='inline-block';
+      elSort.style.display='none'; elUploadBtn.style.display='none';
+      setCrumb('Duplicates');
+      elState.style.display='none';
+      elDup.innerHTML='<div class="state">Loading the library index…<br><span style="opacity:.6">'+
+        'first visit to this view downloads the full item list</span></div>';
+      ensureManifest().then(function(){ showDuplicates(); })
+        .catch(function(e){
+          // build with textContent: the error text is not ours to inject
+          elDup.innerHTML='';
+          var box=document.createElement('div');
+          box.className='state';
+          box.textContent='Could not load the library index: '+e.message;
+          var btn=document.createElement('button');
+          btn.className='btn'; btn.textContent='Retry';
+          btn.addEventListener('click',showDuplicates);
+          box.appendChild(document.createElement('br'));
+          box.appendChild(btn);
+          elDup.appendChild(box);
+        });
+      return;
+    }
     current='__dup__';
     setRoute('#dup');
     elFolder.style.display='none'; elPhoto.style.display='none';
@@ -2849,11 +3106,46 @@
   // runner-up (same size within 2% = almost certainly a byte-identical
   // re-upload, or >=1.5x the size). Everything else stays manual.
   var NOTDUP_KEY='gal.notdup.v1';
-  function notDupSet(){ try{ return new Set(JSON.parse(localStorage.getItem(NOTDUP_KEY)||'[]')); }catch(_){ return new Set(); } }
-  function notDupAdd(sig){
-    var s=notDupSet(); s.add(sig);
-    var arr=Array.from(s); if(arr.length>500) arr=arr.slice(-500);
+  // 2026-11-05: verdicts are SERVER-side now (they used to be localStorage
+  // only, so they didn't follow the owner to another device). localStorage
+  // stays as the instant local mirror; the server copy is the durable one and
+  // is pulled when the duplicate view opens.
+  var _notDupRemote=null;
+  function notDupSet(){
+    var s;
+    try{ s=new Set(JSON.parse(localStorage.getItem(NOTDUP_KEY)||'[]')); }catch(_){ s=new Set(); }
+    if(_notDupRemote) _notDupRemote.forEach(function(x){ s.add(x); });
+    return s;
+  }
+  function loadNotDupRemote(){
+    return fetch('/notdup',{credentials:'same-origin'})
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(j){
+        if(!j || !Array.isArray(j.sigs)) return null;
+        _notDupRemote=new Set(j.sigs);
+        // merge into the local mirror so the list survives an offline visit
+        try{
+          var s=notDupSet(), arr=Array.from(s);
+          if(arr.length>2000) arr=arr.slice(-2000);
+          localStorage.setItem(NOTDUP_KEY, JSON.stringify(arr));
+        }catch(_){}
+        return _notDupRemote;
+      })
+      .catch(function(){ return null; });
+  }
+  function notDupAdd(sig, undo){
+    var s=notDupSet();
+    if(undo) s.delete(sig); else s.add(sig);
+    var arr=Array.from(s); if(arr.length>2000) arr=arr.slice(-2000);
     try{ localStorage.setItem(NOTDUP_KEY, JSON.stringify(arr)); }catch(_){}
+    // durable copy; a failure here must not block the UI
+    try{
+      fetch('/notdup',{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({sig:sig, undo:!!undo})})
+        .then(function(r){ if(r.ok && _notDupRemote){ undo?_notDupRemote.delete(sig):_notDupRemote.add(sig); } })
+        .catch(function(){});
+    }catch(_){}
   }
   function groupSig(g){ return g.map(function(m){return m.stem;}).sort().join('|'); }
   function recommendKeep(g){
@@ -2895,9 +3187,18 @@
     if(_toastTimer){ clearTimeout(_toastTimer); }
     _toastTimer=setTimeout(function(){ _toastEl.classList.remove('show'); }, 15000);
   }
+  var _notDupTried=false;
   function renderDuplicates(rep){
     dupAction={};
     _dupReport=rep;   // remember the current report so deletes update it in place
+    // pull server-side "not duplicates" verdicts once, then re-render so groups
+    // retired on another device are honoured here too
+    if(!_notDupTried && _notDupRemote===null){
+      _notDupTried=true;
+      loadNotDupRemote().then(function(set){
+        if(set && set.size) renderDuplicates(_dupReport||rep);
+      });
+    }
     var groups=rep.groups||[];
     // LIVE-FILTER against the manifest actually loaded in this browser tab.
     // 2026-09-12 fix: dedup.json is a periodic snapshot (see triggerDupScan/
@@ -3186,13 +3487,24 @@
   }
   function bootRoute(rt){
     if(!rt) return;
-    if(rt.folder && (chatMap[rt.folder]||emptyFolders.indexOf(rt.folder)>=0||folderKey[rt.folder])){ openFolder(rt.folder); }
+    if(rt.folder && (chatMap[rt.folder]||emptyFolders.indexOf(rt.folder)>=0||folderKey[rt.folder])){
+      openFolder(rt.folder);
+      // restore the linkable UI state AFTER openFolder (it resets filters when
+      // navigating to a different folder)
+      if(rt.filters && (rt.filters.type||rt.filters.year||rt.filters.size||rt.filters.unseen)){
+        ff={type:rt.filters.type||'',year:rt.filters.year||'',size:rt.filters.size||'',unseen:!!rt.filters.unseen};
+        renderFilterBar(); renderPhotos(); syncRoute();
+      }
+      if(rt.search){ elSearch.value=rt.search; searchQuery=rt.search.toLowerCase(); runSearch(); }
+      if(rt.item){ openFolderAtItem(rt.folder, rt.item); }
+    }
     else if(rt.folder){ setRoute(''); }
     else if(rt.search){
       // #s= means "landing page with the folder filter applied"
       elSearch.value=rt.search; searchQuery=rt.search.toLowerCase();
       renderFolders();
     } else if(rt.view==='dup'){ showDuplicates(); }
+    else if(rt.gsearch){ globalSearch(rt.gsearch); }
   }
   Promise.all([
     fetch('/gallery/folders_meta.json').then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
@@ -3210,22 +3522,19 @@
         applyMeta(meta);
         bootChrome(allFolders, fmeta);
         bootRoute(rt);
+        // The duplicate view is the ONLY route that needs every item. Load the
+        // manifest for it (and for an explicit "All items"), never otherwise:
+        // a normal visit now transfers ~75KB of metadata + shards instead of
+        // 75MB.
+        if(rt && rt.view==='dup') ensureManifest().catch(function(){});
+        return null;
       }
-      return fetch('/gallery/manifest.json',{credentials:'same-origin'})
-        .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
-        .then(function(m){
-          manifest=Array.isArray(m)?m:[];
-          bootDone=true;
-          buildChats();
-          if(!haveMeta){ bootChrome(allFolders, fmeta); bootRoute(rt); return; }
-          // refresh whatever the owner is looking at with the complete data
-          if(current==null) renderFolders();
-          else if(current==='__dup__') showDuplicates();
-          else openFolder(current);
-        })
-        .catch(function(err){
-          if(!haveMeta){ elState.textContent='Failed to load gallery: '+err.message; }
-          // with meta the folders page is already usable — no error splash
+      // legacy: no folders_meta.json (older build) → manifest-first boot
+      return ensureManifest().then(function(){
+        bootChrome(allFolders, fmeta);
+        bootRoute(rt);
+      }).catch(function(err){
+          elState.textContent='Failed to load gallery: '+err.message;
         });
     })
     .catch(function(err){
