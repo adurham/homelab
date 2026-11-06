@@ -60,6 +60,33 @@ Notes that cost time to rediscover:
   with `repairs/ignore_issue {domain: go2rtc, issue_id: recommended_version}` —
   it would otherwise linger until a Core restart deactivates it.
 
+### Consumers of `frigate_lan_ip` — a stale copy means dead camera tiles in HA
+
+The LAN address is baked into more places than this role. When CT 170 moved from
+`192.168.86.85` to `192.168.86.17` (2026-09-18, out-of-pool static), the six
+**generic-camera config entries** in Home Assistant kept the old host and every
+camera tile on the dashboard went blank — Core logged `Error getting new camera
+image from 192_168_86_85: All connection attempts failed` every 5 s, and each
+tile was labelled `<entry title> <camera>` (i.e. `192_168_86_85 Cat Room`).
+
+Each Generic Camera entry (Settings → Devices & Services) carries both URLs:
+
+```
+still_image_url: http://192.168.86.17:1984/api/frame.jpeg?src=<camera>
+stream_source:   rtsp://192.168.86.17:8554/<camera>
+```
+
+Fix them through the **options flow** (it fetches the still and probes the RTSP
+stream before letting you save) — never by editing `.storage`, which HA holds in
+memory. Other consumers that must match: `homeassistant/sensors.yaml` (REST
+sensor), `homeassistant/configuration.yaml` (go2rtc url),
+`automations/mailbox_truck.yaml`, `automations/frigate_watchdog.yaml`, the
+Grafana alert description, and the pet-accident detector's out-of-repo copy.
+
+The Basement camera's generic entry is disabled on purpose: that Nest camera is
+offline in Google's cloud (see `defaults/main.yml`), so `src=basement` 404s in
+go2rtc and has no still image.
+
 ## Architecture
 
 Nest WebRTC sources are defined **directly in Frigate's go2rtc config block**
