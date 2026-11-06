@@ -72,9 +72,19 @@ tile was labelled `<entry title> <camera>` (i.e. `192_168_86_85 Cat Room`).
 Each Generic Camera entry (Settings → Devices & Services) carries both URLs:
 
 ```
-still_image_url: http://192.168.86.17:1984/api/frame.jpeg?src=<camera>
+still_image_url: http://192.168.86.17:5000/api/<camera>/latest.jpg
 stream_source:   rtsp://192.168.86.17:8554/<camera>
 ```
+
+The still comes from **Frigate's own decoded frame**, not from go2rtc's
+`:1984/api/frame.jpeg`. That endpoint spins up a decoder per request and
+occasionally hands back a *partial* frame — the bottom ~20-30 px of the JPEG is
+the last decoded slice row repeated, i.e. a smeared band along the bottom edge of
+every tile. Measured on 2026-11-05: 2 of 15 `frame.jpeg` samples carried a
+20+ row identical band, 0 of 15 `/api/<cam>/latest.jpg` samples did, and 0 of 20
+after the switch. Frigate's snapshot is a decode of the same
+`rtsp://127.0.0.1:8554/<cam>` remux that HA's live view uses, so a clean snapshot
+also proves the live stream is clean.
 
 Fix them through the **options flow** (it fetches the still and probes the RTSP
 stream before letting you save) — never by editing `.storage`, which HA holds in
@@ -82,6 +92,13 @@ memory. Other consumers that must match: `homeassistant/sensors.yaml` (REST
 sensor), `homeassistant/configuration.yaml` (go2rtc url),
 `automations/mailbox_truck.yaml`, `automations/frigate_watchdog.yaml`, the
 Grafana alert description, and the pet-accident detector's out-of-repo copy.
+
+Naming: the entry title is derived from the URL host and cannot be renamed
+(`POST/PATCH` on the entry return 405), so the devices are permanently named
+`192_168_86_85`. The dashboard tiles therefore set an explicit `name:` on each
+`picture-entity` card (`Cat Room`, `Foyer`, …) instead of relying on the entity's
+composed friendly name.
+
 
 The Basement camera is live as of 2026-11-05 (it was offline in Google's cloud
 from 2026-10-23 and dropped from Frigate in the interim — see the dated note in
