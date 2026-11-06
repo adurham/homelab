@@ -320,9 +320,13 @@ def _lock_for(key):
         return lk
 
 
-def rclone(*args):
-    return subprocess.run(["rclone", "--config", RCLONE_CONF, *args],
-                          capture_output=True, text=True)
+def rclone(*args, no_stats=False):
+    cmd = ["rclone", "--config", RCLONE_CONF, *args]
+    if no_stats:
+        # small single-file copies: the 5-minute stats line is pure noise and
+        # --stats 0 skips the accounting work entirely
+        cmd += ["--stats", "0"]
+    return subprocess.run(cmd, capture_output=True, text=True)
 
 
 class _NullCtx:
@@ -540,7 +544,7 @@ def ensure_thumb(chat, stem) -> Path | None:
             return local
         local.parent.mkdir(parents=True, exist_ok=True)
         # 1) try the encrypted cache on Drive
-        r = rclone("copyto", f"{THUMBS}/{chat}/{stem}.jpg", str(local))
+        r = rclone("copyto", f"{THUMBS}/{chat}/{stem}.jpg", str(local), "--no-traverse", no_stats=True)
         if r.returncode == 0 and local.exists() and local.stat().st_size > 0:
             return local
         # 1b) deterministic-failure fast path: if this exact stem's generation
@@ -572,14 +576,14 @@ def ensure_thumb(chat, stem) -> Path | None:
             # download — e.g. folder merged/renamed since the last rebuild).
             cls = {}
             if _video_poster_http(chat, leaf, local, class_out=cls):
-                rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
+                rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg", "--no-traverse", no_stats=True)
                 _neg_clear(chat, stem)
                 return local
             fresh_leaf = _refresh_leaf(chat, stem, leaf, "stale manifest-index entry for")
             if fresh_leaf:
                 leaf = fresh_leaf
                 if _video_poster_http(chat, leaf, local, class_out=cls):
-                    rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
+                    rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg", "--no-traverse", no_stats=True)
                     _neg_clear(chat, stem)
                     return local
             # HTTP route failed (codec ffmpeg can't read? rclone serve down?).
@@ -621,7 +625,7 @@ def ensure_thumb(chat, stem) -> Path | None:
                 _set_reason("deterministic")
                 return None
             try:
-                r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
+                r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src), "--no-traverse", no_stats=True)
                 if r.returncode != 0 and "directory not found" in (r.stderr or ""):
                     # The manifest-index leaf doesn't actually exist on Drive
                     # anymore (stale index -- e.g. a folder merge/rename since
@@ -633,7 +637,7 @@ def ensure_thumb(chat, stem) -> Path | None:
                                                "stale manifest-index entry for")
                     if fresh_leaf:
                         leaf = fresh_leaf
-                        r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src))
+                        r = rclone("copyto", f"{SRC}/{chat}/{leaf}", str(tmp_src), "--no-traverse", no_stats=True)
                 if r.returncode != 0:
                     # TRANSIENT (rclone/Drive transport) — never negative-cache.
                     print(f"[thumb] download original failed {chat}/{leaf}: "
@@ -642,7 +646,7 @@ def ensure_thumb(chat, stem) -> Path | None:
                     return None
                 make_thumb(tmp_src, local, is_video)
                 # 3) persist to encrypted Drive cache (best effort, async-ish)
-                rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg")
+                rclone("copyto", str(local), f"{THUMBS}/{chat}/{stem}.jpg", "--no-traverse", no_stats=True)
                 if local.exists():
                     _neg_clear(chat, stem)  # generation succeeded; drop any old verdict
                     return local

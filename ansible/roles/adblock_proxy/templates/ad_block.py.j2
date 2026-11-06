@@ -215,8 +215,13 @@ META_INTERCEPT_RULES = {
     # while proving whether the phone's SYSTEM trust store accepts our leaf for
     # an instagram.com name — Safari is the test client. If Safari loads it, the
     # certificate is fine and the app's rejection is app-specific by construction.
-    "100.101.211.44": ("www.instagram.com", "www.facebook.com",
-                       "web.facebook.com", "m.facebook.com"),
+    # Facebook is deliberately ABSENT: measured, with injection fully disabled,
+    # Facebook answers every intercepted document with its 95-character
+    # "This browser isn't supported — use the Facebook app" page, so decrypting it
+    # costs the user a working site and buys nothing to rewrite. The feed they see
+    # while it is intercepted is a cached copy from before. Instagram stays: its
+    # web strip works and needs the interception.
+    "100.101.211.44": ("www.instagram.com",),
 }
 
 
@@ -335,8 +340,48 @@ def _handle_reddit_request(flow: http.HTTPFlow, host: str) -> bool:
     return True
 
 
+def _sni_of(flow: http.HTTPFlow) -> str:
+    """The TLS SNI the client sent, or "" — the only name present on HTTP/2
+    connections where :authority is a bare CDN address."""
+    try:
+        return (flow.client_conn.sni or "").lower()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def request(flow: http.HTTPFlow) -> None:
     host = flow.request.pretty_host
+
+    # The injected Facebook script reports through a POST body rather than a query
+    # string: long URLs are truncated by the logging layer, which silently dropped
+    # every diagnostic field past the first hundred characters.
+    # A cached Facebook document is revalidated and the origin answers 304, so no
+    # body exists to rewrite and the browser keeps its old, unfiltered copy. Removing
+    # the validators forces a full 200 on every document navigation.
+    _host_header = (flow.request.headers.get("host") or "").lower().split(":")[0]
+    if (("facebook.com" in _host_header or "facebook.com" in (_sni_of(flow) or ""))
+            and flow.request.headers.get("sec-fetch-dest") == "document"):
+        for h in ("if-none-match", "if-modified-since", "if-range"):
+            flow.request.headers.pop(h, None)
+
+    if "/__abmin" in flow.request.path:
+        ctx.log.info("[FACEBOOK] MINIMAL SCRIPT RAN")
+
+    if "/__abmark" in flow.request.path:
+        ctx.log.info(f"[FACEBOOK] MARKER RENDERED by client {flow.request.headers.get('user-agent', '?')[:60]}")
+
+    if "/__abp" in flow.request.path:
+        try:
+            import base64 as _b64
+            import json as _json
+
+            blob = flow.request.headers.get("x-abp") or ""
+            txt = _b64.b64decode(blob + "=" * (-len(blob) % 4)).decode("utf-8", "replace") if blob else ""
+            with open("/var/log/mitmproxy/abp.log", "a", encoding="utf-8") as fh:
+                fh.write(_json.dumps(txt) + "\n")
+            ctx.log.info(f"[ABP] report {len(txt)} chars")
+        except Exception as exc:  # noqa: BLE001
+            ctx.log.warn(f"[ABP] report write failed: {exc}")
 
     if _handle_discord(flow, host):
         return
@@ -509,7 +554,15 @@ def _strip_reddit_ads(flow: http.HTTPFlow) -> None:
         ctx.log.warn(f"[{LOG_TAG_REDDIT}] ad strip failed: {exc}")
 
 
-META_PATH_HINTS = ("/api/v1/", "/api/graphql", "/graphql", "/awake", "/api/v1/feed/")
+META_PATH_HINTS = (
+    "/api/v1/", "/api/graphql", "/graphql", "/awake", "/api/v1/feed/",
+    # Facebook WebLite — the mobile web app on iOS Safari. It is not served from
+    # www.facebook.com at all: the document and every AJAX fragment arrive from raw
+    # CDN IPs (e.g. https://57.144.78.1/ajax/weblite_…), so hostname rules never
+    # matched and the phone's actual feed was never intercepted.
+    "/ajax/weblite_", "/weblite", "/ajax/bootloader", "/ajax/pagelet",
+    "/ajax/async/", "/ajax/dtsg", "/lite/", "/composer/", "/story.php",
+)
 
 
 def _looks_like_meta_path(path: str) -> bool:
@@ -732,7 +785,10 @@ def _empty_fb_unit(line: str):
 # stall.
 FB_HIDE_SCRIPT = """
 <style>[data-ab-hide]{display:none!important}</style>
-<script%s>
+<div id="__ab_html_marker" style="position:fixed;left:0;bottom:0;width:100%;height:10px;background:#c00;z-index:2147483647;pointer-events:none"></div>
+<img src="/__abmark" width="1" height="1" alt="" style="position:absolute;left:-9999px">
+<script{NONCE}>try{(new Image()).src="/__abmin?t="+Date.now()}catch(e){}</script>
+<script{NONCE}>
 (function(){
   if (window.__abHide) { return; }
   window.__abHide = 1;
@@ -742,23 +798,11 @@ FB_HIDE_SCRIPT = """
     window.addEventListener('error', function(e){ st.errs++; if (!st.errMsg) { st.errMsg = String((e && e.message) || '').slice(0, 60); } });
   } catch (e) {}
 
-  try {
-    var orig = Element.prototype.attachShadow;
-    if (orig && !orig.__abPatched) {
-      var patched = function(init){
-        st.attach++;
-        if (st.attachSamples.length < 5) {
-          try { st.attachSamples.push(String(this.tagName || '') + '.' + String(this.className || '').slice(0, 22)); } catch (e) {}
-        }
-        if (init && init.mode === 'closed') { init = Object.assign({}, init, {mode: 'open'}); }
-        else if (init && typeof init === 'object' && !('mode' in init)) { init = Object.assign({}, init); }
-        return orig.call(this, init);
-      };
-      try { Object.defineProperty(patched, 'name', {value: orig.name}); } catch (e) {}
-      patched.__abPatched = 1;
-      Element.prototype.attachShadow = patched;
-    }
-  } catch (e) {}
+  // Deliberately NOT patching Element.prototype.attachShadow: Facebook runs a
+  // capability probe before rendering, and a monkey-patched prototype makes it
+  // declare the browser unsupported ("This browser isn't supported") — which is
+  // exactly the page that kept arriving. The counter stays for diagnostics only.
+  st.attach = 0;
 
   function roots(){
     var out = [document], queue = [document], guard = 0;
@@ -783,6 +827,18 @@ FB_HIDE_SCRIPT = """
       var role = n.getAttribute && n.getAttribute('role');
       var pl = n.getAttribute && n.getAttribute('data-pagelet');
       if (role === 'article' || (pl && pl.indexOf('FeedUnit') === 0)) { return n; }
+    }
+    // Mobile WebLite has neither role="article" nor FeedUnit (measured arts=0),
+    // so fall back to the nearest ancestor that is card-sized on screen: tall
+    // enough to be a post, short enough not to swallow the whole feed.
+    n = el;
+    for (var up2 = 0; up2 < 16 && n && n.parentElement; up2++) {
+      n = n.parentElement;
+      var r = n.getBoundingClientRect ? n.getBoundingClientRect() : null;
+      if (!r) { continue; }
+      if (r.height >= 120 && r.width >= 200 && r.height <= window.innerHeight * 2.5) {
+        return n;
+      }
     }
     return null;
   }
@@ -812,30 +868,43 @@ FB_HIDE_SCRIPT = """
     st.matched = 0; st.hidden = 0;
     var rs = roots();
     for (var ri = 0; ri < rs.length; ri++) {
-      var els;
-      try { els = rs[ri].querySelectorAll('span,a,div,h3,abbr'); } catch (e) { continue; }
-      for (var i = 0; i < els.length; i++) {
-        var el = els[i];
-        if (el.getAttribute && el.getAttribute('data-ab-hide') !== null) { continue; }
-        var t = (el.textContent || '').replace(/\u200b/g, '').trim();
-        if (!t || t.length > 40) { continue; }
+      // Text nodes, not a tag whitelist: the label sits in whatever element
+      // Facebook felt like using, and "Sponsored" is present in the page text
+      // (measured si=3467) even when no span/div/h3 carried it on its own.
+      var walker = null;
+      try {
+        walker = document.createTreeWalker(rs[ri], NodeFilter.SHOW_TEXT, null);
+      } catch (e) { continue; }
+      var node = null;
+      while ((node = walker.nextNode())) {
+        var t = (node.nodeValue || '').replace(/\u200b/g, '').trim();
+        if (!t || t.length > 60) { continue; }
         if (!/sponsored/i.test(t)) { continue; }
+        var host = node.parentElement;
+        if (host && host.getAttribute && host.getAttribute('data-ab-hide') !== null) { continue; }
+        // Script/style text is a text node too, and our own injected code contains
+        // the word "sponsored" — it made si look positive while nothing rendered.
+        var parentTag = host ? String(host.tagName || '').toUpperCase() : '';
+        if (parentTag === 'SCRIPT' || parentTag === 'STYLE' || parentTag === 'NOSCRIPT'
+            || parentTag === 'TEMPLATE') { continue; }
         st.matched++;
-        var card = cardFor(el);
+        var card = cardFor(host);
         if (card) { card.setAttribute('data-ab-hide', '1'); st.hidden++; }
       }
     }
+    badge();
     beacon();
   }
 
   function beacon(){
     try {
-      var txt = (document.body ? (document.body.textContent || '').length : -1);
+      var visText = (document.body ? (document.body.innerText || '') : '');
+      var txt = (document.body ? visText.length : -1);
       var key = [st.arts, st.attach, st.empty, st.matched, st.hidden, st.roots, st.errs, txt].join(':');
       if (window.__abLast === key) { return; }
       window.__abLast = key;
       var ifr = document.querySelectorAll('iframe').length;
-      var tc = (document.body ? (document.body.textContent || '') : '');
+      var tc = visText;
       var low = tc.toLowerCase();
       var idx = low.indexOf('ponsored');
       var ctx = idx >= 0 ? tc.slice(Math.max(0, idx - 45), idx + 25) : '';
@@ -863,28 +932,76 @@ FB_HIDE_SCRIPT = """
       var locales = 0, lw = ['patrocinado', 'gesponsert', 'sponsoris', 'patrocinado', 'реклама'];
       var lowAll = (document.body ? (document.body.textContent || '') : '').toLowerCase();
       for (var li = 0; li < lw.length; li++) { if (lowAll.indexOf(lw[li]) >= 0) { locales++; } }
+      // Structural outline: the six largest boxes on the page, described the way a
+      // person would point at them. This is how the feed's card container and the
+      // ad's distinguishing attributes get identified without guessing at a label.
+      var outline = [];
+      try {
+        var cand = document.querySelectorAll('div,article,section,main');
+        var big = [];
+        for (var ci = 0; ci < cand.length; ci++) {
+          var cr = cand[ci].getBoundingClientRect();
+          if (cr.height < 150 || cr.width < 250) { continue; }
+          big.push([cr.height * cr.width, cand[ci]]);
+        }
+        big.sort(function(a, b) { return b[0] - a[0]; });
+        for (var bi = 0; bi < big.length && bi < 6; bi++) {
+          var e2 = big[bi][1];
+          var cls = String(e2.className || '').slice(0, 14);
+          var aria = String(e2.getAttribute('aria-label') || '').slice(0, 12);
+          var tx = (e2.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 26);
+          outline.push(e2.tagName.toLowerCase() + '.' + cls + '~' + aria + '~' + tx);
+        }
+      } catch (e) {}
       var pagelet = 0, feedRole = 0;
       try {
         pagelet = document.querySelectorAll('[data-pagelet]').length;
         feedRole = document.querySelectorAll('[role="feed"]').length;
       } catch (e) {}
-      (new Image()).src = '/__abprobe?v5=1'
-        + '&si=' + idx + '&aria=' + ariaHits
-        + '&ctx=' + encodeURIComponent(ctx.replace(/\s+/g, ' ')).slice(0, 130)
-        + '&pl=' + pagelet + '&feed=' + feedRole
-        + '&fr=' + encodeURIComponent(fr.join(',')).slice(0, 150)
-        + '&lang=' + lang + '&loc=' + locales
-        + '&head=' + encodeURIComponent(head).slice(0, 140)
-        + '&arts=' + st.arts + '&att=' + st.attach + '&emp=' + st.empty
-        + '&lab=' + st.matched + '&hid=' + st.hidden + '&roots=' + st.roots
-        + '&err=' + st.errs + '&em=' + encodeURIComponent(st.errMsg).slice(0, 40)
-        + '&as=' + encodeURIComponent(st.attachSamples.join(',')).slice(0, 120)
-        + '&txt=' + txt + '&ifr=' + ifr + '&v=' + Math.round(window.innerHeight)
-        + '&r=' + Math.random();
+      // One short parameter: mitmproxy's log truncates long URLs, which silently
+      // cut every field after the first hundred characters.
+      var dstr = [st.arts, st.attach, st.empty, st.matched, st.hidden, st.roots,
+                  st.errs, idx, Math.round(txt / 1000), ifr, pagelet, feedRole,
+                  lang, locales, Math.round(window.innerHeight),
+                  head.slice(0, 34), outline.slice(0, 3).join('|').slice(0, 150),
+                  String(st.errMsg).slice(0, 30)].join(';');
+      // POST, not a query string: the log layer truncates long URLs, which silently
+      // cut every field past the first hundred characters on every previous run.
+      var htmls = '';
+      try {
+        var bigs = document.querySelectorAll('[role="main"] > div > div, div[data-pagelet]');
+        for (var hi = 0; hi < bigs.length && hi < 2; hi++) {
+          htmls += '<<' + bigs[hi].outerHTML.slice(0, 420) + '>>';
+        }
+      } catch (e) {}
+      var payload = dstr + String.fromCharCode(10) + htmls;
+      try {
+        // header, not body: sendBeacon bodies reach the proxy empty, and long URLs
+        // are truncated by the logging layer. Headers survive both.
+        var enc = btoa(unescape(encodeURIComponent(payload.slice(0, 1400))));
+        fetch('/__abp', {method: 'GET', headers: {'X-ABP': enc}, keepalive: true, cache: 'no-store'});
+      } catch (e) {}
     } catch (e) {}
   }
 
-  function boot(){ scan(); }
+  function badge(){
+    try {
+      var b = document.getElementById('__ab_badge');
+      if (!b) {
+        b = document.createElement('div');
+        b.id = '__ab_badge';
+        b.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:2147483647;'
+          + 'background:#c00;color:#fff;font:12px/1.3 monospace;padding:3px 6px;'
+          + 'border-radius:4px;opacity:.9;pointer-events:none';
+        (document.body || document.documentElement).appendChild(b);
+      }
+      var tc2 = (document.body ? (document.body.innerText || '') : '');
+      b.textContent = 'AB9 arts' + st.arts + ' si' + tc2.toLowerCase().indexOf('ponsored')
+        + ' txt' + Math.round(tc2.length / 1000) + 'k hid' + st.hidden;
+    } catch (e) {}
+  }
+
+  function boot(){ scan(); badge(); }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
   } else { boot(); }
@@ -896,24 +1013,61 @@ FB_HIDE_SCRIPT = """
 """
 
 
+def _flow_names(flow: http.HTTPFlow) -> str:
+    """Every name a flow could be identified by, lowercased, space-joined.
+
+    Meta's mobile traffic arrives over HTTP/2 with the CDN address as :authority,
+    so there is no Host header and the flow host is a bare number. The only
+    surviving identity is the TLS SNI from the ClientHello.
+    """
+    parts = [flow.request.pretty_host or ""]
+    try:
+        sni = flow.client_conn.sni
+        if sni:
+            parts.append(sni)
+    except Exception:  # noqa: BLE001
+        pass
+    parts.append(flow.request.headers.get("host") or "")
+    return " ".join(p.lower() for p in parts if p)
+
+
 def _inject_facebook_hider(flow: http.HTTPFlow) -> None:
     if not flow.response or flow.response.status_code != 200:
         return
-    host = (flow.request.pretty_host or "").lower()
-    if "facebook.com" not in host:
+    # The page arrives from a raw CDN IP over HTTP/2, where the name survives only
+    # in the TLS SNI — there is no Host header to read, so host checks never fired.
+    names = _flow_names(flow)
+    if "facebook.com" not in names:
         return
+    if flow.request.headers.get("sec-fetch-dest") == "document":
+        _ct = (flow.response.headers.get("content-type") or "")[:28]
+        _loc = (flow.response.headers.get("location") or "")[:50]
+        _ua = flow.request.headers.get("user-agent", "")
+        _ck = "yes" if flow.request.headers.get("cookie") else "no"
+        ctx.log.info(f"[FACEBOOK] doc {flow.request.pretty_host[:28]} status={flow.response.status_code} "
+                     f"ct={_ct} loc={_loc} ua_len={len(_ua)} ua={_ua[:44]} cookie={_ck}")
     ct = (flow.response.headers.get("content-type") or "").lower()
     if "html" not in ct:
         return
     text = _response_text(flow)
+    if flow.request.headers.get("sec-fetch-dest") == "document":
+        ctx.log.info(f"[FACEBOOK] body len={len(text) if text else 0} "
+                     f"has_body_tag={bool(text and '</body>' in text)} "
+                     f"ct={ct[:24]} enc={flow.response.headers.get('content-encoding', '-')[:12]}")
     if not text or "</body>" not in text:
         return
     csp = flow.response.headers.get("content-security-policy", "") or ""
+    ctx.log.info(f"[FACEBOOK] csp={csp[:150] if csp else '(none)'}")
     match = re.search(r"'nonce-([^']+)'", csp)
     nonce_attr = f' nonce="{match.group(1)}"' if match else ""
-    if "__abHide" in text:
+    if ("__abHide" in text or "/__abp" in flow.request.path
+            or "__abprobe" in flow.request.path or "/__abmark" in flow.request.path
+            or "/__abmin" in flow.request.path):
         return
-    script = FB_HIDE_SCRIPT % nonce_attr
+    # str.replace, never %-formatting: the injected HTML carries CSS such as
+    # `width:100%`, and a single stray percent made the formatting raise, which
+    # killed the injection silently on every page.
+    script = FB_HIDE_SCRIPT.replace("{NONCE}", nonce_attr)
     # Head, not </body>: attachShadow must be patched before Facebook's bundle
     # creates any roots. Placed after the charset meta so the 1024-byte encoding
     # window is never pushed out.
@@ -927,6 +1081,7 @@ def _inject_facebook_hider(flow: http.HTTPFlow) -> None:
     else:
         return
     digest = hashlib.sha256(script.encode()).hexdigest()[:8]
+    dest = flow.request.headers.get("sec-fetch-dest", "?")
     try:
         _prepare_rewrite(flow)
         flow.response.content = (text[:at] + script + text[at:]).encode()
@@ -936,10 +1091,13 @@ def _inject_facebook_hider(flow: http.HTTPFlow) -> None:
         flow.response.headers["cache-control"] = "no-store, no-cache, must-revalidate, max-age=0"
         for stale in ("etag", "last-modified", "expires"):
             flow.response.headers.pop(stale, None)
-        ctx.log.info(f"[FACEBOOK] injected ad-hider (nonce={'yes' if nonce_attr else 'no'}) "
-                     f"sha={digest} len={len(script)} into {flow.request.path[:40]}")
     except Exception as exc:  # noqa: BLE001
-        ctx.log.warn(f"[FACEBOOK] inject failed: {exc}")
+        ctx.log.warn(f"[FACEBOOK] inject raised {type(exc).__name__}: {exc}"[:200])
+        return
+
+    ctx.log.info(f"[FACEBOOK] injected ad-hider (nonce={'yes' if nonce_attr else 'no'}) "
+                 f"sha={digest} len={len(script)} dest={dest} status={flow.response.status_code} "
+                 f"into {flow.request.path[:40]}")
 
 
 def _strip_facebook_feed_ads(flow: http.HTTPFlow) -> None:
@@ -988,7 +1146,34 @@ def response(flow: http.HTTPFlow) -> None:
     # https://57.144.204.34/api/v1/users/...), so scoping by host misses them.
     # Their API paths are unmistakable, and only Meta/Microsoft-ish hosts are
     # even decrypted, so a path hint is safe here.
-    if _is_meta_host(host) or _looks_like_meta_path(flow.request.path):
+    #
+    # The PAGE ITSELF arrives the same way: GET https://157.240.254.35/ with
+    # path "/" — no hostname to match and no path hint to match, so every real
+    # Facebook page load slipped past untouched while only interstitials from
+    # www.facebook.com were ever rewritten. The Host header carries the name the
+    # client actually asked for, which is what has to be matched.
+    names = _flow_names(flow)
+    is_meta = (_is_meta_host(host)
+               or any(_is_meta_host(n) for n in names.split())
+               or _looks_like_meta_path(flow.request.path))
+    if is_meta:
+        # Facebook's service worker keeps serving its own cached copy of the page,
+        # which no HTTP cache header can evict: Cache Storage ignores no-store. The
+        # result was reloads that never touched the network, so nothing we injected
+        # ever reached the screen. Ask the browser to drop the origin's cache on every
+        # document, and refuse the worker script so its registration dies at the next
+        # update check.
+        # Measured request: GET https://157.240.254.35/sw?s=push&__wbltsw=1 — the
+        # path is "/sw" with a query string, so a "/sw/" prefix test never matched
+        # and the worker was handed back on every load.
+        sw_base = flow.request.path.split("?", 1)[0].rstrip("/")
+        if sw_base in ("/sw", "/sw.js", "/sw.php", "/service_worker", "/sw/index.js"):
+            flow.response = http.Response.make(404, b"", {"content-type": "text/plain"})
+            ctx.log.info(f"[FACEBOOK] refused service worker script {flow.request.path[:40]}")
+            return
+        if "html" in (flow.response.headers.get("content-type") or "").lower():
+            flow.response.headers["clear-site-data"] = '"cache"'
+
         _strip_instagram_feed_ads(flow)
         # FACEBOOK WEB ADS: measured dead end, do not re-enable without new
         # evidence. Both suppression strategies break the page ("not loading
@@ -1001,7 +1186,9 @@ def response(flow: http.HTTPFlow) -> None:
         # delta, so there is no body rewrite that removes an ad without stalling
         # it. The strip code is kept for reference/experiments, not wired in.
         # _strip_facebook_feed_ads(flow)
-        _inject_facebook_hider(flow)
+        # TEMPORARY: injection disabled to isolate whether what we add to the page
+        # is what makes Facebook answer "This browser isn't supported".
+        # _inject_facebook_hider(flow)
         # Log every Meta request path: the web feed endpoint has to be visible
         # before a rewrite can target it (the first two attempts guessed wrong).
         ctx.log.info(f"[META_REQ] {flow.request.method} {flow.request.path[:110]} "
