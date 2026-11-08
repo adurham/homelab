@@ -921,6 +921,17 @@ PRECOOL_RH_MAX_PCT = 65.0
 PRECOOL_DEWPOINT_ENTITY = "sensor.indoor_dew_point"
 PRECOOL_HUMIDITY_ENTITY = "sensor.indoor_humidity_live"
 
+# SEASONAL GATE (2026-11-08, winter readiness). Pre-cool is a COOLING-SEASON
+# mechanism, but nothing in the original gate knew that: it engaged on the
+# clock + cold-abort + humidity alone. In heating that inverts the feature —
+# its vent pass pins Game Room / Guest Bedroom 1 to 100% (heating them), and
+# its demand is cooling-signed (`temp - floor`), so a target room above its
+# floor would ADD HEAT-nudge demand and raise the heat setpoint. Require that
+# the thermostat is not heating, and that either it is explicitly in cool mode
+# or the outdoor temperature says cooling season is plausible. Fail closed if
+# the outdoor reading is unavailable.
+PRECOOL_MIN_OUTDOOR_F = 65.0
+
 # Main Bedroom -- and every other non-target room -- is intentionally NOT
 # configured here. Earlier versions of this feature forced Main Bedroom to a
 # fixed "donor throttle" position whenever pre-cool was active, regardless of
@@ -1441,8 +1452,11 @@ class SmartVentController(hass.Hass):
         # backpressure (which remains the final safety net). No-op outside
         # the window / when the gate is inactive. The gate is also published
         # every cycle so the last window's result stays observable.
-        precool_gate = self._precool_gate()
-        room_positions = self._apply_precool_vents(room_positions, precool_gate)
+        heating_now = (hvac_action == "heating") or (hvac_mode == "heat")
+        precool_gate = self._precool_gate(hvac_action=hvac_action,
+                                          hvac_mode=hvac_mode)
+        room_positions = self._apply_precool_vents(room_positions, precool_gate,
+                                                   heating=heating_now)
         self._publish_precool_sensor(precool_gate)
 
         # Setpoint nudge (the TRIGGER axis): independently of the vent-position
@@ -1633,7 +1647,9 @@ class SmartVentController(hass.Hass):
 
                 if need > occ_override:
                     pos = 100
-                    reason = f"hot override ({need:+.1f}) — 100% regardless of occupancy"
+                    _override_kind = "cold" if is_heating else "hot"
+                    reason = (f"{_override_kind} override ({need:+.1f}) — "
+                              f"100% regardless of occupancy")
                 elif need > raised_hot_override and not is_occupied:
                     # Unoccupied and past the per-floor hot-override (but under
                     # the absolute OCCUPANCY_OVERRIDE_OVER) — give full airflow;
@@ -2381,6 +2397,13 @@ class SmartVentController(hass.Hass):
         """
         try:
             now = self.datetime()
+            # Publish the contention for the CURRENT mode. The original
+            # implementation hardcoded heating=False, so a winter house with
+            # real heating contention always published 0.0 / "no-contention"
+            # and the HA/Grafana view was blind to the axis. Derive it from
+            # the thermostat exactly like _update_zone_presence's log does.
+            _hmode, _hact, _tc, _th = self._get_thermostat_state()
+            heating = (_hact == "heating") or (_hmode == "heat")
             zone_attrs = {}
             for zname in ZONES:
                 last = self._zone_last_occupied.get(zname)
@@ -2404,7 +2427,7 @@ class SmartVentController(hass.Hass):
             # _PENALTY_ENTITY pattern).
             worst_c = 0.0
             for zname in ZONES:
-                c = self._zone_contention(zname, False)
+                c = self._zone_contention(zname, heating)
                 worst_c = max(worst_c, c)
             self.set_state(
                 ZONE_PRESENCE_ENTITY,
@@ -2493,7 +2516,8 @@ class SmartVentController(hass.Hass):
         def off_by(t):
             return (setpoint - t) if heating else (t - setpoint)
 
-        midday_precool = self.datetime().hour in MIDDAY_PRECOOL_HOURS
+        midday_precool = (self.datetime().hour in MIDDAY_PRECOOL_HOURS
+                          and not heating)
 
         # Build the beneficiary list: every occupied room past its (possibly
         # pre-conditioning-lowered) activation margin. Worst-first.
@@ -3292,7 +3316,22 @@ class SmartVentController(hass.Hass):
         self._precool_humidity_blocked_logged = False
         return True
 
-    def _precool_gate(self):
+    def _outdoor_temp(self):
+        """Outdoor temperature (°F) from the weather entity, or None.
+
+        Used by the pre-cool seasonal gate. Kept separate from
+        _weather_factor (which returns a multiplier and folds in the mild
+        band) so the gate can fail closed on a missing reading.
+        """
+        w = self.get_state(WEATHER_ENTITY, attribute="temperature")
+        if w is None:
+            return None
+        try:
+            return float(w)
+        except (TypeError, ValueError):
+            return None
+
+    def _precool_gate(self, hvac_action=None, hvac_mode=None):
         """Compute the pre-cool engage/no-engage decision ONCE per cycle.
 
         This is the SINGLE source of truth for whether pre-cool may act.
@@ -3302,6 +3341,14 @@ class SmartVentController(hass.Hass):
         abort/suppression logic themselves -- this codebase has previously
         been bitten by two logic layers disagreeing about the same threshold
         (see _apply_priority_rooms vs the base ladder).
+
+        SEASONAL GATE (2026-11-08): pre-cool is cooling-only. `hvac_action` /
+        `hvac_mode` are passed by control_loop; a HEATING thermostat (or an
+        explicit heat mode) makes the gate inactive regardless of the clock.
+        In heat_cool, cooling season is inferred from the outdoor temperature
+        (PRECOOL_MIN_OUTDOOR_F) so a mild winter night cannot re-enable it.
+        Legacy/offline callers that pass neither argument keep the historical
+        behavior (season unchecked) so the existing harnesses stay valid.
 
         PHASE 2 added the human-override suppression condition here, in this
         one function, as the original docstring required. The other condition
@@ -3322,6 +3369,37 @@ class SmartVentController(hass.Hass):
         # the tracker reflects this cycle's readings.
         self._precool_reset_if_new_window(now)
 
+        # Seasonal gate (see docstring). Production always passes both; the
+        # legacy no-arg path is kept for the offline harnesses.
+        if hvac_action is None and hvac_mode is None:
+            season_ok = True
+            season_reason = "season unchecked (legacy caller)"
+        else:
+            heating_mode = (hvac_action == "heating") or (hvac_mode == "heat")
+            outdoor = self._outdoor_temp()
+            if heating_mode:
+                season_ok = False
+                season_reason = (f"heating season (action={hvac_action}, "
+                                 f"mode={hvac_mode})")
+            elif hvac_mode == "cool" or hvac_action == "cooling":
+                season_ok = True
+                season_reason = (f"cool mode (action={hvac_action}, "
+                                 f"mode={hvac_mode})")
+            elif hvac_mode == "heat_cool":
+                if outdoor is None:
+                    season_ok = False
+                    season_reason = "outdoor temp unavailable (fail closed)"
+                elif outdoor < PRECOOL_MIN_OUTDOOR_F:
+                    season_ok = False
+                    season_reason = (f"outdoor {outdoor:.1f}F < "
+                                     f"{PRECOOL_MIN_OUTDOOR_F:.0f}F")
+                else:
+                    season_ok = True
+                    season_reason = f"outdoor {outdoor:.1f}F"
+            else:
+                season_ok = False
+                season_reason = f"hvac mode {hvac_mode} is not a cooling mode"
+
         window_active = self._precool_window_active(now)
         cold_abort = self._precool_cold_abort()
         humidity_ok = self._precool_humidity_ok()
@@ -3339,11 +3417,13 @@ class SmartVentController(hass.Hass):
         if window_active:
             self._precool_update_min_temps(now)
 
-        active = (window_active and not cold_abort and humidity_ok
-                  and not suppressed)
+        active = (window_active and season_ok and not cold_abort
+                  and humidity_ok and not suppressed)
 
         if not window_active:
             reason = "window inactive"
+        elif not season_ok:
+            reason = f"seasonal gate: {season_reason}"
         elif cold_abort:
             reason = "cold-abort: an occupied room is at/below " \
                      f"{PRECOOL_ABORT_OCCUPIED_F}F"
@@ -3386,7 +3466,8 @@ class SmartVentController(hass.Hass):
         comfort protection.
 
         Returns exactly 0.0 whenever the pre-cool gate is not active (outside
-        the window, cold-abort, humidity-blocked, or human-suppressed), so a
+        the window, season-gated for heating/cold outdoor, cold-abort,
+        humidity-blocked, or human-suppressed), so a
         non-running pre-cool contributes literally nothing to the nudge and
         the nudge behaves byte-identically to its pre-PHASE-2 self.
         """
@@ -3438,11 +3519,14 @@ class SmartVentController(hass.Hass):
                  f"window-night {window_id} (not just the "
                  f"{SETPOINT_NUDGE_OVERRIDE_COOLDOWN_MIN}min cooldown)")
 
-    def _apply_precool_vents(self, room_positions, gate):
+    def _apply_precool_vents(self, room_positions, gate, heating=False):
         """Vent-position pipeline pass for overnight pre-cool.
 
         No-op (returns room_positions completely UNCHANGED) unless
-        gate.active. When active: Game Room + Guest Bedroom 1 vents to 100%.
+        gate.active, and never in heating mode (2026-11-08 seasonal guard:
+        opening the two targets in a heating cycle would heat them and steal
+        heat from the rest of the house). When active: Game Room + Guest
+        Bedroom 1 vents to 100%.
         Touches NO other room -- every other room, INCLUDING Main Bedroom,
         passes through with whatever value room_positions already holds from
         the earlier passes (_auto_calculate -> _apply_priority_rooms ->
@@ -3466,7 +3550,7 @@ class SmartVentController(hass.Hass):
         Bedroom donates air to a DIFFERENT struggling room; that mechanism is
         untouched by this pass.
         """
-        if not gate.active:
+        if not gate.active or heating:
             return room_positions
 
         new_positions = dict(room_positions)
@@ -4325,7 +4409,12 @@ class SmartVentController(hass.Hass):
         # pre-PHASE-2 form exactly. `precool_window` is read from the SAME gate
         # object, never re-derived from the clock here, so the release gate and
         # the demand can never disagree about whether pre-cool is running.
-        precool_demand = (0.0 if precool_gate is None
+        # Heating safety (2026-11-08, winter readiness): pre-cool demand is
+        # cooling-signed (temp - floor). Even if a stale/legacy gate somehow
+        # says active, it must never add demand to a HEAT nudge -- that would
+        # raise the heat setpoint to "pre-cool" a warm room. The gate itself
+        # is season-gated in production; this is defense in depth.
+        precool_demand = (0.0 if heating or precool_gate is None
                           else self._precool_demand(precool_gate))
         precool_window = bool(precool_gate is not None and precool_gate.active)
         # ONE combined demand feeds the ONE existing depth computation
