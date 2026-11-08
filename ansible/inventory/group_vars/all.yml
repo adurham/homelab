@@ -254,10 +254,12 @@ vault_noip_password: !vault |
           6330
 
 # Global Access Configuration
-# Token-gated hosts (2026-10-19): login as the non-root user and escalate with
-# sudo, whose PAM stack authenticates a signature from the forwarded ssh-agent
-# (the MacBook's YubiKey). Root SSH is disabled on these hosts. Everything else
-# (PVE nodes, tanium, bwt, monitoring) still logs in as root.
+# Non-root hosts (2026-11-08): login as the non-root user with a key that only
+# exists while the 1Password bridge is unlocked (amd-workstation), and escalate
+# with passwordless sudo. The earlier YubiKey/pam_ssh_agent gate was removed by
+# owner decision — authorization is now possession of the 1Password-gated key.
+# Root SSH stays disabled on these hosts. Everything else (tanium, bwt,
+# monitoring) still logs in as root.
 yd_gated_hosts:
   - pve01
   - pve02
@@ -277,12 +279,7 @@ yd_gated_hosts:
   - adblock-proxy-01
 ansible_user: "{{ 'amd' if inventory_hostname in yd_gated_hosts else 'root' }}"
 ansible_become: "{{ inventory_hostname in yd_gated_hosts }}"
-# sudo 1.9.13+ adds -n to the become invocation when no password is set, and the
-# PAM module does not satisfy sudo's non-interactive path on those builds. With
-# a password set ansible drops -n; pam_ssh_agent authenticates first, so this
-# value is never actually used (a failure here means the token is not signing).
-ansible_become_password: "unused-token-gated-sudo"
-ansible_ssh_private_key_file: /Users/adam.durham/.ssh/id_ansible
+ansible_ssh_private_key_file: ~/.ssh/id_ansible
 
 # Shelly local device login (user admin) -- set 2026-10-18
 shelly_device_password: !vault |
