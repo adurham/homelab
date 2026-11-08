@@ -32,6 +32,10 @@ ZONES = {
                     "cover.guest_bedroom_1_8d6d_vent",
                     "cover.guest_bedroom_1_8136_vent",
                 ],
+                # Non-PIR evidence that someone may be in the room. A light or
+                # fan left on is not proof of occupancy, but it is enough to
+                # keep the room out of the 58F vacant-floor treatment.
+                "activity": ["switch.nita_s_bedroom_main_lights"],
             },
             "Guest Bedroom 2": {
                 "temp": "sensor.guest_bedroom_2_temperature",
@@ -39,6 +43,7 @@ ZONES = {
                 "vents": [
                     "cover.guest_bedroom_2_1ec7_vent_2",
                 ],
+                "activity": ["switch.guest_bedroom_main_lights"],
             },
             "Game Room": {
                 "temp": "sensor.game_room_temperature",
@@ -47,6 +52,10 @@ ZONES = {
                     "cover.game_room_889a_vent",
                     "cover.game_room_89ae_vent",
                     "cover.game_room_0c83_vent",
+                ],
+                "activity": [
+                    "light.game_room_game_room",
+                    "switch.game_room_main_lights",
                 ],
             },
             "Cat Room": {
@@ -114,6 +123,13 @@ ZONES = {
                     "cover.main_bedroom_883f_vent_2",
                     "cover.main_bedroom_a96d_vent_2",
                     "cover.main_bedroom_5c2b_vent_2",
+                ],
+                # The ceiling fan/light are often on when someone is in bed
+                # even if the PIR has gone quiet. Non-proof, but enough to
+                # keep the room out of the 58F vacant-floor treatment.
+                "activity": [
+                    "light.main_bedroom_ceiling_fan_light",
+                    "fan.main_bedroom_ceiling_fan",
                 ],
                 # donor_only: this room can be a DONOR (throttled to redirect
                 # flow to a hotter room) but never a BENEFICIARY (it never
@@ -341,10 +357,16 @@ HEAT_PIR_OVERRIDE_F = 1.5
 # occupied" even when its whole zone reads vacant. This is the sleeping-
 # occupant safety net for the 58F floor: PIR can be off for hours while
 # someone sleeps, but it almost always fired when they went to bed. Overnight
-# the hold is long (10h) so a full night's sleep is covered; during the day a
+# the hold is long (12h) so a full night's sleep is covered; during the day a
 # short hold (2h) is enough and preserves the daytime savings.
-HEAT_ROOM_OCCUPANCY_HOLD_MIN = 600.0      # 10h, 21:00-09:00
+HEAT_ROOM_OCCUPANCY_HOLD_MIN = 720.0      # 12h, 21:00-09:00
 HEAT_DAY_ROOM_OCCUPANCY_HOLD_MIN = 120.0  # 2h, 09:00-21:00
+
+# Whole-house "someone is breathing" veto for the 58F floor. CO2 is a
+# physiological signal, unlike PIR: a guest or a still occupant keeps it
+# elevated even when every motion sensor is quiet. Fail closed if unreadable.
+HOUSE_CO2_ENTITY = "sensor.ecobee_edgewater_road_co2"
+HOUSE_CO2_OCCUPIED_PPM = 800.0
 
 # House-away gate for the 58F floor. Room "occupancy" from the ecobee/room
 # sensors is MOTION only (a still person reads empty), so it cannot prove a
@@ -1696,9 +1718,14 @@ class SmartVentController(hass.Hass):
                 # (PIR false negative) is not closed out. Cooling keeps its
                 # existing heat-soak logic untouched.
                 if is_heating and occ_entity and not is_occupied:
-                    if (self._zone_is_vacant(zone_name)
-                            and not self._room_recently_occupied(key)
-                            and self._house_away()):
+                    # Non-PIR activity evidence (a bedroom light/fan left on)
+                    # while someone is home: treat the room as occupied.
+                    if (not self._house_away()) and self._room_activity_on(sensors):
+                        is_occupied = True
+                    elif (self._zone_is_vacant(zone_name)
+                          and not self._room_recently_occupied(key)
+                          and self._house_away()
+                          and not self._co2_says_occupied()):
                         # 0.5F hysteresis on the floor so a sensor wobbling
                         # around 58F doesn't flap the damper 0<->100.
                         floor_open = (temp <= HEAT_VACANT_FLOOR_F
@@ -2330,6 +2357,27 @@ class SmartVentController(hass.Hass):
             if self.get_state(entity) != "not_home":
                 return False
         return True
+
+    def _room_activity_on(self, sensors):
+        """True if any non-PIR activity entity for this room is on."""
+        for entity in sensors.get("activity", []):
+            if self.get_state(entity) == "on":
+                return True
+        return False
+
+    def _co2_says_occupied(self):
+        """True if whole-house CO2 says someone is breathing.
+
+        Fail closed: an unreadable CO2 sensor counts as occupied, so the 58F
+        floor can never engage on a bad reading.
+        """
+        raw = self.get_state(HOUSE_CO2_ENTITY)
+        if raw in (None, "unknown", "unavailable", ""):
+            return True
+        try:
+            return float(raw) >= HOUSE_CO2_OCCUPIED_PPM
+        except (TypeError, ValueError):
+            return True
 
     def _zone_contention(self, zone, heating):
         """How badly some OTHER zone's occupants need air right now, in [0, 1].

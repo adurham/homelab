@@ -108,6 +108,11 @@ class FakeHA(svc.SmartVentController):
         self.attrs[(svc.WEATHER_ENTITY, "temperature")] = 40.0
         for entity in svc.HOUSE_PERSON_ENTITIES:
             self.states[entity] = "not_home"
+        self.states[svc.HOUSE_CO2_ENTITY] = 500.0
+        for _zn, zone in svc.ZONES.items():
+            for _rn, sensors in zone["rooms"].items():
+                for entity in sensors.get("activity", []):
+                    self.states[entity] = "off"
 
     def datetime(self, aware=False):
         return self._clock
@@ -141,6 +146,13 @@ class FakeHA(svc.SmartVentController):
     def set_house(self, home):
         for entity in svc.HOUSE_PERSON_ENTITIES:
             self.states[entity] = "home" if home else "not_home"
+
+    def set_co2(self, ppm):
+        self.states[svc.HOUSE_CO2_ENTITY] = ppm
+
+    def set_activity(self, zone, room, on):
+        for entity in svc.ZONES[zone]["rooms"][room].get("activity", []):
+            self.states[entity] = "on" if on else "off"
 
 
 def auto(ha):
@@ -176,11 +188,11 @@ ha = FakeHA()
 ha.stamp_zone("upstairs", False)
 ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
 ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
-    ha.datetime() - timedelta(hours=11))
-check("T1 vacant zone, no motion for 11h at 62F -> 0% (floor applies)",
+    ha.datetime() - timedelta(hours=13))
+check("T1 vacant zone, no motion for 13h at 62F -> 0% (floor applies)",
       auto(ha)[("upstairs", "Guest Bedroom 1")] == 0)
 
-# Daytime hold is 2h (not 10h), so the 2 PM example still gets its savings.
+# Daytime hold is 2h (not 12h), so the 2 PM example still gets its savings.
 ha = FakeHA(clock=datetime(2026, 11, 10, 14, 0, 0))
 ha.stamp_zone("upstairs", False)
 ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
@@ -216,6 +228,29 @@ ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
     ha.datetime() - timedelta(hours=11))
 check("T1 house home: vacant room 1F below is closed, not floored (0%)",
       auto(ha)[("upstairs", "Guest Bedroom 1")] == 0)
+
+# CO2 is a physiological signal: elevated CO2 (someone breathing, e.g. a
+# guest) vetoes the floor even when the phones are away and motion is quiet.
+ha = FakeHA()
+ha.set_house(False)
+ha.set_co2(900.0)
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
+ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
+    ha.datetime() - timedelta(hours=13))
+check("T1 elevated CO2 vetoes the floor; room gets PIR heat (100%)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 100)
+
+# A bedroom light/fan on while someone is home is non-PIR evidence of use.
+ha = FakeHA()
+ha.set_house(True)
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 63.0)
+ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
+    ha.datetime() - timedelta(hours=13))
+ha.set_activity("upstairs", "Guest Bedroom 1", True)
+check("T1 activity on + house home: 1F below gets 50% (occupied), not floored",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 50)
 
 # =============================================================================
 # 2. Occupied floor: PIR override at 1.5F
