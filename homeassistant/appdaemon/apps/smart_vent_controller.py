@@ -123,7 +123,12 @@ ZONES = {
                 # occupied rooms (Living Room, Kitchen, etc.) to feed itself.
                 # Its own vent positions still follow normal temp/occupancy
                 # logic. 2026-07-16.
+                # 2026-11-08 (winter readiness): donor_only is a COOLING-season
+                # policy. In winter this is the primary sleeping room, so it
+                # must be able to recruit warm air when it is cold; the flag
+                # stays for cooling only.
                 "donor_only": True,
+                "donor_only_heating": False,
             },
             "Main Bathroom": {
                 "temp": "sensor.main_bathroom_temperature",
@@ -310,6 +315,34 @@ DEADBAND = 1.0
 # (upstairs 5-8°F above main floor) and leaving hot rooms uncooled because
 # nobody is standing in them makes the imbalance worse.
 OCCUPANCY_OVERRIDE_OVER = 3.0
+
+# ── Heating vacant-room policy (2026-11-08, winter readiness) ────────────────
+# Cooling treats an empty hot room as a problem (heat-soak raises the house
+# average), so the cooling ladder keeps empty rooms near setpoint. Heating is
+# the mirror image: an empty room is pure heat waste, and there is no
+# heat-soak penalty for letting it drift. Three constants implement the winter
+# policy:
+#
+#   HEAT_VACANT_FLOOR_F -- when a WHOLE ZONE has been empty for
+#   ZONE_PRESENCE_HOLD_MIN (the existing 25-minute presence debounce), its
+#   rooms stop being actively heated above this floor. At/below it they get
+#   100% (pipe/furniture protection). Gating on the whole zone, not the room's
+#   own PIR, is deliberate: a sleeping occupant never trips PIR, and treating
+#   their bedroom as vacant would close the vent on them.
+#
+#   HEAT_PIR_OVERRIDE_F -- on an OCCUPIED floor, a room that reads empty is
+#   treated as occupied once it is this far below the heat setpoint. This is
+#   the PIR-false-negative guard (sleeping person); cooling uses the looser
+#   OCCUPANCY_OVERRIDE_OVER=3.0 because its failure mode is a transient hot
+#   spot, while heating's is waking up cold.
+HEAT_VACANT_FLOOR_F = 58.0
+HEAT_PIR_OVERRIDE_F = 1.5
+# A room whose own PIR has fired within this window is treated as "possibly
+# occupied" even when its whole zone reads vacant. This is the sleeping-
+# occupant safety net for the 58F floor: PIR can be off for hours while
+# someone sleeps, but it almost always fired when they went to bed. After this
+# long with no motion, the room is genuinely a candidate for the floor.
+HEAT_ROOM_OCCUPANCY_HOLD_MIN = 600.0   # 10h
 
 # ── Per-floor unoccupied drift targets (cooling season, data-driven) ───────
 # Empirical targets from 3 days of cooling-cycle drift data (Jul 13-16):
@@ -1043,6 +1076,18 @@ class SmartVentController(hass.Hass):
         self._zone_last_occupied = {}
         self._zone_occupied = {}
         self._zone_vacancy_demoted = set()
+        # Per-room last PIR motion, used by the heating vacant-floor policy
+        # (HEAT_ROOM_OCCUPANCY_HOLD_MIN) so a sleeping occupant whose zone
+        # has gone "vacant" is not closed out. Seed every room as "recently
+        # occupied" at startup: after an AppDaemon restart the PIR history is
+        # gone, and a 2am restart must not treat a sleeping bedroom as vacant
+        # before its motion sensor has a chance to fire.
+        _seed_now = self.datetime()
+        self._room_last_occupied = {
+            (zn, rn): _seed_now
+            for zn, z in ZONES.items()
+            for rn in z["rooms"]
+        }
 
         # Setpoint-nudge ownership state (see the constants block + the state-
         # machine comment on _apply_setpoint_nudge). _sp_owned = True while WE
@@ -1632,6 +1677,46 @@ class SmartVentController(hass.Hass):
                     unocc_hot_override = OCCUPANCY_OVERRIDE_OVER
                     occ_deadband = DEADBAND
 
+                # ── Heating vacant-room policy (2026-11-08) ─────────────────
+                # A room in a zone that has been empty for
+                # ZONE_PRESENCE_HOLD_MIN is not actively heated above
+                # HEAT_VACANT_FLOOR_F; at/below the floor it gets 100% for
+                # pipe/furniture protection. On an OCCUPIED floor, an empty-
+                # reading room is treated as occupied once it is
+                # HEAT_PIR_OVERRIDE_F below setpoint, so a sleeping occupant
+                # (PIR false negative) is not closed out. Cooling keeps its
+                # existing heat-soak logic untouched.
+                if is_heating and occ_entity and not is_occupied:
+                    if (self._zone_is_vacant(zone_name)
+                            and not self._room_recently_occupied(key)):
+                        # 0.5F hysteresis on the floor so a sensor wobbling
+                        # around 58F doesn't flap the damper 0<->100.
+                        floor_open = (temp <= HEAT_VACANT_FLOOR_F
+                                      or (prev and prev > 0 and
+                                          temp <= HEAT_VACANT_FLOOR_F + HYSTERESIS))
+                        if floor_open:
+                            pos = 100
+                            reason = (f"vacant cold floor ({temp:.1f}F <= "
+                                      f"{HEAT_VACANT_FLOOR_F:.0f}F) — 100%")
+                        else:
+                            pos = 0
+                            reason = (f"vacant ({temp:.1f}F > "
+                                      f"{HEAT_VACANT_FLOOR_F:.0f}F floor) — 0%")
+                        room_positions[key] = pos
+                        self._last_zone_positions[key] = pos
+                        self.log(f"  {zone_name}/{room_name}: {temp:.1f}F "
+                                 f"empty need={need:+.1f} -> {pos}% ({reason})")
+                        continue
+                    # Measure the sleeping-occupant trigger against the RAW
+                    # gap, not `need` -- `need` carries the +2F downstairs
+                    # heat-rise bonus and would trip this while the room is
+                    # still above the setpoint.
+                    if (target_heat is not None
+                            and (target_heat - temp) > HEAT_PIR_OVERRIDE_F):
+                        # PIR false negative (sleeping occupant): treat the
+                        # room as occupied for the normal heating ladder.
+                        is_occupied = True
+
                 # Zone-presence contention (lever A): a vacant zone's rooms stop
                 # grabbing an unconditional 100% via either the absolute
                 # OCCUPANCY_OVERRIDE_OVER or the per-floor hot-override while
@@ -1645,12 +1730,22 @@ class SmartVentController(hass.Hass):
                 raised_hot_override = self._elevated_threshold(
                     zone_name, unocc_hot_override, is_heating)
 
-                if need > occ_override:
+                # On an occupied floor, a heating-empty room below the PIR
+                # threshold must not be turned into a 100% "cold override" by
+                # the +2F downstairs heat-rise bonus in `need`; let it fall to
+                # the normal 50%/closed unoccupied ladder instead.
+                _heating_empty_below_pir = (
+                    is_heating and occ_entity and not is_occupied
+                    and target_heat is not None
+                    and (target_heat - temp) <= HEAT_PIR_OVERRIDE_F)
+
+                if need > occ_override and not _heating_empty_below_pir:
                     pos = 100
                     _override_kind = "cold" if is_heating else "hot"
                     reason = (f"{_override_kind} override ({need:+.1f}) — "
                               f"100% regardless of occupancy")
-                elif need > raised_hot_override and not is_occupied:
+                elif (need > raised_hot_override and not is_occupied
+                      and not _heating_empty_below_pir):
                     # Unoccupied and past the per-floor hot-override (but under
                     # the absolute OCCUPANCY_OVERRIDE_OVER) — give full airflow;
                     # the room is hot enough that cooling it matters even empty.
@@ -2121,6 +2216,8 @@ class SmartVentController(hass.Hass):
             self._zone_occupied = {}
         if not hasattr(self, "_zone_vacancy_demoted"):
             self._zone_vacancy_demoted = set()
+        if not hasattr(self, "_room_last_occupied"):
+            self._room_last_occupied = {}
 
     def _update_zone_presence(self):
         """Refresh each zone's presence state from its rooms' occupancy sensors.
@@ -2143,14 +2240,13 @@ class SmartVentController(hass.Hass):
         now = self.datetime()
         for zone_name, zone in ZONES.items():
             occupied = False
-            for _room_name, sensors in zone["rooms"].items():
+            for room_name, sensors in zone["rooms"].items():
                 occ = sensors.get("occupancy")
                 if not occ:
                     continue
-                state = self.get_state(occ)
-                if state == "on":
+                if self.get_state(occ) == "on":
                     occupied = True
-                    break
+                    self._room_last_occupied[(zone_name, room_name)] = now
             if occupied:
                 self._zone_last_occupied[zone_name] = now
             self._zone_occupied[zone_name] = occupied
@@ -2193,6 +2289,22 @@ class SmartVentController(hass.Hass):
             return True
         age = (self.datetime() - last).total_seconds() / 60.0
         return age > ZONE_PRESENCE_HOLD_MIN
+
+    def _room_recently_occupied(self, key, max_age_min=None):
+        """True if this room's own PIR fired within max_age_min.
+
+        Used only by the heating vacant-floor policy. A zone can read vacant
+        while someone sleeps (PIR off for hours); their last motion at
+        bedtime is what keeps the room out of the 58F floor treatment.
+        """
+        self._ensure_zone_presence_state()
+        if max_age_min is None:
+            max_age_min = HEAT_ROOM_OCCUPANCY_HOLD_MIN
+        last = self._room_last_occupied.get(key)
+        if last is None:
+            return False
+        age = (self.datetime() - last).total_seconds() / 60.0
+        return age <= max_age_min
 
     def _zone_contention(self, zone, heating):
         """How badly some OTHER zone's occupants need air right now, in [0, 1].
@@ -2531,34 +2643,36 @@ class SmartVentController(hass.Hass):
                 occ_entity = sensors.get("occupancy")
                 is_occupied = (not occ_entity) or self.get_state(occ_entity) == "on"
                 off = off_by(temp)
-                # Occupancy gate: only help occupied rooms, UNLESS the room is
-                # significantly over setpoint (OCCUPANCY_OVERRIDE_OVER). ecobee
-                # PIR sensors read unoccupied when nobody is moving, even if
-                # the room is hot — don't starve a hot room of airflow just
-                # because it's empty.
-                #
-                # Zone-presence contention: this threshold is now RELATIVE for
-                # rooms in a VACANT zone — an empty room in a zone whose
-                # occupants are nowhere near must be considerably hotter before
-                # it can lock itself into protected-beneficiary status (and out
-                # of donor eligibility) while another floor's occupants are
-                # suffering. _occ_override is the single shared decision both
-                # this pass and fan-assist use (recurring-bug-class guard).
-                _occ_override = self._effective_occupancy_override(
-                    zone_name, key, heating)
+                # Occupancy gate mirrors _auto_calculate, including the
+                # winter policies: a room in a VACANT zone is never a
+                # beneficiary (the base pass gives it frost protection at
+                # HEAT_VACANT_FLOOR_F); on an OCCUPIED floor an empty-reading
+                # room is treated as occupied once it is HEAT_PIR_OVERRIDE_F
+                # below setpoint (sleeping occupant).
                 if occ_entity and not is_occupied:
-                    if off < _occ_override:
-                        continue  # unoccupied and not hot enough to override
-                    # Hot enough to override the PIR false-negative. Treat as
-                    # occupied for sort purposes too — a room this hot is a
-                    # priority regardless of what the motion sensor says, and
-                    # the occupied-first sort would otherwise put it behind
-                    # less-hot but occupied rooms (e.g. GB1 at +8F empty
-                    # losing donors to Living Room at +5F occupied).
-                    is_occupied = True
-                # donor_only rooms never become beneficiaries — they can be
+                    if heating:
+                        if (self._zone_is_vacant(zone_name)
+                                and not self._room_recently_occupied(key)):
+                            continue
+                        if off < HEAT_PIR_OVERRIDE_F:
+                            continue
+                        is_occupied = True
+                    else:
+                        _occ_override = self._effective_occupancy_override(
+                            zone_name, key, heating)
+                        if off < _occ_override:
+                            continue
+                        is_occupied = True
+                # donor_only rooms never become beneficiaries -- they can be
                 # throttled as donors but never steal airflow for themselves.
-                if sensors.get("donor_only"):
+                # 2026-11-08: the flag is cooling-only for rooms that opt out
+                # via donor_only_heating=False (Main Bedroom, the winter
+                # sleeping room). Cat Room keeps the flag in both seasons.
+                _donor_only = sensors.get("donor_only")
+                if (heating and _donor_only
+                        and sensors.get("donor_only_heating") is False):
+                    _donor_only = False
+                if _donor_only:
                     continue
                 # DOWNSTAIRS/BASEMENT LADDER CONSISTENCY (2026-09-02, bug fix):
                 # this pass has its OWN, separate "does this room deserve to be
@@ -2870,17 +2984,29 @@ class SmartVentController(hass.Hass):
                 if temp is None:
                     continue
                 occ_entity = sensors.get("occupancy")
+                is_occ = (not occ_entity) or self.get_state(occ_entity) == "on"
                 off = off_by(temp)
-                # Same occupancy override as the priority pass: a hot room
-                # gets fan-assist even if unoccupied (see OCCUPANCY_OVERRIDE_OVER).
-                # Zone-presence contention (lever A): the threshold is RELATIVE
-                # for rooms in a vacant zone, via the SAME single shared helper
-                # the priority pass uses (recurring-bug-class guard).
-                _occ_override = self._effective_occupancy_override(
-                    zone_name, key, heating)
-                if occ_entity and self.get_state(occ_entity) != "on":
+                # Same winter occupancy gate as the priority pass: no fan
+                # assist for an empty floor, and an empty-reading room on an
+                # occupied floor is treated as occupied once it is
+                # HEAT_PIR_OVERRIDE_F below setpoint (sleeping occupant).
+                if heating and occ_entity and not is_occ:
+                    if (self._zone_is_vacant(zone_name)
+                            and not self._room_recently_occupied(key)):
+                        continue
+                    if off < HEAT_PIR_OVERRIDE_F:
+                        continue
+                    is_occ = True
+                elif occ_entity and not is_occ:
+                    _occ_override = self._effective_occupancy_override(
+                        zone_name, key, heating)
                     if off < _occ_override:
                         continue
+                # donor_only is cooling-only for rooms that opt out in
+                # heating (Main Bedroom); Cat Room stays out in both seasons.
+                if (heating and sensors.get("donor_only")
+                        and sensors.get("donor_only_heating") is not False):
+                    continue
                 margin = self._room_margin(key, heating, base_margin=FAN_ASSIST_OVER)
                 if off < margin:
                     continue
@@ -2985,18 +3111,36 @@ class SmartVentController(hass.Hass):
         """
         worst_hot = 0.0   # most over the cool setpoint
         worst_cold = 0.0  # most under the heat setpoint
-        for _zone_name, zone in ZONES.items():
+        # Sleeping-room inclusion is HEATING-SEASON only. Without this, a
+        # summer heat_cool cycle (low heat setpoint, over-cooled basement)
+        # could pick "heating" from an empty room and run the blower the wrong
+        # way. Same season idiom as the pre-cool gate.
+        _hmode, _hact, _tc, _th = self._get_thermostat_state()
+        _outdoor = self._outdoor_temp()
+        heating_season = (_hmode == "heat"
+                          or (_hmode == "heat_cool"
+                              and _outdoor is not None
+                              and _outdoor < PRECOOL_MIN_OUTDOOR_F))
+        for zone_name, zone in ZONES.items():
             for _room_name, sensors in zone["rooms"].items():
                 occ = sensors.get("occupancy")
-                if occ and self.get_state(occ) != "on":
-                    continue
+                occ_on = (not occ) or self.get_state(occ) == "on"
                 t = self._read_temp(sensors["temp"])
                 if t is None:
                     continue
                 if target_cool is not None:
-                    worst_hot = max(worst_hot, t - target_cool)
+                    # Cooling keeps the historical occupied-only rule (an
+                    # empty hot room is handled by the priority pass).
+                    if occ_on:
+                        worst_hot = max(worst_hot, t - target_cool)
                 if target_heat is not None:
-                    worst_cold = max(worst_cold, target_heat - t)
+                    cold = target_heat - t
+                    # Heating: include a sleeping room on an occupied floor
+                    # (PIR false negative) once it clears HEAT_PIR_OVERRIDE_F.
+                    if occ_on or (heating_season
+                                  and not self._zone_is_vacant(zone_name)
+                                  and cold >= HEAT_PIR_OVERRIDE_F):
+                        worst_cold = max(worst_cold, cold)
         if worst_hot < FAN_ASSIST_OVER and worst_cold < FAN_ASSIST_OVER:
             return None
         return worst_cold > worst_hot
@@ -4379,10 +4523,20 @@ class SmartVentController(hass.Hass):
                 # is only meaningful in an occupied zone, where it reduces to
                 # the bare OCCUPANCY_OVERRIDE_OVER (matching _apply_priority_rooms).
                 if not is_occupied:
-                    if self._zone_is_vacant(zone_name):
+                    if (self._zone_is_vacant(zone_name)
+                            and not self._room_recently_occupied(key)):
                         continue
-                    _override = self._effective_occupancy_override(
-                        zone_name, key, heating)
+                    if heating:
+                        # Winter: only rooms allowed to be heating
+                        # beneficiaries may drive a house-wide heat nudge;
+                        # Cat Room (donor_only in both seasons) must not.
+                        if (sensors.get("donor_only")
+                                and sensors.get("donor_only_heating") is not False):
+                            continue
+                        _override = HEAT_PIR_OVERRIDE_F
+                    else:
+                        _override = self._effective_occupancy_override(
+                            zone_name, key, heating)
                     if self._off_target(room_name, temp, heating,
                                         setpoint=(_reference_heat if heating
                                                   else _reference_cool)) \
