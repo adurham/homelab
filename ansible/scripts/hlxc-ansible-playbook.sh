@@ -125,7 +125,7 @@ chmod 700 /dev/shm/hermes-ansible-local-tmp
 
 export HLXC_TTL="$TTL"
 export HLXC_ANSIBLE_DIR="$ANSIBLE_DIR"
-export HLXC_SSH_KEY_ITEM="op://Personal/5l6mt4hzy4ozgjqi7mgtzoedwq/password"
+export HLXC_SSH_KEY_ITEM="op://Hermes/i3bo4gm6hch4bbieb57rmgwddm/password"
 export HLXC_PUBKEY_IDENTITY_PUB="${PUBKEY_IDENTITY}.pub"
 
 exec ssh-agent -t "$TTL" "$INNER" "$@"

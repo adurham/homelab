@@ -29,4 +29,4 @@ if ! command -v op >/dev/null 2>&1; then
   exit 1
 fi
 
-exec op read "op://Personal/6x2qdqloldso6yx75oba3t74qq/password"
+exec op read "op://Hermes/o2lf3jadisyvglinp35ixcs7sa/password"
