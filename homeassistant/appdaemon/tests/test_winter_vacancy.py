@@ -64,6 +64,12 @@ class FakeHA(svc.SmartVentController):
         self._zone_occupied = {}
         self._zone_vacancy_demoted = set()
         self._room_last_occupied = {}
+        self._room_sleep_hold_until = {}
+        self._activity_entity_to_key = {}
+        for _zn, zone in svc.ZONES.items():
+            for _rn, sensors in zone["rooms"].items():
+                for entity in sensors.get("activity", []):
+                    self._activity_entity_to_key[entity] = (_zn, _rn)
         self._sp_owned = False
         self._sp_commanded_cool = None
         self._sp_commanded_heat = None
@@ -251,6 +257,37 @@ ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
 ha.set_activity("upstairs", "Guest Bedroom 1", True)
 check("T1 activity on + house home: 1F below gets 50% (occupied), not floored",
       auto(ha)[("upstairs", "Guest Bedroom 1")] == 50)
+
+# Lights-out sleep cue: a bedroom light/fan/TV turning off in the evening
+# holds the room as occupied until 09:00, per room.
+ha = FakeHA(clock=datetime(2026, 11, 9, 23, 0, 0))
+ha.set_house(True)
+ha.on_activity_change("light.main_bedroom_ceiling_fan_light", None,
+                      "on", "off", {})
+ha._clock = datetime(2026, 11, 10, 2, 0, 0)
+check("T1 bedroom lights-out holds the room occupied at 2am",
+      ha._room_recently_occupied(("downstairs", "Main Bedroom")) is True)
+ha._clock = datetime(2026, 11, 10, 10, 0, 0)
+check("T1 bedroom lights-out hold expires at 09:00",
+      ha._room_recently_occupied(("downstairs", "Main Bedroom")) is False)
+
+# A common-area light going off does not set a sleep hold.
+ha = FakeHA(clock=datetime(2026, 11, 9, 23, 0, 0))
+ha.set_house(True)
+ha.on_activity_change("switch.living_room_accent_lights", None,
+                      "on", "off", {})
+ha._clock = datetime(2026, 11, 10, 2, 0, 0)
+check("T1 common-area lights-out does not set a sleep hold",
+      ha._room_recently_occupied(("downstairs", "Living Room")) is False)
+
+# The sleep cue is inactive while the house is away.
+ha = FakeHA(clock=datetime(2026, 11, 9, 23, 0, 0))
+ha.set_house(False)
+ha.on_activity_change("light.main_bedroom_ceiling_fan_light", None,
+                      "on", "off", {})
+ha._clock = datetime(2026, 11, 10, 2, 0, 0)
+check("T1 away: lights-out does not set a sleep hold",
+      ha._room_recently_occupied(("downstairs", "Main Bedroom")) is False)
 
 # =============================================================================
 # 2. Occupied floor: PIR override at 1.5F

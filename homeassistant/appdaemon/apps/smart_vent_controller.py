@@ -36,6 +36,7 @@ ZONES = {
                 # fan left on is not proof of occupancy, but it is enough to
                 # keep the room out of the 58F vacant-floor treatment.
                 "activity": ["switch.nita_s_bedroom_main_lights"],
+                "sleep": True,
             },
             "Guest Bedroom 2": {
                 "temp": "sensor.guest_bedroom_2_temperature",
@@ -44,6 +45,7 @@ ZONES = {
                     "cover.guest_bedroom_2_1ec7_vent_2",
                 ],
                 "activity": ["switch.guest_bedroom_main_lights"],
+                "sleep": True,
             },
             "Game Room": {
                 "temp": "sensor.game_room_temperature",
@@ -138,6 +140,7 @@ ZONES = {
                     "light.main_bedroom_ceiling_fan_light",
                     "fan.main_bedroom_ceiling_fan",
                 ],
+                "sleep": True,
                 # donor_only: this room can be a DONOR (throttled to redirect
                 # flow to a hotter room) but never a BENEFICIARY (it never
                 # steals airflow from other rooms for itself). Main Bedroom
@@ -1145,6 +1148,15 @@ class SmartVentController(hass.Hass):
             for zn, z in ZONES.items()
             for rn in z["rooms"]
         }
+        # Bedroom "lights out" sleep cue. When a bedroom's light/fan/TV turns
+        # off in the evening, hold that room as occupied until 09:00; this is
+        # per-room evidence that does not need a PIR or any new hardware.
+        self._room_sleep_hold_until = {}
+        self._activity_entity_to_key = {}
+        for _zn, _z in ZONES.items():
+            for _rn, _sensors in _z["rooms"].items():
+                for _entity in _sensors.get("activity", []):
+                    self._activity_entity_to_key[_entity] = (_zn, _rn)
 
         # Setpoint-nudge ownership state (see the constants block + the state-
         # machine comment on _apply_setpoint_nudge). _sp_owned = True while WE
@@ -1276,6 +1288,10 @@ class SmartVentController(hass.Hass):
                 if occ:
                     self.listen_state(self.on_occupancy_change, occ)
 
+        # Listen for bedroom activity transitions (lights-out sleep cue).
+        for entity in self._activity_entity_to_key:
+            self.listen_state(self.on_activity_change, entity)
+
         # Listen for mode changes to run immediately
         self.listen_state(self.on_mode_change, MODE_SELECT)
         self.listen_state(self.on_mode_change, ENABLED_SWITCH)
@@ -1369,6 +1385,34 @@ class SmartVentController(hass.Hass):
         if old != new and new in ("on", "off"):
             self.log(f"Occupancy change: {entity} -> {new}, running control loop")
             self.control_loop(None)
+
+    def on_activity_change(self, entity, attribute, old, new, kwargs):
+        """Bedroom lights-out sleep cue: hold the room as occupied until 09:00.
+
+        A bedroom light/fan/TV turning off in the evening is per-room evidence
+        that someone is settling in for the night, even if the PIR never fires
+        again. This does not apply to common areas (the `sleep` flag is only on
+        the bedrooms) and does nothing while the house is away.
+        """
+        key = self._activity_entity_to_key.get(entity)
+        if not key:
+            return
+        sensors = ZONES[key[0]]["rooms"][key[1]]
+        if not sensors.get("sleep"):
+            return
+        if old not in ("on", "playing") or new not in ("off", "idle", "standby"):
+            return
+        now = self.datetime()
+        if not (now.hour >= 21 or now.hour < 1):
+            return
+        if self._house_away():
+            return
+        wake = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        if wake <= now:
+            wake += timedelta(days=1)
+        self._room_sleep_hold_until[key] = wake
+        self.log(f"  sleep cue: {key[1]} activity off at {now:%H:%M} -> "
+                 f"held as occupied until {wake:%H:%M}")
 
     def on_mode_change(self, entity, attribute, old, new, kwargs):
         """Run control loop immediately when mode or enabled changes."""
@@ -2281,6 +2325,10 @@ class SmartVentController(hass.Hass):
             self._zone_vacancy_demoted = set()
         if not hasattr(self, "_room_last_occupied"):
             self._room_last_occupied = {}
+        if not hasattr(self, "_room_sleep_hold_until"):
+            self._room_sleep_hold_until = {}
+        if not hasattr(self, "_activity_entity_to_key"):
+            self._activity_entity_to_key = {}
 
     def _update_zone_presence(self):
         """Refresh each zone's presence state from its rooms' occupancy sensors.
@@ -2361,6 +2409,9 @@ class SmartVentController(hass.Hass):
         bedtime is what keeps the room out of the 58F floor treatment.
         """
         self._ensure_zone_presence_state()
+        until = self._room_sleep_hold_until.get(key)
+        if until is not None and self.datetime() < until:
+            return True
         if max_age_min is None:
             hour = self.datetime().hour
             if hour >= 21 or hour < 9:
