@@ -174,6 +174,23 @@ ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
 check("T1 vacant zone, no motion for 11h at 62F -> 0% (floor applies)",
       auto(ha)[("upstairs", "Guest Bedroom 1")] == 0)
 
+# Daytime hold is 2h (not 10h), so the 2 PM example still gets its savings.
+ha = FakeHA(clock=datetime(2026, 11, 10, 14, 0, 0))
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
+ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
+    ha.datetime() - timedelta(hours=3))
+check("T1 daytime: 3h since motion at 62F -> 0% (2h day hold expired)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 0)
+
+ha = FakeHA(clock=datetime(2026, 11, 10, 14, 0, 0))
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
+ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
+    ha.datetime() - timedelta(hours=1))
+check("T1 daytime: 1h since motion at 62F -> 100% (2h day hold active)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 100)
+
 # =============================================================================
 # 2. Occupied floor: PIR override at 1.5F
 # =============================================================================

@@ -340,9 +340,11 @@ HEAT_PIR_OVERRIDE_F = 1.5
 # A room whose own PIR has fired within this window is treated as "possibly
 # occupied" even when its whole zone reads vacant. This is the sleeping-
 # occupant safety net for the 58F floor: PIR can be off for hours while
-# someone sleeps, but it almost always fired when they went to bed. After this
-# long with no motion, the room is genuinely a candidate for the floor.
-HEAT_ROOM_OCCUPANCY_HOLD_MIN = 600.0   # 10h
+# someone sleeps, but it almost always fired when they went to bed. Overnight
+# the hold is long (10h) so a full night's sleep is covered; during the day a
+# short hold (2h) is enough and preserves the daytime savings.
+HEAT_ROOM_OCCUPANCY_HOLD_MIN = 600.0      # 10h, 21:00-09:00
+HEAT_DAY_ROOM_OCCUPANCY_HOLD_MIN = 120.0  # 2h, 09:00-21:00
 
 # ── Per-floor unoccupied drift targets (cooling season, data-driven) ───────
 # Empirical targets from 3 days of cooling-cycle drift data (Jul 13-16):
@@ -2299,7 +2301,11 @@ class SmartVentController(hass.Hass):
         """
         self._ensure_zone_presence_state()
         if max_age_min is None:
-            max_age_min = HEAT_ROOM_OCCUPANCY_HOLD_MIN
+            hour = self.datetime().hour
+            if hour >= 21 or hour < 9:
+                max_age_min = HEAT_ROOM_OCCUPANCY_HOLD_MIN
+            else:
+                max_age_min = HEAT_DAY_ROOM_OCCUPANCY_HOLD_MIN
         last = self._room_last_occupied.get(key)
         if last is None:
             return False
