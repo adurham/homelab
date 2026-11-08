@@ -9,7 +9,7 @@
 # On macOS the fallback is the local `op` CLI (app integration, biometric).
 set -euo pipefail
 
-ITEM="${ANSIBLE_VAULT_OP_ITEM:-op://Personal/6x2qdqloldso6yx75oba3t74qq/password}"
+ITEM="${ANSIBLE_VAULT_OP_ITEM:-op://Hermes/o2lf3jadisyvglinp35ixcs7sa/password}"
 BRIDGE="$HOME/.hermes/bin/op-bridge-rpc"
 BRIDGE_SOCK="$HOME/.hermes/op-bridge.sock"
 
