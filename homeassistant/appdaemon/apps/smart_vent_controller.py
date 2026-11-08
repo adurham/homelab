@@ -346,6 +346,13 @@ HEAT_PIR_OVERRIDE_F = 1.5
 HEAT_ROOM_OCCUPANCY_HOLD_MIN = 600.0      # 10h, 21:00-09:00
 HEAT_DAY_ROOM_OCCUPANCY_HOLD_MIN = 120.0  # 2h, 09:00-21:00
 
+# House-away gate for the 58F floor. Room "occupancy" from the ecobee/room
+# sensors is MOTION only (a still person reads empty), so it cannot prove a
+# room is unoccupied. The floor is therefore allowed only when the
+# phone-based person entities say nobody is home. When anyone is home, the
+# 1.5F sleeping-room trigger applies and rooms never go below ~62.5F.
+HOUSE_PERSON_ENTITIES = ("person.adam_durham", "person.tati")
+
 # ── Per-floor unoccupied drift targets (cooling season, data-driven) ───────
 # Empirical targets from 3 days of cooling-cycle drift data (Jul 13-16):
 #   - Downstairs rooms already hold +1-2°F (Living Room p50 +1.6, Dining +0.3).
@@ -1690,7 +1697,8 @@ class SmartVentController(hass.Hass):
                 # existing heat-soak logic untouched.
                 if is_heating and occ_entity and not is_occupied:
                     if (self._zone_is_vacant(zone_name)
-                            and not self._room_recently_occupied(key)):
+                            and not self._room_recently_occupied(key)
+                            and self._house_away()):
                         # 0.5F hysteresis on the floor so a sensor wobbling
                         # around 58F doesn't flap the damper 0<->100.
                         floor_open = (temp <= HEAT_VACANT_FLOOR_F
@@ -2311,6 +2319,17 @@ class SmartVentController(hass.Hass):
             return False
         age = (self.datetime() - last).total_seconds() / 60.0
         return age <= max_age_min
+
+    def _house_away(self):
+        """True only when every configured person entity is not_home.
+
+        Fail closed: missing/unknown/unavailable counts as home, so a bad
+        presence reading can never let the 58F floor close a room.
+        """
+        for entity in HOUSE_PERSON_ENTITIES:
+            if self.get_state(entity) != "not_home":
+                return False
+        return True
 
     def _zone_contention(self, zone, heating):
         """How badly some OTHER zone's occupants need air right now, in [0, 1].

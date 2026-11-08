@@ -106,6 +106,8 @@ class FakeHA(svc.SmartVentController):
         self.states[svc.SETPOINT_TRUTH_HEAT] = sp_heat
         self.attrs[(svc.FAN_ENTITY, "fan_mode")] = "auto"
         self.attrs[(svc.WEATHER_ENTITY, "temperature")] = 40.0
+        for entity in svc.HOUSE_PERSON_ENTITIES:
+            self.states[entity] = "not_home"
 
     def datetime(self, aware=False):
         return self._clock
@@ -135,6 +137,10 @@ class FakeHA(svc.SmartVentController):
             self._zone_last_occupied[zone] = self._clock
         else:
             self._zone_last_occupied[zone] = self._clock - timedelta(minutes=30)
+
+    def set_house(self, home):
+        for entity in svc.HOUSE_PERSON_ENTITIES:
+            self.states[entity] = "home" if home else "not_home"
 
 
 def auto(ha):
@@ -190,6 +196,26 @@ ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
     ha.datetime() - timedelta(hours=1))
 check("T1 daytime: 1h since motion at 62F -> 100% (2h day hold active)",
       auto(ha)[("upstairs", "Guest Bedroom 1")] == 100)
+
+# The 58F floor is HOUSE-AWAY only. Room occupancy is motion-only, so while
+# anyone is home a still person must never be floored.
+ha = FakeHA()
+ha.set_house(True)
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
+ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
+    ha.datetime() - timedelta(hours=11))
+check("T1 house home: vacant room 62F is not floored (PIR trigger heats it)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 100)
+
+ha = FakeHA()
+ha.set_house(True)
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 63.0)
+ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
+    ha.datetime() - timedelta(hours=11))
+check("T1 house home: vacant room 1F below is closed, not floored (0%)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 0)
 
 # =============================================================================
 # 2. Occupied floor: PIR override at 1.5F
