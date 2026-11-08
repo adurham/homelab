@@ -255,31 +255,6 @@ all:
         ansible_user: amd
         ansible_become: true
 
-    hermes_gateway:
-      hosts:
-        hermes-gw-01:
-          # Reach via Tailscale, not the homelab subnet IP. Once the LXC
-          # joined Tailnet directly (Phase 6 / `tailscale up` inside the CT),
-          # the subnet-routed path via tailscale-gw → 172.16.0.50 stopped
-          # working — Tailscale prefers the direct WireGuard path to
-          # 100.119.249.49 but doesn't accept return traffic for 172.16.0.50
-          # on that interface. ip_hermes_gateway (172.16.0.50) is still
-          # used for templating LXC static-IP and iptables-self rules.
-          ansible_host: hermes-gw-01.tail19c543.ts.net
-          # Reach it DIRECTLY over Tailscale. hermes_gateway is a child of
-          # private_subnet, whose group_vars ProxyCommand jumps through the
-          # personal MacBook — but this host peers directly on the tailnet, so
-          # the jump dies with `kex_exchange_identification` on any run that
-          # doesn't pre-override it (the same quirk gallery-01 was already
-          # fixed for). Override back to the fleet default; do not inherit
-          # the jump.
-          ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
-          vmid: 113
-          target_node: pve02
-      vars:
-        ansible_user: amd
-        ansible_become: true
-
     # Adam's personal MacBook Pro M4 — a first-class Hermes TARGET (not a CT).
     # Its hermes binary runs from the checkout at ~/.hermes/hermes-agent (the
     # ~/.local/bin/hermes shim execs it); update_hermes_macbook.yml keeps that

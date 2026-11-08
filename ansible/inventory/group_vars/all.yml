@@ -272,7 +272,6 @@ yd_gated_hosts:
   - authentik
   - frigate-01
   - tailscale-gw
-  - hermes-gw-01
   - gallery-01
   - media-ingest-01
   - media-ingest-02
