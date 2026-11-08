@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Ansible vault password, resolved from 1Password at run time.
+#
+# There is no password on this disk. The secret lives in 1Password, and the
+# only way this script can read it is through the bridge the owner starts on
+# his MacBook (~/bin/op-bridge) — which signs in with Touch ID and forwards
+# its `op` socket to this host over SSH. Stop the bridge and this fails.
+#
+# On macOS the fallback is the local `op` CLI (app integration, biometric).
+set -euo pipefail
+
+ITEM="${ANSIBLE_VAULT_OP_ITEM:-op://Personal/6x2qdqloldso6yx75oba3t74qq/password}"
+BRIDGE="$HOME/.hermes/bin/op-bridge-rpc"
+BRIDGE_SOCK="$HOME/.hermes/op-bridge.sock"
+
+if [ -x "$BRIDGE" ] && [ -S "$BRIDGE_SOCK" ]; then
+  if out=$("$BRIDGE" read "$ITEM" 2>/dev/null) && [ -n "$out" ]; then
+    printf '%s\n' "$out"
+    exit 0
+  fi
+fi
+
+if command -v op >/dev/null 2>&1; then
+  if out=$(op read "$ITEM" 2>/dev/null) && [ -n "$out" ]; then
+    printf '%s\n' "$out"
+    exit 0
+  fi
+fi
+
+echo "vault-pass: no 1Password bridge at $BRIDGE_SOCK" >&2
+echo "vault-pass: start ~/bin/op-bridge on the MacBook (Touch ID) and leave it running" >&2
+exit 1
