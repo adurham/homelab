@@ -55,7 +55,12 @@ ZONES = {
                 ],
                 "activity": [
                     "light.game_room_game_room",
+                    "light.game_room_game_room_tv",
                     "switch.game_room_main_lights",
+                    "media_player.game_room_right_tv_un55u7900ffxza",
+                    "media_player.game_room_tv",
+                    "media_player.samsung_7_series_55_un55ru7100fxza",
+                    "media_player.u7900f_x227251",
                 ],
             },
             "Cat Room": {
@@ -82,6 +87,7 @@ ZONES = {
                 # (+4.8) -> 100% regardless of occupancy") while Game Room sat
                 # +11.2F over with "no donor rooms" available.
                 "donor_only": True,
+                "activity": ["switch.cat_room_main_lights"],
             },
             "Guest Bathroom": {
                 "temp": "sensor.guest_bathroom_temperature",
@@ -111,6 +117,7 @@ ZONES = {
                 # satisfied — max_vent_pct is a ceiling, not a floor).
                 # Added 2026-09-02.
                 "donor_only": True,
+                "activity": ["switch.guest_bathroom_vanity_lights"],
             },
         },
     },
@@ -173,6 +180,7 @@ ZONES = {
                 # steals airflow from occupied rooms for itself). Its vent
                 # still opens/closes normally based on its own temp. 2026-07-16.
                 "donor_only": True,
+                "activity": ["switch.front_foyer_chandelier"],
             },
             "Living Room": {
                 "temp": "sensor.living_room_temperature",
@@ -181,12 +189,27 @@ ZONES = {
                     "cover.living_room_fc56_vent_2",
                     "cover.living_room_5d8e_vent_2",
                 ],
+                "activity": [
+                    "light.living_room",
+                    "light.hue_color_lamp_1",
+                    "light.hue_color_lamp_2",
+                    "light.hue_color_downlight_1",
+                    "light.hue_color_downlight_2",
+                    "switch.living_room_accent_lights",
+                    "binary_sensor.living_room_tv",
+                    "media_player.bravia_k_77xr80c",
+                    "media_player.living_room_soundbar_2",
+                ],
             },
             "Kitchen": {
                 "temp": "sensor.kitchen_temperature",
                 "occupancy": None,
                 "vents": [
                     "cover.kitchen_d124_vent_2",
+                ],
+                "activity": [
+                    "switch.kitchen_main_lights",
+                    "switch.kitchen_island_pendants",
                 ],
             },
             "Dining Room": {
@@ -195,6 +218,7 @@ ZONES = {
                 "vents": [
                     "cover.dining_room_7a28_vent_2",
                 ],
+                "activity": ["switch.dining_room_ceiling_fan_light"],
             },
             "Laundry Room": {
                 "temp": "sensor.laundry_room_temperature",
@@ -213,6 +237,7 @@ ZONES = {
                 # Its own vent position still follows normal temp/occupancy
                 # logic. 2026-07-26.
                 "donor_only": True,
+                "activity": ["switch.laundry_room_main_lights"],
             },
         },
     },
@@ -224,6 +249,7 @@ ZONES = {
                 "vents": [
                     "cover.basement_4d79_vent",
                 ],
+                "activity": ["switch.basement_lights"],
             },
         },
     },
@@ -2359,9 +2385,14 @@ class SmartVentController(hass.Hass):
         return True
 
     def _room_activity_on(self, sensors):
-        """True if any non-PIR activity entity for this room is on."""
-        for entity in sensors.get("activity", []):
-            if self.get_state(entity) == "on":
+        """True if any non-PIR presence/activity entity for this room is on.
+
+        `presence` is reserved for future binary sensors (door, mmWave,
+        per-room CO2 threshold); `activity` holds lights/fans/TVs.
+        """
+        for entity in (sensors.get("presence", [])
+                       + sensors.get("activity", [])):
+            if self.get_state(entity) in ("on", "playing"):
                 return True
         return False
 
@@ -2724,12 +2755,16 @@ class SmartVentController(hass.Hass):
                 # below setpoint (sleeping occupant).
                 if occ_entity and not is_occupied:
                     if heating:
-                        if (self._zone_is_vacant(zone_name)
-                                and not self._room_recently_occupied(key)):
-                            continue
-                        if off < HEAT_PIR_OVERRIDE_F:
-                            continue
-                        is_occupied = True
+                        if (not self._house_away()
+                                and self._room_activity_on(sensors)):
+                            is_occupied = True
+                        else:
+                            if (self._zone_is_vacant(zone_name)
+                                    and not self._room_recently_occupied(key)):
+                                continue
+                            if off < HEAT_PIR_OVERRIDE_F:
+                                continue
+                            is_occupied = True
                     else:
                         _occ_override = self._effective_occupancy_override(
                             zone_name, key, heating)
@@ -3064,12 +3099,16 @@ class SmartVentController(hass.Hass):
                 # occupied floor is treated as occupied once it is
                 # HEAT_PIR_OVERRIDE_F below setpoint (sleeping occupant).
                 if heating and occ_entity and not is_occ:
-                    if (self._zone_is_vacant(zone_name)
-                            and not self._room_recently_occupied(key)):
+                    if (not self._house_away()
+                            and self._room_activity_on(sensors)):
+                        is_occ = True
+                    elif (self._zone_is_vacant(zone_name)
+                          and not self._room_recently_occupied(key)):
                         continue
-                    if off < HEAT_PIR_OVERRIDE_F:
+                    elif off < HEAT_PIR_OVERRIDE_F:
                         continue
-                    is_occ = True
+                    else:
+                        is_occ = True
                 elif occ_entity and not is_occ:
                     _occ_override = self._effective_occupancy_override(
                         zone_name, key, heating)
@@ -4596,25 +4635,29 @@ class SmartVentController(hass.Hass):
                 # is only meaningful in an occupied zone, where it reduces to
                 # the bare OCCUPANCY_OVERRIDE_OVER (matching _apply_priority_rooms).
                 if not is_occupied:
-                    if (self._zone_is_vacant(zone_name)
-                            and not self._room_recently_occupied(key)):
-                        continue
-                    if heating:
-                        # Winter: only rooms allowed to be heating
-                        # beneficiaries may drive a house-wide heat nudge;
-                        # Cat Room (donor_only in both seasons) must not.
-                        if (sensors.get("donor_only")
-                                and sensors.get("donor_only_heating") is not False):
-                            continue
-                        _override = HEAT_PIR_OVERRIDE_F
+                    if (heating and not self._house_away()
+                            and self._room_activity_on(sensors)):
+                        is_occupied = True
                     else:
-                        _override = self._effective_occupancy_override(
-                            zone_name, key, heating)
-                    if self._off_target(room_name, temp, heating,
-                                        setpoint=(_reference_heat if heating
-                                                  else _reference_cool)) \
-                            < _override:
-                        continue
+                        if (self._zone_is_vacant(zone_name)
+                                and not self._room_recently_occupied(key)):
+                            continue
+                        if heating:
+                            # Winter: only rooms allowed to be heating
+                            # beneficiaries may drive a house-wide heat nudge;
+                            # Cat Room (donor_only in both seasons) must not.
+                            if (sensors.get("donor_only")
+                                    and sensors.get("donor_only_heating") is not False):
+                                continue
+                            _override = HEAT_PIR_OVERRIDE_F
+                        else:
+                            _override = self._effective_occupancy_override(
+                                zone_name, key, heating)
+                        if self._off_target(room_name, temp, heating,
+                                            setpoint=(_reference_heat if heating
+                                                      else _reference_cool)) \
+                                < _override:
+                            continue
                 # NOTE: a donor_only room is NOT skipped here (deliberately
                 # different from _apply_priority_rooms). donor_only only means
                 # "never a BENEFICIARY of vent REDISTRIBUTION" — it does not mean
