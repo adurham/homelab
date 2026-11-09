@@ -99,7 +99,7 @@ Single-host metrics + logs stack on `vm-01` and `graf-01`:
   1. Home Assistant webhook → iOS critical push (`severity=critical`
      overrides Do Not Disturb; warnings come in as normal pushes).
   2. Discord (`#infra-alerts`, via `roles/grafana_ack_bot` — a
-     standalone bot on hermes-gw-01, NOT Grafana's native Discord
+     standalone bot on graf-01, NOT Grafana's native Discord
      integration directly) — clickthrough link to the firing alert,
      permanent scrollable history, and reaction-based ack (EM7-style:
      suppresses new notifications until the alert actually resolves,
@@ -164,7 +164,7 @@ Manages the lifecycle of LXC containers, VMs, and cluster configuration.
   - `deploy_tanium_clients.yml` — Tanium client install across mixed OS targets.
   - `deploy_monitoring.yml` — VictoriaMetrics + Grafana.
   - `deploy_grafana_ack_bot.yml` — Discord reaction ack/silence bot for
-    Grafana alerts (hermes-gw-01, see `roles/grafana_ack_bot/README.md`).
+    Grafana alerts (graf-01, see `roles/grafana_ack_bot/README.md`).
   - `deploy_nut_ups.yml` — NUT monitoring for the lab-corner UPS
     (pve01): driver + upsd + monitor-only upsmon, metrics to
     VictoriaMetrics, and a monthly quick battery self-test. See

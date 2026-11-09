@@ -1146,22 +1146,23 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | `vm-01`         | 106  | `172.16.0.42`    | DHCP (`192.168.86.x`) | VictoriaMetrics + blackbox + Loki + Alloy   |
 | `graf-01`       | 107  | `172.16.0.41`    | -                  | Grafana + image renderer                    |
 | `proxy-01`      | 108  | `172.16.0.12`    | -                  | Squid caching proxy (listens `:3129` ssl-bump / `:3130`) |
-| `hermes-gw-01`  | 113  | `172.16.0.50`    | - (Tailscale: `hermes-gw-01.tail19c543.ts.net`) | Hermes gateway; joins the tailnet directly, reached by tailnet name |
+| ~~`hermes-gw-01`~~ | ~~113~~ | ~~`172.16.0.50`~~ | - | **Deleted 2026-11-08** — CT 113 and its tailnet name are gone; vmid 113 is free |
 | `gallery-01`    | 115  | `172.16.0.46`    | - (Tailscale: `100.83.114.12`) | Media gallery platform (OS/tailnet hostname kept as `tg-harvester-01`); joins the tailnet directly |
 | `media-ingest-01` | 116 | `172.16.0.47`   | -                  | Media collector (outbound-only)             |
 | `media-ingest-02` | 117 | `172.16.0.48`   | -                  | Secondary-source gallery collector (outbound-only) |
 | `adblock-proxy-01` | 118 | `172.16.0.49`  | DHCP (`192.168.86.x`) | mitmproxy explicit HTTPS proxy for personal-device Discord ad-stripping (Tailscale-only ingress, joins tailnet directly like hermes-gw-01) |
-| `print-01`      | 119  | `172.16.0.51`    | -                  | Bambu/MakerWorld → Creality K2 converter + slicer web app (Creality Print CLI headless; private-SDN only, joins the tailnet for ingress) |
+| `print-01`      | 119  | `172.16.0.120`   | -                  | Bambu/MakerWorld → Creality K2 converter + slicer web app (Creality Print CLI headless; private-SDN only, joins the tailnet for ingress) |
 | `frigate-01`    | 170  | `172.16.0.45`    | `192.168.86.17` (static) | Frigate NVR (Docker-in-LXC); eth0 on vmbr0 for RTSP/HA + eth1 on `private` |
 
 `172.16.0.40` was previously assigned to **both** `mail-01` and `vm-01` (ARP race). Resolved 2026-05-01 — moved `vm-01` to `.42`. See commit `12bb4c2`.
 
-`172.16.0.51` carries two rows: `print-01` (live, CT 119) and `ts-01` (the
-planned Tanium server, VMID 200). **VM 200 does not exist** — the built Tanium
-VMs are 210–214/222–223 and all are stopped — so the `ts-01` row is plan-only.
-If that VM is ever built, move `print-01` first (a stale host key at this
-address already caused one `REMOTE HOST IDENTIFICATION HAS CHANGED` failure
-against the new CT).
+**Resolved 2026-11-09:** `172.16.0.51` was shared by `print-01` (CT 119) and
+`ts-01` (VM 200, TanOS). VM 200 *was* built after this note was written, and the
+collision produced exactly the predicted ARP race: the gateway resolved `.51` to
+print-01's MAC (`bc:24:11:39:c3:e7`), so ts-01 was reachable for a minute after
+each boot and then went dark. `print-01` moved to `172.16.0.120`; the static
+neighbour pin that had been masking the race is gone. Never allocate from the
+`172.16.0.51`/`.52`–`.56` range — those are the TanOS appliance addresses.
 
 ## Monitoring & metrics ingestion into VictoriaMetrics (vm-01)
 
