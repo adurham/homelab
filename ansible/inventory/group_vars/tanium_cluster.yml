@@ -19,8 +19,12 @@ ansible_ssh_common_args: >-
   -o StrictHostKeyChecking=accept-new
   -o LogLevel=ERROR
 
-# Don't pin a specific identity file — let ssh negotiate via the agent
-# on the jump host.
+# TanOS is a CLI menu, not a POSIX shell: ansible must talk to it with
+# `raw` (or a purpose-built module), never with normal modules. The account is
+# tanadmin, password-only by design, and the password is fetched at run time
+# from 1Password through the bridge — nothing on disk.
+tanos_password_ref: "op://Personal/cr2s4li6fbh7i4snjwgj4tlh3a/password"
+ansible_password: "{{ lookup('pipe', '/home/adam.durham/.hermes/bin/op-bridge-rpc read ' ~ tanos_password_ref) }}"
 ansible_ssh_private_key_file: null
 
 # Override ansible's hardcoded SSH args. The default

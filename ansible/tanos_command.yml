@@ -1,0 +1,24 @@
+---
+# Run a TanOS CLI command (the appliance's menu command language, NOT a shell
+# command) across the Tanium cluster.
+#
+#   ansible-playbook tanos_command.yml -e '{"cmd":"show ntp"}'
+#   ansible-playbook tanos_command.yml -e '{"cmd":"report info"}' --limit ts-01
+#
+# Pass cmd as JSON: a plain `-e cmd='show ntp'` gets split into two args and
+# the CLI only sees "show".
+#
+# TanOS gives tanadmin a command menu, not a POSIX shell, so `raw` is the only
+# ansible transport that works — normal modules need a shell and a Python.
+- name: TanOS CLI command
+  hosts: tanium_cluster
+  gather_facts: false
+  tasks:
+    - name: "{{ cmd }}"
+      ansible.builtin.raw: "{{ cmd }}"
+      register: tanos_out
+      changed_when: false
+
+    - name: Output
+      ansible.builtin.debug:
+        var: tanos_out.stdout_lines
