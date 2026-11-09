@@ -387,11 +387,17 @@ class Detector:
         quiet = float(self.gate_cfg.get("baseline_quiet", 300))
         now = time.time()
         for cam, st in self.states.items():
-            if st.active_events or (now - st.last_cat_seen) < quiet:
+            if st.check_lock.locked():
                 continue
             if st.last_verdict == "accident":
                 continue
-            if st.check_lock.locked():
+            if self.cameras[cam].get("mode") == "periodic":
+                # The cat room is never empty, so the "quiet room" rule would
+                # never let a baseline exist. Refresh only after a clean check
+                # (so an accident cannot be baked into the baseline).
+                if st.last_verdict not in ("clean", ""):
+                    continue
+            elif st.active_events or (now - st.last_cat_seen) < quiet:
                 continue
             try:
                 frame = self.fetch_frame(cam)
