@@ -93,6 +93,7 @@ frigate_camera_fps:
 frigate_track_objects:
   - person
   - cat
+  - dog
 # Per-camera object overrides. driveway additionally tracks `car` and
 # `truck` for the mailbox-vehicle alert below -- scoped to just this
 # camera so the extra CPU detection load doesn't hit the other 5.
@@ -111,6 +112,7 @@ frigate_camera_objects:
   driveway:
     - person
     - cat
+    - dog
     - car
     - truck
 # Named detection zones per camera. Used for the mailbox-vehicle alert

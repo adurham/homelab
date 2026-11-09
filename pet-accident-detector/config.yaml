@@ -31,22 +31,27 @@ analyzer:
   #   timeout: 90
   #   max_tokens: 160
 
-# mode: event    -> check when a cat event ENDS (room goes empty)
-# mode: periodic -> fixed interval (rooms that are never empty, e.g. cat room)
+# mode: event    -> check when a pet event ENDS (room goes empty)
+# mode: periodic -> fixed interval only
+# Every camera with an `interval` also gets a periodic backstop check, even in
+# event mode: a dog may toilet and then stay in the room, so "pet left" alone
+# would never fire. Event mode just makes the common case fast.
 cameras:
   foyer:
     label: Foyer
     mode: event
+    interval: 600
   basement:
     label: Basement
     mode: event
+    interval: 600
   cat_room:
     label: Cat Room
     mode: periodic
     interval: 900
 
 triggers:
-  labels: [cat]
+  labels: [cat, dog]
 
 timing:
   settle: 30          # wait for the cat to clear the frame after it leaves

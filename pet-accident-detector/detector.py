@@ -53,25 +53,32 @@ LOG = logging.getLogger("petdetector")
 DEFAULT_CONFIG = Path(__file__).resolve().parent / "config.yaml"
 
 PROMPT = (
-    "Inspect the floor in this image for a genuine pet accident (urine, feces, or vomit). "
+    "Inspect every visible surface in this image - floor, rug, carpet, furniture, "
+    "bed, and corners - for a genuine pet accident: dog or cat urine, dog or cat "
+    "feces, or cat vomit. "
     "IGNORE all of the following normal things, which are NOT accidents: water bowls and "
     "food bowls (round dishes, sometimes shiny), litter boxes, scattered litter, toys, pet "
-    "beds, mats, rugs, cat trees, furniture, and pets. "
+    "beds, mats, rugs as such, cat trees, furniture as such, and pets themselves. "
     "CRITICAL: bright sunlight, window light pools, glare, sheen, and reflections on "
     "tile/hardwood/laminate floors are NOT puddles - hard floors are shiny and reflect "
-    "light normally. Do NOT report a puddle just because the floor looks bright, shiny, or "
-    "reflective. "
-    "A dark or irregular shape is almost always a SHADOW (from a cat, furniture, or the "
-    "camera) or a darker floor tile/seam, not liquid. Demand positive evidence of WETNESS: "
-    "a glossy sheen with a specular highlight, a meniscus or sharp edge, or a spreading "
-    "stain. For solid waste, demand a distinct three-dimensional shape with its own "
-    "highlight and shadow, not a flat dark patch. "
+    "light normally. Do NOT report a puddle just because a surface looks bright, shiny, or "
+    "reflective. A flat dark patch or a soft-edged shape is a SHADOW or a pattern in the "
+    "carpet, not liquid. "
+    "Demand positive evidence: "
+    "URINE = a yellowish or darker wet stain with a glossy sheen, a tide-line/meniscus "
+    "edge, or a spreading stain on the surface. "
+    "FECES = a distinct three-dimensional brown shape with its own highlight and shadow, "
+    "not a flat dark patch. "
+    "VOMIT = an irregular foamy or liquid patch, often with solid bits, often on carpet or "
+    "a rug and partly soaked in; not a clean carpet pattern and not a toy. "
+    "Cats often vomit on rugs, beds, or furniture rather than bare floor - check those too. "
     "Answer exactly in this format and nothing else: "
-    "ACCIDENT: yes|no | WHY: <one short sentence> | CONFIDENCE: high|medium|low"
+    "ACCIDENT: yes|no | KIND: urine|feces|vomit|none | WHY: <one short sentence> | "
+    "CONFIDENCE: high|medium|low"
 )
 
 BBOX_PROMPT = (
-    "There is a suspected pet accident (urine, feces, or vomit) on the floor in this image. "
+    "There is a suspected pet accident (urine, feces, or vomit) on a surface in this image. "
     "Give the tightest bounding box around the single most suspicious area. "
     "Use normalized coordinates from 0 to 1000 in the order [x1, y1, x2, y2], where "
     "(x1,y1) is the TOP-LEFT corner and (x2,y2) is the BOTTOM-RIGHT corner. "
@@ -79,6 +86,7 @@ BBOX_PROMPT = (
 )
 
 VERDICT_RE = re.compile(r"ACCIDENT:\s*(yes|no)", re.IGNORECASE)
+KIND_RE = re.compile(r"KIND:\s*(urine|feces|vomit|none)", re.IGNORECASE)
 WHY_RE = re.compile(r"WHY:\s*(.+?)(?:\s*\|\s*CONFIDENCE:|$)", re.IGNORECASE | re.DOTALL)
 CONF_RE = re.compile(r"CONFIDENCE:\s*(high|medium|low)", re.IGNORECASE)
 BBOX_RE = re.compile(r"BBOX:\s*\[([^\]]+)\]", re.IGNORECASE)
@@ -134,6 +142,7 @@ class Verdict:
     accident: bool = False
     confidence: str = "low"
     reason: str = ""
+    kind: str = "none"
     raw: str = ""
     ok: bool = False
 
@@ -324,10 +333,12 @@ class Detector:
             return Verdict(ok=False, reason="unparseable answer", raw=text)
         why = WHY_RE.search(text)
         conf = CONF_RE.search(text)
+        kind = KIND_RE.search(text)
         return Verdict(
             accident=m.group(1).lower() == "yes",
             confidence=(conf.group(1).lower() if conf else "low"),
             reason=(why.group(1).strip() if why else ""),
+            kind=(kind.group(1).lower() if kind else "none"),
             raw=text.strip(),
             ok=True,
         )
@@ -511,7 +522,7 @@ class Detector:
                 image_url = tmpl.format(cam=cam)
             except Exception as exc:  # noqa: BLE001
                 LOG.warning("[%s] image upload failed: %s", cam, exc)
-        title = f"Pet Accident? - {label}"
+        title = f"Pet accident ({verdict.kind}) - {label}" if verdict.kind != "none" else f"Pet accident? - {label}"
         msg = verdict.reason or "A pet accident may be on the floor."
         if verdict.confidence:
             msg = f"{msg} ({verdict.confidence} confidence)"
@@ -606,7 +617,7 @@ class Detector:
             tag = "trigger" if i == 0 else "vote"
             lines.append(
                 f"frame {i} ({tag}): ACCIDENT: {'yes' if v.accident else 'no'} | "
-                f"WHY: {v.reason} | CONFIDENCE: {v.confidence} | raw: {v.raw[:300]}"
+                f"KIND: {v.kind} | WHY: {v.reason} | CONFIDENCE: {v.confidence} | raw: {v.raw[:300]}"
             )
         try:
             (self.evidence_dir / f"{base.name}.txt").write_text("\n".join(lines) + "\n")
@@ -658,10 +669,12 @@ class Detector:
             if eid:
                 st.active_events.discard(eid)
             if st.active_events:
-                LOG.debug("[%s] cat event %s ended, %d still active", cam, eid, len(st.active_events))
+                LOG.debug("[%s] %s event %s ended, %d still active", cam, label, eid, len(st.active_events))
                 return
-            if self.cameras[cam].get("mode") != "periodic":
-                self.schedule_check(cam, "cat left")
+            # Periodic cameras skip the constant cat traffic, but a dog in the
+            # cat room is unusual enough to be worth an immediate check.
+            if self.cameras[cam].get("mode") != "periodic" or label == "dog":
+                self.schedule_check(cam, f"{label} left")
 
     def schedule_check(self, cam: str, reason: str) -> None:
         st = self.states[cam]
@@ -677,11 +690,16 @@ class Detector:
         t.start()
 
     def periodic_loop(self) -> None:
-        """Per-camera fixed-interval checks for rooms that are never empty."""
+        """Fixed-interval backstop for every camera that sets an interval.
+
+        Event-mode cameras also use this: a dog may toilet and then stay in
+        the room for hours, so "pet left" alone would never fire. Periodic
+        checks catch that; the event trigger just makes the common case fast.
+        """
         next_run = {}
         now = time.time()
         for cam, c in self.cameras.items():
-            if c.get("mode") == "periodic":
+            if float(c.get("interval", 0) or 0) > 0:
                 next_run[cam] = now + 60  # first check a minute after start
         while not self.stop.is_set():
             now = time.time()
@@ -789,12 +807,14 @@ def main() -> int:
                 {
                     "camera": cam,
                     "accident": res.verdict.accident,
+                    "kind": res.verdict.kind,
                     "confidence": res.verdict.confidence,
                     "reason": res.verdict.reason,
                     "ok": res.verdict.ok,
                     "gate": res.gate.__dict__ if res.gate else None,
                     "votes": [
-                        {"accident": v.accident, "confidence": v.confidence, "reason": v.reason} for v in res.votes
+                        {"accident": v.accident, "kind": v.kind, "confidence": v.confidence, "reason": v.reason}
+                        for v in res.votes
                     ],
                 },
                 indent=2,

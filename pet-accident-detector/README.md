@@ -1,9 +1,13 @@
 # pet-accident-detector (v4)
 
-An event-driven pet-accident detector for the Frigate cameras. When a cat
-leaves a room, it grabs a fresh frame, asks a vision model whether there is a
-genuine accident on the floor, confirms across several frames, and pushes a
-rich iOS notification through Home Assistant with the annotated frame.
+An event-driven pet-accident detector for the Frigate cameras. It looks for
+**dog pee/poop and cat vomit anywhere in view** - floor, rug, carpet,
+furniture or bed. When a cat or dog leaves a room it grabs a fresh frame, and
+every camera also gets a periodic backstop check (a dog may toilet and then
+stay in the room). A vision model decides whether there is a genuine accident,
+confirms across several frames, and pushes a rich iOS notification through
+Home Assistant with the annotated frame and what it thinks it found (urine,
+feces or vomit).
 
 This is the revival of the 2026 `pet-accident-detector` daemon that used to run
 on the MacBook against the exo cluster. The trigger model and prompt are
@@ -34,13 +38,16 @@ Frigate (CT 170)  --frigate/events-->  MQTT (HA Mosquitto)
 
 | Camera | Mode | Why |
 |---|---|---|
-| `foyer` | event | room empties; check when the cat leaves |
-| `basement` | event | same, as soon as its Nest stream is healthy |
-| `cat_room` | periodic (15 min) | litter area is never empty, so "cat left" never fires |
+| `foyer` | event + 10 min | room empties; check when a cat or dog leaves, plus a backstop |
+| `basement` | event + 10 min | same |
+| `cat_room` | periodic (15 min) | litter area is never empty, so "pet left" never fires |
 
-`mode: event` cameras are checked on a Frigate `cat` event of type `end`, after
-`settle` seconds so the cat clears the frame. `mode: periodic` cameras are
-checked on a fixed interval and the prompt tells the model to ignore pets.
+`mode: event` cameras are checked on a Frigate `cat` **or `dog`** event of type
+`end`, after `settle` seconds so the pet clears the frame. Every camera with an
+`interval` also gets a periodic backstop check regardless of mode, because a
+dog can toilet and then stay in the room for hours. `mode: periodic` cameras
+are checked on the interval only and the prompt tells the model to ignore pets
+themselves.
 
 ## The local detector (current state and honest limits)
 
