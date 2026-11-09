@@ -68,7 +68,7 @@ all:
           # rule alerts if a production LXC drops out of this coverage again.
           pve_backup_job_id: "41c3b19b-20ea-4ba0-b760-52a79d1cb83a"
           pve_backup_schedule: "Mon..Sun 02:00"
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 171, 240, 241]
         pve02:
           ansible_host: 192.168.86.12
           pve_sync_vlan_ip: "172.20.0.12"
@@ -77,7 +77,7 @@ all:
           pve_backup_job_id: "08bcc363-a9bf-4de3-9c73-5c4581cc0b78"
           pve_backup_schedule: "Mon..Sun 02:30"
           # Same union vmid list as pve01 -- migration-proof; see the comment there.
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 171, 240, 241]
           # SMART textfile export (roles/smartctl_exporter) added
           # 2026-09-16 -- pve02's boot HDD (ST500LM034-2GH17A, 35k+
           # power-on hrs) has no spare to replace it with, so tracking
@@ -99,7 +99,7 @@ all:
           pve_backup_job_id: "52cb07d6-1400-4437-9591-568cad479879"
           pve_backup_schedule: "Mon..Sun 03:00"
           # Same union vmid list as pve01 -- migration-proof; see the comment there.
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 171, 240, 241]
           # Same as pve02 -- see comment there. pve03's boot HDD
           # (ST500LM021-1KJ152) is the one that actually corrupted
           # pve-cluster's config.db on 2026-09-10.
@@ -200,6 +200,23 @@ all:
       vars:
         ansible_user: amd
         ansible_become: true
+
+    # Pet-accident detector (Frigate MQTT -> gemma4 VLM -> Home Assistant).
+    # Small Debian CT on pve03; static LAN IP .18 (out of the DHCP pool,
+    # IPAM-verified free). The app lives in /opt/pet-accident-detector and
+    # runs as the systemd unit pet-accident-detector.service; secrets are a
+    # root-only env file at /root/.config/pet-accident-detector/env (see
+    # roles/pet_detector/README.md). Deploy with deploy_pet_detector.yml.
+    pet_detector:
+      hosts:
+        pet-detector-01:
+          ansible_host: 192.168.86.18
+          vmid: 171
+          target_node: pve03
+          template: debian-12-standard_12.12-1_amd64.tar.zst
+      vars:
+        ansible_user: root
+        ansible_ssh_private_key_file: ~/.ssh/id_ansible
 
     tailscale:
       hosts:
@@ -706,7 +723,7 @@ all:
 #             # ssh args (ProxyCommand etc) live in
 #             # inventory/group_vars/bwt_lab.yml — same Tailscale-jump
 #             # pattern as private_subnet hosts.
-# 
+#
 #         bwt_clients:
 #           hosts:
 #             bwt-tc-01:
@@ -758,7 +775,7 @@ all:
 #             vm_bridge: "{{ net_bwt_bridge }}"
 #             vm_storage: nvme-data
 #             vm_gw: "{{ net_bwt_gw }}"
-# 
+#
 #     # Monitoring Infrastructure
     monitoring:
       children:

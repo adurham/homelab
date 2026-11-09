@@ -1,0 +1,2 @@
+---
+pet_detector_src: "{{ playbook_dir }}/../pet-accident-detector"

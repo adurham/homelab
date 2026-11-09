@@ -1,0 +1,82 @@
+# Deploys the pet-accident-detector app to the existing CT.
+#
+# The CT itself is created once, by hand (see README.md for the exact
+# pct create line); this role is the repeatable part: packages, app files,
+# venv, systemd unit. Secrets are deliberately NOT in ansible vars -- they
+# are a root-only env file provisioned from the workstation, because the
+# HA token and the Ollama key are not in the vault (see README.md).
+
+- name: Ensure base packages
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - ca-certificates
+      - openssh-client
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure app directory
+  ansible.builtin.file:
+    path: /opt/pet-accident-detector
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Copy application files
+  ansible.builtin.copy:
+    src: "{{ pet_detector_src }}/{{ item }}"
+    dest: /opt/pet-accident-detector/{{ item }}
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - detector.py
+    - localgate.py
+    - config.yaml
+    - requirements.txt
+    - README.md
+
+- name: Ensure virtualenv
+  ansible.builtin.command: python3 -m venv /opt/pet-accident-detector/.venv
+  args:
+    creates: /opt/pet-accident-detector/.venv/bin/python
+
+- name: Install Python dependencies
+  ansible.builtin.command: /opt/pet-accident-detector/.venv/bin/pip install -q -r requirements.txt
+  args:
+    chdir: /opt/pet-accident-detector
+  changed_when: false
+
+- name: Check that the secrets env file is provisioned
+  ansible.builtin.stat:
+    path: /root/.config/pet-accident-detector/env
+  register: pet_detector_env
+
+- name: Fail with the provisioning instructions when secrets are missing
+  ansible.builtin.assert:
+    that: pet_detector_env.stat.exists
+    fail_msg: >-
+      /root/.config/pet-accident-detector/env is missing. Provision it from
+      the workstation (see roles/pet_detector/README.md), mode 600, with
+      HASS_URL, HASS_TOKEN, OLLAMA_API_KEY and FRIGATE_MQTT_PASSWORD.
+    quiet: true
+
+- name: Install systemd unit
+  ansible.builtin.copy:
+    src: pet-accident-detector.service
+    dest: /etc/systemd/system/pet-accident-detector.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart pet detector
+
+- name: Enable and start detector
+  ansible.builtin.systemd:
+    name: pet-accident-detector
+    state: started
+    enabled: true
+    daemon_reload: true

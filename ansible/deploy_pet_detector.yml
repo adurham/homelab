@@ -1,0 +1,22 @@
+---
+# Deploys the pet-accident-detector app to CT 171 (pet-detector-01).
+#
+# One-time CT creation (already done 2026-11-09; kept here so a rebuild is
+# reproducible). Run on the target node, pve03:
+#
+#   pveam download local debian-12-standard_12.12-1_amd64.tar.zst
+#   pct create 171 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst \
+#     --hostname pet-detector-01 --cores 1 --memory 512 --swap 256 \
+#     --net0 name=eth0,bridge=vmbr0,ip=192.168.86.18/24,gw=192.168.86.1 \
+#     --nameserver 192.168.86.1 --searchdomain chi.lab.amd-e.com \
+#     --rootfs local-lvm:4 --unprivileged 1 --features nesting=1 \
+#     --ssh-public-keys /tmp/pet.keys   # id_ansible.pub
+#   pct start 171
+#
+# Then:
+#   ansible-playbook deploy_pet_detector.yml
+- name: Deploy pet accident detector
+  hosts: pet_detector
+  gather_facts: true
+  roles:
+    - pet_detector

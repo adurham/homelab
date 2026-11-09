@@ -98,6 +98,12 @@ Runtime state, baselines, evidence and logs live in
 
 ## Install / operate
 
+Production runs in the lab as CT 171 (`pet-detector-01`, pve03, .18), deployed
+with `ansible-playbook deploy_pet_detector.yml`; see
+`ansible/roles/pet_detector/README.md` for the one-time CT creation and the
+hand-provisioned secrets. The workstation user unit below is for development
+only.
+
 ```bash
 cd ~/repos/homelab/pet-accident-detector
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -111,11 +117,11 @@ journalctl --user -u pet-accident-detector.service -f
 .venv/bin/python detector.py --notify-test foyer
 ```
 
-Secrets are read from `~/.hermes/.env` (`HASS_URL`, `HASS_TOKEN`,
-`OLLAMA_API_KEY`) and `~/.config/pet-accident-detector/env`
-(`FRIGATE_MQTT_PASSWORD`, mode 600). The HA image upload uses the dedicated
-`id_petaccident` key from the old deployment (copied from the MacBook, mode
-600) against HA's `core_ssh` add-on on port 2222.
+On the CT, use `journalctl -u pet-accident-detector -f` instead. Secrets are
+read from `~/.hermes/.env` (`HASS_URL`, `HASS_TOKEN`, `OLLAMA_API_KEY`) and
+`~/.config/pet-accident-detector/env` (all four vars on the CT, mode 600). The
+HA image upload uses the dedicated `id_petaccident` key against HA's
+`core_ssh` add-on on port 2222.
 
 ## Operational notes
 

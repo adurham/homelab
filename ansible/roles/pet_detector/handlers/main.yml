@@ -1,0 +1,5 @@
+---
+- name: Restart pet detector
+  ansible.builtin.systemd:
+    name: pet-accident-detector
+    state: restarted
