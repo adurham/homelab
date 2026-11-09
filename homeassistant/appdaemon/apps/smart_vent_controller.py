@@ -288,6 +288,9 @@ SETPOINT_TRUTH_HEAT = "sensor.ecobee_edgewater_road_desired_heat"
 HEARTBEAT_ENTITY = "sensor.smart_vent_controller_heartbeat"
 # Summary sensor for the delivery/capacity handicap (achieved-cooling-rate axis).
 DELIVERY_PENALTY_ENTITY = "sensor.smart_vent_delivery_handicap"
+# Heating supply-air max (hottest open-vent duct temp), published for
+# calibration of the heating backpressure thresholds.
+HEATING_SUPPLY_ENTITY = "sensor.smart_vent_heating_supply"
 # Observability for the zone-presence contention axis: publishes each zone's
 # occupied/vacant state + last-occupied age + the computed contention for the
 # current cycle, so the deploy dispatch / Grafana can see the fix in action.
@@ -1478,6 +1481,13 @@ class SmartVentController(hass.Hass):
         self.log(f"Mode change: {entity} {old} -> {new}, running control loop")
         self.control_loop(None)
 
+    def _effective_mode(self, mode, hvac_mode, hvac_action):
+        """Ignore the summer-only Cool Upstairs/Downstairs modes while heating."""
+        if (mode in ("Cool Upstairs", "Cool Downstairs")
+                and (hvac_action == "heating" or hvac_mode == "heat")):
+            return "Auto"
+        return mode
+
     # ── Main control loop ─────────────────────────────────────────────────────
 
     def control_loop(self, kwargs):
@@ -1497,14 +1507,20 @@ class SmartVentController(hass.Hass):
         mode = self.get_state(MODE_SELECT)
         self.log(f"Control loop: mode={mode}")
 
+        # Get thermostat state before the mode guard: Cool Upstairs/Downstairs
+        # are summer-only and must be ignored once the system is heating.
+        hvac_mode, hvac_action, target_cool, target_heat = self._get_thermostat_state()
+        guarded_mode = self._effective_mode(mode, hvac_mode, hvac_action)
+        if guarded_mode != mode:
+            self.log(f"Mode '{mode}' is cooling-only — ignoring it while "
+                     f"heating and using Auto")
+            mode = guarded_mode
+        self.log(f"Thermostat: mode={hvac_mode}, action={hvac_action}, "
+                 f"cool={target_cool}, heat={target_heat}")
+
         if mode == "Manual":
             # Don't touch anything
             return
-
-        # Get thermostat state
-        hvac_mode, hvac_action, target_cool, target_heat = self._get_thermostat_state()
-        self.log(f"Thermostat: mode={hvac_mode}, action={hvac_action}, "
-                 f"cool={target_cool}, heat={target_heat}")
 
         # Restart-amnesia guard: the FIRST cycle after initialize() may carry a
         # persisted setpoint-nudge ownership record loaded from disk. Re-adopt
@@ -1665,6 +1681,19 @@ class SmartVentController(hass.Hass):
         room_positions = self._apply_precool_vents(room_positions, precool_gate,
                                                    heating=heating_now)
         self._publish_precool_sensor(precool_gate)
+
+        # Publish the heating supply-air max for backpressure calibration.
+        if hvac_action == "heating":
+            self._publish_heating_supply()
+        elif self.get_state(HEATING_SUPPLY_ENTITY) != "unknown":
+            self.set_state(
+                HEATING_SUPPLY_ENTITY,
+                state="unknown",
+                attributes={
+                    "friendly_name": "Smart Vent Heating Supply Max F",
+                    "icon": "mdi:thermometer-high",
+                },
+            )
 
         # Setpoint nudge (the TRIGGER axis): independently of the vent-position
         # math above, escape the ecobee's whole-house-average blind spot by
@@ -5369,6 +5398,19 @@ class SmartVentController(hass.Hass):
                 chosen = ratio
                 break
         return chosen
+
+    def _publish_heating_supply(self):
+        """Publish the hottest open-vent duct temp for threshold calibration."""
+        supply = self._heating_supply_max()
+        self.set_state(
+            HEATING_SUPPLY_ENTITY,
+            state=str(round(supply, 1)) if supply is not None else "unknown",
+            attributes={
+                "friendly_name": "Smart Vent Heating Supply Max F",
+                "icon": "mdi:thermometer-high",
+                "supply_max_f": supply,
+            },
+        )
 
     def _heating_supply_max(self):
         """Max duct temp across open vents (heating supply-air proxy), or None."""

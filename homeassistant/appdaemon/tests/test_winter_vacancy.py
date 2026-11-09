@@ -546,5 +546,31 @@ out = ha._apply_backpressure_rooms(all_closed(), "heating")
 check("T7 hot supply lowers the heating cap to 25%",
       closed_vents(out) <= 5)
 
+
+# =============================================================================
+# 8. Cool-mode guard while heating + heating supply sensor.
+# =============================================================================
+ha = FakeHA(action="heating")
+check("T8 Cool Upstairs is ignored while heating",
+      ha._effective_mode("Cool Upstairs", "heat_cool", "heating") == "Auto")
+check("T8 Cool Upstairs is preserved while cooling",
+      ha._effective_mode("Cool Upstairs", "heat_cool", "cooling")
+      == "Cool Upstairs")
+check("T8 Manual is never rewritten",
+      ha._effective_mode("Manual", "heat_cool", "heating") == "Manual")
+
+ha = FakeHA(action="heating")
+ha.set_all_duct_temps(130.0)
+ha._publish_heating_supply()
+state, attrs = ha.published[svc.HEATING_SUPPLY_ENTITY]
+check("T8 heating supply sensor publishes the hottest duct",
+      state == "130.0" and attrs.get("supply_max_f") == 130.0)
+
+ha = FakeHA(action="heating")
+ha._publish_heating_supply()
+state, attrs = ha.published[svc.HEATING_SUPPLY_ENTITY]
+check("T8 heating supply sensor is unknown with no sample",
+      state == "unknown" and attrs.get("supply_max_f") is None)
+
 print(f"\n{sum(PASS)}/{len(PASS)} checks passed")
 sys.exit(0 if all(PASS) else 1)
