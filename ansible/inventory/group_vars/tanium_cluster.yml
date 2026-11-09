@@ -25,7 +25,7 @@ ansible_ssh_common_args: >-
 # from 1Password through the bridge — nothing on disk.
 tanos_password_ref: "op://Personal/cr2s4li6fbh7i4snjwgj4tlh3a/password"
 ansible_password: "{{ lookup('pipe', '/home/adam.durham/.hermes/bin/op-bridge-rpc read ' ~ tanos_password_ref) }}"
-ansible_ssh_private_key_file: null
+ansible_ssh_private_key_file: ~/.ssh/id_tanos
 
 # Override ansible's hardcoded SSH args. The default
 # `-o KbdInteractiveAuthentication=no -o PreferredAuthentications=...,publickey`
