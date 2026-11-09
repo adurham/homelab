@@ -401,6 +401,15 @@ HEAT_OVERNIGHT_PIR_START_HOUR = 18
 HEAT_SLEEP_WAKE_HOUR = 10
 HEAT_SLEEP_WAKE_MINUTE = 30
 HEAT_DAY_ROOM_OCCUPANCY_HOLD_MIN = 120.0  # 2h, daytime only
+# Bedrooms/naps get a longer daytime hold: a 13:00 lie-down should not be
+# treated as empty at 15:00.
+HEAT_SLEEP_DAY_ROOM_OCCUPANCY_HOLD_MIN = 240.0  # 4h
+# Defense in depth: a sleep-flagged room's floor is at least this far below
+# the heat setpoint. With a 64F setpoint the worst case is 60F, not 58F.
+HEAT_SLEEP_FLOOR_MARGIN_F = 4.0
+# A room temp older than this is not trusted for the floor decision (the
+# ecobee sensors normally report every ~30 min).
+HEAT_TEMP_STALE_MIN = 90.0
 # Bedroom lights-out cue window; a light/fan/TV off in this window holds the
 # room as occupied until 10:30.
 HEAT_LIGHTS_OUT_START_HOUR = 20
@@ -1175,10 +1184,23 @@ class SmartVentController(hass.Hass):
             for zn, z in ZONES.items()
             for rn in z["rooms"]
         }
-        # Bedroom "lights out" sleep cue. When a bedroom's light/fan/TV turns
-        # off in the evening, hold that room as occupied until 10:30; this is
-        # per-room evidence that does not need a PIR or any new hardware.
-        self._room_sleep_hold_until = {}
+        # If the app starts at night, seed the sleep rooms' lights-out hold
+        # through 10:30 as well. A restart must not reset a sleeping room.
+        if (_seed_now.hour >= HEAT_OVERNIGHT_PIR_START_HOUR
+                or _seed_now.hour < 9):
+            _seed_wake = _seed_now.replace(hour=HEAT_SLEEP_WAKE_HOUR,
+                                           minute=HEAT_SLEEP_WAKE_MINUTE,
+                                           second=0, microsecond=0)
+            if _seed_wake <= _seed_now:
+                _seed_wake += timedelta(days=1)
+            self._room_sleep_hold_until = {
+                (zn, rn): _seed_wake
+                for zn, z in ZONES.items()
+                for rn, sensors in z["rooms"].items()
+                if sensors.get("sleep")
+            }
+        else:
+            self._room_sleep_hold_until = {}
         self._room_pir_latch_until = {}
         self._activity_entity_to_key = {}
         for _zn, _z in ZONES.items():
@@ -1441,8 +1463,6 @@ class SmartVentController(hass.Hass):
             return
         if not (now.hour >= HEAT_LIGHTS_OUT_START_HOUR
                 or now.hour < HEAT_LIGHTS_OUT_END_HOUR):
-            return
-        if self._house_away():
             return
         wake = now.replace(hour=HEAT_SLEEP_WAKE_HOUR,
                            minute=HEAT_SLEEP_WAKE_MINUTE,
@@ -1729,7 +1749,12 @@ class SmartVentController(hass.Hass):
                 occ_entity = sensors.get("occupancy")
                 is_occupied = True
                 if occ_entity:
-                    is_occupied = self.get_state(occ_entity) == "on"
+                    occ_state = self.get_state(occ_entity)
+                    is_occupied = occ_state == "on"
+                    if is_heating and occ_state in (None, "unknown", "unavailable"):
+                        # A dead PIR must never make a room look empty in
+                        # heating; fail safe to occupied.
+                        is_occupied = True
 
                 # Occupancy weight: occupied rooms get a bonus to their need
                 occ_bonus = 1.0 if is_occupied else 0.0
@@ -1839,20 +1864,27 @@ class SmartVentController(hass.Hass):
                           and not self._room_recently_occupied(key)
                           and not self._room_pir_latched(key)
                           and self._house_away()
-                          and not self._co2_says_occupied()):
+                          and not self._co2_says_occupied()
+                          and self._temp_is_fresh(sensors["temp"])):
                         # 0.5F hysteresis on the floor so a sensor wobbling
-                        # around 58F doesn't flap the damper 0<->100.
-                        floor_open = (temp <= HEAT_VACANT_FLOOR_F
+                        # around the floor doesn't flap the damper 0<->100.
+                        # Sleep rooms never go below setpoint - 4F (60F at a
+                        # 64F heat setting), so a false "vacant" costs little.
+                        floor_f = HEAT_VACANT_FLOOR_F
+                        if sensors.get("sleep") and target_heat is not None:
+                            floor_f = max(floor_f,
+                                          target_heat - HEAT_SLEEP_FLOOR_MARGIN_F)
+                        floor_open = (temp <= floor_f
                                       or (prev and prev > 0 and
-                                          temp <= HEAT_VACANT_FLOOR_F + HYSTERESIS))
+                                          temp <= floor_f + HYSTERESIS))
                         if floor_open:
                             pos = 100
                             reason = (f"vacant cold floor ({temp:.1f}F <= "
-                                      f"{HEAT_VACANT_FLOOR_F:.0f}F) — 100%")
+                                      f"{floor_f:.0f}F) — 100%")
                         else:
                             pos = 0
                             reason = (f"vacant ({temp:.1f}F > "
-                                      f"{HEAT_VACANT_FLOOR_F:.0f}F floor) — 0%")
+                                      f"{floor_f:.0f}F floor) — 0%")
                         room_positions[key] = pos
                         self._last_zone_positions[key] = pos
                         self.log(f"  {zone_name}/{room_name}: {temp:.1f}F "
@@ -2454,6 +2486,19 @@ class SmartVentController(hass.Hass):
         age = (self.datetime() - last).total_seconds() / 60.0
         return age > ZONE_PRESENCE_HOLD_MIN
 
+    def _temp_is_fresh(self, entity, max_age_min=None):
+        """True unless the sensor's last_updated is older than max_age_min."""
+        if max_age_min is None:
+            max_age_min = HEAT_TEMP_STALE_MIN
+        raw = self.get_state(entity, attribute="last_updated")
+        if not raw:
+            return True
+        try:
+            age_s = (self.datetime() - self.parse_datetime(raw)).total_seconds()
+            return age_s <= max_age_min * 60.0
+        except Exception:
+            return True
+
     def _room_recently_occupied(self, key, max_age_min=None):
         """True if this room's own PIR fired within max_age_min.
 
@@ -2483,8 +2528,10 @@ class SmartVentController(hass.Hass):
             if last >= wake:
                 wake += timedelta(days=1)
             return now < wake
-        return ((now - last).total_seconds() / 60.0
-                <= HEAT_DAY_ROOM_OCCUPANCY_HOLD_MIN)
+        day_hold = HEAT_DAY_ROOM_OCCUPANCY_HOLD_MIN
+        if ZONES[key[0]]["rooms"][key[1]].get("sleep"):
+            day_hold = HEAT_SLEEP_DAY_ROOM_OCCUPANCY_HOLD_MIN
+        return (now - last).total_seconds() / 60.0 <= day_hold
 
     def _room_pir_latched(self, key):
         """True while the 1.5F PIR trigger's short latch is active."""
@@ -2882,6 +2929,9 @@ class SmartVentController(hass.Hass):
                     continue
                 occ_entity = sensors.get("occupancy")
                 is_occupied = (not occ_entity) or self.get_state(occ_entity) == "on"
+                if (heating and occ_entity
+                        and self.get_state(occ_entity) in (None, "unknown", "unavailable")):
+                    is_occupied = True
                 off = off_by(temp)
                 # Occupancy gate mirrors _auto_calculate, including the
                 # winter policies: a room in a VACANT zone is never a
@@ -3233,6 +3283,9 @@ class SmartVentController(hass.Hass):
                     continue
                 occ_entity = sensors.get("occupancy")
                 is_occ = (not occ_entity) or self.get_state(occ_entity) == "on"
+                if (heating and occ_entity
+                        and self.get_state(occ_entity) in (None, "unknown", "unavailable")):
+                    is_occ = True
                 off = off_by(temp)
                 # Same winter occupancy gate as the priority pass: no fan
                 # assist for an empty floor, and an empty-reading room on an
@@ -4780,6 +4833,9 @@ class SmartVentController(hass.Hass):
                     continue
                 is_occupied = ((not occ_entity)
                                or self.get_state(occ_entity) == "on")
+                if (heating and occ_entity
+                        and self.get_state(occ_entity) in (None, "unknown", "unavailable")):
+                    is_occupied = True
                 # Occupancy gate mirrors _apply_priority_rooms: an OCCUPIED room
                 # (or no sensor => assumed occupied) counts; an unoccupied room
                 # is NOT an occupant needing the compressor to escalate unless
@@ -5379,7 +5435,10 @@ class SmartVentController(hass.Hass):
                 return self._open_closed_rooms_for_backpressure(
                     room_positions, 0,
                     f"heating supply {supply_max:.1f}F emergency")
-            if supply_max is not None and supply_max >= HEAT_SUPPLY_WARN_F:
+            if supply_max is None:
+                max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING_WARN)
+                bp_label = "heating no supply sample (25%)"
+            elif supply_max >= HEAT_SUPPLY_WARN_F:
                 max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING_WARN)
                 bp_label = f"heating supply {supply_max:.1f}F"
             else:

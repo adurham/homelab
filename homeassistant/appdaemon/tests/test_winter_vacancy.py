@@ -190,6 +190,19 @@ ha.set_room("upstairs", "Guest Bedroom 1", 57.5)
 check("T1 vacant zone, empty room 57.5F -> 100% (at/below floor)",
       auto(ha)[("upstairs", "Guest Bedroom 1")] == 100)
 
+# Sleep rooms use a higher floor: setpoint 64 - 4F = 60F.
+ha = FakeHA()
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 59.5)
+check("T1 sleep room 59.5F -> 100% (60F sleep floor)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 100)
+
+ha = FakeHA()
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 60.5)
+check("T1 sleep room 60.5F -> 0% (above 60F sleep floor)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 0)
+
 # Sleeping-occupant safety net: a room whose own PIR fired in the last 10h is
 # not floor-treated just because the zone went vacant.
 ha = FakeHA()
@@ -213,8 +226,8 @@ ha = FakeHA(clock=datetime(2026, 11, 10, 14, 0, 0))
 ha.stamp_zone("upstairs", False)
 ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
 ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
-    ha.datetime() - timedelta(hours=3))
-check("T1 daytime: 3h since motion at 62F -> 0% (2h day hold expired)",
+    ha.datetime() - timedelta(hours=5))
+check("T1 daytime: 5h since motion at 62F -> 0% (4h sleep day hold expired)",
       auto(ha)[("upstairs", "Guest Bedroom 1")] == 0)
 
 ha = FakeHA(clock=datetime(2026, 11, 10, 14, 0, 0))
@@ -308,8 +321,8 @@ ha.set_house(False)
 ha.on_activity_change("light.main_bedroom_ceiling_fan_light", None,
                       "on", "off", {})
 ha._clock = datetime(2026, 11, 10, 2, 0, 0)
-check("T1 away: lights-out does not set a sleep hold",
-      ha._room_recently_occupied(("downstairs", "Main Bedroom")) is False)
+check("T1 away: lights-out still sets a sleep hold (guest safety)",
+      ha._room_recently_occupied(("downstairs", "Main Bedroom")) is True)
 
 # 09:00 cliff regression: a 23:00 PIR protects through 10:30 the next
 # morning, even though the old rule switched to a 2h daytime hold at 09:00.
@@ -387,6 +400,15 @@ check("T2b 1.6F below latches the room as occupied",
 ha._clock += timedelta(minutes=21)
 check("T2b PIR latch expires after 20 minutes",
       ha._room_pir_latched(("upstairs", "Guest Bedroom 1")) is False)
+
+# A dead/unavailable PIR must never make a room look empty in heating.
+ha = FakeHA()
+ha.set_house(True)
+ha.stamp_zone("upstairs", True)
+ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
+ha.states[svc.ZONES["upstairs"]["rooms"]["Guest Bedroom 1"]["occupancy"]] = "unavailable"
+check("T2b unavailable PIR fails safe to occupied (not floored)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 100)
 
 # A sleeping bedroom must not be used as a donor by the priority pass.
 ha = FakeHA()
@@ -502,9 +524,15 @@ def closed_vents(out):
 
 
 ha = FakeHA(action="heating")
+ha.set_all_duct_temps(100.0)
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
 check("T7 heating backpressure caps closures at 40%",
       closed_vents(out) <= 8)
+
+ha = FakeHA(action="heating")   # no duct samples
+out = ha._apply_backpressure_rooms(all_closed(), "heating")
+check("T7 no supply sample caps heating closures at 25%",
+      closed_vents(out) <= 5)
 
 ha = FakeHA(action="heating")
 ha.set_all_duct_temps(140.0)
