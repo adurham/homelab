@@ -67,13 +67,6 @@ homeassistant   IN      A       {{ ip_loadbalancer }} ; HA has its own auth (loc
 ; CT's tailnet address (lb-01 cannot reach its private-SDN address).
 printbot        IN      A       {{ ip_loadbalancer }} ; Bambu->K2 print service (internal-only)
 
-; Hermes persistent gateway (front by lb-01 — internal-only ACL in nginx).
-; hermes = GUI (Hermes's own native OIDC-to-Authentik login);
-; hermes-api = CLI (hermes submit / api_server, Authentik M2M forward-auth).
-; Both resolve to the LB VIP; nginx routes by server_name to hermes-gw-01.
-hermes          IN      A       {{ ip_loadbalancer }}
-hermes-api      IN      A       {{ ip_loadbalancer }}
-
 ; Host names for the boxes we actually address by name
 ; (added 2026-10-19: every container was reachable by IP but several had no
 ; record at all, or a stale one from the router's DNS, so `ssh <name>` broke).
@@ -85,7 +78,6 @@ media-ingest-01 IN      A       {{ ip_media_ingest }}
 media-ingest-02 IN      A       {{ ip_media_ingest_02 }}
 gallery-01      IN      A       {{ ip_media_gallery }}
 tg-harvester-01 IN      A       {{ ip_media_gallery }}
-hermes-gw-01    IN      A       {{ ip_hermes_gateway }}
 adblock-proxy-01 IN     A       {{ ip_adblock_proxy }}
 tailscale-gw    IN      A       {{ ip_tailscale_gw_lan }}
 ; frigate-01 has eth1 on the private SDN (ip_frigate) but only its DHCP LAN

@@ -248,7 +248,7 @@
 
 # ── Docker + Frigate, deployed via `pct exec` from the proxmox host ──────────
 # Done through pct exec (not a separate SSH play) so the whole stand-up is a
-# single role run against the pve node, matching hermes_gateway_host's pattern.
+# single role run against the pve node, matching media_gallery_host's pattern.
 
 - name: Install prerequisites in CT
   ansible.builtin.command: >

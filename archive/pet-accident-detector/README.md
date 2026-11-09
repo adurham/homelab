@@ -1,3 +1,12 @@
+# RETIRED (2026-11-09)
+
+This daemon is dead — it was a launchd LaunchAgent on the MacBook and has not
+run for months. Archived rather than revived: bringing it back means a lab CT
+with Frigate MQTT access plus a local VLM, which is a project of its own. Kept
+for the prompt design and the trigger model, which were the useful parts.
+
+---
+
 # pet-accident-detector
 
 Local-only, **event-driven** VLM pet-accident detector. It subscribes to

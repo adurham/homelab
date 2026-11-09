@@ -1,7 +1,6 @@
 ---
-# Keep the personal MacBook's Hermes install current with the fork's `main` —
-# the MacBook half of what hermes_gateway's "Clone Hermes Agent Repository"
-# task does for the gateway. No handlers: the MacBook runs hermes
+# Keep the personal MacBook's Hermes install current with the fork's `main`.
+# No handlers: the MacBook runs hermes
 # interactively (no managed service on it), so a pulled checkout takes effect
 # for NEW hermes processes on their next launch.
 #

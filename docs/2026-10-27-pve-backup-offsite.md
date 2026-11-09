@@ -49,5 +49,5 @@
   LXC restore drill): `rclone copy vmbackup_crypt:pve/<archive> /nvme-pool/vzdump-backups/dump/`
   then `pct restore` / `qm restore`.
 - 43 GB/week of upstream is a real cost at ~16 Mbit/s. If that hurts, options are
-  fortnightly cadence, or excluding the two largest guests (hermes-gw-01 16.8 GB,
-  frigate-01 8.1 GB) and keeping only config-level guests off-site.
+  fortnightly cadence, or excluding the largest guests (frigate-01 8.1 GB and the
+  TanOS appliance VMs) and keeping only config-level guests off-site.

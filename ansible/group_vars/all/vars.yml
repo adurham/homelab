@@ -50,7 +50,6 @@ ip_tailscale_gw_lan: "192.168.86.10"  # tailscale-gw eth0 on the LAN (vmbr0), ST
                                        # Wifi's default DHCP pool (.20-.250) via a live nmap sweep +
                                        # vendor docs, consistent with pve01/02/03 already sitting
                                        # static-outside-DHCP at .11/.12/.13.
-ip_hermes_gateway: "172.16.0.50"
 ip_media_gallery: "172.16.0.46"
 ip_media_ingest: "172.16.0.47"
 ip_media_ingest_02: "172.16.0.48"

@@ -15,7 +15,6 @@
     - authentik
     - dns-01
     - frigate-01
-    - hermes-gw-01
     - lb-01
     - mail-01
     - media-ingest-01

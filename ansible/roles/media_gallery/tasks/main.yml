@@ -24,7 +24,7 @@
 # The CT joined the tailnet to support the web gallery work. It is reached
 # directly at media-gallery-01.tail19c543.ts.net for admin (the private_subnet
 # ProxyCommand path becomes unreliable once the CT peers directly — same quirk
-# as hermes-gw-01). Requires TUN passthrough in /etc/pve/lxc/115.conf
+# as other directly-peering CTs). Requires TUN passthrough in /etc/pve/lxc/115.conf
 # (media_gallery_host role / manual: lxc.cgroup2.devices.allow c 10:200 rwm +
 # /dev/net/tun mount).
 #
@@ -765,8 +765,8 @@
 # (auth is enforced by Authentik at lb-01). Without a firewall, ANY host on the
 # private subnet or tailnet could hit them directly and bypass SSO entirely —
 # pulling decrypted originals with a plain GET. Lock the service ports to lb-01
-# (the Authentik front door) + loopback only. Mirrors the hermes_gateway
-# api_server lockdown. Default INPUT policy stays ACCEPT (don't break SSH/ping);
+# (the Authentik front door) + loopback only. Mirrors the api_server
+# lockdown pattern. Default INPUT policy stays ACCEPT (don't break SSH/ping);
 # we DROP only the specific service ports for non-allowed sources.
 - name: Install iptables persistence
   ansible.builtin.apt:

@@ -15,7 +15,7 @@ stop command. It wiped `tailscale-gw`'s three nat `POSTROUTING`
 about an hour:
 
 - `dns-01` answered authoritative queries but every recursion timed out;
-- `hermes-gw-01` and `gallery-01` run with a MagicDNS-only
+- `gallery-01` ran with a MagicDNS-only
   `resolv.conf`, so their `tailscaled` died and they fell off the tailnet;
 - nothing alerted, because nothing probed egress, recursion, or the
   gateway's rule inventory.

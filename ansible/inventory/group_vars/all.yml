@@ -100,11 +100,11 @@ discord_infra_alerts_history_webhook_url: !vault |
           3233333566653162343333316162313838613134373363376536
 
 # Grafana Discord Ack Bot (roles/grafana_ack_bot). Standalone service on
-# hermes-gw-01: reacting to an alert message in #infra-alerts (1h/4h/24h
+# graf-01: reacting to an alert message in #infra-alerts (1h/4h/24h
 # emoji) creates a matching Grafana Alertmanager silence via this
 # service-account token (created 2026-08-08, Editor role, scoped only to
 # what the Silence API needs). Reuses the EXISTING Hermes Discord bot
-# token (vault_hermes_gw_discord_bot_token, see roles/hermes_gateway) --
+# token (vault_hermes_gw_discord_bot_token) --
 # deliberately not a new Discord application. See
 # roles/grafana_ack_bot/files/service.py for the full design rationale.
 grafana_ack_bot_sa_token: !vault |

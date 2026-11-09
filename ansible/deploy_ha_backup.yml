@@ -1,12 +1,14 @@
 ---
 # Push Home Assistant's own backups to encrypted Google Drive.
-# Runs on hermes-gw-01 because that host is already authorised in HAOS's
-# authorized_keys -- no new trust relationship, no new on-prem device.
+# Runs on vm-01 (CT 106), the always-on monitoring container. The ha_backup
+# ed25519 key recovered from the retired hermes-gw-01 backup is already
+# authorised in HAOS's authorized_keys, so the existing trust relationship
+# is kept without a new HAOS authorisation step.
 #
 #   ansible-playbook -i inventory/proxmox.yml deploy_ha_backup.yml \
 #     --vault-password-file ../.vault_pass
 - name: Push HA backups to encrypted Google Drive
-  hosts: hermes-gw-01
+  hosts: vm-01
   become: true
   gather_facts: true
   roles:

@@ -59,7 +59,7 @@ Every alert fans out in parallel (each `continue: true`) to:
    critical`).
 2. **Discord** (`discord_infra_alerts` contact point) — a plain
    `webhook` type (NOT `type: discord`) pointed at
-   `roles/grafana_ack_bot`'s receiver on hermes-gw-01. That service does
+   `roles/grafana_ack_bot`'s receiver on graf-01. That service does
    the actual Discord posting AND adds reaction-based ack/silence —
    Grafana's native Discord integration has no ack capability of its
    own, hence the indirection. See `roles/grafana_ack_bot/README.md`

@@ -32,8 +32,8 @@ pve_backup_mailnotification: failure
 # still recoverable. keep-daily also collapses ad-hoc same-day manual runs
 # (2026-10-20: two manual CT 101 dumps each consumed a keep-last slot).
 # Anything bigger does NOT fit pve01: one generation of every guest it
-# hosts is ~38 GiB (113 hermes-gw-01 15.7G + 170 frigate-01 14.1G
-# dominate), its dump dir holds ~113 GiB, the pool is 81% CAP / 68% FRAG
+# hosts is ~22 GiB (170 frigate-01 14.1G dominates), its dump dir holds
+# ~113 GiB, the pool is 81% CAP / 68% FRAG
 # with 147G avail -- each extra generation costs another ~38 GiB there.
 # Numbers + procedure: docs/2026-10-21-backup-retention-audit.md.
 #

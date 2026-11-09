@@ -10,7 +10,7 @@
 #
 # Run from the personal MacBook (the inventory's default ProxyCommand
 # points at that machine's own Tailscale IP 100.66.19.20, which loops
-# back to itself when executing from there -- override via hermes-gw-01):
+# back to itself when executing from there -- override with -e ansible_ssh_common_args=''):
 #
 #   ansible-playbook ansible/deploy_dns_server_config.yml \
 #     --vault-password-file .vault_pass \

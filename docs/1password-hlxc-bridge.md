@@ -1,5 +1,11 @@
 # 1Password-over-hlxc bridge
 
+> **Retired 2026-11-08.** The `hermes-gw-01` LXC and this broker are gone. The
+> current access path is `~/bin/op-bridge` on the MacBook forwarding its `op`
+> socket to the workstation (`~/.hermes/bin/op-bridge-rpc`, see
+> `1password-headless-linux` → `references/op-bridge-tunnel.md`). This document
+> is kept as the design record.
+
 Gives `hermes-gw-01` (and the interactive `hermes` CLI session inside it)
 on-demand access to **arbitrary** 1Password Personal vault items, gated by
 a physical approval prompt (Touch ID / security key) on the personal

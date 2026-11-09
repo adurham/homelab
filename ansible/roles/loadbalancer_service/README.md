@@ -16,7 +16,7 @@ Set as play vars by `deploy_loadbalancer.yml` /
 
 Referenced from `group_vars/all/vars.yml` (not role defaults):
 `ip_authentik`, `ip_grafana`, `ip_homeassistant`, `ip_media_gallery`,
-`ip_hermes_gateway`, `ip_vm`, `lb_lan_ingress_ip`, `net_lan_range`,
+`ip_vm`, `lb_lan_ingress_ip`, `net_lan_range`,
 `net_private_range`, `net_private_gw`.
 
 ## Usage

@@ -1,7 +1,7 @@
 # roles/grafana_ack_bot
 
 Deploys a standalone Discord reaction-based ack/silence bot for Grafana
-alerts to `hermes-gw-01` (systemd service `grafana-ack-bot`). Receives
+alerts to `graf-01` (systemd service `grafana-ack-bot`). Receives
 Grafana alertmanager webhook POSTs, posts formatted alerts to
 `#infra-alerts` with reaction options, and turns reactions into real
 Grafana Alertmanager actions.
@@ -29,8 +29,8 @@ module docstring at the top of `files/service.py`.
   token.
 - Installs and enables the `grafana-ack-bot.service` systemd unit.
 - Default-deny iptables on the receiver port (tcp/8990): only graf-01
-  and loopback allowed in, mirroring `roles/hermes_gateway`'s pattern
-  for its own exposed ports.
+  and loopback allowed in, mirroring the default-deny pattern used for
+  the gateway's exposed ports.
 
 ## Two reaction outcomes (deliberately different operations)
 
@@ -71,7 +71,7 @@ per-channel rate-limit bucket if unserialized; verified live that a
 
 All in `ansible/inventory/group_vars/all.yml`:
 
-- `vault_hermes_gw_discord_bot_token` — reused from `roles/hermes_gateway`.
+- `vault_hermes_gw_discord_bot_token` — the existing Hermes Discord bot token.
 - `discord_infra_alerts_webhook_url` — same webhook the
   `discord_infra_alerts` Grafana contact point posts to (see
   `roles/grafana`); the ack bot both posts through it and edits its own
@@ -90,8 +90,7 @@ All in `ansible/inventory/group_vars/all.yml`:
 
 ## Where it's invoked
 
-`deploy_grafana_ack_bot.yml` against the `hermes_gateway` inventory
-group (same host as the main Hermes gateway, different systemd unit).
+`deploy_grafana_ack_bot.yml` against the `graf-01` host.
 
 ## Grafana-side wiring
 

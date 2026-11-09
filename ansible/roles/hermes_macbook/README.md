@@ -2,10 +2,9 @@
 
 Keeps the **personal MacBook Pro M4**'s live Hermes checkout
 (`~/.hermes/hermes-agent` — what the `~/.local/bin/hermes` shim execs)
-current with `adurham/hermes-agent` `main`. This is the MacBook half of the
-fleet's hermes code deploy; the gateway (hermes-gw-01) half lives in
-`hermes_gateway`'s "Clone Hermes Agent Repository" task inside
-`deploy_hermes_gateway.yml`.
+current with `adurham/hermes-agent` `main`. The old LXC gateway half of the
+fleet (hermes-gw-01, CT 113) was retired on 2026-11-08; the workstation now
+runs the gateway natively, so this role only manages the MacBook install.
 
 ## Run
 
@@ -15,7 +14,7 @@ From the homelab `ansible/` directory:
 
 Via the 1Password-bridge wrappers (secrets never touch disk):
 
-    ./scripts/hlxc-ansible-playbook.sh update_hermes_macbook.yml
+    ansible-playbook update_hermes_macbook.yml
 
 One-shot without the wrapper (secrets on tmpfs, shredded after):
 

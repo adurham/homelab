@@ -1,9 +1,9 @@
 ---
 # Provisions the LXC for the personal-device MITM ad-stripping proxy
 # (mitmproxy, explicit HTTPS proxy — NOT transparent/network-wide).
-# Mirrors the hermes_gateway_host role pattern: pveam template fetch ->
+# Mirrors the printfarm_host role pattern: pveam template fetch ->
 # cluster-wide existence check -> pct create -> inject SSH key -> join
-# Tailscale directly (same as hermes-gw-01) -> add to in-memory inventory.
+# Tailscale directly (same as the other peering CTs) -> add to in-memory inventory.
 
 - name: Update Template Database
   ansible.builtin.command: pveam update
@@ -217,7 +217,7 @@
   changed_when: false
 
 # TUN device passthrough so Tailscale can run inside the unprivileged CT.
-# Mirrors hermes-gw-01's config (hermes_gateway_host role) and
+# Mirrors the other directly-peering CT configs and
 # tailscale-gw's. Without these two lines, /dev/net/tun isn't visible
 # inside the container and `tailscale up` fails with "device or resource
 # busy" / "no such device".
@@ -257,7 +257,7 @@
   delegate_to: localhost
 
 - name: Add Adblock Proxy Host to In-Memory Inventory
-  # Reach via Tailscale directly (same pattern as hermes-gw-01) — personal
+  # Reach via Tailscale directly (same pattern as the other peering CTs) — personal
   # devices connect to this proxy from anywhere on the tailnet, not just
   # the home LAN, so it joins Tailscale itself rather than being reached
   # via the tailscale-gw subnet router.

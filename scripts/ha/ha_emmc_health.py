@@ -8,7 +8,7 @@ estimate at /sys/block/mmcblk0/device/life_time as two hex bytes (type A and
 type B estimates): 0x01-0x0A mean 0-10% ... 90-100% of rated life consumed,
 0x0B means the device has exceeded it.
 
-Runs from hermes-gw-01 over the HAOS SSH add-on; read-only.
+Runs from vm-01 over the HAOS SSH add-on; read-only.
 
 Metrics:
   ha_emmc_life_used_percent{estimate="a"|"b"}
@@ -18,7 +18,7 @@ Metrics:
 import subprocess
 import sys
 
-HA_HOST = "192.168.86.2"  # the HAOS SSH add-on does not answer to mDNS from hermes-gw-01
+HA_HOST = "192.168.86.2"  # the HAOS SSH add-on does not answer to mDNS from the private SDN
 HA_PORT = "2222"
 VM = "http://172.16.0.42:8428/api/v1/import/prometheus"
 

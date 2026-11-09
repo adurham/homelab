@@ -1,5 +1,5 @@
 ---
-# Grafana Discord Ack Bot: standalone service on hermes-gw-01 that lets
+# Grafana Discord Ack Bot: standalone service on graf-01 that lets
 # reacting to a Grafana alert message in #infra-alerts (1h/4h/24h emoji)
 # create a matching Grafana Alertmanager silence. Deliberately NOT part
 # of hermes-agent -- see the module docstring in files/service.py for
@@ -76,10 +76,10 @@
     daemon_reload: true
 
 # Default-deny firewall for the webhook receiver port, mirroring the
-# pattern already established for hermes_gateway's api_server (tcp/8642):
+# pattern already established for the gateway's api_server (tcp/8642):
 # only graf-01 (the sole caller of /grafana-webhook) and loopback are
 # allowed in; everything else is dropped. Uses the SAME netfilter-persistent
-# stack hermes_gateway already installed on this host — no new package.
+# stack already installed on this host — no new package.
 - name: "iptables: allow loopback to grafana-ack-bot (defense in depth)"
   ansible.builtin.iptables:
     chain: INPUT

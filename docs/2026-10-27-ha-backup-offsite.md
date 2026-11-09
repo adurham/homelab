@@ -15,8 +15,11 @@ manual backup completes normally in ~5 minutes.)
 
 ## What was built
 
-`roles/ha_backup` + `deploy_ha_backup.yml`, running on **hermes-gw-01** — a host
-HAOS already trusts, so no new device and no new network path:
+`roles/ha_backup` + `deploy_ha_backup.yml`, running on **vm-01**. Since the
+hermes-gw-01 LXC was retired on 2026-11-08, the job moved to vm-01 (2026-11-09)
+and reuses the same ed25519 key — recovered from that guest's last vzdump and
+already present in HAOS's `authorized_keys` — so there is still no new device
+and no new HAOS authorisation:
 
 1. Pulls `/backup/*.tar` from HAOS over the Advanced SSH add-on (port 2222) with
    a dedicated ed25519 key (`/root/.ssh/ha_backup`, public key appended to

@@ -3399,7 +3399,7 @@ groups:
     annotations:
       summary: Home Assistant backups have not reached Google Drive for over 2 days
       description: 'The last successful ha-backup-push run is older than 2 days (or
-        the metric is missing). On hermes-gw-01: `systemctl status ha-backup-push.timer`,
+        the metric is missing). On vm-01: `systemctl status ha-backup-push.timer`,
         `journalctl -u ha-backup-push.service -n 50`, then run it by hand with `systemctl
         start ha-backup-push.service`. Common causes: HAOS SSH key rejected, rclone
         OAuth token expired, or /backup on the HA box full.'
@@ -4335,7 +4335,7 @@ groups:
     annotations:
       summary: '{{ '{{' }} $labels.instance }} is unreachable on the tailnet'
       description: "SSH-banner probe to {{ '{{' }} $labels.target }} has failed for 5 minutes.\
-        \ hermes-gw-01 and gallery-01 peer DIRECTLY on the tailnet and resolve via\
+        \ gallery-01 and the other directly-peering CTs resolve via\
         \ MagicDNS only, so they drop off the tailnet whenever their DNS path dies\
         \ \u2014 during the 2026-10-20 SDN egress outage both vanished while still\
         \ pingable on their LAN leg. Check the container's `tailscale status` from\

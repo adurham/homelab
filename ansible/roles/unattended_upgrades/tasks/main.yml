@@ -1,7 +1,7 @@
 ---
 # Fleet audit 2026-09-10: every CT in the cluster (Authentik, dns-01,
-# lb-01, mail-01, ntp-01, proxy-01, media-ingest-01/02, hermes-gw-01,
-# adblock-proxy-01, gallery-01, frigate-01) had NO unattended-upgrades
+# lb-01, mail-01, ntp-01, proxy-01, media-ingest-01/02, adblock-proxy-01,
+# gallery-01, frigate-01) had NO unattended-upgrades
 # config at all -- 100-217 packages behind each, including 74 unpatched
 # SECURITY updates on Authentik alone (the fleet's identity provider).
 # Only the 3 pve nodes had this (roles/pve_unattended_upgrades). This

@@ -3,9 +3,9 @@
 # inventory/proxmox.yml). These must live HERE, not in the inventory file's
 # vars: block — inventory-file group vars rank below group_vars/all.yml,
 # which pins ansible_user: root (wrong for the Mac) and the Mac-only
-# /Users/adam.durham/.ssh/id_ansible key path (meaningless on hermes-gw-01).
+# /Users/adam.durham/.ssh/id_ansible key path (meaningless on the Linux CTs).
 #
-# Transport: Tailscale's netcat. From hermes-gw-01 the plain forms are dead
+# Transport: Tailscale's netcat. From the LAN side the plain forms are dead
 # ends — `ssh adam.durham@100.66.19.20` is refused (publickey) and
 # `tailscale ssh` needs a one-time host-key trust — while `tailscale nc %h
 # %p` works. Do NOT let this host inherit private_subnet's ProxyCommand:

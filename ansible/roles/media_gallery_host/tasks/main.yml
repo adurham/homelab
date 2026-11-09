@@ -1,6 +1,6 @@
 ---
 # Provisions the LXC for the upstream source media collector. Runs against the
-# proxmox node hosting the CT (pve02). Mirrors the hermes_gateway_host role:
+# proxmox node hosting the CT (pve02). Mirrors the printfarm_host role:
 # pveam template fetch -> cluster-wide existence check -> pct create ->
 # inject SSH key -> TUN passthrough for Tailscale -> add to in-memory
 # inventory. vmid 115, ip_media_gallery (172.16.0.51), hostname media-gallery-01.

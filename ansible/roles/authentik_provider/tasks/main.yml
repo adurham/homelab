@@ -18,6 +18,17 @@
     return_content: true
   register: providers_list
 
+- name: Resolve Built-in Flows for Proxmox Provider
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/flows/instances/?slug={{ item }}"
+    method: GET
+    headers: "{{ headers }}"
+  register: proxmox_flows
+  loop:
+    - default-authentication-flow
+    - default-provider-authorization-implicit-consent
+    - default-provider-invalidation-flow
+
 - name: Create Proxmox Provider
   ansible.builtin.uri:
     url: "{{ authentik_url }}/api/v3/providers/oauth2/"
@@ -26,8 +37,11 @@
     body_format: json
     body:
       name: "{{ provider_name }}"
-      authorization_flow: "default-provider-authorization-implicit-consent"
-      authentication_flow: "default-authentication-flow"
+      # Authentik's API accepts only UUIDs here; the slug literals the role
+      # used until 2026-11-09 now 400 with "not a valid UUID".
+      authorization_flow: "{{ proxmox_flows.results[1].json.results[0].pk }}"
+      authentication_flow: "{{ proxmox_flows.results[0].json.results[0].pk }}"
+      invalidation_flow: "{{ proxmox_flows.results[2].json.results[0].pk }}"
       redirect_uris: >-
         {{ proxmox_redirect_uris.split() | map('regex_replace', '^(.*)$', '{"url": "\1", "matching_mode": "strict"}') | map('from_json') | list }}
       client_type: "confidential"
@@ -50,9 +64,15 @@
   when: providers_list.json.results | length > 0
   register: update_provider
 
-- name: Capture Provider ID
+- name: Capture Provider ID (newly created)
   ansible.builtin.set_fact:
-    provider_id: "{{ (new_provider.json.pk if new_provider is defined and new_provider.changed else providers_list.json.results[0].pk) }}"
+    provider_id: "{{ new_provider.json.pk }}"
+  when: new_provider is defined and new_provider.json is defined and new_provider.json.pk is defined
+
+- name: Capture Provider ID (existing)
+  ansible.builtin.set_fact:
+    provider_id: "{{ providers_list.json.results[0].pk }}"
+  when: providers_list.json.results | length > 0
 
 - name: Get Proxmox Application (Direct)
   ansible.builtin.uri:
@@ -249,12 +269,15 @@
   register: new_grafana_provider
   no_log: true
 
-- name: Capture Grafana Provider ID (Original)
+- name: Capture Grafana Provider ID (newly created)
   ansible.builtin.set_fact:
-    grafana_provider_id: >-
-      {{ new_grafana_provider.json.pk
-         if (new_grafana_provider is defined and new_grafana_provider.changed)
-         else grafana_providers_found.json.results[0].pk }}
+    grafana_provider_id: "{{ new_grafana_provider.json.pk }}"
+  when: new_grafana_provider is defined and new_grafana_provider.json is defined and new_grafana_provider.json.pk is defined
+
+- name: Capture Grafana Provider ID (existing)
+  ansible.builtin.set_fact:
+    grafana_provider_id: "{{ grafana_providers_found.json.results[0].pk }}"
+  when: grafana_providers_found.json.results | length > 0
 
 - name: Get Email Scope Mapping
   ansible.builtin.uri:
@@ -539,9 +562,15 @@
     status_code: [200]
   when: collector_providers.json.results | length > 0
 
-- name: Capture Media Ingest Collector provider id
+- name: Capture Media Ingest Collector provider id (newly created)
   ansible.builtin.set_fact:
-    collector_provider_id: "{{ (new_collector_provider.json.pk if new_collector_provider is defined and new_collector_provider.changed else collector_providers.json.results[0].pk) }}"
+    collector_provider_id: "{{ new_collector_provider.json.pk }}"
+  when: new_collector_provider is defined and new_collector_provider.json is defined and new_collector_provider.json.pk is defined
+
+- name: Capture Media Ingest Collector provider id (existing)
+  ansible.builtin.set_fact:
+    collector_provider_id: "{{ collector_providers.json.results[0].pk }}"
+  when: collector_providers.json.results | length > 0
 
 - name: Get Media Ingest Collector application
   ansible.builtin.uri:
@@ -612,14 +641,6 @@
       providers: "{{ desired_outpost_providers }}"
     status_code: [200]
   when: desired_outpost_providers != ((embedded_outpost.json.results[0].providers | default([])) | unique | sort)
-
-# -------------------------------------------------------------------------
-# Hermes Gateway — persistent GUI (native OIDC) + CLI (forward-auth M2M).
-# See tasks/hermes.yml for the full rationale.
-# -------------------------------------------------------------------------
-
-- name: Provision Hermes Dashboard + API Authentik integrations
-  ansible.builtin.import_tasks: hermes.yml
 
 # -------------------------------------------------------------------------
 # MyApps-style launcher: group + icon curation on all apps above, plus

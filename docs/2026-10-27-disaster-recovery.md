@@ -181,7 +181,7 @@ Restore order (each depends on the one before):
 3. `authentik` 100 — SSO
 4. `lb-01` 103 — front door for the web services
 5. `graf-01` 107, then the VM/Loki box — so you can see what you are doing
-6. `mail-01` 104, `ntp-01` 105, `hermes-gw-01` 113, `bwt-dhcp` 114
+6. `mail-01` 104, `ntp-01` 105, `bwt-dhcp` 114
 7. `tg-harvester-01` 115, `media-ingest-01` 116, `media-ingest-02` 117,
    `adblock-proxy-01` 118, `frigate-01` 170
 8. VMs `ps5forge-rig` 240, `mitm-generic` 241

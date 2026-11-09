@@ -4,7 +4,7 @@
 # into a K2 project, slices it with Creality Print's own CLI, and can push the
 # gcode to Tati's K2 (Moonraker on 192.168.86.43:7125).
 #
-# Mirrors the adblock_proxy_host / hermes_gateway_host pattern:
+# Mirrors the adblock_proxy_host / media_gallery_host pattern:
 #   pveam template fetch -> cluster-wide existence check -> pct create ->
 #   inject SSH key -> TUN passthrough (Tailscale inside the CT) -> add to the
 #   in-memory inventory.
@@ -110,7 +110,7 @@
   changed_when: false
 
 # TUN passthrough so Tailscale can run inside the unprivileged CT (same two
-# lines as hermes-gw-01 / adblock-proxy-01 / tailscale-gw). Without them
+# lines as adblock-proxy-01 / tailscale-gw). Without them
 # /dev/net/tun is invisible in the container and `tailscale up` fails with
 # "device or resource busy" / "no such device".
 - name: Allow tun device cgroup in Print Service LXC config

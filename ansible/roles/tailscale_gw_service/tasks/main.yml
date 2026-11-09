@@ -90,7 +90,7 @@
 # looks like local-gateway traffic at the destination — which means
 # iptables/audit on each host can't distinguish Tailnet from any other
 # off-subnet origin. Disabling it makes per-host firewalls honest:
-# hermes-gw can ACCEPT 100.64.0.0/10, drop everything else, and that's
+# individual CTs can ACCEPT 100.64.0.0/10, drop everything else, and that's
 # actually what happens at the wire.
 #
 # Return path is unaffected: hosts on 172.16.0.0/24 route 100.x via
@@ -114,8 +114,8 @@
 # Shared 100Mbps internet cap for the two noisy media CTs (2026-08-25).
 # Scoped by IP inside the gateway with tc/htb: ONLY media-ingest-02
 # (172.16.0.48) and tg-harvester-01 (172.16.0.46) share the 100Mbit
-# class; all other SDN CTs (lb-01, authentik, dns-01, graf-01,
-# hermes-gw, ...) route through this gateway UNCAPPED. Chosen over
+# class; all other SDN CTs (lb-01, authentik, dns-01, graf-01, ...)
+# route through this gateway UNCAPPED. Chosen over
 # per-CT Proxmox `rate=` caps (user wants 100 TOTAL, not per-box) and
 # over giving infra CTs LAN legs (user explicitly does NOT want more
 # CTs directly on the LAN). eth0 egress = lab upload, eth1 egress =

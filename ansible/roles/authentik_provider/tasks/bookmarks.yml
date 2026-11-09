@@ -48,7 +48,6 @@
       # real Tanium logo uploaded manually (Untitled.png) — group only.
       - { slug: "tanium", group: "Security", icon: "", bookmark: false }
       - { slug: "tg-gallery", group: "Media", icon: "immich", bookmark: false }
-      - { slug: "hermes-dashboard", group: "Automation", icon: "anthropic", bookmark: false }
       # Bookmark-only tiles — no provider, just a curated deep link.
       - slug: "home-assistant"
         name: "Home Assistant"

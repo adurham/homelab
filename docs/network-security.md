@@ -65,7 +65,7 @@ vm-01, graf-01) **do not** have per-CT firewall files. Reasoning:
   The direct private-IP path (`172.16.0.42:8428`) is still open within
   the SDN — Grafana datasource and Alloy push use it. (The "9 service
   CTs" above are the core 100-108 set. Separately, the personal/media
-  service CTs — 113 hermes-gw-01, 114 bwt-dhcp, 115 gallery-01, 116/117
+  service CTs — 114 bwt-dhcp, 115 gallery-01, 116/117
   media-ingest, 118 adblock-proxy-01, 170 frigate-01 — are likewise
   outside the per-CT-firewall model, each for its own documented reason.)
 - The pve hosts are hardened against inbound from the SDN via

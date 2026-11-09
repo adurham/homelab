@@ -1,7 +1,7 @@
 #!/bin/bash
 # Shared 100Mbps internet cap for noisy lab CTs (2026-08-25).
 # Scoped to media-ingest-02 (172.16.0.48) + tg-harvester-01 (172.16.0.46).
-# Other SDN CTs (lb-01, authentik, dns-01, graf-01, hermes-gw) are NOT capped.
+# Other SDN CTs (lb-01, authentik, dns-01, graf-01) are NOT capped.
 # eth0 egress = lab upload to internet; eth1 egress = lab download.
 set -e
 for dev in eth0 eth1; do tc qdisc del dev $dev root 2>/dev/null || true; done

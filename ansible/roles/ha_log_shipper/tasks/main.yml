@@ -46,7 +46,7 @@
     mode: '0640'
   no_log: true
   # Reuses the same vaulted long-lived HA token as the AdGuard log
-  # shipper and hermes_gateway roles — one fewer credential to rotate.
+  # shipper role — one fewer credential to rotate.
 
 - name: Deploy HA Log Shipper Script
   ansible.builtin.template:

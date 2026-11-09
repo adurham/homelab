@@ -280,7 +280,7 @@ all:
           # fact 397). The private_subnet group's default ProxyCommand
           # (jump via personal MacBook's Tailscale IP) flakes for this
           # specific host once it peers directly -- same quirk documented
-          # for hermes-gw-01. Override to reach it directly over Tailscale
+          # for other directly-peering CTs. Override to reach it directly over Tailscale
           # instead of inheriting the jump path.
           ansible_host: 100.83.114.12
           ansible_ssh_common_args: ""
@@ -394,7 +394,7 @@ all:
     # Personal-device MITM ad-stripping proxy (mitmproxy explicit HTTPS
     # proxy). Devices opt in individually via Wi-Fi proxy settings pointed
     # at its Tailscale hostname — NOT transparent/network-wide. Joins the
-    # tailnet directly (mirrors hermes-gw-01's pattern) since personal
+    # tailnet directly (mirrors the other directly-peering CTs) since personal
     # devices reach it over Tailscale from anywhere, not just the home LAN.
     adblock_proxy:
       hosts:

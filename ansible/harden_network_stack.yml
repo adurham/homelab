@@ -94,7 +94,7 @@
 - name: iptables owns the ruleset (nftables.service masked, no flush on disk)
   hosts: >-
     lb-01,dns-01,proxy-01,ntp-01,authentik,frigate-01,tailscale-gw,
-    hermes-gw-01,gallery-01,media-ingest-01,media-ingest-02,
+    gallery-01,media-ingest-01,media-ingest-02,
     adblock-proxy-01,vm-01,graf-01,mail-01
   gather_facts: false
   tasks:

@@ -44,8 +44,8 @@ blackbox_iframe_self_targets:
 # from vm-01 until either (a) tailscale is installed+joined on vm-01, or
 # (b) tailscale-gw is reconfigured to advertise a subnet route for the
 # tailnet CGNAT range into the LAN side. Left as Tailscale IPs anyway
-# (matching hermes_gateway's same fix, which DOES have a working tailnet
-# path) so this is correct the moment either prerequisite lands, rather
+# (matching the same fix on other tailnet-joined CTs, which DO have a
+# working tailnet path) so this is correct the moment either prerequisite lands, rather
 # than needing a second edit. Override at inventory level if needed.
 exo_scrape_targets:
   - name: macstudio-m4-1

@@ -5,7 +5,7 @@
 Every alert in the lab was raised **by the cluster, about the cluster**:
 
 - Grafana (`graf-01`, CT 107) evaluates the rules and lives on **pve03**.
-- The Discord ack/silence bot (`hermes-gw-01`, CT 113) also lives on **pve03**.
+- The Discord ack/silence bot (now `graf-01`, CT 107) also lives on **pve03**.
 - VictoriaMetrics and Loki scrape targets are cluster guests too.
 
 So a pve03 failure, a cluster-wide power loss, or a dead switch produced the one
