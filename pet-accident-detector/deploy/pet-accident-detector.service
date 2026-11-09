@@ -1,0 +1,16 @@
+[Unit]
+Description=Pet accident detector (Frigate MQTT -> VLM -> Home Assistant)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/repos/homelab/pet-accident-detector
+ExecStart=%h/repos/homelab/pet-accident-detector/.venv/bin/python %h/repos/homelab/pet-accident-detector/detector.py
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

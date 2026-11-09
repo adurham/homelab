@@ -1,0 +1,89 @@
+# pet-accident-detector v4
+
+mqtt:
+  host: 192.168.86.2
+  port: 1883
+  user: frigate
+  password_env: FRIGATE_MQTT_PASSWORD
+  topic: frigate/events
+
+frigate:
+  base_url: http://192.168.86.17:5000
+  frame_height: 1080
+  frame_timeout: 15
+
+analyzer:
+  # ollama = Ollama HTTP API (/api/chat). Use https://ollama.com for the cloud
+  # gemma4 the Hermes vision tool uses, or http://127.0.0.1:11434 for a local one.
+  backend: ollama
+  base_url: https://ollama.com
+  model: gemma4:31b
+  api_key_env: OLLAMA_API_KEY
+  timeout: 90
+  max_tokens: 160
+  # Optional fallback tried when the primary endpoint fails (e.g. a local VLM
+  # on a Mac Studio that went to sleep, falling back to the cloud):
+  # fallback:
+  #   backend: ollama
+  #   base_url: https://ollama.com
+  #   model: gemma4:31b
+  #   api_key_env: OLLAMA_API_KEY
+  #   timeout: 90
+  #   max_tokens: 160
+
+# mode: event    -> check when a cat event ENDS (room goes empty)
+# mode: periodic -> fixed interval (rooms that are never empty, e.g. cat room)
+cameras:
+  foyer:
+    label: Foyer
+    mode: event
+  basement:
+    label: Basement
+    mode: event
+  cat_room:
+    label: Cat Room
+    mode: periodic
+    interval: 900
+
+triggers:
+  labels: [cat]
+
+timing:
+  settle: 30          # wait for the cat to clear the frame after it leaves
+  debounce: 8         # extra wait after settle, collapses bursty events
+  cooldown: 3600      # per-camera minimum seconds between alerts
+  consensus_frames: 3 # total frames including the trigger frame
+  consensus_gap: 4
+  consensus_needed: 3 # all frames must agree
+
+gate:
+  # Local floor-change pre-gate. shadow = score it and log it, but always run
+  # the VLM (safe default). enforce = skip the VLM when the score is below the
+  # threshold. off = disable.
+  enabled: true
+  mode: shadow
+  threshold: 0.0025
+  de_threshold: 12
+  chroma_threshold: 8
+  ignore_top: 0.12
+  baseline_quiet: 300   # only refresh a baseline after 5 min with no cat
+  baseline_interval: 60
+
+notify:
+  services:
+    - mobile_app_adams_iphone_18_pro
+    # - mobile_app_tatis_iphone_18_pro_max
+  ha_url_env: HASS_URL
+  ha_token_env: HASS_TOKEN
+  ha_ssh_host: 192.168.86.2
+  ha_ssh_port: 2222
+  ha_ssh_key: ~/.config/pet-accident-detector/id_petaccident
+  ha_www: /config/www
+  image_url_template: /local/accident_{cam}.jpg
+  draw_bbox: true
+
+paths:
+  data_dir: ~/.local/share/pet-accident-detector
+  log_file: ~/.local/share/pet-accident-detector/detector.log
+  evidence_keep_days: 14
+  negative_sample_rate: 0.10

@@ -1,0 +1,4 @@
+paho-mqtt>=2.1
+pyyaml
+pillow
+numpy
