@@ -66,3 +66,9 @@ vaulted in this repo (`vault_vm_backup_crypt_password`) and in the macOS
 keychain (`VMBackupCryptPassword`). Note: the push script's header says
 "Managed by Ansible — roles/pve_backup_offsite", but that role is not in
 this repo — the live unit + script are hand-maintained on pve01.
+
+## Restore drills
+
+| Date | What | Result |
+| :-- | :-- | :-- |
+| 2026-11-09 | CT 105 (`ntp-01`) from the 2026-11-08 03:01 vzdump, restored to VMID 900 on pve03 `nvme-data`, net0 removed before boot to avoid an IP clash | PASS — booted as `ntp-01`, `/etc/chrony/chrony.conf` intact, `chrony` active; VMID 900 destroyed after the check |
