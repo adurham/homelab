@@ -457,10 +457,25 @@ all:
         mail_server:
         ntp_server:
         tanium_clients:
-        hermes_gateway:
         media_gallery:
         media_ingest:
         media_ingest_02:
+
+    # Standalone lab VMs that live on the LAN (not the private subnet) and are
+    # reached directly, no jump host.
+    lab_vms:
+      hosts:
+        ps5forge-rig:
+          ansible_host: 192.168.86.55
+          vmid: 240
+          target_node: pve03
+        mitm-generic:
+          ansible_host: 192.168.86.56
+          vmid: 241
+          target_node: pve01
+      vars:
+        ansible_user: root
+        ansible_ssh_common_args: ""
 
     # Tanium Cluster
     tanium_cluster:
