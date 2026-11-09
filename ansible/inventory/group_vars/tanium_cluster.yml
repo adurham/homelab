@@ -2,9 +2,9 @@
 # Tanium TanOS appliance overrides — see project memory
 # `tanos_appliance_users` for context.
 
-# tandev = full sudo-capable user on TanOS dev images.
-# root SSH is disabled; tanadmin is the locked-down menu UI.
-ansible_user: tandev
+# tanadmin is the appliance account used for automation (owner decision
+# 2026-11-08, replacing tandev). root SSH is disabled on TanOS.
+ansible_user: tanadmin
 
 # Reach the lab subnet via Tailscale through the personal Mac jump host;
 # its 1Password SSH agent serves the key actually authorized on the
