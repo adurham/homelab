@@ -65,11 +65,13 @@ class FakeHA(svc.SmartVentController):
         self._zone_vacancy_demoted = set()
         self._room_last_occupied = {}
         self._room_sleep_hold_until = {}
+        self._room_pir_latch_until = {}
         self._activity_entity_to_key = {}
         for _zn, zone in svc.ZONES.items():
             for _rn, sensors in zone["rooms"].items():
                 for entity in sensors.get("activity", []):
                     self._activity_entity_to_key[entity] = (_zn, _rn)
+        self._house_away_since = self._clock - timedelta(minutes=90)
         self._sp_owned = False
         self._sp_commanded_cool = None
         self._sp_commanded_heat = None
@@ -152,6 +154,8 @@ class FakeHA(svc.SmartVentController):
     def set_house(self, home):
         for entity in svc.HOUSE_PERSON_ENTITIES:
             self.states[entity] = "home" if home else "not_home"
+        self._house_away_since = (None if home
+                                  else self._clock - timedelta(minutes=90))
 
     def set_co2(self, ppm):
         self.states[svc.HOUSE_CO2_ENTITY] = ppm
@@ -159,6 +163,12 @@ class FakeHA(svc.SmartVentController):
     def set_activity(self, zone, room, on):
         for entity in svc.ZONES[zone]["rooms"][room].get("activity", []):
             self.states[entity] = "on" if on else "off"
+
+    def set_all_duct_temps(self, temp):
+        for _zn, zone in svc.ZONES.items():
+            for _rn, sensors in zone["rooms"].items():
+                for vent in sensors.get("vents", []):
+                    self.states[self._duct_sensor_for_vent(vent)] = temp
 
 
 def auto(ha):
@@ -258,8 +268,20 @@ ha.set_activity("upstairs", "Guest Bedroom 1", True)
 check("T1 activity on + house home: 1F below gets 50% (occupied), not floored",
       auto(ha)[("upstairs", "Guest Bedroom 1")] == 50)
 
+# Guest/untracked occupant: activity on must veto the floor even when the
+# phones say away.
+ha = FakeHA()
+ha.set_house(False)
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
+ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
+    ha.datetime() - timedelta(hours=13))
+ha.set_activity("upstairs", "Guest Bedroom 1", True)
+check("T1 activity on + house away is not floored (guest safety)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 100)
+
 # Lights-out sleep cue: a bedroom light/fan/TV turning off in the evening
-# holds the room as occupied until 09:00, per room.
+# holds the room as occupied until 10:30, per room.
 ha = FakeHA(clock=datetime(2026, 11, 9, 23, 0, 0))
 ha.set_house(True)
 ha.on_activity_change("light.main_bedroom_ceiling_fan_light", None,
@@ -267,8 +289,8 @@ ha.on_activity_change("light.main_bedroom_ceiling_fan_light", None,
 ha._clock = datetime(2026, 11, 10, 2, 0, 0)
 check("T1 bedroom lights-out holds the room occupied at 2am",
       ha._room_recently_occupied(("downstairs", "Main Bedroom")) is True)
-ha._clock = datetime(2026, 11, 10, 10, 0, 0)
-check("T1 bedroom lights-out hold expires at 09:00",
+ha._clock = datetime(2026, 11, 10, 11, 0, 0)
+check("T1 bedroom lights-out hold expires at 10:30",
       ha._room_recently_occupied(("downstairs", "Main Bedroom")) is False)
 
 # A common-area light going off does not set a sleep hold.
@@ -288,6 +310,36 @@ ha.on_activity_change("light.main_bedroom_ceiling_fan_light", None,
 ha._clock = datetime(2026, 11, 10, 2, 0, 0)
 check("T1 away: lights-out does not set a sleep hold",
       ha._room_recently_occupied(("downstairs", "Main Bedroom")) is False)
+
+# 09:00 cliff regression: a 23:00 PIR protects through 10:30 the next
+# morning, even though the old rule switched to a 2h daytime hold at 09:00.
+ha = FakeHA(clock=datetime(2026, 11, 10, 9, 5, 0))
+ha.set_house(False)
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
+ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
+    datetime(2026, 11, 9, 23, 0, 0))
+check("T1 09:05 after a 23:00 PIR is NOT floored (protected to 10:30)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 100)
+
+ha = FakeHA(clock=datetime(2026, 11, 10, 10, 45, 0))
+ha.set_house(False)
+ha.stamp_zone("upstairs", False)
+ha.set_room("upstairs", "Guest Bedroom 1", 62.0)
+ha._room_last_occupied[("upstairs", "Guest Bedroom 1")] = (
+    datetime(2026, 11, 9, 23, 0, 0))
+check("T1 10:45 after a 23:00 PIR IS floored (10:30 expiry)",
+      auto(ha)[("upstairs", "Guest Bedroom 1")] == 0)
+
+# House-away must be stable for HOUSE_AWAY_DEBOUNCE_MIN before it counts.
+ha = FakeHA()
+ha.set_house(False)
+ha._house_away_since = ha._clock
+check("T1 house-away debounce: not away immediately",
+      ha._house_away() is False)
+ha._clock += timedelta(minutes=61)
+check("T1 house-away debounce: away after 61 min",
+      ha._house_away() is True)
 
 # =============================================================================
 # 2. Occupied floor: PIR override at 1.5F
@@ -323,6 +375,33 @@ ha.stamp_zone("downstairs", True)
 ha.set_room("downstairs", "Main Bedroom", 62.6)    # 1.4F below, under PIR 1.5
 check("T2 downstairs empty room 1.4F below is not 100% (bonus guard)",
       auto(ha)[("downstairs", "Main Bedroom")] == 50)
+
+# 1.5F trigger latches for 20 min so the vent cannot chatter at the boundary.
+ha = FakeHA()
+ha.set_house(True)
+ha.stamp_zone("upstairs", True)
+ha.set_room("upstairs", "Guest Bedroom 1", 62.4)   # 1.6F below
+auto(ha)
+check("T2b 1.6F below latches the room as occupied",
+      ha._room_pir_latched(("upstairs", "Guest Bedroom 1")) is True)
+ha._clock += timedelta(minutes=21)
+check("T2b PIR latch expires after 20 minutes",
+      ha._room_pir_latched(("upstairs", "Guest Bedroom 1")) is False)
+
+# A sleeping bedroom must not be used as a donor by the priority pass.
+ha = FakeHA()
+ha.set_house(True)
+ha.stamp_zone("upstairs", True)
+ha.stamp_zone("downstairs", True)
+ha.set_room("upstairs", "Guest Bedroom 1", 60.0, occ=True)
+ha.set_room("downstairs", "Main Bedroom", 64.0, occ=False)
+ha._room_sleep_hold_until[("downstairs", "Main Bedroom")] = (
+    ha._clock + timedelta(hours=1))
+base = auto(ha)
+out = ha._apply_priority_rooms(dict(base), "heating", 72.0, 64.0, "Auto")
+check("T2b sleeping Main Bedroom is not throttled as a donor",
+      out[("downstairs", "Main Bedroom")] == 50
+      and not any("throttling downstairs/Main Bedroom" in l for l in ha.logs))
 
 # =============================================================================
 # 3. Priority pass: vacant rooms never recruit donors; occupied-floor
@@ -408,6 +487,36 @@ ha.set_room("upstairs", "Guest Bedroom 1", 60.0)
 ha._apply_setpoint_nudge("heat_cool", "heating", 72.0, 64.0, "Auto")
 check("T6 occupied-floor cold room can drive a heat setpoint nudge",
       any(s == "ecobee_enhanced/set_hold_temperature" for s, _ in ha.calls))
+
+
+# =============================================================================
+# 7. Heating backpressure: 40% static, 25% hot supply, force-open at emergency.
+# =============================================================================
+def all_closed():
+    return {(zn, rn): 0 for zn, z in svc.ZONES.items() for rn in z["rooms"]}
+
+
+def closed_vents(out):
+    return sum(len(svc.ZONES[z]["rooms"][r].get("vents", []))
+               for (z, r), p in out.items() if p == 0)
+
+
+ha = FakeHA(action="heating")
+out = ha._apply_backpressure_rooms(all_closed(), "heating")
+check("T7 heating backpressure caps closures at 40%",
+      closed_vents(out) <= 8)
+
+ha = FakeHA(action="heating")
+ha.set_all_duct_temps(140.0)
+out = ha._apply_backpressure_rooms(all_closed(), "heating")
+check("T7 heating supply emergency opens all closed vents",
+      closed_vents(out) == 0)
+
+ha = FakeHA(action="heating")
+ha.set_all_duct_temps(130.0)
+out = ha._apply_backpressure_rooms(all_closed(), "heating")
+check("T7 hot supply lowers the heating cap to 25%",
+      closed_vents(out) <= 5)
 
 print(f"\n{sum(PASS)}/{len(PASS)} checks passed")
 sys.exit(0 if all(PASS) else 1)

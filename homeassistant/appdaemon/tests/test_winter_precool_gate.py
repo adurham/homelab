@@ -11,7 +11,7 @@ No pytest / appdaemon needed: same stub pattern as the other suites.
 import os
 import sys
 import types
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ---- stub appdaemon BEFORE importing the controller --------------------------
 hassapi = types.ModuleType("appdaemon.plugins.hass.hassapi")
@@ -146,6 +146,18 @@ for label, kwargs, want in [
     gate = ha._precool_gate(hvac_action=kwargs["action"],
                             hvac_mode=kwargs["mode"])
     check(label, gate.active is want)
+
+# In heat_cool, recent cooling is the season signal (not the 2am outdoor low).
+ha = FakeHA(action="idle", mode="heat_cool", outdoor=55.0)
+ha._last_cooling_at = ha.datetime() - timedelta(hours=2)
+gate = ha._precool_gate(hvac_action="idle", hvac_mode="heat_cool")
+check("T1b heat_cool 55F but cooled 2h ago -> active", gate.active is True)
+
+ha = FakeHA(action="idle", mode="heat_cool", outdoor=55.0)
+ha._last_cooling_at = ha.datetime() - timedelta(hours=30)
+gate = ha._precool_gate(hvac_action="idle", hvac_mode="heat_cool")
+check("T1b heat_cool 55F and no cooling for 30h -> inactive",
+      gate.active is False)
 
 
 # =============================================================================
