@@ -7,6 +7,10 @@ generation that doesn't cost anything to read back.
 | Tier | What | Where | Cadence | Retention |
 | :-- | :-- | :-- | :-- | :-- |
 | 1. On-site | `vzdump` snapshot of every guest | `/nvme-pool/vzdump-backups/dump` on each PVE node | nightly 02:00 / 02:30 / 03:00 (one job per node) | 3 daily + 2 weekly |
+
+> The TanOS appliances (VMIDs 200-205, `ts-*`/`tms-*`/`tzs-*`) were added to
+> the per-node jobs on 2026-11-08 after ts-01 was found with no restore point
+> at all while it was down.
 | 2. Off-site | newest archive per guest, rclone-crypt encrypted | `vmbackup_crypt:pve/` (Google Drive) | weekly, Sat 05:00, `pve-backup-push.timer` | newest 4 per guest |
 | 3. Local second generation | newest archive per guest, staged copy | `/mnt/vault/pve-backups/<YYYYMMDD>/` on amd-workstation (8TB `vault`) | weekly, immediately after tier 2 (`ExecStartPost`) | ≤ 2 TiB, oldest generations pruned |
 
