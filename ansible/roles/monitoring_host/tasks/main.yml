@@ -27,7 +27,7 @@
     --hostname {{ inventory_hostname }}
     --cores {{ vm_cores | default(2) }} --memory {{ vm_memory | default(4096) }} --swap 512
     --net0 name=eth0,bridge=private,ip={{ net_private_ip }},gw={{ net_private_gw }}
-    --nameserver {{ ip_dns_primary }}
+    --nameserver "{{ ip_dns_primary }} {{ ip_dns_fallback | default('1.1.1.1') }}"
     --searchdomain chi.lab.amd-e.com
     --storage nvme-data
     --unprivileged 1
@@ -60,7 +60,7 @@
     set -o pipefail
     ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }} \
       pct set {{ vmid }} \
-      --nameserver {{ ip_dns_primary }} \
+      --nameserver "{{ ip_dns_primary }} {{ ip_dns_fallback | default('1.1.1.1') }}" \
       --searchdomain chi.lab.amd-e.com
   args:
     executable: /bin/bash
@@ -76,6 +76,7 @@
     set -o pipefail
     ssh -o StrictHostKeyChecking=no {{ ct_owner.stdout }} pct exec {{ vmid }} -- tee /etc/resolv.conf >/dev/null <<'EOF'
     nameserver {{ ip_dns_primary }}
+    nameserver {{ ip_dns_fallback | default('1.1.1.1') }}
     search chi.lab.amd-e.com
     EOF
   args:
