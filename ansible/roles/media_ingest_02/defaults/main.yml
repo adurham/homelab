@@ -134,3 +134,7 @@ media_ingest_02_likes_per_model_timeout: 900  # 15 min in seconds
 # header directly) and the download proceeds — which is precisely why the
 # streaming push fix, not this cap, is the primary defense.
 media_ingest_02_file_size_max_bytes: 8589934592  # 8 GiB
+
+# Public key (gpg uid/email) parked downloads are encrypted to. Private half is
+# in the password manager only -- no lab box can decrypt what it parks.
+media_ingest_park_recipient: park@media-ingest.local

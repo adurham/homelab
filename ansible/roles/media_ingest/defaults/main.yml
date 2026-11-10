@@ -20,3 +20,7 @@ media_ingest_collector_client_id: "media-ingest-collector"
 # missed). Runs reconcile.py on a systemd timer.
 media_ingest_reconcile_interval: "20min"   # OnUnitActiveSec for the timer
 media_ingest_reconcile_lookback: 40        # messages per private chat per sweep
+
+# Public key (gpg uid/email) parked downloads are encrypted to. Private half is
+# in the password manager only -- no lab box can decrypt what it parks.
+media_ingest_park_recipient: park@media-ingest.local

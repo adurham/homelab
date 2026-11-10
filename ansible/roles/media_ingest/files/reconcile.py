@@ -63,24 +63,17 @@ FAILED = Path(os.environ.get("TG_FAILED_DIR", "/var/lib/media-ingest/failed"))
 # the whole sweep — and did for ~20h on 2026-11-10 while the gallery auth was
 # broken, silently losing every ephemeral item in the window.
 EXCL_CACHE = Path(os.environ.get("TG_EXCLUDED_CACHE", "/var/lib/media-ingest/excluded_cache.json"))
-# Parked downloads are AES-256 encrypted at rest (plaintext media must never
-# touch persistent storage); they are decrypted into the tmpfs only for the push.
-ENC_KEY = os.environ.get("STAGING_ENC_KEY", "")
+# Parked downloads are encrypted to a PUBLIC key whose private half lives in the
+# password manager, not on this host -- so the sweep can no longer decrypt them.
+# It reports them instead and leaves recovery off-box by design.
+PARK_RECIPIENT = os.environ.get("STAGING_PARK_RECIPIENT", "park@media-ingest.local")
 
 
 def _encrypt_file(src: Path, dst: Path) -> None:
     subprocess.run(
-        ["gpg", "--batch", "--yes", "--quiet", "--cipher-algo", "AES256",
-         "--passphrase-fd", "0", "--symmetric", "--output", str(dst), str(src)],
-        input=ENC_KEY.encode(), check=True,
-    )
-
-
-def _decrypt_file(src: Path, dst: Path) -> None:
-    subprocess.run(
-        ["gpg", "--batch", "--yes", "--quiet", "--passphrase-fd", "0",
-         "--output", str(dst), "--decrypt", str(src)],
-        input=ENC_KEY.encode(), check=True,
+        ["gpg", "--batch", "--yes", "--quiet", "--trust-model", "always",
+         "--recipient", PARK_RECIPIENT, "--output", str(dst), "--encrypt", str(src)],
+        check=True,
     )
 
 STAGING.mkdir(parents=True, exist_ok=True)
@@ -111,11 +104,6 @@ def _park(stem, folder, date_iso):
         files = [p for p in STAGING.glob(stem + "*") if p.suffix != ".json"]
         if not files:
             return
-        if not ENC_KEY:
-            log.error("no STAGING_ENC_KEY — refusing to write %s to disk in "
-                      "plaintext; the download is lost (secrecy beats availability)",
-                      stem)
-            return
         for p in files:
             _encrypt_file(p, FAILED / (p.name + ".gpg"))
             p.unlink()
@@ -139,7 +127,7 @@ def push_parked(dry_run=False, limit=50):
     """
     if not FAILED.is_dir():
         return 0, 0
-    pushed = failed = 0
+    pushed = failed = needs_manual = 0
     for sidecar in sorted(FAILED.glob("*.json"))[:limit]:
         try:
             meta = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -156,16 +144,11 @@ def push_parked(dry_run=False, limit=50):
             continue
         tmp = None
         payload = files[0]
+        if meta.get("encrypted") or payload.suffix == ".gpg":
+            # Encrypted to a key this host does not hold: recover it off-box.
+            needs_manual += 1
+            continue
         try:
-            if meta.get("encrypted") or payload.suffix == ".gpg":
-                if not ENC_KEY:
-                    log.error("parked %s is encrypted but STAGING_ENC_KEY is unset — "
-                              "cannot drain it", stem)
-                    failed += 1
-                    continue
-                tmp = STAGING / (stem + ".dec")
-                _decrypt_file(payload, tmp)   # plaintext lands only in the tmpfs
-                payload = tmp
             store_client.push_media(folder, str(payload), stem, meta.get("date", ""),
                                     is_out=False)
             for p in files:
@@ -179,6 +162,10 @@ def push_parked(dry_run=False, limit=50):
         finally:
             if tmp is not None and tmp.exists():
                 tmp.unlink()
+    if needs_manual:
+        log.warning("%d parked item(s) are encrypted to the off-box recovery key "
+                    "and need manual recovery (see docs/media-ingest-recovery.md)",
+                    needs_manual)
     return pushed, failed
 
 

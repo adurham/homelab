@@ -55,20 +55,20 @@ LOG_FILE = os.environ.get("TG_LOG_FILE", "/var/log/media-ingest/collector.log")
 # (hit live 2026-11-10: the file was downloaded, the push 400'd during a gallery
 # auth outage, and the old unconditional cleanup deleted the only copy).
 FAILED = Path(os.environ.get("TG_FAILED_DIR", "/var/lib/media-ingest/failed"))
-# Key for at-rest encryption of parked downloads. Plaintext media must never
-# touch persistent storage (that is why staging is a tmpfs), but a failed push
-# has to survive a restart, so the bytes are parked AES-256-encrypted and only
-# decrypted into the tmpfs when they are pushed. Key comes from the vault via
-# the service env; with no key we do NOT park (secrecy beats availability).
-ENC_KEY = os.environ.get("STAGING_ENC_KEY", "")
+# Parked downloads are encrypted to a PUBLIC key: plaintext media must never
+# touch persistent storage (that is why staging is a tmpfs), and the matching
+# private key is deliberately NOT on this host -- it lives in the password
+# manager, so a compromise of this box yields ciphertext only. Nothing here can
+# decrypt, which is the point; recovery is done off-box.
+PARK_RECIPIENT = os.environ.get("STAGING_PARK_RECIPIENT", "park@media-ingest.local")
 
 
 def _encrypt_file(src: Path, dst: Path) -> None:
-    """Encrypt src to dst with the staging key (gpg symmetric, AES-256)."""
+    """Encrypt src to dst for PARK_RECIPIENT (gpg public-key, no local secret)."""
     subprocess.run(
-        ["gpg", "--batch", "--yes", "--quiet", "--cipher-algo", "AES256",
-         "--passphrase-fd", "0", "--symmetric", "--output", str(dst), str(src)],
-        input=ENC_KEY.encode(), check=True,
+        ["gpg", "--batch", "--yes", "--quiet", "--trust-model", "always",
+         "--recipient", PARK_RECIPIENT, "--output", str(dst), "--encrypt", str(src)],
+        check=True,
     )
 
 # Active-pull backstop interval (seconds). Telegram deprioritizes update fan-out
@@ -282,11 +282,6 @@ def _park_failed(stem: str, folder: str, date_iso: str) -> None:
         FAILED.mkdir(parents=True, exist_ok=True)
         files = [p for p in STAGING.glob(stem + "*") if p.suffix != ".json"]
         if not files:
-            return
-        if not ENC_KEY:
-            log.error("no STAGING_ENC_KEY — refusing to write %s to disk in "
-                      "plaintext; the download is lost (secrecy beats availability)",
-                      stem)
             return
         for p in files:
             dst = FAILED / (p.name + ".gpg")

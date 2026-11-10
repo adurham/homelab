@@ -31,6 +31,7 @@ Env (from scraper.env, rendered by ansible from vault + defaults):
   consumed by store_client.
 """
 import datetime as dt
+import json
 import logging
 import os
 import subprocess
@@ -58,6 +59,13 @@ SCRAPE_FILTER_ARGS = os.environ.get("M02_SCRAPE_FILTER_ARGS", "").strip()
 # backfill scrape each tick. Pin free-tier models to this list in the source
 # UI. Empty = skip the pinned-list pass.
 PINNED_LIST = os.environ.get("M02_PINNED_LIST", "").strip()
+
+# Where a download that could not be pushed is parked, encrypted to a PUBLIC key
+# whose private half lives in the password manager (not on this host). Staging is
+# a tmpfs, so leaving the file there was one restart away from losing it; parking
+# as ciphertext survives reboots without putting readable media on disk.
+PARK_DIR = Path(os.environ.get("M02_PARK_DIR", str(STAGING.parent / "failed")))
+PARK_RECIPIENT = os.environ.get("STAGING_PARK_RECIPIENT", "park@media-ingest.local")
 
 STAGING.mkdir(parents=True, exist_ok=True)
 Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
@@ -541,6 +549,28 @@ def _accumulate_pushes(pushed: int, failed: int):
         _PUSH_TOTALS["failed"] += failed
 
 
+def _park(fpath: Path, folder: str, stem: str) -> None:
+    """Encrypt a download whose push failed into PARK_DIR; never keep plaintext."""
+    try:
+        PARK_DIR.mkdir(parents=True, exist_ok=True)
+        # Name by stem so a recovery pass can find the pair by sidecar.
+        dst = PARK_DIR / (stem + fpath.suffix + ".gpg")
+        subprocess.run(
+            ["gpg", "--batch", "--yes", "--quiet", "--trust-model", "always",
+             "--recipient", PARK_RECIPIENT, "--output", str(dst), "--encrypt", str(fpath)],
+            check=True,
+        )
+        fpath.unlink()
+        (PARK_DIR / (stem + ".json")).write_text(
+            json.dumps({"stem": stem, "folder": folder, "encrypted": True}),
+            encoding="utf-8",
+        )
+        log.warning("PARKED %s (encrypted) in %s — push failed, kept for off-box recovery",
+                    stem, PARK_DIR)
+    except Exception as e:  # noqa: BLE001
+        log.error("could not park %s: %s: %s", stem, type(e).__name__, e)
+
+
 def _walk_and_push():
     """Walk the staging tree (flat per-model: <model_username>/<file>) and push
     each file to the gallery. Returns (pushed, failed, skipped).
@@ -655,6 +685,8 @@ def _walk_and_push():
             except Exception as e:  # noqa: BLE001
                 failed += 1
                 log.error("push failed %s: %s: %s", stem, type(e).__name__, e)
+                _park(fpath, folder, stem)
+                _SEEN_SIZES.pop(key, None)
     return pushed, failed, skipped
 
 
