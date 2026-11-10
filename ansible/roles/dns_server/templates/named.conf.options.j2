@@ -17,16 +17,26 @@ options {
         recursion yes;
         allow-query { trusted; };
 
-        # Upstream resolution via AdGuard Home on the homeassistant host.
-        # AdGuard already does DoT upstream to Cloudflare; forwarding to
-        # it gives us encrypted egress + the ad-block lists, and avoids
-        # running a duplicate DoT proxy (stubby) on dns-01.
-        # bind ↔ AdGuard is plaintext-on-LAN — accepted, since the
+        # Upstream resolution via the LAN resolvers (AdGuard Home pair on
+        # pve01/pve02 at 192.168.86.4 and .5). AdGuard does DoT upstream to
+        # Cloudflare/Quad9 and applies the ad-block lists, so forwarding to it
+        # gives encrypted egress + filtering and avoids running a duplicate
+        # DoT proxy (stubby) here.
+        # bind <-> AdGuard is plaintext-on-LAN -- accepted, since the
         # encrypted boundary is at the WAN egress.
-        # forward-only fails closed if AdGuard is down: lab DNS breaks
-        # but no plaintext fallback to public root resolvers.
+        # forward-only fails closed if both are down: lab DNS breaks but no
+        # plaintext fallback to public root resolvers.
+        #
+        # 2026-11-10: this used to name {{ ip_homeassistant }} (the HA Green's
+        # AdGuard). That add-on was removed when DNS/DHCP moved to the two
+        # containers, which left dns-01 SERVFAILing every external name -- and
+        # that silently broke anything on this subnet that resolves by name,
+        # including the Grafana ack bot's connection to discord.com. Point it
+        # at the pair: bind tries them in order, so one resolver can be down.
         forwarders {
-                {{ ip_homeassistant }};
+{% for resolver in lan_dns_resolvers %}
+                {{ resolver }};
+{% endfor %}
         };
         forward only;
 
