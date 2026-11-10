@@ -98,8 +98,14 @@ all:
           zfs_scrub_day_of_month: 15
           pve_backup_job_id: "52cb07d6-1400-4437-9591-568cad479879"
           pve_backup_schedule: "Mon..Sun 03:00"
+          # pve03 hosts the 500G TanOS appliances (201/203/205); one archive of
+          # 201 alone is 124G, so the cluster-wide 3-daily/2-weekly policy does
+          # not fit this pool (hit 94% CAP on 2026-11-10). Keep a single latest
+          # archive per guest here -- the newest is still pushed offsite.
+          pve_backup_prune_backups: "keep-last=1"
           # Same union vmid list as pve01 -- migration-proof; see the comment there.
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 171, 240, 241]
+          # 201/203/205 are included because they live here and are the big ones.
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 171, 201, 203, 205, 240, 241]
           # Same as pve02 -- see comment there. pve03's boot HDD
           # (ST500LM021-1KJ152) is the one that actually corrupted
           # pve-cluster's config.db on 2026-09-10.
