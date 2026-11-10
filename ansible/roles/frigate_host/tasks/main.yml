@@ -510,3 +510,27 @@
     pct exec {{ vmid }} -- bash -c
     "printf '%s\n' '*/5 * * * * root python3 /opt/frigate/camera_health.py >> /var/log/frigate_health.log 2>&1' > /etc/cron.d/frigate-health"
   changed_when: true
+
+# ── Last-good frame server ──────────────────────────────────────────────────
+# Frigate serves a fixed placeholder JPEG ("No frames have been received")
+# whenever a camera has no recent frames, and HA's camera tiles point straight
+# at /api/<cam>/latest.jpg - so a stalled Nest session shows an error card.
+# lastgood.py keeps the newest REAL frame per camera and serves it on :8099;
+# the six generic-camera config entries' still_image_url point there.
+- name: Install the last-good frame server inside the CT
+  ansible.builtin.command: >-
+    pct push {{ vmid }} {{ role_path }}/files/lastgood.py
+    /opt/frigate/lastgood.py --perms 0755
+  changed_when: true
+
+- name: Install the last-good systemd unit inside the CT
+  ansible.builtin.command: >-
+    pct push {{ vmid }} {{ role_path }}/files/frigate-lastgood.service
+    /etc/systemd/system/frigate-lastgood.service --perms 0644
+  changed_when: true
+
+- name: Enable the last-good frame server
+  ansible.builtin.command: >-
+    pct exec {{ vmid }} -- bash -c
+    "systemctl daemon-reload && systemctl enable --now frigate-lastgood.service"
+  changed_when: true

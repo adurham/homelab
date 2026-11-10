@@ -83,6 +83,25 @@ version required **4 or more** stalled cameras before acting, so the common
 case - one to three dead - sat broken indefinitely while the log said
 "waiting for recovery".
 
+### Last-good frames: kill the placeholder tiles
+
+Frigate's placeholder is what makes a stalled camera look *broken*. `lastgood.py`
+(systemd `frigate-lastgood.service`, port 8099) polls `/api/<cam>/latest.jpg`
+every 15 s, keeps the newest frame whose md5 is not the placeholder and whose
+size clears 20 kB, and serves it at `http://<frigate>:8099/<cam>.jpg` with
+`Cache-Control: no-store`.
+
+The six generic-camera config entries now use that URL as `still_image_url`, so
+a camera that is mid-flap shows its last good picture instead of the error card.
+Change it through the **options flow**, and leave `stream_source` **empty** for
+these: if a stream URL is supplied the flow opens it to validate and fails with
+`{'stream_source': 'timeout'}` whenever that camera happens to be down (which is
+most of the time). The tiles use `camera_view: image`, so no stream is needed.
+
+Also: `platform: generic` is **not** available as YAML — the camera integration
+rejects it ("does not support platform setup"), so a YAML fallback camera is not
+an option; the config entry is the only route.
+
 ### Consumers of `frigate_lan_ip` — a stale copy means dead camera tiles in HA
 
 The LAN address is baked into more places than this role. When CT 170 moved from

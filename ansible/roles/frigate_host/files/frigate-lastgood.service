@@ -1,0 +1,16 @@
+[Unit]
+Description=Last-good frame server for Frigate cameras
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/frigate/lastgood.py
+Restart=always
+RestartSec=5
+Environment=FRIGATE_URL=http://127.0.0.1:5000
+Environment=LASTGOOD_DIR=/opt/frigate/lastgood
+Environment=LASTGOOD_PORT=8099
+
+[Install]
+WantedBy=multi-user.target
