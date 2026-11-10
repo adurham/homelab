@@ -309,7 +309,7 @@
     body:
       name: "Grafana"
       client_id: "{{ grafana_client_id | default('grafana') }}"
-      client_secret: "{{ grafana_client_secret | default('grafana_secret_placeholder') }}"
+      client_secret: "{{ grafana_client_secret | default(omit) }}"
       authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
       authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
       invalidation_flow: "{{ grafana_invalidation_pk }}"
@@ -350,7 +350,7 @@
     headers: "{{ headers }}"
     body_format: json
     body:
-      client_secret: "{{ grafana_client_secret | default('grafana_secret_placeholder') }}"
+      client_secret: "{{ grafana_client_secret | default(omit) }}"
       redirect_uris:
         - url: "https://grafana.chi.lab.amd-e.com/login/generic_oauth"
           matching_mode: "strict"
