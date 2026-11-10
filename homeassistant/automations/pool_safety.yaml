@@ -3,14 +3,22 @@
 # suction). A single-speed pump cooks its seal/motor within minutes when no
 # water is moving heat away, so on a real fault we force the relay OFF and alert.
 #
+# ONE RULE, BOTH FAULT BANDS (merged 2026-11-10): this used to be two
+# near-identical automations - "Dead (no power draw)" (<50 W) and "Low draw
+# (dead-head / dry)" (50-700 W). They differed only in the threshold and the
+# wording of the alert, so they are now a single rule with the wider <700 W
+# gate; the alert text branches on the reading to name the fault (no draw vs
+# dead-head / lost prime). Coverage is unchanged: every fault signature draws
+# LESS than normal, so <700 W catches both bands.
+#
 # Calibrated from sensor.edgewater_road_power_minute_average_12 (24h history):
 # normal running draw is a tight ~924 W (p10 920, p90 930, max 932, transient
 # floor 824 W at start/stop). Fault signatures all draw LESS than normal:
 #   - dead relay / tripped breaker / no power : ~0 W
 #   - dead-head (no flow, valve shut)         : ~50-70% normal -> ~460-650 W
 #   - lost prime / running dry / cavitation   : ~30-50% normal -> ~280-460 W
-# Thresholds: DEAD = below 50 W; LOW = below 700 W (clears the 824 W transient
-# floor, so a normal start/stop never trips it).
+# Threshold: FAULT = below 700 W (clears the 824 W transient floor, so a normal
+# start/stop never trips it).
 #
 # Re-arm: a forced-off pump stays off until the next 09:00 ON (or a pool_season
 # toggle) via pool_filter.yaml's schedule - intentional, so a real fault is seen
@@ -32,11 +40,11 @@
 # Emporia's whole cloud poll stalled outright - every circuit sensor
 # (including the whole-home aggregate) froze at an identical timestamp for
 # 30+ minutes, all reporting a stale cached ~0 W. A frozen 0 W satisfies the
-# "below 50 for 8 min" trigger just as well as a genuine fault, no matter how
+# "below 700 for 8 min" trigger just as well as a genuine fault, no matter how
 # long the debounce is, because wall-clock time keeps passing even though the
 # reading itself never updates. This force-killed a pump that was actually
 # running fine. Per warm memory fact 410 (corroboration, not just longer
-# debounce), both automations below now also require
+# debounce), the safety rule below also requires
 # sensor.edgewater_road_power_minute_average_12's last_reported to be within
 # 180s (Emporia's normal ~60s poll cadence, so 180s gives 2-3 missed polls of
 # slack before treating it as stale) - i.e. the reading must be LIVE, not
@@ -45,7 +53,7 @@
 # is still visible without blinding the safety logic into a false trip.
 #
 # last_reported vs last_updated: deliberately using last_reported (HA
-# >=2024.4; this host runs 2026.8.2). Since HA 2024.4, last_updated only
+# >=2024.4; this host runs 2026.11.1). Since HA 2024.4, last_updated only
 # advances when the STATE VALUE CHANGES - if Emporia's cloud poll is healthy
 # but happens to report the same value twice in a row (very plausible at a
 # steady ~924W run, or a genuinely idle 0W with the pump off), last_updated
@@ -53,70 +61,20 @@
 # real cutoff. last_reported advances on every poll regardless of whether the
 # value changed, so it's the correct "is the data pipe alive" signal here.
 
-- alias: "Pool Pump Safety - Dead (no power draw)"
-  id: pool_pump_safety_dead
+- alias: "Pool Pump Safety"
+  id: pool_pump_safety
   mode: single
   max_exceeded: silent
 
   trigger:
-    # Pump commanded ON but never drew power (relay never closed / breaker off)
-    - platform: state
-      entity_id: switch.shelly1minig3_28372f21c5b8
-      to: "on"
-      for: "00:08:00"
-    # Pump was running, then power collapsed mid-run (breaker trip / relay fail)
-    - platform: numeric_state
-      entity_id: sensor.edgewater_road_power_minute_average_12
-      below: 50
-      for: "00:08:00"
-
-  condition:
-    - condition: state
-      entity_id: switch.shelly1minig3_28372f21c5b8
-      state: "on"
-    - condition: numeric_state
-      entity_id: sensor.edgewater_road_power_minute_average_12
-      below: 50
-    # Corroboration gate: the reading must be LIVE, not a stale frozen cache
-    # from a stalled Emporia cloud poll (see 2026-08-19 note above).
-    - condition: template
-      value_template: >
-        {{ states.sensor.edgewater_road_power_minute_average_12 is not none and
-           (now() - states.sensor.edgewater_road_power_minute_average_12.last_reported).total_seconds() < 180 }}
-
-  action:
-    - service: switch.turn_off
-      target:
-        entity_id: switch.shelly1minig3_28372f21c5b8
-    - service: persistent_notification.create
-      data:
-        notification_id: pool_pump_fault
-        title: "Pool pump fault - forced OFF"
-        message: >
-          Pool pump was commanded ON but is drawing no power
-          ({{ states('sensor.edgewater_road_power_minute_average_12') }} W,
-          normal is ~924 W). Likely a tripped breaker or relay fault. The pump
-          has been forced OFF. Check the breaker / Shelly relay, then re-run by
-          toggling Pool Season off and back on.
-    - service: notify.mobile_app_adams_iphone_18_pro
-      data:
-        title: "Pool pump fault - forced OFF"
-        message: >
-          No power draw while commanded ON (tripped breaker / relay fault).
-          Pump forced OFF - check the breaker, then toggle Pool Season to re-run.
-
-- alias: "Pool Pump Safety - Low draw (dead-head / dry)"
-  id: pool_pump_safety_low_draw
-  mode: single
-  max_exceeded: silent
-
-  trigger:
-    # Running draw sagged into the fault band and stayed there
+    # Running draw sagged into the fault band and stayed there (also covers a
+    # collapse to zero - 0 W is below 700 W too).
     - platform: numeric_state
       entity_id: sensor.edgewater_road_power_minute_average_12
       below: 700
       for: "00:08:00"
-    # Pump came up weak from the start (never reached normal draw)
+    # Pump commanded ON but never reached normal draw (relay never closed,
+    # breaker off, or came up weak from the start).
     - platform: state
       entity_id: switch.shelly1minig3_28372f21c5b8
       to: "on"
@@ -126,10 +84,9 @@
     - condition: state
       entity_id: switch.shelly1minig3_28372f21c5b8
       state: "on"
-    # In the fault band, not dead-zero (dead-zero is handled by the Dead rule)
+    # In the fault band - below normal running draw.
     - condition: numeric_state
       entity_id: sensor.edgewater_road_power_minute_average_12
-      above: 50
       below: 700
     # Corroboration gate: the reading must be LIVE, not a stale frozen cache
     # from a stalled Emporia cloud poll (see 2026-08-19 note above).
@@ -139,31 +96,37 @@
            (now() - states.sensor.edgewater_road_power_minute_average_12.last_reported).total_seconds() < 180 }}
 
   action:
+    # Name the fault signature for the alerts: a dead-zero reading is a relay /
+    # breaker problem, anything else in the band is a flow problem.
+    - variables:
+        watts: "{{ states('sensor.edgewater_road_power_minute_average_12') | float(0) }}"
+        fault: >-
+          {% if watts | float(0) < 50 -%}
+          no power draw while commanded ON (tripped breaker / relay fault)
+          {%- else -%}
+          drawing only {{ watts }} W (normal is ~924 W) - dead-head (closed valve) or lost prime / clogged suction, no water moving
+          {%- endif %}
     - service: switch.turn_off
       target:
         entity_id: switch.shelly1minig3_28372f21c5b8
     - service: persistent_notification.create
       data:
         notification_id: pool_pump_fault
-        title: "Pool pump fault - low flow, forced OFF"
-        message: >
-          Pool pump is drawing only
-          {{ states('sensor.edgewater_road_power_minute_average_12') }} W
-          (normal is ~924 W) - the sign of a dead-head (closed valve) or lost
-          prime / clogged suction with no water moving. The pump has been forced
-          OFF to protect the seal and motor. Check valves, water level, and the
-          pump / skimmer baskets, then re-run by toggling Pool Season.
+        title: "Pool pump fault - forced OFF"
+        message: >-
+          Pool pump {{ fault }}. The pump has been forced OFF to protect the
+          seal and motor. Check the breaker / Shelly relay, valves, water
+          level, and the pump / skimmer baskets, then re-run by toggling Pool
+          Season off and back on.
     - service: notify.mobile_app_adams_iphone_18_pro
       data:
-        title: "Pool pump fault - low flow, forced OFF"
-        message: >
-          Drawing only
-          {{ states('sensor.edgewater_road_power_minute_average_12') }} W
-          (normal ~924) - dead-head or lost prime, no flow. Pump forced OFF.
-          Check valves / water level / baskets, then toggle Pool Season to re-run.
+        title: "Pool pump fault - forced OFF"
+        message: >-
+          {{ fault }}. Pump forced OFF - check breaker / valves / water level /
+          baskets, then toggle Pool Season to re-run.
 
-# Non-destructive companion to the freshness gate above: the safety rules now
-# refuse to act on a stale reading, so a real multi-hour Emporia cloud outage
+# Non-destructive companion to the freshness gate above: the safety rule now
+# refuses to act on a stale reading, so a real multi-hour Emporia cloud outage
 # during a pump run would otherwise go silent (no cutoff, no alert). This
 # fires a one-time heads-up instead, without touching the relay, so a genuine
 # cloud outage is still visible for manual judgment.
