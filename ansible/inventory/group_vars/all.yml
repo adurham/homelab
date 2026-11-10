@@ -397,6 +397,12 @@ lan_dns_dhcp_ntp:
 # One line per device: a second dhcp-host for the same MAC silently drops the
 # reservation. Tag blocks (cam= Nest cameras onto the mitm interceptor, sw2=
 # Switch 2 console, opphone= lab phone) each key a single dhcp-option to the tag.
+#
+# NOTE: live DHCP on lan-dns-01 is KEA (/etc/kea/kea-dhcp4.conf, rendered by
+# roles/lan_dhcp_kea). This list only feeds roles/lan_dns/templates/dnsmasq.conf.j2
+# (a dnsmasq variant that is not running), so keep it matching KEA — it is the
+# file people read first, and a stale entry here has already sent one probe at
+# the wrong address (amd-workstation listed .57 after the host moved to .19).
 lan_dns_dhcp_reservations:
   - "# --- MAC reservations (from the add-on's DHCP client list) ---"
   - "dhcp-host=20:f8:3b:01:a8:ca,192.168.86.2,home-assistant"
@@ -404,7 +410,7 @@ lan_dns_dhcp_reservations:
   - "dhcp-host=D0:CF:13:CB:FC:28,192.168.86.24,shelly-exhaust-fan"
   - "dhcp-host=28:37:2F:21:C5:B8,192.168.86.25,shelly-pool-pump"
   - "dhcp-host=BC:24:11:8B:07:28,192.168.86.34,lb-01"
-  - "dhcp-host=58:47:CA:78:CF:F7,192.168.86.57,amd-workstation"
+  - "dhcp-host=58:47:CA:78:CF:F7,192.168.86.19,amd-workstation"
   - "dhcp-host=B0:81:84:EE:0F:D0,192.168.86.211,shelly-right-garage"
   - "dhcp-host=34:B7:DA:C4:95:74,192.168.86.216,shelly-left-garage"
   - "dhcp-host=28:37:2F:21:C1:DC,192.168.86.222,shelly-circulator-pump"
