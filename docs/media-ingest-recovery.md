@@ -5,8 +5,14 @@ file: staging is a tmpfs so that plaintext media never lands on persistent
 storage, and parked files are therefore written **encrypted to a public key**.
 
 The matching private key is deliberately not on any lab host — it lives in the
-password manager (item: *media-ingest park key (gpg private)*, Hermes vault).
-A compromised box yields ciphertext only.
+password manager: item `pthff33gmjdg72jkf6pmt3i3wq` ("media-ingest park key (gpg
+private)", Hermes vault), stored **base64 in `notesPlain`** because the bridge
+wire protocol is line-based and would truncate an armored key. A compromised box
+yields ciphertext only.
+
+The key is RSA-3072 (sign + encrypt). An ed25519/cv25519 pair was tried first and
+dropped: gpg 2.4 could not decrypt with the exported unprotected cv25519 secret
+subkey ("Bad secret key"), verified with a local round-trip.
 
 ## Where parked files live
 
@@ -24,9 +30,10 @@ Each item is `<stem><ext>.gpg` plus a `<stem>.json` sidecar holding the target
 1. Pull the private key out of the password manager through the bridge:
 
    ```sh
-   op-bridge-rpc item get "<item id>" --format json | jq -r '.fields[] | select(.label=="notesPlain") | .value' > /tmp/park.key
+   op-bridge-rpc item get pthff33gmjdg72jkf6pmt3i3wq --format json \
+     | jq -r '.fields[] | select(.label=="notesPlain") | .value' | base64 -d > /tmp/park.asc
    export GNUPGHOME=$(mktemp -d); chmod 700 "$GNUPGHOME"
-   gpg --batch --quiet --import /tmp/park.key
+   gpg --batch --quiet --import /tmp/park.asc
    ```
 
 2. Copy the parked pair back and decrypt it:
