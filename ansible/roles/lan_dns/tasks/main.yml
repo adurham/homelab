@@ -1,0 +1,208 @@
+---
+# AdGuard Home on a LAN DNS container (lan-dns-01 / lan-dns-02).
+#
+# What this role owns:
+#   * /opt/adguardhome  -- binary, config, data. NOT /tmp: /tmp is cleared on
+#     every container boot, and on 2026-11-10 lan-dns-02 came back from a
+#     restart with no binary at all because the unit's
+#     ConditionFileIsExecutable pointed into /tmp. :53 refused connections and
+#     the redundancy alert was the only thing that noticed.
+#   * the systemd unit (path, Restart=always, enabled)
+#   * dnsmasq, DHCP-only, on the one host flagged dhcp: true
+#
+# What it deliberately does NOT own: the live AdGuardHome.yaml, once it exists.
+# That file carries the admin password hash, filter IDs, and query-log state;
+# regenerating it on every run would log the operator out and reset the filter
+# list. It is deployed only when absent, so a rebuilt container comes up with
+# the same DNS behaviour, and an existing one is never disturbed.
+
+- name: AdGuard Home install root
+  ansible.builtin.file:
+    path: "{{ adguard_home_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Check whether AdGuard Home is installed
+  ansible.builtin.stat:
+    path: "{{ adguard_home_dir }}/AdGuardHome"
+  register: adguard_binary
+
+- name: Download AdGuard Home release
+  ansible.builtin.get_url:
+    url: "https://static.adtidy.org/adguardhome/release/AdGuardHome_linux_amd64.tar.gz"
+    dest: /tmp/adguardhome.tar.gz
+    mode: '0644'
+  when: not adguard_binary.stat.exists
+
+# The release tarball unpacks to AdGuardHome/AdGuardHome (directory + binary).
+# Unarchiving it straight into the install root produced a *directory* named
+# AdGuardHome, so the unit's ConditionFileIsExecutable never matched and the
+# service was silently skipped -- caught by the dig check at the end of this
+# role on a rebuilt lan-dns-02. Extract to a scratch dir and copy the binary.
+- name: Create the AdGuard Home unpack directory
+  ansible.builtin.file:
+    path: /tmp/adguardhome-unpack
+    state: directory
+    mode: '0755'
+  when: not adguard_binary.stat.exists
+
+- name: Unpack AdGuard Home
+  ansible.builtin.unarchive:
+    src: /tmp/adguardhome.tar.gz
+    dest: /tmp/adguardhome-unpack
+    remote_src: true
+  when: not adguard_binary.stat.exists
+
+- name: Find the AdGuard Home binary in the unpacked tree
+  ansible.builtin.shell: find /tmp/adguardhome-unpack -type f -name AdGuardHome | head -1
+  register: adguard_binary_path
+  changed_when: false
+  when: not adguard_binary.stat.exists
+
+- name: Install the AdGuard Home binary
+  ansible.builtin.copy:
+    src: "{{ adguard_binary_path.stdout }}"
+    dest: "{{ adguard_home_dir }}/AdGuardHome"
+    remote_src: true
+    mode: '0755'
+  when: not adguard_binary.stat.exists
+
+- name: Clean up the unpack directory
+  ansible.builtin.file:
+    path: /tmp/adguardhome-unpack
+    state: absent
+  when: not adguard_binary.stat.exists
+
+# force: false -- see the header. On a fresh container this writes a working
+# resolver config (Quad9 DoH upstream + the AdGuard DNS filter); on a live one
+# it does nothing at all.
+- name: Seed AdGuard Home configuration (first install only)
+  ansible.builtin.template:
+    src: AdGuardHome.yaml.j2
+    dest: "{{ adguard_home_dir }}/AdGuardHome.yaml"
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+  notify: Restart AdGuardHome
+
+# systemd-resolved listens on 127.0.0.53:53 and 127.0.0.54:53, which collides
+# with AdGuard's 0.0.0.0:53 ("bind: address already in use"). The live
+# containers have it off; a freshly built one does not, so the role turns it off
+# and pins /etc/resolv.conf to a bootstrap resolver until AdGuard owns :53.
+- name: Stop and disable systemd-resolved
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Point resolv.conf at the bootstrap resolvers
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: "{% for ns in lan_dns_bootstrap_nameservers %}nameserver {{ ns }}\n{% endfor %}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Deploy the AdGuardHome unit
+  ansible.builtin.template:
+    src: AdGuardHome.service.j2
+    dest: /etc/systemd/system/AdGuardHome.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: adguard_unit
+  notify: Restart AdGuardHome
+
+- name: Reload systemd when the unit changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: adguard_unit.changed
+
+- name: Enable and start AdGuardHome
+  ansible.builtin.systemd:
+    name: AdGuardHome
+    enabled: true
+    state: started
+
+- name: Wait for :53 to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 53
+    state: started
+    timeout: 30
+
+- name: Verify the resolver answers on its own address
+  ansible.builtin.command: dig +short +time=2 +tries=2 example.com @127.0.0.1
+  register: adguard_dig
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 5
+  until: adguard_dig.stdout | default('') | length > 0
+
+- name: Point the container's own resolver at AdGuard
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: "nameserver 127.0.0.1\n"
+    owner: root
+    group: root
+    mode: '0644'
+
+# DHCP is NOT this role's job any more (2026-11-10).
+#
+# The owner rejected independent DHCP lease databases: the two containers must
+# serve DHCP with SHARED leases, which means Kea hot-standby (libdhcp_ha,
+# dhcp-socket-type raw), not dnsmasq. That path is owned by the session that had
+# it running at 17:26 and lives outside this role. This role used to deploy
+# dnsmasq and purge kea-dhcp4-server; that fight is exactly what left the house
+# with no DHCP server at all, so the block below is off by default and only runs
+# if someone explicitly sets lan_dns_manage_dhcp: true.
+- name: DHCP server (legacy dnsmasq path — disabled by default)
+  when:
+    - ct_dhcp | default(false) | bool
+    - lan_dns_manage_dhcp | default(false) | bool
+  block:
+    # Two DHCP servers on one broadcast domain is a race, not redundancy: on
+    # 2026-11-10 kea-dhcp4-server (also enabled) grabbed :67 first, dnsmasq
+    # failed to bind, and the container ended up serving no DHCP at all once
+    # kea was disabled. dnsmasq is the one with the house's reservations.
+    - name: Remove the competing Kea DHCP server
+      ansible.builtin.apt:
+        name: kea-dhcp4-server
+        state: absent
+        purge: true
+
+    - name: Ensure dnsmasq is installed
+      ansible.builtin.apt:
+        name: dnsmasq
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Deploy the DHCP-only dnsmasq configuration
+      ansible.builtin.template:
+        src: dnsmasq.conf.j2
+        dest: /etc/dnsmasq.conf
+        owner: root
+        group: root
+        mode: '0644'
+      register: dnsmasq_conf
+      notify: Restart dnsmasq
+
+    - name: Enable and start dnsmasq
+      ansible.builtin.systemd:
+        name: dnsmasq
+        enabled: true
+        state: started
+
+    - name: Confirm dnsmasq is actually listening on :67
+      ansible.builtin.command: ss -lunp
+      register: dnsmasq_sockets
+      changed_when: false
+      failed_when: "'dnsmasq' not in dnsmasq_sockets.stdout"
+      retries: 3
+      delay: 3

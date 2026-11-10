@@ -495,6 +495,29 @@ all:
         ansible_user: root
         ansible_ssh_common_args: ""
 
+    # The house's DNS pair (deploy_lan_dns.yml). Both are AdGuard Home on the
+    # LAN; lan-dns-01 additionally runs the DHCP server. Reached directly --
+    # they sit on 192.168.86.0/24, not the private SDN -- and by key, which the
+    # provisioning role installs. HA-managed with pvesr to the opposite node.
+    lan_dns:
+      hosts:
+        lan-dns-01:
+          ansible_host: 192.168.86.4
+          vmid: 130
+          target_node: pve01
+          ct_dhcp: true
+        lan-dns-02:
+          ansible_host: 192.168.86.5
+          vmid: 131
+          target_node: pve02
+          ct_dhcp: false
+      vars:
+        ansible_user: root
+        ansible_ssh_private_key_file: "~/.ssh/id_ansible"
+        # accept-new, not "": these containers are rebuilt from scratch by
+        # deploy_lan_dns.yml and a fresh container has a fresh host key.
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+
     # Tanium Cluster
     tanium_cluster:
       children:

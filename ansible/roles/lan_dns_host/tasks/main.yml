@@ -1,0 +1,134 @@
+---
+# Provision ONE LAN DNS container ({{ ct.hostname }}, CT {{ ct.vmid }}).
+#
+# Called in a loop from deploy_lan_dns.yml with `ct` = one entry of
+# lan_dns_hosts. Everything here is idempotent: an existing container is left
+# alone apart from config that must converge (memory, onboot, the ansible key,
+# HA + replication membership).
+#
+# These containers are the house's resolvers -- DHCP option 6 hands both
+# addresses to every client -- so they are also HA-managed with pvesr
+# replication. The 2026-11-09 outage was DNS+DHCP living on one appliance; this
+# pair is the answer to that, and it is only an answer if it is reproducible.
+
+- name: Resolve owning node for CT {{ ct.vmid }}
+  ansible.builtin.include_role:
+    name: resolve_ct_node
+  vars:
+    ct_vmid: "{{ ct.vmid }}"
+
+- name: Create {{ ct.hostname }} (CT {{ ct.vmid }})
+  ansible.builtin.command: >-
+    pct create {{ ct.vmid }} /var/lib/vz/template/cache/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+    --hostname {{ ct.hostname }}
+    --cores 1 --memory 1024 --swap 512
+    --rootfs nvme-data:2
+    --net0 name=eth0,bridge=vmbr0,ip={{ ct.ip }}/24,gw={{ lan_gateway }}
+    --nameserver "{{ lan_dns_bootstrap_nameservers | join(' ') }}"
+    --unprivileged 1
+    --features nesting=1
+    --onboot 1
+    --start 1
+  when: not ct_exists
+  register: lan_dns_ct_create
+  changed_when: lan_dns_ct_create.rc == 0
+
+- name: Ensure {{ ct.hostname }} is running
+  ansible.builtin.command: pct start {{ ct.vmid }}
+  delegate_to: "{{ ct_node }}"
+  register: lan_dns_ct_start
+  changed_when: lan_dns_ct_start.rc == 0
+  failed_when:
+    - lan_dns_ct_start.rc != 0
+    - "'already running' not in (lan_dns_ct_start.stderr + lan_dns_ct_start.stdout)"
+
+- name: Ensure {{ ct.hostname }} starts on boot
+  ansible.builtin.command: pct set {{ ct.vmid }} --onboot 1
+  delegate_to: "{{ ct_node }}"
+  changed_when: false
+
+# 512MB was the original size and it is a cgroup ceiling, not a reservation:
+# apt-daily-upgrade batches have OOM-killed 512MB containers on this cluster
+# before (dns-01, lb-01, tailscale-gw, proxy-01 on 2026-09-11). Raising it
+# costs nothing at idle and only matters during a dpkg burst.
+- name: Read {{ ct.hostname }} memory ceiling
+  ansible.builtin.command: pct config {{ ct.vmid }}
+  delegate_to: "{{ ct_node }}"
+  register: lan_dns_ct_cfg
+  changed_when: false
+
+- name: Raise {{ ct.hostname }} memory ceiling to 1GB
+  ansible.builtin.command: pct set {{ ct.vmid }} --memory 1024
+  delegate_to: "{{ ct_node }}"
+  when: "'memory: 1024' not in lan_dns_ct_cfg.stdout"
+
+# The containers are created with a root password only; ansible reaches them by
+# key. Without this the config play cannot run and the container is
+# unmanageable, which is how both of these began life.
+- name: Wait for {{ ct.hostname }} to answer on the network
+  ansible.builtin.shell: |
+    set -o pipefail
+    for i in $(seq 1 30); do
+      if ping -c1 -W1 {{ ct.ip }} >/dev/null 2>&1; then exit 0; fi
+      sleep 2
+    done
+    exit 1
+  args:
+    executable: /bin/bash
+  changed_when: false
+  retries: 3
+  delay: 5
+
+- name: Stage the ansible public key on {{ ct_node }}
+  ansible.builtin.copy:
+    content: "{{ lan_dns_ansible_pubkey }}\n"
+    dest: "/tmp/lan_dns_key_{{ ct.vmid }}.pub"
+    owner: root
+    group: root
+    mode: '0644'
+  delegate_to: "{{ ct_node }}"
+  changed_when: false
+
+- name: Authorise the ansible key on {{ ct.hostname }}
+  ansible.builtin.shell: |
+    set -o pipefail
+    pct push {{ ct.vmid }} /tmp/lan_dns_key_{{ ct.vmid }}.pub /tmp/lan_dns_key.pub
+    pct exec {{ ct.vmid }} -- bash -c 'install -d -m 0700 /root/.ssh; touch /root/.ssh/authorized_keys; chmod 0600 /root/.ssh/authorized_keys; cat /tmp/lan_dns_key.pub >> /root/.ssh/authorized_keys; sort -u -o /root/.ssh/authorized_keys /root/.ssh/authorized_keys; rm -f /tmp/lan_dns_key.pub'
+    rm -f /tmp/lan_dns_key_{{ ct.vmid }}.pub
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ ct_node }}"
+  changed_when: false
+
+# HA + replication. A guest with HA set but no pvesr job is the trap that broke
+# ntp-01 on 2026-10-30: the CRM can relocate it to a node that has no disk.
+- name: Ensure {{ ct.hostname }} is an HA resource
+  ansible.builtin.shell: |
+    set -o pipefail
+    if pvesh get /cluster/ha/resources --output-format json |
+         grep -q '"sid": *"ct:{{ ct.vmid }}"'; then
+      echo present
+    else
+      pvesh create /cluster/ha/resources --sid ct:{{ ct.vmid }} --state started
+      echo created
+    fi
+  args:
+    executable: /bin/bash
+  register: lan_dns_ha
+  changed_when: "'created' in lan_dns_ha.stdout"
+
+- name: Ensure a replication job exists for {{ ct.hostname }}
+  ansible.builtin.shell: |
+    set -o pipefail
+    if pvesh get /cluster/replication --output-format json |
+         grep -q '"guest": *{{ ct.vmid }}'; then
+      echo present
+    else
+      pvesr create-local-job {{ ct.vmid }}-0 {{ ct.replica_node }} --schedule '*/15'
+      pvesr run --id {{ ct.vmid }}-0 || true
+      echo created
+    fi
+  args:
+    executable: /bin/bash
+  register: lan_dns_repl
+  changed_when: "'created' in lan_dns_repl.stdout"

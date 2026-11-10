@@ -1,0 +1,26 @@
+---
+- name: Provision the LAN DNS containers (CT 130 / CT 131)
+  hosts: pve01:pve02
+  gather_facts: true
+  vars:
+    lan_dns_template_file: ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+  tasks:
+    - name: Ensure the Ubuntu 24.04 template is cached on this node
+      ansible.builtin.command: pveam download local {{ lan_dns_template_file }}
+      args:
+        creates: /var/lib/vz/template/cache/{{ lan_dns_template_file }}
+
+    - name: Resolve / create each LAN DNS container
+      ansible.builtin.include_role:
+        name: lan_dns_host
+      loop: "{{ lan_dns_hosts }}"
+      loop_control:
+        loop_var: ct
+        label: "{{ ct.hostname }} ({{ ct.vmid }})"
+      when: ct.node == inventory_hostname
+
+- name: Configure the LAN DNS services
+  hosts: lan_dns
+  gather_facts: true
+  roles:
+    - lan_dns

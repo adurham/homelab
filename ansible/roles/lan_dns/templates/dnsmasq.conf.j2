@@ -1,0 +1,29 @@
+# DHCP for the house. Written by roles/lan_dns (lan-dns-01 only).
+#
+# DNS is AdGuard on this same container -- dnsmasq is DHCP-only (port=0), which
+# is why nothing here answers on :53.
+#
+# History worth keeping: this config came off the HA Green's Dnsmasq-DHCP
+# add-on on 2026-11-10 when DNS and DHCP were split apart after the 89-minute
+# LAN outage. Two dhcp-host lines for the same MAC silently drop the
+# reservation, so every entry below is deliberately one line per device, and
+# the tag blocks (cameras / switch2 / lab phone) each carry their option on a
+# single dhcp-option line keyed to that tag.
+port=0
+interface={{ lan_dns_dhcp_interface }}
+bind-interfaces
+except-interface=lo
+domain={{ lan_dns_dhcp_domain }}
+dhcp-range={{ lan_dns_dhcp_range }},{{ lan_dns_dhcp_netmask }},{{ lan_dns_dhcp_lease }}
+dhcp-option=option:router,{{ lan_gateway }}
+dhcp-option=option:dns-server,{{ lan_dns_resolvers | join(',') }}
+dhcp-option=option:domain-name,{{ lan_dns_dhcp_domain }}
+dhcp-option=option:ntp-server,{{ lan_dns_dhcp_ntp | join(',') }}
+dhcp-authoritative
+log-dhcp
+dhcp-leasefile=/var/lib/misc/dnsmasq.leases
+
+# --- MAC reservations ---
+{% for line in lan_dns_dhcp_reservations %}
+{{ line }}
+{% endfor %}

@@ -1,0 +1,11 @@
+---
+- name: Restart AdGuardHome
+  ansible.builtin.systemd:
+    name: AdGuardHome
+    state: restarted
+    daemon_reload: true
+
+- name: Restart dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: restarted

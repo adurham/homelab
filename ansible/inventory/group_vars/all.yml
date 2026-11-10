@@ -305,3 +305,138 @@ vault_grafana_renderer_token: !vault |
           63333465366136623234336233636464396537646666393134343764323061646564616366363464
           31333863313134613434336637336237313133646439316231653132623330313962306363383935
           353633306430336434363330333366346333
+
+# --- LAN DNS pair (CT 130 / CT 131), provisioned by deploy_lan_dns.yml ---------
+# The house's resolvers: DHCP option 6 hands both addresses to every client, so
+# these two are also HA-managed with pvesr replication. The 2026-11-09 outage
+# was DNS+DHCP living on one appliance with no second copy.
+lan_gateway: "192.168.86.1"
+
+lan_dns_hosts:
+  - vmid: 130
+    hostname: lan-dns-01
+    ip: 192.168.86.4
+    node: pve01
+    replica_node: pve02
+    dhcp: true
+  - vmid: 131
+    hostname: lan-dns-02
+    ip: 192.168.86.5
+    node: pve02
+    replica_node: pve01
+    dhcp: false
+
+# Nameservers a freshly built container may use before its own AdGuard exists.
+# Only used during the bootstrap window; AdGuard takes :53 afterwards.
+lan_dns_bootstrap_nameservers:
+  - 1.1.1.1
+  - 9.9.9.9
+
+# Public half of ~/.ssh/id_ansible, so a newly created container is reachable by
+# ansible without a password step.
+lan_dns_ansible_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPORqLe0CJ4SZiAWXtJIQBx+AG3GdWN8gYcMx3WOBQrP ansible@amd-workstation (dedicated, 1password)"
+
+# --- AdGuard Home -------------------------------------------------------------
+# /opt, never /tmp: Proxmox clears /tmp on container boot and a unit pointing
+# there left lan-dns-02 with no resolver at all after its 2026-11-10 restart.
+adguard_home_dir: /opt/adguardhome
+# AdGuard Home config schema. Must be pinned in the template: without it the
+# binary parses with schema 31 (scalar upstream_dns) and rejects the lists.
+adguard_schema_version: 34
+adguard_admin_address: 127.0.0.1:3001
+# Quad9 DoH, which is what the live pair actually resolves through.
+adguard_upstreams:
+  - https://dns10.quad9.net/dns-query
+adguard_bootstrap_dns:
+  - 9.9.9.10
+  - 149.112.112.10
+# bcrypt hash of the AdGuard admin password (carried over from the live pair;
+# the two resolvers share it, as lan-dns-02 was cloned from lan-dns-01).
+# Without a user in the config AdGuard boots into its first-run wizard on
+# :3000 and refuses to serve :53 -- a rebuilt container would come up dead.
+adguard_admin_password_hash: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          63626630313331653162313964353466613932376134663333613935366466316639613039316661
+          6239313263643035353163623834333665656138343064310a363161386637346437613465636165
+          35653935626637333865646434373262376363346138616663646562346663393533326336303135
+          3362393361613665380a353737616564626430613139303034323636303333613137393062343939
+          64363261333234386166303131643463623134333462356439316565326338366438316433386435
+          35333733396461666461616331313134613065343636643533333361633832393535363336333063
+          613230613137623930303666396635323931
+adguard_filters:
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
+    name: AdGuard DNS filter
+    id: 1
+  - enabled: false
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
+    name: AdAway Default Blocklist
+    id: 2
+
+# --- DHCP (lan-dns-01 only) ---------------------------------------------------
+# dnsmasq is DHCP-only here (port=0 in the template); DNS is AdGuard.
+# kea-dhcp4-server is deliberately removed by the role: two enabled DHCP servers
+# on one broadcast domain raced for :67 on 2026-11-10 and the house ended up
+# with neither of them running.
+lan_dns_dhcp_interface: eth0
+lan_dns_dhcp_domain: lan
+lan_dns_dhcp_range: "192.168.86.20,192.168.86.99"
+lan_dns_dhcp_netmask: 255.255.255.0
+lan_dns_dhcp_lease: 12h
+lan_dns_dhcp_ntp:
+  - 216.239.35.0
+  - 216.239.35.4
+# One line per device: a second dhcp-host for the same MAC silently drops the
+# reservation. Tag blocks (cam= Nest cameras onto the mitm interceptor, sw2=
+# Switch 2 console, opphone= lab phone) each key a single dhcp-option to the tag.
+lan_dns_dhcp_reservations:
+  - "# --- MAC reservations (from the add-on's DHCP client list) ---"
+  - "dhcp-host=20:f8:3b:01:a8:ca,192.168.86.2,home-assistant"
+  - "dhcp-host=34:B7:DA:C5:5E:A4,192.168.86.21,shelly-middle-garage"
+  - "dhcp-host=D0:CF:13:CB:FC:28,192.168.86.24,shelly-exhaust-fan"
+  - "dhcp-host=28:37:2F:21:C5:B8,192.168.86.25,shelly-pool-pump"
+  - "dhcp-host=BC:24:11:8B:07:28,192.168.86.34,lb-01"
+  - "dhcp-host=58:47:CA:78:CF:F7,192.168.86.57,amd-workstation"
+  - "dhcp-host=B0:81:84:EE:0F:D0,192.168.86.211,shelly-right-garage"
+  - "dhcp-host=34:B7:DA:C4:95:74,192.168.86.216,shelly-left-garage"
+  - "dhcp-host=28:37:2F:21:C1:DC,192.168.86.222,shelly-circulator-pump"
+  - "dhcp-host=94:83:c4:d7:ea:9e,192.168.86.104,gl-rm10-kvm"
+  - "dhcp-host=ec:b5:fa:9c:41:a0,192.168.86.197,hue-living-room-bridge"
+  - "dhcp-host=ec:b5:fa:ae:57:db,192.168.86.53,hue-game-room-bridge"
+  - "dhcp-host=c4:29:96:e0:fd:56,192.168.86.250,hue-living-room-sync-box"
+  - "dhcp-host=c4:29:96:09:be:a8,192.168.86.190,hue-game-room-sync-box"
+  - "dhcp-host=28:94:01:77:1D:80,192.168.86.16,gs108ev4"
+  - "dhcp-host=A2:0F:D8:0F:9A:EC,192.168.86.179,living-room-tv"
+  - "dhcp-host=E8:F6:0A:7E:15:28,192.168.86.100,shelly-workstation-plug"
+  - "dhcp-host=AC:EB:E6:F2:92:FC,192.168.86.160,shelly-pve-plug-a"
+  - "dhcp-host=AC:EB:E6:F6:48:38,192.168.86.187,shelly-pve-plug-b"
+  - "dhcp-host=AC:EB:E6:F7:8D:C4,192.168.86.234,shelly-pve-plug-c"
+  - "dhcp-host=6C:5A:B0:37:9A:2F,192.168.86.14,tl-sg105e"
+  - "dhcp-host=0C:EF:15:C3:7D:62,192.168.86.15,es208g"
+  - "dhcp-host=9C:37:CB:B9:C7:6B,192.168.86.32,ps5"
+  - "# --- lab overrides (camera/PS5/switch2/phone tags), verbatim from the add-on ---"
+  - "# nest-mitm: route every Nest camera's default gateway at the test interceptor."
+  - "# One dhcp-host line per MAC on purpose: a second line for the same MAC silently"
+  - "# drops the reservation (verified). Every line carries set:cam, so the single"
+  - "# dhcp-option below applies to all of them. 1h leases: a camera flips onto the"
+  - "# interceptor within ~30 minutes of a change, and back just as fast on rollback."
+  - "dhcp-host=b8:7b:d4:da:5e:17,nest-cam-indoor.lan,192.168.86.192,1h,set:cam"
+  - "dhcp-host=b8:7b:d4:e8:b2:bf,cam-79.lan,192.168.86.79,1h,set:cam"
+  - "dhcp-host=cc:a7:c1:60:0e:df,cam-164.lan,192.168.86.164,1h,set:cam"
+  - "dhcp-host=3c:31:74:bf:75:b2,cam-191.lan,192.168.86.191,1h,set:cam"
+  - "dhcp-host=3c:31:74:55:a4:2c,cam-210.lan,192.168.86.210,1h,set:cam"
+  - "dhcp-host=cc:a7:c1:68:f0:03,cam-233.lan,192.168.86.233,1h,set:cam"
+  - "dhcp-option=cam,3,192.168.86.56"
+  - "# switch2 (4c:30:6a:de:9f:01 at .28): tag -> router override. Reservation and"
+  - "# dhcp-option must name the same MAC; this is the console, not the Switch 1."
+  - "dhcp-host=4c:30:6a:de:9f:01,switch2.lan,192.168.86.28,1h,set:sw2"
+  - "dhcp-option=sw2,3,192.168.86.56"
+  - "dhcp-option=sw2,6,192.168.86.56"
+  - "# lab phone (OnePlus Open, .126): default gateway -> .41 so its HTTPS lands on the"
+  - "# source-scoped full-capture listener there (port 8445). The reservation lives HERE"
+  - "# rather than in dhcp_client_settings because a second dhcp-host line for the same"
+  - "# MAC silently drops the reservation (see the note at the top of this block)."
+  - "# Revert = delete these three lines, re-add the phone in the DHCP client list."
+  - "dhcp-host=a2:cf:35:30:52:ab,oneplus-open.lan,192.168.86.126,24h,set:opphone"
+  - "dhcp-option=opphone,3,192.168.86.41"
+  - "# end lab phone capture block"
