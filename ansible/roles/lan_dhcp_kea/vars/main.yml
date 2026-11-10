@@ -1,0 +1,120 @@
+---
+# House DHCP reservations (shared by both Kea peers; the HA hook syncs leases,
+# not config - these must match on primary and standby).
+lan_dhcp_reservations:
+  - mac: 20:f8:3b:01:a8:ca
+    ip: 192.168.86.2
+    hostname: home-assistant
+  - mac: 34:B7:DA:C5:5E:A4
+    ip: 192.168.86.21
+    hostname: shelly-middle-garage
+  - mac: D0:CF:13:CB:FC:28
+    ip: 192.168.86.24
+    hostname: shelly-exhaust-fan
+  - mac: 28:37:2F:21:C5:B8
+    ip: 192.168.86.25
+    hostname: shelly-pool-pump
+  - mac: BC:24:11:8B:07:28
+    ip: 192.168.86.34
+    hostname: lb-01
+  - mac: 58:47:CA:78:CF:F7
+    ip: 192.168.86.57
+    hostname: amd-workstation
+  - mac: B0:81:84:EE:0F:D0
+    ip: 192.168.86.211
+    hostname: shelly-right-garage
+  - mac: 34:B7:DA:C4:95:74
+    ip: 192.168.86.216
+    hostname: shelly-left-garage
+  - mac: 28:37:2F:21:C1:DC
+    ip: 192.168.86.222
+    hostname: shelly-circulator-pump
+  - mac: 94:83:c4:d7:ea:9e
+    ip: 192.168.86.104
+    hostname: gl-rm10-kvm
+  - mac: ec:b5:fa:9c:41:a0
+    ip: 192.168.86.197
+    hostname: hue-living-room-bridge
+  - mac: ec:b5:fa:ae:57:db
+    ip: 192.168.86.53
+    hostname: hue-game-room-bridge
+  - mac: c4:29:96:e0:fd:56
+    ip: 192.168.86.250
+    hostname: hue-living-room-sync-box
+  - mac: c4:29:96:09:be:a8
+    ip: 192.168.86.190
+    hostname: hue-game-room-sync-box
+  - mac: 28:94:01:77:1D:80
+    ip: 192.168.86.16
+    hostname: gs108ev4
+  - mac: A2:0F:D8:0F:9A:EC
+    ip: 192.168.86.179
+    hostname: living-room-tv
+  - mac: E8:F6:0A:7E:15:28
+    ip: 192.168.86.100
+    hostname: shelly-workstation-plug
+  - mac: AC:EB:E6:F2:92:FC
+    ip: 192.168.86.160
+    hostname: shelly-pve-plug-a
+  - mac: AC:EB:E6:F6:48:38
+    ip: 192.168.86.187
+    hostname: shelly-pve-plug-b
+  - mac: AC:EB:E6:F7:8D:C4
+    ip: 192.168.86.234
+    hostname: shelly-pve-plug-c
+  - mac: 6C:5A:B0:37:9A:2F
+    ip: 192.168.86.14
+    hostname: tl-sg105e
+  - mac: 0C:EF:15:C3:7D:62
+    ip: 192.168.86.15
+    hostname: es208g
+  - mac: 9C:37:CB:B9:C7:6B
+    ip: 192.168.86.32
+    hostname: ps5
+  - mac: b8:7b:d4:da:5e:17
+    ip: 192.168.86.192
+    hostname: nest-cam-indoor
+    options:
+      router: 192.168.86.56
+  - mac: b8:7b:d4:e8:b2:bf
+    ip: 192.168.86.79
+    hostname: cam-79
+    options:
+      router: 192.168.86.56
+  - mac: cc:a7:c1:60:0e:df
+    ip: 192.168.86.164
+    hostname: cam-164
+    options:
+      router: 192.168.86.56
+  - mac: 3c:31:74:bf:75:b2
+    ip: 192.168.86.191
+    hostname: cam-191
+    options:
+      router: 192.168.86.56
+  - mac: 3c:31:74:55:a4:2c
+    ip: 192.168.86.210
+    hostname: cam-210
+    options:
+      router: 192.168.86.56
+  - mac: cc:a7:c1:68:f0:03
+    ip: 192.168.86.233
+    hostname: cam-233
+    options:
+      router: 192.168.86.56
+  - mac: 4c:30:6a:de:9f:01
+    ip: 192.168.86.28
+    hostname: switch2
+    options:
+      router: 192.168.86.56
+      dns: 192.168.86.56
+  - mac: a2:cf:35:30:52:ab
+    ip: 192.168.86.126
+    hostname: oneplus-open
+    options:
+      router: 192.168.86.41
+  - mac: 5c:96:66:3a:f0:18
+    ip: 192.168.86.103
+    hostname: ps5wired
+    options:
+      router: 192.168.86.56
+      dns: 192.168.86.56

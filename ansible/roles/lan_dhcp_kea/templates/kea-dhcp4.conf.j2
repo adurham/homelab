@@ -1,0 +1,49 @@
+{% set reservations = [] %}
+{% for r in lan_dhcp_reservations %}
+{% set entry = {"hw-address": r.mac, "ip-address": r.ip} %}
+{% if r.hostname is defined %}{% set _ = entry.update({"hostname": r.hostname}) %}{% endif %}
+{% if r.options is defined %}
+{% set od = [] %}
+{% if r.options.router is defined %}{% set _ = od.append({"name": "routers", "data": r.options.router}) %}{% endif %}
+{% if r.options.dns is defined %}{% set _ = od.append({"name": "domain-name-servers", "data": r.options.dns}) %}{% endif %}
+{% set _ = entry.update({"option-data": od}) %}
+{% endif %}
+{% set _ = reservations.append(entry) %}
+{% endfor %}
+{% set ha = {
+  "this-server-name": kea_role,
+  "mode": "hot-standby",
+  "heartbeat-delay": kea_ha_heartbeat_ms,
+  "max-response-delay": kea_ha_max_response_ms,
+  "max-ack-delay": 5000,
+  "max-unacked-clients": kea_ha_max_unacked_clients,
+  "peers": kea_peers | map('combine', {"auto-failover": true}) | list
+} %}
+{% set subnet = {
+  "subnet": kea_subnet,
+  "id": 1,
+  "pools": [{"pool": kea_pool}],
+  "option-data": [
+    {"name": "routers", "data": kea_routers},
+    {"name": "domain-name-servers", "data": kea_dns_servers},
+    {"name": "domain-name", "data": kea_domain},
+    {"name": "ntp-servers", "data": kea_ntp_servers}
+  ],
+  "reservations": reservations
+} %}
+{% set cfg = {
+  "Dhcp4": {
+    "interfaces-config": {"interfaces": ["eth0"], "dhcp-socket-type": "raw"},
+    "lease-database": {"type": "memfile", "persist": true, "name": kea_lease_file, "lfc-interval": 1800},
+    "renew-timer": kea_renew_timer,
+    "rebind-timer": kea_rebind_timer,
+    "valid-lifetime": kea_lease_lifetime,
+    "authoritative": true,
+    "hooks-libraries": [
+      {"library": kea_hook_dir + "/libdhcp_lease_cmds.so"},
+      {"library": kea_hook_dir + "/libdhcp_ha.so", "parameters": {"high-availability": [ha]}}
+    ],
+    "subnet4": [subnet]
+  }
+} %}
+{{ cfg | to_nice_json }}

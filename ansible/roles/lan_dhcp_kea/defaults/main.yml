@@ -1,0 +1,33 @@
+---
+# Kea DHCPv4 hot-standby pair for the LAN (CT 130 primary / CT 131 standby).
+# Config of record for the shared-lease requirement: the HA hook replicates
+# leases, so either peer can answer without handing out a conflicting address.
+
+kea_hook_dir: /usr/lib/x86_64-linux-gnu/kea/hooks
+kea_conf: /etc/kea/kea-dhcp4.conf
+kea_lease_file: /var/lib/kea/kea-leases4.csv
+
+kea_role: "{{ 'primary' if inventory_hostname == 'lan-dns-01' else 'standby' }}"
+
+kea_subnet: 192.168.86.0/24
+kea_pool: 192.168.86.20 - 192.168.86.99
+kea_routers: 192.168.86.1
+kea_dns_servers: 192.168.86.4, 192.168.86.5
+kea_ntp_servers: 216.239.35.0, 216.239.35.4
+kea_domain: lan
+
+kea_lease_lifetime: 3600
+kea_renew_timer: 900
+kea_rebind_timer: 1800
+
+kea_ha_heartbeat_ms: 5000
+kea_ha_max_response_ms: 30000
+kea_ha_max_unacked_clients: 3
+
+kea_peers:
+  - name: primary
+    url: http://192.168.86.4:8000/
+    role: primary
+  - name: standby
+    url: http://192.168.86.5:8000/
+    role: standby

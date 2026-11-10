@@ -1,0 +1,70 @@
+---
+# Kea DHCPv4 hot-standby pair — the shared-lease DHCP for the LAN.
+# Owns :67 on both containers and the HA channel on :8000. The lan_dns role
+# owns AdGuard and must never touch DHCP (its legacy dnsmasq block is off).
+
+- name: Ensure Kea is installed
+  ansible.builtin.apt:
+    name: kea-dhcp4-server
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Remove dnsmasq so it cannot race Kea for :67
+  ansible.builtin.apt:
+    name: dnsmasq
+    state: absent
+    purge: true
+
+- name: Make sure no dnsmasq unit is left running
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Deploy the Kea configuration
+  ansible.builtin.template:
+    src: kea-dhcp4.conf.j2
+    dest: "{{ kea_conf }}"
+    owner: root
+    group: root
+    mode: '0644'
+  register: kea_conf_file
+
+- name: Validate the Kea configuration
+  ansible.builtin.command: kea-dhcp4 -t {{ kea_conf }}
+  changed_when: false
+
+- name: Enable and start Kea
+  ansible.builtin.systemd:
+    name: kea-dhcp4-server
+    enabled: true
+    state: "{{ 'restarted' if kea_conf_file.changed else 'started' }}"
+    daemon_reload: true
+
+- name: Wait for the DHCP socket
+  ansible.builtin.shell: ss -lunp | grep -q ':67 '
+  register: kea_dhcp_socket
+  until: kea_dhcp_socket.rc == 0
+  retries: 10
+  delay: 2
+  changed_when: false
+
+- name: Wait for the HA channel
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 8000
+    state: started
+    timeout: 30
+  delegate_to: localhost
+
+- name: Show the HA state
+  ansible.builtin.shell: journalctl -u kea-dhcp4-server -n 80 --no-pager -o cat | grep HA_STATE_TRANSITION | tail -2
+  register: kea_ha_state
+  changed_when: false
+  failed_when: false
+
+- name: HA state
+  ansible.builtin.debug:
+    msg: "{{ kea_ha_state.stdout_lines | default([]) }}"

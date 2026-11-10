@@ -1,0 +1,11 @@
+---
+# Kea DHCPv4 hot-standby pair for the LAN (shared lease database via the HA
+# hook). Run after deploy_lan_dns.yml has converged AdGuard on the same pair.
+#
+#   ansible-playbook deploy_lan_dhcp.yml \
+#     -e '{"ansible_ssh_private_key_file":"/home/adam.durham/.ssh/id_ansible"}'
+- name: Configure the shared-lease DHCP pair
+  hosts: lan_dns
+  gather_facts: true
+  roles:
+    - lan_dhcp_kea
