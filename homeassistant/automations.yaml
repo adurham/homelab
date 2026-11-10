@@ -32,57 +32,6 @@
       entity_id: input_boolean.tati_phone_tracking_stale
     action: input_boolean.turn_off
   mode: single
-- id: gr_syncbox_watchdog
-  alias: Game Room Sync Box Watchdog
-  description: Logs blip start/end when the Game Room Hue Sync Box's power entity
-    goes unavailable and recovers
-  triggers:
-  - platform: state
-    entity_id: switch.game_room_sync_box_power
-    to: unavailable
-    id: drop
-  - platform: state
-    entity_id: switch.game_room_sync_box_power
-    from: unavailable
-    id: recover
-  conditions: []
-  actions:
-  - choose:
-    - conditions:
-      - condition: trigger
-        id: drop
-      sequence:
-      - data:
-          title: Game Room Sync Box DROPPED
-          message: 'Went unavailable at {{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}
-            (HDMI input was: {{ states(''select.game_room_sync_box_hdmi_input'') }})'
-          notification_id: gr_syncbox_drop_{{ now().timestamp() | int }}
-        action: persistent_notification.create
-      - data:
-          name: Game Room Sync Box
-          message: went unavailable (blip start)
-          entity_id: switch.game_room_sync_box_power
-        action: logbook.log
-    - conditions:
-      - condition: trigger
-        id: recover
-      sequence:
-      - variables:
-          down_seconds: '{{ (now() - trigger.from_state.last_changed).total_seconds()
-            | round(1) }}'
-      - data:
-          title: Game Room Sync Box RECOVERED
-          message: Back online at {{ now().strftime('%Y-%m-%d %H:%M:%S') }} after
-            {{ down_seconds }}s
-          notification_id: gr_syncbox_recover_{{ now().timestamp() | int }}
-        action: persistent_notification.create
-      - data:
-          name: Game Room Sync Box
-          message: recovered after {{ down_seconds }}s (blip end)
-          entity_id: switch.game_room_sync_box_power
-        action: logbook.log
-  mode: queued
-  max: 10
 - id: garage_lights_auto_on
   alias: Garage Lights - Auto On (door or motion, 15 min)
   description: Door contact or motion turns the garage lights on with the 15-minute
