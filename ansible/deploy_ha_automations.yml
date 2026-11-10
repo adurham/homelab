@@ -23,13 +23,14 @@
     ha_skip_backup: false
     ssh_opts: "-o StrictHostKeyChecking=accept-new"
     # How many pre-deploy backups to retain (most recent N by date). These
-    # backups have NO built-in retention (unlike HA's own daily automatic
-    # backups, which cap at 3 copies via HA's own backup manager) and
-    # accumulate ~330-400MB per deploy run — 15 of them ate 5.4GB of the
-    # 28GB disk and contributed to a near-outage (2026-07-26, freed via
-    # `ha backups remove`). Pruned after every deploy so this can't
-    # silently recur.
-    pre_deploy_backup_keep: 3
+    # have NO built-in retention (unlike HA's own automatic backups) and run
+    # ~640MB each on this box, so 1 is deliberate: the config surface this
+    # playbook writes is all in git (rollback = git revert + redeploy), and
+    # HA already keeps 3 daily automatic backups of config + ssl + add-ons.
+    # The pre-deploy copy only adds a same-minute rollback point for the
+    # non-git parts (.storage, secrets.yaml) — one is enough for that.
+    # (Was 3; 3 identical copies from a testing session ate 1.9GB of 7.3GB free.)
+    pre_deploy_backup_keep: 1
     # AppDaemon apps live under the addon's own config dir, NOT /config/apps
     # (that is a placeholder). The addon slug is part of the path. AppDaemon
     # hot-reloads on file change, so no core restart is needed for these.
