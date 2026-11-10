@@ -116,12 +116,14 @@ cameras:
     friendly_name: "{{ label }}"
     ffmpeg:
       inputs:
-        # RTSP from Frigate's own go2rtc remuxed stream. The ffmpeg remux
-        # (#video=copy) drops corrupted NALs from the WebRTC transport before
-        # the detect process sees them. RTSP handles reconnection more
-        # robustly than HTTP reconnect flags.
-        - path: "rtsp://127.0.0.1:8554/{{ name }}"
-          input_args: preset-rtsp-restream
+        # Read the Nest WebRTC source directly. There used to be a second
+        # go2rtc ffmpeg restream in between (<cam> = ffmpeg:<cam>_raw#video=copy)
+        # to strip corrupt NALs, but that layer kept answering "Output file does
+        # not contain any stream" / RTSP 404 whenever a session stalled, and
+        # Frigate then had nothing to read. Direct + preset-rtsp-generic (which
+        # sets analyzeduration/probesize) decodes the raw stream reliably.
+        - path: "rtsp://127.0.0.1:8554/{{ name }}_raw"
+          input_args: preset-rtsp-generic
           roles:
             # detect only — NO record role. Video footage lives in Nest/Google
             # Home (family already uses it); Frigate recording was a redundant

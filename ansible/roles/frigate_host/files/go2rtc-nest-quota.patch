@@ -1,0 +1,181 @@
+diff --git a/pkg/nest/api.go b/pkg/nest/api.go
+index 371af22..106f9a4 100644
+--- a/pkg/nest/api.go
++++ b/pkg/nest/api.go
+@@ -190,6 +190,9 @@ func (a *API) ExchangeSDP(projectID, deviceID, offer string) (string, error) {
+ 
+ 	req.Header.Set("Authorization", "Bearer "+a.Token)
+ 
++	if err := limiter.reserve(deviceID, "GenerateWebRtcStream", 5*time.Second); err != nil {
++		return "", err
++	}
+ 	client := &http.Client{Timeout: time.Second * 5000}
+ 	res, err := client.Do(req)
+ 	if err != nil {
+@@ -197,6 +200,11 @@ func (a *API) ExchangeSDP(projectID, deviceID, offer string) (string, error) {
+ 	}
+ 	defer res.Body.Close()
+ 
++	if res.StatusCode == 429 {
++		limiter.note429()
++	} else if res.StatusCode == 200 {
++		limiter.noteOK()
++	}
+ 	if res.StatusCode != 200 {
+ 		return "", errors.New("nest: wrong status: " + res.Status)
+ 	}
+@@ -275,6 +283,9 @@ func (a *API) ExtendStream() error {
+ 
+ 	req.Header.Set("Authorization", "Bearer "+a.Token)
+ 
++	if err := limiter.reserve(a.StreamDeviceID, "ExtendWebRtcStream", 50*time.Second); err != nil {
++		return err
++	}
+ 	client := &http.Client{Timeout: time.Second * 5000}
+ 	res, err := client.Do(req)
+ 	if err != nil {
+@@ -282,6 +293,11 @@ func (a *API) ExtendStream() error {
+ 	}
+ 	defer res.Body.Close()
+ 
++	if res.StatusCode == 429 {
++		limiter.note429()
++	} else if res.StatusCode == 200 {
++		limiter.noteOK()
++	}
+ 	if res.StatusCode != 200 {
+ 		return errors.New("nest: wrong status: " + res.Status)
+ 	}
+diff --git a/pkg/nest/limiter.go b/pkg/nest/limiter.go
+new file mode 100644
+index 0000000..92d7e95
+--- /dev/null
++++ b/pkg/nest/limiter.go
+@@ -0,0 +1,127 @@
++package nest
++
++import (
++	"errors"
++	"sync"
++	"time"
++)
++
++// Google's Device Access limits (nest/device-access/project/limits):
++//   - 10 ExecuteDeviceCommand calls per minute per project AND user
++//   - 5 per minute per device and command
++//   - 30 per minute and 100 per hour per camera
++//
++// Every dial (GenerateWebRtcStream) and every keep-alive (ExtendWebRtcStream)
++// is one of those calls: a restart with six cameras spends 6 of the 10 project
++// slots in a second, and each failed retry spends another. The only way to keep
++// sessions alive is to stay inside the windows - reacting to a 429 is too late,
++// the budget is already gone and every camera starves together.
++var (
++	projectQuota = []quotaWindow{{time.Minute, 10}}
++	perCmdQuota  = []quotaWindow{{time.Minute, 5}}
++	perCamQuota  = []quotaWindow{{time.Minute, 30}, {time.Hour, 100}}
++)
++
++// ThrottledError means "do not send this call now": the caller treats it as a
++// soft failure so consumers fall back instead of storming.
++var ThrottledError = errors.New("nest: throttled by local quota limiter")
++
++type quotaWindow struct {
++	d     time.Duration
++	limit int
++}
++
++type quotaLimiter struct {
++	mu     sync.Mutex
++	hits   map[string][]time.Time
++	holdTo time.Time // project-wide hold-off after a real 429
++}
++
++var limiter = &quotaLimiter{hits: map[string][]time.Time{}}
++
++func (q *quotaLimiter) prune(key string, keep time.Duration) []time.Time {
++	cut := time.Now().Add(-keep)
++	hits := q.hits[key]
++	i := 0
++	for i < len(hits) && !hits[i].After(cut) {
++		i++
++	}
++	if i > 0 {
++		hits = append([]time.Time(nil), hits[i:]...)
++	}
++	q.hits[key] = hits
++	return hits
++}
++
++// reserve books a slot in every applicable window, or waits until one frees.
++// Dials pass a short maxWait (fail fast, Frigate retries later); keep-alives
++// may wait longer because losing a session costs a whole dial.
++func (q *quotaLimiter) reserve(dev, cmd string, maxWait time.Duration) error {
++	deadline := time.Now().Add(maxWait)
++	for {
++		q.mu.Lock()
++		now := time.Now()
++		if now.Before(q.holdTo) {
++			wait := q.holdTo.Sub(now)
++			q.mu.Unlock()
++			if wait > maxWait {
++				return ThrottledError
++			}
++			time.Sleep(wait)
++			continue
++		}
++
++		type check struct {
++			key string
++			win quotaWindow
++		}
++		var checks []check
++		for _, w := range projectQuota {
++			checks = append(checks, check{"project", w})
++		}
++		for _, w := range perCmdQuota {
++			checks = append(checks, check{"cmd:" + dev + ":" + cmd, w})
++		}
++		for _, w := range perCamQuota {
++			checks = append(checks, check{"cam:" + dev, w})
++		}
++
++		need := time.Duration(0)
++		for _, c := range checks {
++			hits := q.prune(c.key, c.win.d)
++			if len(hits) >= c.win.limit {
++				d := hits[len(hits)-c.win.limit].Add(c.win.d).Sub(now)
++				if d > need {
++					need = d
++				}
++			}
++		}
++		if need <= 0 {
++			for _, c := range checks {
++				q.hits[c.key] = append(q.hits[c.key], now)
++			}
++			q.mu.Unlock()
++			return nil
++		}
++		q.mu.Unlock()
++
++		if now.Add(need).After(deadline) {
++			return ThrottledError
++		}
++		time.Sleep(need)
++	}
++}
++
++// note429 holds the whole project off for a minute - Google just told us the
++// budget is gone, so no camera should keep pushing.
++func (q *quotaLimiter) note429() {
++	q.mu.Lock()
++	q.holdTo = time.Now().Add(time.Minute)
++	q.mu.Unlock()
++}
++
++func (q *quotaLimiter) noteOK() {
++	q.mu.Lock()
++	q.holdTo = time.Time{}
++	q.mu.Unlock()
++}

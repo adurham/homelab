@@ -53,6 +53,17 @@ git apply --3way "$PATCH_DIR/go2rtc-nest.patch"
 git -c user.name=amd -c user.email=amd@frigate-01 \
   commit --quiet -am "nest: per-camera API instances, re-arming extend timer, dial mutex (carried patch)"
 
+# Second patch: a local sliding-window quota limiter. Google caps
+# ExecuteDeviceCommand at 10/min per project+user (5/min per device+command,
+# 30/min and 100/h per camera); six cameras dialing at boot plus retries blew
+# through it and every camera starved on 429. The limiter books a slot in each
+# window before a call goes out and holds the project off for a minute after a
+# real 429. Verified: no 429s in steady state, calls log
+# "nest: call dev=… cmd=… status=200".
+git apply --3way "$PATCH_DIR/go2rtc-nest-quota.patch"
+git -c user.name=amd -c user.email=amd@frigate-01 \
+  commit --quiet -am "nest: sliding-window Device Access quota limiter (carried patch)"
+
 PATH="$GO_HOME/go/bin:$PATH" CGO_ENABLED=0 \
   go build -trimpath -ldflags "-s -w" -o "$OUT" .
 

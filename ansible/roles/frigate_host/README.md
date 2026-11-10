@@ -83,6 +83,26 @@ version required **4 or more** stalled cameras before acting, so the common
 case - one to three dead - sat broken indefinitely while the log said
 "waiting for recovery".
 
+### Quota limiter (carried patch) — what it fixed and what it did not
+
+Google's Device Access limits every `ExecuteDeviceCommand` call (both
+`GenerateWebRtcStream` and `ExtendWebRtcStream`) to **10 per minute per project
+and user**, 5/min per device+command, 30/min and 100/h per camera. Six cameras
+dialing at boot, plus go2rtc's 3x30s retry loop, spent that in seconds and the
+whole fleet starved on `429 RESOURCE_EXHAUSTED`.
+
+`files/go2rtc-nest-quota.patch` (built after `go2rtc-nest.patch`) adds
+`pkg/nest/limiter.go`: a sliding-window limiter that books a slot in every
+applicable window *before* a call goes out, fails a dial fast (5 s) so Frigate
+retries later instead of storming, lets keep-alives wait up to 50 s, and holds
+the project off for a minute after a real 429. Instrumented builds log
+`nest: call dev=… cmd=… status=…` and `nest: throttled …`.
+
+Verified 2026-11-10: in steady state every call returns 200 and there are no
+429s — the API layer is now healthy. It did **not** stop the cameras dropping:
+sessions still lapse every 1-2 minutes while extends return 200, which points at
+the media path (UDP/NAT between Nest's WebRTC peer and this CT), not the API.
+
 ### Last-good frames: kill the placeholder tiles
 
 Frigate's placeholder is what makes a stalled camera look *broken*. `lastgood.py`
