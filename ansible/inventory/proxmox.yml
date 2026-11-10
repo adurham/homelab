@@ -512,11 +512,9 @@ all:
           target_node: pve02
           ct_dhcp: false
       vars:
+        # key + ssh args live in inventory/group_vars/lan_dns.yml: group_vars/all
+        # outranks inventory-file vars, so an override here would be ignored.
         ansible_user: root
-        ansible_ssh_private_key_file: "~/.ssh/id_ansible"
-        # accept-new, not "": these containers are rebuilt from scratch by
-        # deploy_lan_dns.yml and a fresh container has a fresh host key.
-        ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
 
     # Tanium Cluster
     tanium_cluster:

@@ -1,0 +1,11 @@
+---
+# The LAN DNS/DHCP pair authorizes ONE key — the dedicated one installed by
+# roles/lan_dns_host (lan_dns_ansible_pubkey, SHA256:AsVAEO70…). The fleet
+# skeleton key in group_vars/all (~/.ssh/id_ansible) is not accepted there, and
+# because group_vars/all outranks inventory-file vars, the override has to live
+# at group level like this.
+ansible_ssh_private_key_file: "~/.ssh/id_ansible_dns"
+
+# accept-new, not "": these containers are rebuilt from scratch by
+# deploy_lan_dns.yml and a fresh container has a fresh host key.
+ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"

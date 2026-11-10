@@ -18,7 +18,10 @@ lan_dhcp_reservations:
     ip: 192.168.86.34
     hostname: lb-01
   - mac: 58:47:CA:78:CF:F7
-    ip: 192.168.86.57
+    # enp3s0 is static .19 in /etc/netplan (the old .57 reservation was squatted by
+    # the Shelly plug, now moved to .100). Keep the reservation on .19 so a DHCP
+    # fallback or rescue boot lands on the address the host actually uses.
+    ip: 192.168.86.19
     hostname: amd-workstation
   - mac: B0:81:84:EE:0F:D0
     ip: 192.168.86.211
