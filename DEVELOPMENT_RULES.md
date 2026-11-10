@@ -53,6 +53,31 @@
   changes to a CT and forget to backport. If you do something by hand,
   encode it in the role or note it in a follow-up.
 
+## Identity obfuscation — media ingest lanes
+
+This repo is public. The capture pipeline behind the two media-ingest CTs
+(`roles/media_ingest`, `roles/media_ingest_02`, `roles/media_gallery` and the
+playbooks that deploy them) must not carry identifying detail — no source
+identifiers, account handles, person or folder names, and no upstream tool
+names — in code, comments, commit messages, test fixtures or git history.
+
+- Real values are templated in from the vault at deploy time; roles and
+  inventory reference vault variable names only.
+- Runtime logs on those hosts do carry the real values, which is why
+  `alloy_ship_logs: false` is set for them (see `roles/alloy/README.md`).
+- Before committing to those paths, scan the diff:
+
+  ```sh
+  git diff --cached -- ansible/roles/media_ingest* ansible/roles/media_gallery \
+    | grep -nE '[0-9]{9,}|@[A-Za-z0-9_]{3,}'
+  ```
+
+  Empty output = clean. Use placeholders in examples (`<id>`, `<name>`).
+- A leaked value cannot be undone by a later commit — the old blob stays in
+  history. Scrubbing it is a **destructive op: ask first** (see Git Operations).
+- Debug notes that need the real values belong outside the repo (an untracked
+  file or the agent's private notes), never in a tracked file or PR body.
+
 ## Security headers on the load balancer
 
 - `roles/loadbalancer_service/templates/nginx.conf.j2` defines two
