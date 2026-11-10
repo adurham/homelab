@@ -149,10 +149,10 @@
   delay: 5
   until: adguard_dig.stdout | default('') | length > 0
 
-- name: Point the container's own resolver at AdGuard
+- name: Give the container a resolver that does not depend on itself
   ansible.builtin.copy:
     dest: /etc/resolv.conf
-    content: "nameserver 127.0.0.1\n"
+    content: "{% for ns in lan_dns_bootstrap_nameservers %}nameserver {{ ns }}\n{% endfor %}"
     owner: root
     group: root
     mode: '0644'

@@ -132,6 +132,14 @@ homeassistant_url: "http://{{ ip_homeassistant }}:8123"
 lan_dns_resolvers:
   - 192.168.86.4
   - 192.168.86.5
+# Recursive upstreams for the lab DNS (dns-01 / BIND). Deliberately EXTERNAL:
+# forwarding to the LAN resolver pair made the alerting path (ack bot ->
+# dns-01 -> LAN pair -> DoT) depend on the very resolvers Grafana monitors,
+# so a LAN DNS outage also silenced its own alert. Lab clients lose
+# adblocking; the LAN clients keep it.
+dns_server_forwarders:
+  - 1.1.1.1
+  - 9.9.9.9
 # Long-lived access token for the VictoriaMetrics → HA Prometheus scrape.
 homeassistant_token: !vault |
           $ANSIBLE_VAULT;1.1;AES256

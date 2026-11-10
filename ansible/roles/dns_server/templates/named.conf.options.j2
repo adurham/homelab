@@ -31,10 +31,11 @@ options {
         # AdGuard). That add-on was removed when DNS/DHCP moved to the two
         # containers, which left dns-01 SERVFAILing every external name -- and
         # that silently broke anything on this subnet that resolves by name,
-        # including the Grafana ack bot's connection to discord.com. Point it
-        # at the pair: bind tries them in order, so one resolver can be down.
+        # including the Grafana ack bot's connection to discord.com. Keep the
+        # upstreams EXTERNAL: forwarding to the LAN pair made alerting depend
+        # on the resolvers it monitors (circular), 2026-11-10.
         forwarders {
-{% for resolver in lan_dns_resolvers %}
+{% for resolver in dns_server_forwarders %}
                 {{ resolver }};
 {% endfor %}
         };
