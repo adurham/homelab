@@ -100,6 +100,18 @@
     state: present
   notify: Save iptables rules
 
+- name: "iptables: allow vm-01 (172.16.0.42) to grafana-ack-bot tcp/8990"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8990"
+    source: "172.16.0.42"
+    jump: ACCEPT
+    action: insert
+    comment: "grafana_ack_bot: vm-01 health probe"
+    state: present
+  notify: Save iptables rules
+
 - name: "iptables: drop all other inbound to grafana-ack-bot tcp/8990"
   ansible.builtin.iptables:
     chain: INPUT

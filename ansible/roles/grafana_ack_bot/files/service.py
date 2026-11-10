@@ -1249,9 +1249,30 @@ class AckBotClient(discord.Client):
         await _edit_via_webhook(self._http_session, message_id, new_content)
 
 
-async def run_http_server() -> None:
+async def handle_healthz(request: web.Request) -> web.Response:
+    """Liveness for the alerting path itself.
+
+    The ack bot IS the delivery leg for every Grafana notification, so if it is
+    dead nobody hears about anything -- including this. vm-01's blackbox probe
+    (`blackbox_ack_bot`) polls this endpoint and Grafana's `ack_bot_down` rule
+    pages on it.
+
+    200 only when the Discord client is connected: a process that is up but has
+    lost the gateway would accept the webhook and fail to post, so "the port is
+    open" is not the question being asked here. 503 otherwise.
+    """
+    client = request.app["client"]
+    ready = client.is_ready() and not client.is_closed()
+    if ready:
+        return web.Response(status=200, text=f"ok user={client.user}\n")
+    return web.Response(status=503, text="discord gateway not ready\n")
+
+
+async def run_http_server(client: discord.Client) -> None:
     app = web.Application()
+    app["client"] = client
     app.router.add_post("/grafana-webhook", handle_grafana_webhook)
+    app.router.add_get("/healthz", handle_healthz)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", HTTP_LISTEN_PORT)  # noqa: S104 -- must accept Grafana's webhook POST from another host, not just localhost
@@ -1386,7 +1407,7 @@ async def main() -> None:
     client = AckBotClient()
     await asyncio.gather(
         client.start(DISCORD_BOT_TOKEN),
-        run_http_server(),
+        run_http_server(client),
         _reconcile_pending(),
     )
 

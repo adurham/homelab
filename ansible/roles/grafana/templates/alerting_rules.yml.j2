@@ -5554,3 +5554,69 @@ groups:
     labels:
       severity: warning
     isPaused: false
+  - uid: ack_bot_down
+    title: Grafana Discord ack bot is down
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: min(probe_success{job="blackbox_ack_bot"})
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: Alerting
+    execErrState: Alerting
+    for: 5m
+    annotations:
+      summary: grafana-ack-bot cannot post to Discord — every Grafana notification is going nowhere
+      description: "The ack bot (graf-01:8990) is the single delivery leg for all Grafana\
+        \ notifications: alerts, this one included. probe_success for job blackbox_ack_bot\
+        \ is 0, meaning /healthz did not return 200 for 5 minutes -- either the process is\
+        \ dead (crash loop, OOM, bad token) or it is alive without a Discord gateway connection,\
+        \ which accepts the webhook and posts nothing.\
+        \ \n\nThis alert cannot be delivered over the channel it is about, so severity=critical\
+        \ also routes it to email via mail-01 -- check that inbox if Discord is silent.\
+        \ \n\nLast time this happened (2026-11-10) the cause was DNS: graf-01 resolves discord.com\
+        \ through dns-01, and dns-01 was SERVFAILing because its forwarder still pointed at\
+        \ a resolver that had been removed. Check, in order: `systemctl status grafana-ack-bot`\
+        \ and `journalctl -u grafana-ack-bot -n 50` on graf-01; `dig +short discord.com @172.16.0.10`;\
+        \ and `curl -s localhost:8990/healthz`."
+    labels:
+      severity: critical
+    isPaused: false

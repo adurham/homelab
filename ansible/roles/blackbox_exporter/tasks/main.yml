@@ -134,6 +134,22 @@
             recursion_desired: true
             valid_rcodes: ["NOERROR"]
             preferred_ip_protocol: ip4
+
+        # The alerting path monitoring itself. grafana-ack-bot on graf-01 is
+        # the only delivery leg for Grafana notifications, so when it dies
+        # everything goes quiet -- including whatever tried to report the
+        # failure. /healthz answers 200 only when the Discord client is
+        # connected AND the HTTP receiver is up, 503 when the process is alive
+        # but has lost the gateway (that combination accepts the webhook and
+        # posts nothing, which a tcp_connect probe would call healthy).
+        ack_bot_health:
+          prober: http
+          timeout: 5s
+          http:
+            valid_status_codes: [200]
+            method: GET
+            fail_if_not_ssl: false
+            preferred_ip_protocol: ip4
     owner: root
     group: blackbox_exporter
     mode: '0640'

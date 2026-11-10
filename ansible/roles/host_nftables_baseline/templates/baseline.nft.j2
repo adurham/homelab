@@ -27,6 +27,12 @@ table inet baseline_filter {
 		ip saddr {{ source }} tcp dport {{ port }} accept
 {% endfor %}
 {% endfor %}
+{# Per-host narrow exceptions that must NOT be widened to every allowed
+   source (e.g. a single monitoring host probing one service port). Written
+   as raw nft expressions; the caller owns their correctness. #}
+{% for rule in host_nftables_extra_accept | default([]) %}
+		{{ rule }}
+{% endfor %}
 	}
 
 	chain forward {

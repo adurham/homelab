@@ -23,6 +23,12 @@
       - "172.16.0.0/24"
       - "192.168.86.0/24"
       - "100.64.0.0/10"
+    # The ack bot's /healthz (8990) is the alerting path's own liveness probe.
+    # Deliberately NOT in allowed_tcp_ports: that list is a cross product, and
+    # opening 8990 to all three CIDRs would expose the webhook receiver to
+    # anything on the LAN. Only vm-01, which runs the blackbox probe, gets it.
+    host_nftables_extra_accept:
+      - "ip saddr 172.16.0.42 tcp dport 8990 accept"
   roles:
     - host_nftables_baseline
 

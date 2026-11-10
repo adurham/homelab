@@ -368,6 +368,25 @@ scrape_configs:
       - target_label: __address__
         replacement: 127.0.0.1:9115
 
+  # The alerting path's own delivery leg: grafana-ack-bot on graf-01. 200 means
+  # the Discord client is connected; 503 means the process is up but cannot
+  # post. Everything Grafana notifies goes through this single process.
+  - job_name: 'blackbox_ack_bot'
+    metrics_path: /probe
+    params:
+      module: [ack_bot_health]
+    static_configs:
+      - targets: ['http://172.16.0.41:8990/healthz']
+        labels:
+          instance: 'grafana-ack-bot'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
   # Directly-tailnet'd containers. These two lost their tailscaled when
   # their resolv.conf (MagicDNS only) lost DNS, which made them
   # unreachable by name while their LAN leg stayed up — the failure looked
