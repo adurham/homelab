@@ -1,2 +1,212 @@
-# Home Assistant Automations
-# This file is managed by the UI - do not edit manually
+- id: tati_phone_tracking_stale_on
+  alias: 'Tati Phone Tracking: Mark Stale'
+  description: Flags Tati's WiFi presence tracker as stale if it's been unknown for
+    over an hour (avoids false alerts from normal phone WiFi sleep)
+  triggers:
+  - platform: state
+    entity_id: person.tati
+    to: unknown
+    for:
+      hours: 1
+  conditions: []
+  actions:
+  - target:
+      entity_id: input_boolean.tati_phone_tracking_stale
+    action: input_boolean.turn_on
+  mode: single
+- id: tati_phone_tracking_stale_off
+  alias: 'Tati Phone Tracking: Clear Stale'
+  description: Clears the stale flag once Tati's tracker reports a real state again
+    (home/not_home)
+  triggers:
+  - platform: state
+    entity_id: person.tati
+  conditions:
+  - condition: not
+    conditions:
+    - condition: state
+      entity_id: person.tati
+      state: unknown
+  actions:
+  - target:
+      entity_id: input_boolean.tati_phone_tracking_stale
+    action: input_boolean.turn_off
+  mode: single
+- id: gr_syncbox_watchdog
+  alias: Game Room Sync Box Watchdog
+  description: Logs blip start/end when the Game Room Hue Sync Box's power entity
+    goes unavailable and recovers
+  triggers:
+  - platform: state
+    entity_id: switch.game_room_sync_box_power
+    to: unavailable
+    id: drop
+  - platform: state
+    entity_id: switch.game_room_sync_box_power
+    from: unavailable
+    id: recover
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: drop
+      sequence:
+      - data:
+          title: Game Room Sync Box DROPPED
+          message: 'Went unavailable at {{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}
+            (HDMI input was: {{ states(''select.game_room_sync_box_hdmi_input'') }})'
+          notification_id: gr_syncbox_drop_{{ now().timestamp() | int }}
+        action: persistent_notification.create
+      - data:
+          name: Game Room Sync Box
+          message: went unavailable (blip start)
+          entity_id: switch.game_room_sync_box_power
+        action: logbook.log
+    - conditions:
+      - condition: trigger
+        id: recover
+      sequence:
+      - variables:
+          down_seconds: '{{ (now() - trigger.from_state.last_changed).total_seconds()
+            | round(1) }}'
+      - data:
+          title: Game Room Sync Box RECOVERED
+          message: Back online at {{ now().strftime('%Y-%m-%d %H:%M:%S') }} after
+            {{ down_seconds }}s
+          notification_id: gr_syncbox_recover_{{ now().timestamp() | int }}
+        action: persistent_notification.create
+      - data:
+          name: Game Room Sync Box
+          message: recovered after {{ down_seconds }}s (blip end)
+          entity_id: switch.game_room_sync_box_power
+        action: logbook.log
+  mode: queued
+  max: 10
+- id: garage_lights_auto_on
+  alias: Garage Lights - Auto On (door or motion, 15 min)
+  description: Door contact or motion turns the garage lights on with the 15-minute
+    timeout armed. Does nothing if the lights are already on (manual on wins).
+  triggers:
+  - trigger: state
+    entity_id: binary_sensor.garage_door_contact
+    to: 'on'
+  - trigger: state
+    entity_id: binary_sensor.garage_door_motion
+    to: 'on'
+  conditions:
+  - condition: state
+    entity_id: switch.garage_main_lights
+    state: 'off'
+  actions:
+  - action: timer.start
+    target:
+      entity_id: timer.garage_lights_motion_timeout
+    data:
+      duration: 00:15:00
+  - action: switch.turn_on
+    target:
+      entity_id: switch.garage_main_lights
+  - action: system_log.write
+    data:
+      message: 'Garage Lights: auto ON ({{ trigger.to_state.name if trigger.to_state
+        is defined else ''automation'' }}) - 15 min timer armed'
+      level: info
+  mode: single
+- id: garage_lights_manual_on
+  alias: Garage Lights - Manual On Latches
+  description: 'If the lights come on while no timeout is armed, a person did it:
+    cancel any timer and leave them on until switched off.'
+  triggers:
+  - trigger: state
+    entity_id: switch.garage_main_lights
+    to: 'on'
+  conditions:
+  - condition: state
+    entity_id: timer.garage_lights_motion_timeout
+    state: idle
+  actions:
+  - action: timer.cancel
+    target:
+      entity_id: timer.garage_lights_motion_timeout
+  - action: system_log.write
+    data:
+      message: 'Garage Lights: manual ON - latched, no auto-off'
+      level: info
+  mode: single
+- id: garage_lights_motion_extend
+  alias: Garage Lights - Extend Auto Timeout on Motion
+  description: While an auto-on timeout is armed, motion restarts the 15 minutes.
+    Never arms a timer in manual mode.
+  triggers:
+  - trigger: state
+    entity_id: binary_sensor.garage_door_motion
+    to: 'on'
+  conditions:
+  - condition: state
+    entity_id: switch.garage_main_lights
+    state: 'on'
+  - condition: state
+    entity_id: timer.garage_lights_motion_timeout
+    state: active
+  actions:
+  - action: timer.start
+    target:
+      entity_id: timer.garage_lights_motion_timeout
+    data:
+      duration: 00:15:00
+  - action: system_log.write
+    data:
+      message: 'Garage Lights: motion extended the 15-minute timeout'
+      level: info
+  mode: single
+- id: garage_lights_auto_off
+  alias: Garage Lights - Auto Off After Timeout
+  description: Turns the lights off when the auto-on timeout finishes (only reachable
+    when the timer was armed by door/motion).
+  triggers:
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: timer.garage_lights_motion_timeout
+  conditions:
+  - condition: state
+    entity_id: switch.garage_main_lights
+    state: 'on'
+  actions:
+  - action: switch.turn_off
+    target:
+      entity_id: switch.garage_main_lights
+  - action: system_log.write
+    data:
+      message: 'Garage Lights: auto OFF after 15 minutes without motion'
+      level: info
+  mode: single
+- id: garage_lights_timer_cleanup
+  alias: Garage Lights - Cancel Timeout When Switched Off
+  description: Any off (manual or auto) clears a pending timeout, so the next on starts
+    fresh.
+  triggers:
+  - trigger: state
+    entity_id: switch.garage_main_lights
+    to: 'off'
+  actions:
+  - action: timer.cancel
+    target:
+      entity_id: timer.garage_lights_motion_timeout
+  mode: single
+- id: garage_lights_legacy_guard
+  alias: Garage Lights - Keep Legacy Automations Disabled
+  description: The three original YAML automations are replaced; this disables them
+    on every HA start in case YAML restores them.
+  triggers:
+  - trigger: homeassistant
+    event: start
+  actions:
+  - action: automation.turn_off
+    target:
+      entity_id:
+      - automation.garage_lights_door_open_and_motion_control
+      - automation.garage_lights_reset_timer_on_motion
+      - automation.garage_lights_turn_off_after_motion_timeout
+  mode: single

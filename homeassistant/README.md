@@ -6,6 +6,21 @@ playbook at `ansible/deploy_ha_automations.yml`.
 
 ## Quick Start
 
+Prerequisites, once per workstation (the playbook fails at its first task
+without them):
+
+- `yamllint` on PATH (`uv tool install yamllint`) — the playbook lints
+  `homeassistant/` before it touches the host.
+- `homeassistant/ha_config.env` (gitignored) — the reload step runs
+  `reload_ha_automations.py`, which reads `HA_URL` + `HA_TOKEN` from it.
+- An SSH entry for the box in `~/.ssh/config` (root, port 2222, the
+  automation key) so `scp`/`ssh` inside the playbook authenticate without
+  flags.
+- Run it from the **repo root** — the repo-root `ansible.cfg` points at
+  `ansible/inventory/` and `ansible/vault-pass`. (Before that file existed,
+  the documented `ansible-playbook ansible/deploy_ha_automations.yml`
+  matched no hosts and exited 0 having done nothing.)
+
 1. Bootstrap your local API credentials (gitignored):
 
    ```bash
@@ -61,6 +76,14 @@ homeassistant/
 `homeassistant.packages.manual_automations` block in `configuration.yaml`.
 That packaging is what lets repo-managed automations coexist with the
 UI-managed `automations.yaml` HA edits in place.
+
+**The UI-managed files are snapshots, not sources.** `automations.yaml`,
+`scripts.yaml` and `scenes.yaml` are written by HA itself, so the playbook
+never pushes them (a push would clobber anything created in the UI since the
+last commit) — it only lints around them. The copies here exist so a rebuild
+can restore them: refresh them deliberately after UI work, e.g.
+`ssh homeassistant.local 'cat /config/automations.yaml' > homeassistant/automations.yaml`,
+then commit. Keep them in sync or the repo stops being a complete backup.
 
 ## Live Systems
 

@@ -33,3 +33,10 @@ ignore: |
   .vscode/
   ansible/credentials/
   homeassistant/backup/
+  # HA-owned files: core rewrites these in place (scripts/scenes/automations
+  # from the UI). It emits list items at the parent key's indent, which
+  # yamllint's default indentation rule rejects - and the file is regenerated
+  # by HA, so "fixing" it just fights the owner. Do not lint them.
+  homeassistant/scripts.yaml
+  homeassistant/scenes.yaml
+  homeassistant/automations.yaml

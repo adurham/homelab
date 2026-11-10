@@ -100,3 +100,13 @@ timer:
   exhaust_fan_post_hvac:
     name: "Exhaust Fan Post-HVAC Countdown"
     duration: "00:05:00"
+
+# Recorder: short local history only. Long-term metrics are shipped to
+# VictoriaMetrics/Grafana; the appliance only needs enough history for the
+# UI/logbook and short-window automations. Trimmed 2026-11-10 (default was
+# 10 days; DB had grown to ~2.5 GB of the 28 GB disk).
+recorder:
+  purge_keep_days: 5
+  auto_purge: true
+  auto_repack: true
+  commit_interval: 30

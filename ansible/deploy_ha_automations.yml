@@ -18,6 +18,9 @@
     deploy_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
     ha_root: "{{ playbook_dir }}/../homeassistant"
     ha_restart: false
+    # Set -e ha_skip_backup=true when the recorder DB is known-busy (repack) or
+    # the box is short on space and you deliberately want a config-only deploy.
+    ha_skip_backup: false
     ssh_opts: "-o StrictHostKeyChecking=accept-new"
     # How many pre-deploy backups to retain (most recent N by date). These
     # backups have NO built-in retention (unlike HA's own daily automatic
@@ -76,7 +79,28 @@
         ha backups new --name pre-deploy-{{ deploy_ts }} --folders homeassistant
       register: ha_backup
       changed_when: ha_backup.rc == 0
-      failed_when: ha_backup.rc != 0
+      # A pre-deploy backup is a safety net, not a gate. HA Core refuses the
+      # backup's pre-backup action with "Could not lock database within 30
+      # seconds" whenever the recorder is busy (auto_repack's VACUUM holds a
+      # long exclusive lock on this box's ~1.4 GB sqlite DB), which is common
+      # and unrelated to what is being deployed. Retry, then carry on with a
+      # loud warning rather than blocking the deploy; HA keeps its own daily
+      # automatic backups regardless.
+      retries: 2
+      delay: 45
+      until: ha_backup.rc == 0
+      failed_when: false
+      when: not (ha_skip_backup | bool)
+
+    - name: Warn when the pre-deploy backup could not be taken
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: no pre-deploy backup was taken (ha backups new rc={{ ha_backup.rc | default('?') }}).
+          Most likely the recorder DB was locked (auto_repack/purge). The deploy
+          is continuing; HA's own daily backup still covers the config folder.
+      when:
+        - not (ha_skip_backup | bool)
+        - ha_backup.rc | default(1) != 0
 
     # Prune old pre-deploy-* backups, keeping only the N most recent
     # (pre_deploy_backup_keep). These backups have no built-in retention
@@ -111,6 +135,30 @@
       changed_when: prune_result.rc == 0
       when: stale_pre_deploy_slugs | length > 0
 
+    - name: Resolve the AppDaemon apps directory on the host
+      # The add-on config mount is spelled differently depending on which SSH
+      # server answers port 2222: the Advanced SSH & Web Terminal add-on mounts
+      # it at /addon_configs, the stock Terminal & SSH (core_ssh) add-on at
+      # /app_configs. Hardcoding one silently scp's into a directory AppDaemon
+      # never reads (or fails outright), so probe and use whichever exists.
+      ansible.builtin.raw: >-
+        for d in {{ appdaemon_apps_dir }} {{ appdaemon_apps_dir | replace('/addon_configs', '/app_configs') }};
+        do [ -d "$d" ] && { echo "$d"; exit 0; }; done; echo MISSING
+      register: ad_dir_probe
+      changed_when: false
+
+    - name: Fail if neither AppDaemon config mount exists
+      ansible.builtin.fail:
+        msg: >-
+          Neither {{ appdaemon_apps_dir }} nor its /app_configs twin exists on
+          the HA host - is the AppDaemon add-on installed? Refusing to guess a
+          path that AppDaemon would never load.
+      when: ad_dir_probe.stdout | trim == 'MISSING'
+
+    - name: Use the AppDaemon apps directory that actually exists
+      ansible.builtin.set_fact:
+        appdaemon_apps_dir: "{{ ad_dir_probe.stdout | trim }}"
+
     - name: Ensure target directories exist
       ansible.builtin.raw: "mkdir -p /config/automations /config/apps {{ appdaemon_apps_dir }}"
       register: mkdir_result
@@ -133,22 +181,25 @@
       # local `automations/` directory stays on the remote and HA still
       # loads it via `!include_dir_merge_list`. This task SSHes in, lists
       # the remote dir, and rm -f any file not present locally.
-      ansible.builtin.shell: |
-        set -eo pipefail
-        cd {{ ha_root }}/automations
-        local_=$(ls *.yaml | sort)
-        remote_=$(ssh -p {{ ansible_port }} {{ ssh_opts }} \
-          {{ ansible_user }}@{{ ansible_host }} \
-          "ls /config/automations/" 2>/dev/null | sort)
-        for f in $(comm -23 <(echo "$remote_") <(echo "$local_")); do
-          [ -n "$f" ] || continue
-          # Skip non-.yaml files (bak files, directories)
-          case "$f" in *.yaml) ;; *) continue ;; esac
-          echo "Removing orphan: $f"
-          ssh -p {{ ansible_port }} {{ ssh_opts }} \
+      # exec: bash is required — the task uses process substitution (<(...)),
+      # which /bin/sh (dash) on the controller rejects with
+      # "Syntax error: "(" unexpected".
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -eo pipefail
+          cd {{ ha_root }}/automations
+          local_=$(find . -name '*.yaml' | sed 's|^\./||' | sort)
+          remote_=$(ssh -p {{ ansible_port }} {{ ssh_opts }} \
             {{ ansible_user }}@{{ ansible_host }} \
-            "rm -v /config/automations/$f"
-        done
+            "cd /config/automations && find . -name '*.yaml' | sed 's|^\./||'" 2>/dev/null | sort)
+          for f in $(comm -23 <(echo "$remote_") <(echo "$local_")); do
+            [ -n "$f" ] || continue
+            echo "Removing orphan: $f"
+            ssh -p {{ ansible_port }} {{ ssh_opts }} \
+              {{ ansible_user }}@{{ ansible_host }} \
+              "rm -v /config/automations/$f"
+          done
       delegate_to: localhost
       register: cleanup_orphans
       changed_when: cleanup_orphans.stdout | default('') | length > 0
