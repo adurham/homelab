@@ -491,3 +491,22 @@
     name: "{{ inventory_hostname }}"
     ansible_host: "{{ net_private_ip.split('/')[0] }}"
     ansible_user: "root"
+
+# ── Camera-health watchdog ───────────────────────────────────────────────────
+# A Nest camera can stay connected while delivering no frames; Frigate then
+# serves its placeholder JPEG and the HA dashboard tiles read "No frames have
+# been received". The script restarts Frigate only after a camera has been at
+# 0 fps on DEAD_CHECKS consecutive 5-minute ticks, with a 30-minute cooldown,
+# so a single dead camera no longer sits broken forever (the previous version
+# required 4+ stalled cameras before it would act).
+- name: Install the camera-health watchdog inside the CT
+  ansible.builtin.command: >-
+    pct push {{ vmid }} {{ role_path }}/files/camera_health.py
+    /opt/frigate/camera_health.py --perms 0755
+  changed_when: true
+
+- name: Install the camera-health cron entry inside the CT
+  ansible.builtin.command: >-
+    pct exec {{ vmid }} -- bash -c
+    "printf '%s\n' '*/5 * * * * root python3 /opt/frigate/camera_health.py >> /var/log/frigate_health.log 2>&1' > /etc/cron.d/frigate-health"
+  changed_when: true

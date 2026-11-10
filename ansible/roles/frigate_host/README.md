@@ -60,6 +60,29 @@ Notes that cost time to rediscover:
   with `repairs/ignore_issue {domain: go2rtc, issue_id: recommended_version}` —
   it would otherwise linger until a Core restart deactivates it.
 
+### Camera tile placeholders = a stalled Nest session, not an HA problem
+
+A tile reading **"No frames have been received, check error logs"** is Frigate's
+own placeholder JPEG (byte-identical every time, ~51.8 kB) served by
+`/api/<cam>/latest.jpg` when that camera has produced nothing for a while. The
+HA card is innocent - it renders whatever that URL returns.
+
+Diagnose from Frigate, not HA: `/api/stats` shows `camera_fps` per camera, and
+0.0 for a camera whose go2rtc `nest:` session is still *connected* but no longer
+delivering frames (`/api/streams?src=<cam>_raw` still shows a live WebRTC
+producer with bytes flowing). `docker compose restart frigate` clears it and the
+cameras come back in ~2 minutes; per-camera recovery is **not** possible -
+go2rtc refuses to delete a config-defined stream (`DELETE /api/streams?src=X`
+-> 400) and re-PUTting an identical source is a no-op.
+
+`/opt/frigate/camera_health.py` (installed by this role, cron every 5 min) does
+that restart automatically. It waits for `DEAD_CHECKS` consecutive 0-fps ticks
+(30 min) with a 1-hour cooldown: a drop takes 1-2 min to re-establish, so
+shorter thresholds restart healthy cameras during ordinary churn. The previous
+version required **4 or more** stalled cameras before acting, so the common
+case - one to three dead - sat broken indefinitely while the log said
+"waiting for recovery".
+
 ### Consumers of `frigate_lan_ip` — a stale copy means dead camera tiles in HA
 
 The LAN address is baked into more places than this role. When CT 170 moved from
