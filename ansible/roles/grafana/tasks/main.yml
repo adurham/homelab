@@ -23,9 +23,10 @@
 
 - name: Install Grafana
   ansible.builtin.apt:
-    name: grafana
+    name: "grafana={{ grafana_version }}"
     state: present
     update_cache: true
+    allow_downgrade: true
 
 - name: Install Dependencies for Image Renderer
   ansible.builtin.apt:
@@ -178,6 +179,24 @@
     content: |
       [server]
       root_url = https://grafana.chi.lab.amd-e.com
+
+      # Shared Postgres: both replicas use the same DB, which is what makes
+      # the pair interchangeable behind lb-01 and lets the alertmanager
+      # cluster dedupe notifications.
+      [database]
+      type = postgres
+      host = {{ grafana_db_host }}:5432
+      name = {{ grafana_db_name }}
+      user = {{ grafana_db_user }}
+      password = {{ grafana_db_password }}
+      ssl_mode = disable
+
+      # HA alerting: both replicas evaluate rules; the gossip cluster on
+      # :9094 elects a leader so each alert is notified exactly once.
+      [unified_alerting]
+      ha_listen_address = {{ grafana_ha_listen_address }}
+      ha_advertise_address = {{ grafana_ha_listen_address }}
+      ha_peers = {{ grafana_ha_peers }}
 
       [auth.generic_oauth]
       enabled = true

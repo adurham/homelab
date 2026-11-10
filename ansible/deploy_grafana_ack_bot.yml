@@ -5,7 +5,7 @@
 # (why this is a separate process from hermes-agent, not an extension of
 # its own Discord adapter).
 - name: Deploy Grafana Discord Ack Bot
-  hosts: graf-01
+  hosts: grafana   # both replicas; lb-01 fronts them with a backup upstream
   gather_facts: true
   roles:
     - grafana_ack_bot

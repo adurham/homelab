@@ -1,4 +1,6 @@
 ---
+# Pin the Grafana version so both replicas share one DB schema.
+grafana_version: "12.3.1"
 # Bump in lockstep with grafana-image-renderer's go.mod requirement.
 # As of 2026-04-30 the upstream master needed >= 1.26.x, and 1.25.6
 # triggered an auto-toolchain download that fails on the grafana user's

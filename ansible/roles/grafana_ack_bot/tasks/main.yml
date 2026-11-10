@@ -7,12 +7,19 @@
 # conflict). Reuses the existing Hermes Discord bot token + webhook, no
 # new Discord application needed.
 
+- name: Ensure the bot's system user exists
+  ansible.builtin.user:
+    name: "{{ grafana_ack_bot_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
 - name: Create grafana-ack-bot venv directory
   ansible.builtin.file:
     path: /opt/grafana-ack-bot-venv
     state: directory
-    owner: hermes
-    group: hermes
+    owner: "{{ grafana_ack_bot_user }}"
+    group: "{{ grafana_ack_bot_group }}"
     mode: '0755'
 
 - name: Create grafana-ack-bot venv
@@ -20,7 +27,12 @@
   args:
     creates: /opt/grafana-ack-bot-venv/bin/python3
   become: true
-  become_user: hermes
+  become_user: "{{ grafana_ack_bot_user }}"
+
+- name: Ensure virtualenv is available for the bot's venv
+  ansible.builtin.apt:
+    name: python3-virtualenv
+    state: present
 
 - name: Install grafana-ack-bot Python dependencies
   ansible.builtin.pip:
@@ -30,22 +42,22 @@
     virtualenv: /opt/grafana-ack-bot-venv
     state: present
   become: true
-  become_user: hermes
+  become_user: "{{ grafana_ack_bot_user }}"
 
 - name: Create /opt/grafana-ack-bot directory
   ansible.builtin.file:
     path: /opt/grafana-ack-bot
     state: directory
-    owner: hermes
-    group: hermes
+    owner: "{{ grafana_ack_bot_user }}"
+    group: "{{ grafana_ack_bot_group }}"
     mode: '0755'
 
 - name: Deploy grafana-ack-bot service.py
   ansible.builtin.copy:
     src: service.py
     dest: /opt/grafana-ack-bot/service.py
-    owner: hermes
-    group: hermes
+    owner: "{{ grafana_ack_bot_user }}"
+    group: "{{ grafana_ack_bot_group }}"
     mode: '0644'
   notify: Restart grafana-ack-bot
 
@@ -53,8 +65,8 @@
   ansible.builtin.template:
     src: grafana-ack-bot.env.j2
     dest: /opt/grafana-ack-bot/grafana-ack-bot.env
-    owner: hermes
-    group: hermes
+    owner: "{{ grafana_ack_bot_user }}"
+    group: "{{ grafana_ack_bot_group }}"
     mode: '0600'
   no_log: true
   notify: Restart grafana-ack-bot
@@ -80,6 +92,15 @@
 # only graf-01 (the sole caller of /grafana-webhook) and loopback are
 # allowed in; everything else is dropped. Uses the SAME netfilter-persistent
 # stack already installed on this host — no new package.
+- name: Ensure iptables and its persistence tooling are installed
+  ansible.builtin.apt:
+    name:
+      - iptables
+      - iptables-persistent
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
 - name: "iptables: allow loopback to grafana-ack-bot (defense in depth)"
   ansible.builtin.iptables:
     chain: INPUT
@@ -109,6 +130,17 @@
     jump: ACCEPT
     action: insert
     comment: "grafana_ack_bot: vm-01 health probe"
+    state: present
+  notify: Save iptables rules
+
+- name: "iptables: allow lb-01 (172.16.0.30) to grafana-ack-bot tcp/8990"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8990"
+    source: "172.16.0.30"
+    jump: ACCEPT
+    comment: "grafana_ack_bot: lb-01 -> webhook receiver"
     state: present
   notify: Save iptables rules
 

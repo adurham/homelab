@@ -1,0 +1,4 @@
+---
+# The bot runs as an unprivileged system user, created by the role if absent.
+grafana_ack_bot_user: hermes
+grafana_ack_bot_group: hermes

@@ -93,6 +93,23 @@ tailscale_advertised_routes:
 # mail-01's postfix relay -> iCloud SMTP. Used as a backup channel when the
 # HA webhook is broken.
 alert_email_to: "amdnative@icloud.com"
+# Shared Grafana database (Postgres on ct 140, graf-db-01). Both Grafana
+# replicas point at it, which is what makes alerting HA work: Grafana's
+# alertmanager cluster dedupes notifications through this DB.
+grafana_db_host: "172.16.0.44"
+grafana_db_name: "grafana_prod"
+grafana_db_user: "grafana"
+# Alerting HA gossip cluster (both replicas, UDP/TCP 9094).
+grafana_ha_peers: "172.16.0.41:9094,172.16.0.45:9094"
+grafana_ha_listen_address: "{{ hostvars[inventory_hostname].ansible_host }}:9094"
+grafana_db_password: !vault |
+                    $ANSIBLE_VAULT;1.1;AES256
+                    64653436666337316130623965646239376166343961666262313330363962373665633966366534
+                    3735333737666537376136316465323538343366313761340a643432656137313435353339613531
+                    35623638313639336534306133633233653534626339343939303033313638393135623864326464
+                    3566366665356537370a366134373134376636353437306132633436633834613030316434646561
+                    36346233363238653632383136323933366239333663356633383833373265343038
+
 
 # Cluster Nodes (Physical LAN)
 # Used for SDN Peering and Corosync

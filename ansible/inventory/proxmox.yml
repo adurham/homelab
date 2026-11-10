@@ -139,15 +139,11 @@ all:
         ansible_user: amd
         ansible_become: true
 
-    dns_server:
-      hosts:
-        dns-01:
-          ansible_host: "{{ ip_dns_primary }}"
-          vmid: 102
-          target_node: pve02
-      vars:
-        ansible_user: amd
-        ansible_become: true
+    # NOTE: the old standalone BIND server (dns-01, vmid 102 on pve02) was
+    # retired when DNS/DHCP moved to the lan_dns pair (CT 130/131, see
+    # deploy_lan_dns.yml) — its group had no var (`ip_dns_primary` was deleted)
+    # and its host no longer exists, so any play targeting `dns_server` failed
+    # before it could connect. Removed 2026-11-10.
 
     proxy_server:
       hosts:
@@ -821,6 +817,16 @@ all:
               target_node: pve01
               features: "nesting=1"
               net_private_ip: 172.16.0.41/24
+            # Second Grafana replica: same DB, same provisioning, behind
+            # lb-01. Both are HA-managed with a pvesr replica on the third
+            # node, so a node loss restarts one of them elsewhere.
+            graf-02:
+              ansible_host: 172.16.0.45
+              vmid: 141
+              template: debian-12-standard_12.12-1_amd64.tar.zst
+              target_node: pve01
+              features: "nesting=1"
+              net_private_ip: 172.16.0.45/24
 
       vars:
         ansible_user: root
