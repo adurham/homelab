@@ -102,6 +102,40 @@ Also: `platform: generic` is **not** available as YAML — the camera integratio
 rejects it ("does not support platform setup"), so a YAML fallback camera is not
 an option; the config entry is the only route.
 
+### The real cause of the 1-3 minute drops: a per-user SDM rate limit
+
+Measured 2026-11-10 by calling the SDM API directly with the same OAuth client
+(no go2rtc involved):
+
+```
+429 {"code": 429, "message": "Rate limited for the GenerateWebRtcStream API for the user.",
+     "status": "RESOURCE_EXHAUSTED"}
+429 {"code": 429, "message": "Rate limited for the ExecuteDeviceCommand API for the user.",
+     "status": "RESOURCE_EXHAUSTED"}
+```
+
+Google limits stream generation and extends **per user (Nest account)**, not per
+camera. Six cameras negotiating at boot plus one extend each per few minutes
+sits right at that ceiling, and every other consumer on the same account - HA's
+own Nest integration, any manual probing - eats the same budget. When a call
+429s, go2rtc's retry loop (in `rtcConn`: 3 attempts, 30 s apart) multiplies the
+call rate, so one 429 snowballs into every camera dying.
+
+Do NOT "fix" it by backing off inside go2rtc. Tried: a global 5 s gap between
+SDM calls with a 429 penalty growing 10s -> 60s. Result was worse - the penalty
+also delays the *extend* calls, sessions lapse while queued, and the fleet goes
+to 0/6 live. The patch was reverted; `go2rtc-nest.patch` (per-camera API
+instances, re-arming extend timer, serialised dial) is the last known-good.
+
+What actually helps, in order:
+1. Fewer concurrent WebRTC streams on the account (the ceiling is the account's,
+   not the per-camera one). Moving cameras from Nest/SDM to RTSP removes them
+   from this budget entirely.
+2. No other SDM consumers on the same Nest account while Frigate is running
+   (HA's Nest integration included).
+3. Last-good frames on the dashboard (see below) so the user never sees the
+   placeholder while the balance is bad.
+
 ### Consumers of `frigate_lan_ip` — a stale copy means dead camera tiles in HA
 
 The LAN address is baked into more places than this role. When CT 170 moved from
