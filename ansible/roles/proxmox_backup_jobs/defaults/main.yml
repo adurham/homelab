@@ -41,9 +41,11 @@ pve_backup_mailnotification: failure
 # new policy prunes by the NEW rules. Apply between Mon 03:30 and Tue 02:00
 # so the first run is a Tuesday -- applied later in the week, guests dip to
 # 2 archives until the next ISO-week rollover (Monday).
-# keep-daily=3,keep-weekly=2 (~5 archives/guest) is the largest policy that
-# fits pve01: one night is ~38 GB and the pool has 288 GB free, so
-# keep-daily=7 would need ~266 GB (98% pool) and keep-last=3+daily=7+weekly=2
-# needs ~456 GB. Fable proposed daily=7/weekly=4; the space math forbids it.
-pve_backup_prune_backups: "keep-daily=3,keep-weekly=2"
+# 2026-11-10: policy is keep-last=1 on the local NVMe pool -- one archive per
+# guest. The other generations live off-pool: the weekly push of each node's
+# newest per-guest archives into amd-workstation's 8TB vault, plus the weekly
+# encrypted Google Drive copy. Local space is only a fast-restore cache.
+# (Before this, keep-daily/weekly kept up to 5 archives per guest; the 500G
+# TanOS VMs on pve03 pushed that pool to 94% CAP.)
+pve_backup_prune_backups: "keep-last=1"
 pve_backup_notes_template: "ansible-managed nightly backup"
