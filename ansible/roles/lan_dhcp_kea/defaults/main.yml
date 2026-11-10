@@ -22,7 +22,7 @@ kea_rebind_timer: 1800
 
 kea_ha_heartbeat_ms: 5000
 kea_ha_max_response_ms: 30000
-kea_ha_max_unacked_clients: 3
+kea_ha_max_unacked_clients: 0
 
 kea_peers:
   - name: primary
