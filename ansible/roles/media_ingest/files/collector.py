@@ -30,8 +30,10 @@ folders as the historical archive.
 """
 import asyncio
 import datetime as dt
+import json
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -46,6 +48,12 @@ API_HASH = os.environ["TG_API_HASH"]
 SESSION = os.environ.get("TG_SESSION", "/var/lib/media-ingest/collector")
 STAGING = Path(os.environ.get("TG_STAGING", "/var/lib/media-ingest/staging"))
 LOG_FILE = os.environ.get("TG_LOG_FILE", "/var/log/media-ingest/collector.log")
+# Where a download is parked when the gallery push fails. STAGING is a tmpfs, so
+# anything left there dies with a reboot, and TTL/self-destruct media is purged
+# server-side once consumed -- a failed push used to be permanent data loss
+# (hit live 2026-11-10: the file was downloaded, the push 400'd during a gallery
+# auth outage, and the old unconditional cleanup deleted the only copy).
+FAILED = Path(os.environ.get("TG_FAILED_DIR", "/var/lib/media-ingest/failed"))
 
 # Active-pull backstop interval (seconds). Telegram deprioritizes update fan-out
 # to idle-looking secondary sessions (a userbot that only pings looks dormant),
@@ -246,6 +254,33 @@ def _refresh_excluded():
 _seen = set()
 
 
+def _park_failed(stem: str, folder: str, date_iso: str) -> None:
+    """Keep a downloaded-but-unpushed file instead of deleting it.
+
+    STAGING is a tmpfs and the old cleanup ran in a `finally`, so a failed push
+    destroyed the only copy while the source had already purged TTL media. Move
+    the bytes to the durable FAILED dir plus a .json sidecar (folder + date) so
+    a retry can push them correctly. Best-effort: never mask the original error.
+    """
+    try:
+        FAILED.mkdir(parents=True, exist_ok=True)
+        files = [p for p in STAGING.glob(stem + "*") if p.suffix != ".json"]
+        if not files:
+            return
+        for p in files:
+            shutil.move(str(p), str(FAILED / p.name))
+        (FAILED / (stem + ".json")).write_text(
+            json.dumps({"stem": stem, "folder": folder, "date": date_iso}),
+            encoding="utf-8",
+        )
+        log.warning(
+            "PARKED %s (%d file(s)) in %s — push failed, media kept for retry",
+            stem, len(files), FAILED,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("could not park %s: %s: %s", stem, type(e).__name__, e)
+
+
 async def handle(event):
     msg = event.message
     if getattr(msg, "out", False):
@@ -279,6 +314,7 @@ async def handle(event):
     log.info("MEDIA%s from chat=%s stem=%s kind=%s -> folder=%s%s", eph, cid, stem, kind, folder, lag_str)
 
     tmp = STAGING / stem
+    pushed = False
     try:
         path = await msg.download_media(file=str(tmp))
         if not path or os.path.getsize(path) == 0:
@@ -286,19 +322,19 @@ async def handle(event):
             return
         store_client.push_media(folder, path, stem, date_iso, is_out=False)
         _seen.add(stem)
+        pushed = True
         log.info("PUSHED %s to gallery folder %s", stem, folder)
     except Exception as e:  # noqa: BLE001
         log.error("capture/push failed %s: %s: %s", stem, type(e).__name__, e)
+        _park_failed(stem, folder, date_iso)
     finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        for p in STAGING.glob(stem + "*"):
-            try:
-                p.unlink()
-            except OSError:
-                pass
+        # Only a successful push earns deletion; a failed one was just parked.
+        if pushed:
+            for p in STAGING.glob(stem + "*"):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
 
 async def main():
