@@ -808,6 +808,25 @@ all:
               target_node: pve01
               features: "nesting=1"
               net_private_ip: "{{ ip_vm }}/24"
+            # VictoriaMetrics cluster (v1.142.0): each node runs vmstorage
+            # plus vminsert/vmselect; vminsert replicates every write to both
+            # storages (-replicationFactor=2) and lb-01 fronts the stateless
+            # insert/select tiers. vmagent on vm-01 scrapes once and
+            # remote-writes to the cluster.
+            vm-clus-01:
+              ansible_host: 172.16.0.46
+              vmid: 142
+              template: debian-12-standard_12.12-1_amd64.tar.zst
+              target_node: pve02
+              features: "nesting=1"
+              net_private_ip: 172.16.0.46/24
+            vm-clus-02:
+              ansible_host: 172.16.0.47
+              vmid: 143
+              template: debian-12-standard_12.12-1_amd64.tar.zst
+              target_node: pve03
+              features: "nesting=1"
+              net_private_ip: 172.16.0.47/24
         grafana:
           hosts:
             graf-01:

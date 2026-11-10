@@ -5,7 +5,7 @@ datasources:
     uid: victoriametrics
     type: prometheus
     access: proxy
-    url: http://{{ hostvars['vm-01']['ansible_host'] }}:8428
+    url: http://172.16.0.30:8481/select/0/prometheus
     isDefault: true
     version: 2
     editable: true
