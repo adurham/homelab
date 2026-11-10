@@ -96,7 +96,7 @@ alert_email_to: "amdnative@icloud.com"
 # Shared Grafana database (Postgres on ct 140, graf-db-01). Both Grafana
 # replicas point at it, which is what makes alerting HA work: Grafana's
 # alertmanager cluster dedupes notifications through this DB.
-grafana_db_host: "172.16.0.44"
+grafana_db_host: "172.16.0.30"
 grafana_db_name: "grafana_prod"
 grafana_db_user: "grafana"
 # Alerting HA gossip cluster (both replicas, UDP/TCP 9094).

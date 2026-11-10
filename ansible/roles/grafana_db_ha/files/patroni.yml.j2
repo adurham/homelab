@@ -1,0 +1,44 @@
+scope: grafana
+name: {{ patroni_name }}
+restapi:
+  listen: {{ patroni_ip }}:8008
+  connect_address: {{ patroni_ip }}:8008
+etcd3:
+  hosts: 172.16.0.44:2379,172.16.0.48:2379,172.16.0.42:2379
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    synchronous_mode: true
+    postgresql:
+      use_pg_rewind: true
+      parameters:
+        wal_log_hints: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        hot_standby: "on"
+        wal_level: replica
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - host replication replicator 172.16.0.0/24 scram-sha-256
+    - host all all 172.16.0.0/24 scram-sha-256
+postgresql:
+  listen: {{ patroni_ip }}:5432
+  connect_address: {{ patroni_ip }}:5432
+  data_dir: /var/lib/postgresql/15/main
+  bin_dir: /usr/lib/postgresql/15/bin
+  authentication:
+    replication:
+      username: replicator
+      password: {{ patroni_password }}
+    superuser:
+      username: postgres
+      password: {{ patroni_password }}
+  parameters:
+    unix_socket_directories: /var/run/postgresql
+    hba_file: /etc/postgresql/15/main/pg_hba.conf
+    ident_file: /etc/postgresql/15/main/pg_ident.conf
