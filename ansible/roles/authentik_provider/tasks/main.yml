@@ -29,6 +29,34 @@
     - default-provider-authorization-implicit-consent
     - default-provider-invalidation-flow
 
+- name: Look up OAuth 'groups' scope mapping
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/provider/scope/?scope_name=groups"
+    method: GET
+    headers: "{{ headers }}"
+  register: pve_groups_mapping
+
+- name: Create OAuth 'groups' scope mapping when missing
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/provider/scope/"
+    method: POST
+    headers: "{{ headers }}"
+    body_format: json
+    body:
+      name: "OAuth Mapping: groups"
+      scope_name: "groups"
+      description: "Groups claim for PVE (Authentik does not auto-create it on API-made providers)"
+      expression: "return [group.name for group in user.ak_groups.all()]"
+    status_code: [200, 201]
+  when: pve_groups_mapping.json.results | length == 0
+
+- name: Get OAuth Scope Mappings (Proxmox)
+  ansible.builtin.uri:
+    url: "{{ authentik_url }}/api/v3/propertymappings/provider/scope/?page_size=100"
+    method: GET
+    headers: "{{ headers }}"
+  register: pve_scope_mappings
+
 - name: Create Proxmox Provider
   ansible.builtin.uri:
     url: "{{ authentik_url }}/api/v3/providers/oauth2/"
@@ -45,6 +73,22 @@
       redirect_uris: >-
         {{ proxmox_redirect_uris.split() | map('regex_replace', '^(.*)$', '{"url": "\1", "matching_mode": "strict"}') | map('from_json') | list }}
       client_type: "confidential"
+      # Pin the client pair: a re-created provider otherwise gets a random
+      # client_id/secret that PVE's realm never learns, and SSO dies with
+      # "client_id is missing or invalid".
+      client_id: "{{ authentik_pve_client_id | default('D2YzWfFOmQgUJBpRjHzyOQeD6ODWhh0QUVEFgOHZ') }}"
+      client_secret: "{{ authentik_client_key }}"
+      # Authentik >= 2026.8 rejects authorize requests unless the grant type
+      # is listed; an API-created provider defaults to none ("Invalid
+      # grant_type for provider" -> malformed request).
+      grant_types:
+        - authorization_code
+        - refresh_token
+      property_mappings: >-
+        {{ pve_scope_mappings.json.results
+           | selectattr('managed', 'defined')
+           | selectattr('name', 'search', 'email|profile|openid|groups')
+           | map(attribute='pk') | list }}
       signing_key: "{{ signing_cert.json.results[0].pk }}"
     status_code: [200, 201]
   when: providers_list.json.results | length == 0
@@ -59,6 +103,16 @@
     body:
       redirect_uris: >-
         {{ proxmox_redirect_uris.split() | map('regex_replace', '^(.*)$', '{"url": "\1", "matching_mode": "strict"}') | map('from_json') | list }}
+      client_id: "{{ authentik_pve_client_id | default('D2YzWfFOmQgUJBpRjHzyOQeD6ODWhh0QUVEFgOHZ') }}"
+      client_secret: "{{ authentik_client_key }}"
+      grant_types:
+        - authorization_code
+        - refresh_token
+      property_mappings: >-
+        {{ pve_scope_mappings.json.results
+           | selectattr('managed', 'defined')
+           | selectattr('name', 'search', 'email|profile|openid|groups')
+           | map(attribute='pk') | list }}
       signing_key: "{{ signing_cert.json.results[0].pk }}"
     status_code: [200]
   when: providers_list.json.results | length > 0
@@ -264,6 +318,9 @@
           matching_mode: "strict"
       client_type: "confidential"
       signing_key: "{{ signing_cert.json.results[0].pk }}"
+      grant_types:
+        - authorization_code
+        - refresh_token
     status_code: [200, 201]
   when: grafana_providers_found.json.results | length == 0
   register: new_grafana_provider
@@ -306,6 +363,9 @@
       authorization_flow: "{{ grafana_authz_flow.json.results[0].pk }}"
       authentication_flow: "{{ grafana_auth_flow.json.results[0].pk }}"
       invalidation_flow: "{{ grafana_invalidation_pk }}"
+      grant_types:
+        - authorization_code
+        - refresh_token
     status_code: [200]
   when: grafana_provider_id is defined
   no_log: true
@@ -544,6 +604,8 @@
       client_id: "{{ media_ingest_collector_client_id | default('media-ingest-collector') }}"
       client_secret: "{{ vault_media_ingest_collector_client_secret }}"
       access_token_validity: "hours=1"
+      grant_types:
+        - client_credentials
       signing_key: "{{ collector_signing_key.json.results[0].pk }}"
       sub_mode: "hashed_user_id"
       property_mappings: "{{ collector_scope_openid.json.results | map(attribute='pk') | list }}"
@@ -559,6 +621,8 @@
     body_format: json
     body:
       signing_key: "{{ collector_signing_key.json.results[0].pk }}"
+      grant_types:
+        - client_credentials
     status_code: [200]
   when: collector_providers.json.results | length > 0
 

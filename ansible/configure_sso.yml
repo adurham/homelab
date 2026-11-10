@@ -5,8 +5,9 @@
   run_once: true
   vars:
     # Secrets provided by user
-    authentik_client_id: "D2YzWfFOmQgUJBpRjHzyOQeD6ODWhh0QUVEFgOHZ"
-    authentik_client_key: "{{ authentik_client_key }}"
+    authentik_client_id: "{{ authentik_pve_client_id }}"
+    # client secret comes from group_vars/all/vault.yml (authentik_client_key);
+    # the previous self-referencing override here shadowed it.
     authentik_url: "https://auth.chi.lab.amd-e.com/application/o/proxmox/"
     # User config
     admin_email: "admin@lab.amd-e.com"
@@ -37,6 +38,8 @@
       ansible.builtin.shell: >
         pveum realm modify {{ realm_name }}
         --issuer-url {{ authentik_url }}
+        --client-id '{{ authentik_client_id }}'
+        --client-key '{{ authentik_client_key }}'
         --groups-claim groups
         --scopes "openid profile email groups"
         --autocreate 1

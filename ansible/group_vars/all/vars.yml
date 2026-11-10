@@ -34,6 +34,11 @@ ip_authentik: "172.16.0.20"
 # so deploy_media_gallery.yml failed with 'authentik_url is undefined'. Define it
 # globally so every role/playbook resolves it.
 authentik_url: "https://auth.chi.lab.amd-e.com"
+# OIDC client_id for the PVE `lab.amd-e.com` realm. PVE's realm and the
+# Authentik provider must carry the SAME client_id/client_secret or every
+# login dies with "client_id is missing or invalid". Both configure_sso.yml
+# (PVE side) and the authentik_provider role read this one value.
+authentik_pve_client_id: "D2YzWfFOmQgUJBpRjHzyOQeD6ODWhh0QUVEFgOHZ"
 ip_loadbalancer: "172.16.0.30"
 ip_mail_server: "172.16.0.40"
 ip_grafana: "172.16.0.41"
