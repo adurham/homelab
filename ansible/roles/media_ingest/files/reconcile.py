@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -62,6 +63,25 @@ FAILED = Path(os.environ.get("TG_FAILED_DIR", "/var/lib/media-ingest/failed"))
 # the whole sweep — and did for ~20h on 2026-11-10 while the gallery auth was
 # broken, silently losing every ephemeral item in the window.
 EXCL_CACHE = Path(os.environ.get("TG_EXCLUDED_CACHE", "/var/lib/media-ingest/excluded_cache.json"))
+# Parked downloads are AES-256 encrypted at rest (plaintext media must never
+# touch persistent storage); they are decrypted into the tmpfs only for the push.
+ENC_KEY = os.environ.get("STAGING_ENC_KEY", "")
+
+
+def _encrypt_file(src: Path, dst: Path) -> None:
+    subprocess.run(
+        ["gpg", "--batch", "--yes", "--quiet", "--cipher-algo", "AES256",
+         "--passphrase-fd", "0", "--symmetric", "--output", str(dst), str(src)],
+        input=ENC_KEY.encode(), check=True,
+    )
+
+
+def _decrypt_file(src: Path, dst: Path) -> None:
+    subprocess.run(
+        ["gpg", "--batch", "--yes", "--quiet", "--passphrase-fd", "0",
+         "--output", str(dst), "--decrypt", str(src)],
+        input=ENC_KEY.encode(), check=True,
+    )
 
 STAGING.mkdir(parents=True, exist_ok=True)
 Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
@@ -83,21 +103,28 @@ def _park(stem, folder, date_iso):
     """Keep a reconcile download whose push failed (mirror of collector._park_failed).
 
     The sweep's own cleanup used to delete the file even on failure, so an outage
-    could lose media the same way the live collector did. Park it next to the
-    collector's parked items; the next sweep's push_parked() drains it.
+    could lose media the same way the live collector did. Encrypt it into FAILED
+    (plaintext never lands on persistent storage); the next sweep drains it.
     """
     try:
         FAILED.mkdir(parents=True, exist_ok=True)
         files = [p for p in STAGING.glob(stem + "*") if p.suffix != ".json"]
         if not files:
             return
+        if not ENC_KEY:
+            log.error("no STAGING_ENC_KEY — refusing to write %s to disk in "
+                      "plaintext; the download is lost (secrecy beats availability)",
+                      stem)
+            return
         for p in files:
-            shutil.move(str(p), str(FAILED / p.name))
+            _encrypt_file(p, FAILED / (p.name + ".gpg"))
+            p.unlink()
         (FAILED / (stem + ".json")).write_text(
-            json.dumps({"stem": stem, "folder": folder, "date": date_iso}),
+            json.dumps({"stem": stem, "folder": folder, "date": date_iso,
+                        "encrypted": True}),
             encoding="utf-8",
         )
-        log.warning("PARKED %s (%d file(s)) in %s — push failed, kept for retry",
+        log.warning("PARKED %s (%d file(s), encrypted) in %s — push failed, kept for retry",
                     stem, len(files), FAILED)
     except Exception as e:  # noqa: BLE001
         log.warning("could not park %s: %s: %s", stem, type(e).__name__, e)
@@ -127,8 +154,19 @@ def push_parked(dry_run=False, limit=50):
         if dry_run:
             log.info("WOULD push parked %s (%s) -> %s", stem, files[0].name, folder)
             continue
+        tmp = None
+        payload = files[0]
         try:
-            store_client.push_media(folder, str(files[0]), stem, meta.get("date", ""),
+            if meta.get("encrypted") or payload.suffix == ".gpg":
+                if not ENC_KEY:
+                    log.error("parked %s is encrypted but STAGING_ENC_KEY is unset — "
+                              "cannot drain it", stem)
+                    failed += 1
+                    continue
+                tmp = STAGING / (stem + ".dec")
+                _decrypt_file(payload, tmp)   # plaintext lands only in the tmpfs
+                payload = tmp
+            store_client.push_media(folder, str(payload), stem, meta.get("date", ""),
                                     is_out=False)
             for p in files:
                 p.unlink()
@@ -138,6 +176,9 @@ def push_parked(dry_run=False, limit=50):
         except Exception as e:  # noqa: BLE001
             log.error("parked push failed %s: %s: %s", stem, type(e).__name__, e)
             failed += 1
+        finally:
+            if tmp is not None and tmp.exists():
+                tmp.unlink()
     return pushed, failed
 
 

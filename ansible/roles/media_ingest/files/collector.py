@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -54,6 +55,21 @@ LOG_FILE = os.environ.get("TG_LOG_FILE", "/var/log/media-ingest/collector.log")
 # (hit live 2026-11-10: the file was downloaded, the push 400'd during a gallery
 # auth outage, and the old unconditional cleanup deleted the only copy).
 FAILED = Path(os.environ.get("TG_FAILED_DIR", "/var/lib/media-ingest/failed"))
+# Key for at-rest encryption of parked downloads. Plaintext media must never
+# touch persistent storage (that is why staging is a tmpfs), but a failed push
+# has to survive a restart, so the bytes are parked AES-256-encrypted and only
+# decrypted into the tmpfs when they are pushed. Key comes from the vault via
+# the service env; with no key we do NOT park (secrecy beats availability).
+ENC_KEY = os.environ.get("STAGING_ENC_KEY", "")
+
+
+def _encrypt_file(src: Path, dst: Path) -> None:
+    """Encrypt src to dst with the staging key (gpg symmetric, AES-256)."""
+    subprocess.run(
+        ["gpg", "--batch", "--yes", "--quiet", "--cipher-algo", "AES256",
+         "--passphrase-fd", "0", "--symmetric", "--output", str(dst), str(src)],
+        input=ENC_KEY.encode(), check=True,
+    )
 
 # Active-pull backstop interval (seconds). Telegram deprioritizes update fan-out
 # to idle-looking secondary sessions (a userbot that only pings looks dormant),
@@ -267,14 +283,22 @@ def _park_failed(stem: str, folder: str, date_iso: str) -> None:
         files = [p for p in STAGING.glob(stem + "*") if p.suffix != ".json"]
         if not files:
             return
+        if not ENC_KEY:
+            log.error("no STAGING_ENC_KEY — refusing to write %s to disk in "
+                      "plaintext; the download is lost (secrecy beats availability)",
+                      stem)
+            return
         for p in files:
-            shutil.move(str(p), str(FAILED / p.name))
+            dst = FAILED / (p.name + ".gpg")
+            _encrypt_file(p, dst)
+            p.unlink()  # plaintext never lands on persistent storage
         (FAILED / (stem + ".json")).write_text(
-            json.dumps({"stem": stem, "folder": folder, "date": date_iso}),
+            json.dumps({"stem": stem, "folder": folder, "date": date_iso,
+                        "encrypted": True}),
             encoding="utf-8",
         )
         log.warning(
-            "PARKED %s (%d file(s)) in %s — push failed, media kept for retry",
+            "PARKED %s (%d file(s), encrypted) in %s — push failed, kept for retry",
             stem, len(files), FAILED,
         )
     except Exception as e:  # noqa: BLE001
