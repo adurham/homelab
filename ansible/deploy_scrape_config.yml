@@ -1,0 +1,18 @@
+---
+# Re-apply ONLY the scrape configuration to vm-01 (VictoriaMetrics).
+#
+# Exists because deploy_monitoring.yml is too broad for a scrape change: its
+# first play recreates the monitoring CTs, which nobody wants when the ask is
+# "add a blackbox target". This renders roles/victoriametrics
+# (prometheus.yml, the blackbox module config) and restarts the service if
+# anything changed.
+#
+#   ansible-playbook ansible/deploy_scrape_config.yml \
+#     --vault-password-file ./vault-pass
+- name: VictoriaMetrics scrape configuration
+  hosts: victoriametrics
+  gather_facts: true
+  tasks:
+    - name: Apply victoriametrics role
+      ansible.builtin.include_role:
+        name: victoriametrics

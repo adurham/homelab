@@ -341,6 +341,33 @@ scrape_configs:
       - target_label: __address__
         replacement: 127.0.0.1:9115
 
+  # The LAN resolvers themselves: 192.168.86.4 (lan-dns-01, pve01) and
+  # 192.168.86.5 (lan-dns-02, pve02). These are what every LAN client's
+  # DHCP option 6 hands out, so if recursion through them breaks, the whole
+  # house loses names -- the 2026-11-09 outage. Probed from vm-01, which
+  # reaches the .86 LAN (it already scrapes HA at .2:8123), so the check
+  # stays independent of the hosts it is watching. The HA Green (.2) is
+  # deliberately NOT a target: its AdGuard was uninstalled 2026-11-10 and
+  # it is no longer a resolver.
+  - job_name: 'blackbox_lan_dns'
+    metrics_path: /probe
+    params:
+      module: [dns_recursion]
+    static_configs:
+      - targets: ['192.168.86.4']
+        labels:
+          instance: 'lan-dns-01'
+      - targets: ['192.168.86.5']
+        labels:
+          instance: 'lan-dns-02'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
   # Directly-tailnet'd containers. These two lost their tailscaled when
   # their resolv.conf (MagicDNS only) lost DNS, which made them
   # unreachable by name while their LAN leg stayed up — the failure looked

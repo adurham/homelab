@@ -5133,3 +5133,424 @@ groups:
     labels:
       severity: warning
     isPaused: false
+  - uid: lan_dns_resolvers_down
+    title: LAN DNS resolver not answering
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: probe_success{job="blackbox_lan_dns"}
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: eq
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: Alerting
+    execErrState: Alerting
+    for: 5m
+    annotations:
+      summary: LAN resolver {{ '{{' }} $labels.instance {{ '}}' }} cannot resolve external names
+      description: "The recursive probe of www.google.com A through a LAN resolver (job blackbox_lan_dns,\
+        \ target 192.168.86.4 = lan-dns-01 / 192.168.86.5 = lan-dns-02) has failed for 5 minutes.\
+        \ Every LAN client gets these two addresses as its DNS servers via DHCP option 6, so a\
+        \ resolver that stops recursing takes the whole house's name resolution with it -- that is\
+        \ the 2026-11-09 outage, where the single resolver on the HA Green stayed down 89 minutes\
+        \ and nothing paged. One resolver down is survivable (clients fail over), which is why this\
+        \ rule is per-instance and the redundancy-loss rule below is separate. Check the container:\
+        \ `pct exec 130 -- systemctl status AdGuardHome` (or 131), then\
+        \ `dig +short google.com @192.168.86.4` from any host on the LAN."
+    labels:
+      severity: critical
+    isPaused: false
+  - uid: lan_dns_redundancy_lost
+    title: LAN DNS has fewer than two working resolvers
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: count(probe_success{job="blackbox_lan_dns"} == 1)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 2
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Alerting
+    for: 10m
+    annotations:
+      summary: LAN DNS is running on fewer than two resolvers
+      description: "Fewer than two of the .4/.5 resolver pair answer a recursive query. Names still\
+        \ resolve while one is up, so this is the warning that says the house is one failure away\
+        \ from the 2026-11-09 outage again. Fix the dead one before the other follows: check the\
+        \ container (pct status 130 / 131), then AdGuardHome's own log inside it."
+    labels:
+      severity: warning
+    isPaused: false
+  - uid: lan_dhcp_server_down
+    title: LAN DHCP not answering
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 900
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: min(lan_dhcp_up)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Alerting
+    for: 15m
+    annotations:
+      summary: No DHCP server answered a DISCOVER on the LAN
+      description: "lan_dhcp_up comes from the LAN watchdog on amd-workstation (root timer, every\
+        \ 5 min): it sends a real DHCP DISCOVER on the .86 LAN and records whether an offer came\
+        \ back. dnsmasq for the house runs on lan-dns-01 (CT 130, 192.168.86.4); the Nest/Google\
+        \ router only ever offers .2, so there is no second server. Existing leases keep working\
+        \ until they expire (T1 6h), which is why this is 15m rather than 2m -- but any new device\
+        \ or renewal fails. Check: `pct exec 130 -- systemctl status dnsmasq` and\
+        \ `journalctl -u dnsmasq -n 50` on pve01."
+    labels:
+      severity: critical
+    isPaused: false
+  - uid: lan_gateway_unreachable
+    title: LAN gateway not answering
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: min(lan_gateway_up)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Alerting
+    for: 5m
+    annotations:
+      summary: The LAN gateway (192.168.86.1) is not answering ICMP
+      description: "lan_gateway_up is 0: the router at 192.168.86.1 did not answer an ICMP echo\
+        \ for 5 minutes. This is the Nest/Google router, the only path off the LAN -- no WAN, no\
+        \ DHCP renewals, no cloud integrations. Check whether the egress probes (blackbox_internet_egress)\
+        \ agree: if those are also down the fault is the router or the ISP link, not this host."
+    labels:
+      severity: warning
+    isPaused: false
+  - uid: sso_pve_authorize_broken
+    title: PVE SSO authorize flow broken
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 900
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: min(sso_canary_ok)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Alerting
+    for: 15m
+    annotations:
+      summary: PVE -> Authentik login is broken
+      description: "sso_canary_ok is 0: PVE's own authorize URL no longer reaches the Authentik\
+        \ login flow. The canary uses the unauthenticated /access/openid/auth-url endpoint and\
+        \ then follows the redirect, so it catches client_id drift, missing grant_types, a dead\
+        \ authentication flow and missing scope mappings without needing credentials -- all four\
+        \ have broken this login before (2026-11-10: providers created without grant_types and\
+        \ with a regenerated client_id). Fix in the Authentik admin: Applications -> Providers ->\
+        \ Proxmox, check client_id matches pve's realm (datacenter.cfg / configure_sso.yml) and that\
+        \ grant_types contains authorization_code. Metric source: sso-canary.timer on amd-workstation."
+    labels:
+      severity: critical
+    isPaused: false
+  - uid: pve_zfs_pool_capacity_high
+    title: PVE ZFS pool filling up
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: max by (node, pool) (pve_zfs_pool_used_percent)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 85
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Alerting
+    for: 30m
+    annotations:
+      summary: ZFS pool {{ '{{' }} $labels.pool {{ '}}' }} on {{ '{{' }} $labels.node {{ '}}' }} is {{ '{{' }} $values.A {{ '}}' }}% full
+      description: "ZFS degrades badly past 80% (fragmentation, slower allocation, longer txg\
+        \ commits), and at 94% on pve03 the pool could not take another backup archive without\
+        \ failing. The 2026-11-10 cleanup that fixed this only worked because someone looked.\
+        \ Check what is holding space: `zfs list -o name,used,refer,usedbysnapshots -s used -r\
+        \ <pool> | tail -20` on the node. Usual culprits are stale per-guest vzdump archives\
+        \ (retention should be keep-last=1 locally; history belongs in the 8TB vault and Google\
+        \ Drive) and old pre-* snapshots. Metric source: pve-storage-watchdog.timer on amd-workstation."
+    labels:
+      severity: warning
+    isPaused: false
+  - uid: pve_storage_watchdog_broken
+    title: PVE storage watchdog cannot read the cluster
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 3600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: min(pve_storage_watchdog_ok) or (time() - max(pve_storage_watchdog_timestamp_seconds)) > 3600
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Alerting
+    for: 30m
+    annotations:
+      summary: PVE storage watchdog is not reporting
+      description: "pve_storage_watchdog_ok is 0, or the last successful run is over an hour old:\
+        \ the capacity alarm itself is broken, which is worse than a full pool because it fails\
+        \ silently. Usual cause is the hermes@pve API token (401) -- check the header in\
+        \ ~/.hermes/pve-token and `tail ~/.hermes/logs/pve-storage.log` on amd-workstation."
+    labels:
+      severity: warning
+    isPaused: false
