@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew the NAT-PMP UDP 8555 mapping every 30 minutes
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=30min
+Unit=frigate-natpmp.service
+
+[Install]
+WantedBy=timers.target

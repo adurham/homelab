@@ -114,6 +114,19 @@ left every SDM call at `status=200` with no 400s and no 429s in a 10-minute
 window. Nothing in the repo used the integration's entities (its only camera,
 `camera.basement_camera`, has no consumer), so it stays disabled.
 
+### WebRTC media needs a public mapping — and Nest Wifi only speaks NAT-PMP
+
+Nest's peer sends media to the candidate we advertise. With only a private
+`192.168.86.17:8555` candidate, `tcpdump -ni any "udp port 8555"` on the CT shows
+**nothing**: no media ever arrives, Frigate reports 0 fps, and go2rtc cannot even
+produce a frame.jpeg from the stream while the SDM API happily returns 200.
+
+The gateway here is a **Nest Wifi**: no admin API, no UPnP IGD (`upnpc -s` only
+finds the Hue bridge), but it *does* answer **NAT-PMP**. `frigate-natpmp-renew.sh`
+(+ `frigate-natpmp.timer`, every 30 min) maps public UDP 8555 -> the CT, and
+go2rtc advertises `stun:8555` so it learns that public ip:port itself. That is
+the whole router-side setup - nobody needs to open the Google Home app.
+
 ### Last-good frames: kill the placeholder tiles
 
 Frigate's placeholder is what makes a stalled camera look *broken*. `lastgood.py`

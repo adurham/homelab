@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew the NAT-PMP UDP 8555 mapping for go2rtc WebRTC media
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/frigate/frigate-natpmp-renew.sh

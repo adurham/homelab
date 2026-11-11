@@ -534,3 +534,28 @@
     pct exec {{ vmid }} -- bash -c
     "systemctl daemon-reload && systemctl enable --now frigate-lastgood.service"
   changed_when: true
+
+# ── NAT-PMP mapping for WebRTC media ────────────────────────────────────────
+# Nest's WebRTC peer can only send media to a public address, and this LAN's
+# gateway is a Nest Wifi: no UPnP IGD, no admin API. It does answer NAT-PMP, so
+# the CT opens its own UDP 8555 mapping and renews it on a timer.
+- name: Install the NAT-PMP renewal script inside the CT
+  ansible.builtin.command: >-
+    pct push {{ vmid }} {{ role_path }}/files/frigate-natpmp-renew.sh
+    /opt/frigate/frigate-natpmp-renew.sh --perms 0755
+  changed_when: true
+
+- name: Install the NAT-PMP systemd unit + timer inside the CT
+  ansible.builtin.command: >-
+    pct push {{ vmid }} {{ item }}
+    /etc/systemd/system/{{ item }} --perms 0644
+  loop:
+    - frigate-natpmp.service
+    - frigate-natpmp.timer
+  changed_when: true
+
+- name: Enable the NAT-PMP renewal timer
+  ansible.builtin.command: >-
+    pct exec {{ vmid }} -- bash -c
+    "systemctl daemon-reload && systemctl enable --now frigate-natpmp.timer"
+  changed_when: true
