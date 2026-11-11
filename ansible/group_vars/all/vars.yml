@@ -97,7 +97,7 @@ alert_email_to: "amdnative@icloud.com"
 # replicas point at it, which is what makes alerting HA work: Grafana's
 # alertmanager cluster dedupes notifications through this DB.
 grafana_db_host: "127.0.0.1"
-grafana_db_name: "grafana_prod"
+grafana_db_name: "grafana_prod_utf8"
 grafana_db_user: "grafana"
 # Alerting HA gossip cluster (both replicas, UDP/TCP 9094).
 grafana_ha_peers: "172.16.0.41:9094,172.16.0.45:9094"
