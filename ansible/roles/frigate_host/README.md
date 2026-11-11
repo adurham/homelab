@@ -127,6 +127,23 @@ finds the Hue bridge), but it *does* answer **NAT-PMP**. `frigate-natpmp-renew.s
 go2rtc advertises `stun:8555` so it learns that public ip:port itself. That is
 the whole router-side setup - nobody needs to open the Google Home app.
 
+### Experiments that did NOT fix the media decay (do not repeat)
+
+Every one of these was measured on the live fleet, 2026-11-10/11:
+
+| change | result |
+|---|---|
+| quota limiter (10/min project budget) | fixes 429 storms, calls all 200 — **keep** |
+| HA `nest` integration disabled | `400 invalid session` disappears — **keep disabled** |
+| NAT-PMP mapping + `stun:8555` candidate | media flows for a while, then decays |
+| drop go2rtc `preload` | no 400s at all, but **0/6 live** — preload is required |
+| read `<cam>_raw` directly (no restream) | 1/6 |
+| only 3 cameras enabled (concurrency test) | **0/3** — not a concurrency limit |
+| upstream PR #2493 (`nest: keep sessions alive…`) | 0–2/6, worse than the carried patch |
+
+Pattern in every case: SDM dials and extends return 200, then the media stops
+after 1–2 minutes and Frigate's fps falls to 0.
+
 ### Last-good frames: kill the placeholder tiles
 
 Frigate's placeholder is what makes a stalled camera look *broken*. `lastgood.py`
