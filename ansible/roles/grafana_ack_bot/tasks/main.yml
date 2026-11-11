@@ -133,6 +133,21 @@
     state: present
   notify: Save iptables rules
 
+- name: "iptables: allow the LB pair and VIP to grafana-ack-bot tcp/8990"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8990"
+    source: "{{ item }}"
+    jump: ACCEPT
+    comment: "grafana_ack_bot: LB -> webhook receiver"
+    state: present
+  loop:
+    - 172.16.0.29
+    - 172.16.0.30
+    - 172.16.0.31
+  notify: Save iptables rules
+
 - name: "iptables: allow lb-01 (172.16.0.30) to grafana-ack-bot tcp/8990"
   ansible.builtin.iptables:
     chain: INPUT
