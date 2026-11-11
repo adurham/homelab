@@ -10,9 +10,11 @@
 {% endif %}
 {% set _ = reservations.append(entry) %}
 {% endfor %}
+{% set pools = [] %}
+{% for p in kea_pools %}{% set _ = pools.append({"pool": p}) %}{% endfor %}
 {% set ha = {
   "this-server-name": kea_role,
-  "mode": "hot-standby",
+  "mode": kea_ha_mode,
   "heartbeat-delay": kea_ha_heartbeat_ms,
   "max-response-delay": kea_ha_max_response_ms,
   "max-ack-delay": 5000,
@@ -22,7 +24,7 @@
 {% set subnet = {
   "subnet": kea_subnet,
   "id": 1,
-  "pools": [{"pool": kea_pool}],
+  "pools": pools,
   "option-data": [
     {"name": "routers", "data": kea_routers},
     {"name": "domain-name-servers", "data": kea_dns_servers},

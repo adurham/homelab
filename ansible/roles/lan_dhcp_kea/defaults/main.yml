@@ -10,7 +10,15 @@ kea_lease_file: /var/lib/kea/kea-leases4.csv
 kea_role: "{{ 'primary' if inventory_hostname == 'lan-dns-01' else 'standby' }}"
 
 kea_subnet: 192.168.86.0/24
-kea_pool: 192.168.86.20 - 192.168.86.99
+# .55 (ps5forge-rig), .56 (mitm-generic) and .84 (midea-ac) are static hosts that
+# used to sit inside the .20-.99 range: Kea offered their addresses to other
+# clients, the clients ARP-probed, found them occupied and sent DHCPDECLINE,
+# which blacklists the address for 24h. The pool is split around them so those
+# addresses are never handed out at all.
+kea_pools:
+  - "192.168.86.20 - 192.168.86.54"
+  - "192.168.86.57 - 192.168.86.83"
+  - "192.168.86.85 - 192.168.86.99"
 kea_routers: 192.168.86.1
 kea_dns_servers: 192.168.86.4, 192.168.86.5
 kea_ntp_servers: 216.239.35.0, 216.239.35.4
@@ -22,7 +30,14 @@ kea_rebind_timer: 1800
 
 kea_ha_heartbeat_ms: 5000
 kea_ha_max_response_ms: 30000
-kea_ha_max_unacked_clients: 0
+
+# `hot-standby` never promotes on this topology: the standby sees no client
+# traffic, so max-unacked-clients never trips and a dead primary leaves the
+# survivor stuck in COMMUNICATION-INTERRUPTED answering nothing. `passive-backup`
+# promotes on heartbeat loss, which is the behaviour we actually want; the
+# unacked-client trigger stays non-zero so an in-flight failure can also promote.
+kea_ha_mode: passive-backup
+kea_ha_max_unacked_clients: 5
 
 kea_peers:
   - name: primary
@@ -30,4 +45,4 @@ kea_peers:
     role: primary
   - name: standby
     url: http://192.168.86.5:8000/
-    role: standby
+    role: backup

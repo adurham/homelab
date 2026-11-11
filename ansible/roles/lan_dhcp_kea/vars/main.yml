@@ -121,3 +121,18 @@ lan_dhcp_reservations:
     options:
       router: 192.168.86.56
       dns: 192.168.86.56
+
+  # Static hosts that sit INSIDE the dynamic pool (.20-.99). They are configured
+  # with fixed addresses on the host side, so without a reservation Kea happily
+  # offers their addresses to other clients; the client ARP-probes, sees them
+  # already in use, sends DHCPDECLINE, and Kea blacklists the address for 24h.
+  # That is what produced the declines on .55/.56/.84.
+  - mac: bc:24:11:b3:65:96
+    ip: 192.168.86.55
+    hostname: ps5forge-rig
+  - mac: bc:24:11:76:e4:b8
+    ip: 192.168.86.56
+    hostname: mitm-generic
+  - mac: BC:04:35:DB:C7:6A
+    ip: 192.168.86.84
+    hostname: midea-ac
