@@ -1,0 +1,7 @@
+[Unit]
+Description=Promote the Kea standby when the primary is unreachable
+After=kea-dhcp4-server.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/dhcp-failover-watch.py

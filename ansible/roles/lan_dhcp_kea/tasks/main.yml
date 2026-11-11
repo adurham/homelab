@@ -68,3 +68,64 @@
 - name: HA state
   ansible.builtin.debug:
     msg: "{{ kea_ha_state.stdout_lines | default([]) }}"
+
+# --- Failover watchdog (standby only) ---------------------------------------
+# Kea 2.4.1's HA hook will not promote this pair: with the primary gone the
+# backup stays in "backup" state, `dhcp-enable` returns success but the socket
+# stays filtered, and `ha-maintenance-start` is refused (backup ->
+# partner-in-maintenance). Proven 2026-11-10. So the standby carries a watchdog
+# that swaps in a standalone config (same subnet/pool/reservations, HA hook
+# removed) when the primary is unreachable, and swaps the HA config back when it
+# returns. Measured: promote in ~24s, hand back in ~14s, real client served.
+- name: Keep the HA config for the watchdog to swap back
+  ansible.builtin.copy:
+    src: "{{ kea_conf }}"
+    dest: "{{ kea_ha_conf }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0644'
+  when: kea_role == 'standby'
+
+- name: Render the standalone config used during promotion
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    import json
+    cfg = json.load(open("{{ kea_conf }}"))
+    cfg["Dhcp4"]["hooks-libraries"] = [
+        h for h in cfg["Dhcp4"].get("hooks-libraries", [])
+        if "libdhcp_ha.so" not in h.get("library", "")
+    ]
+    json.dump(cfg, open("{{ kea_standalone_conf }}", "w"), indent=2)
+    PY
+  changed_when: false
+  when: kea_role == 'standby'
+
+- name: Install the failover watchdog
+  ansible.builtin.copy:
+    src: dhcp-failover-watch.py
+    dest: /usr/local/sbin/dhcp-failover-watch.py
+    owner: root
+    group: root
+    mode: '0755'
+  when: kea_role == 'standby'
+
+- name: Install the watchdog unit and timer
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - dhcp-failover-watch.service
+    - dhcp-failover-watch.timer
+  when: kea_role == 'standby'
+
+- name: Enable the failover watchdog timer
+  ansible.builtin.systemd:
+    name: dhcp-failover-watch.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: kea_role == 'standby'

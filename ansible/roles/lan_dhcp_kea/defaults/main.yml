@@ -5,6 +5,8 @@
 
 kea_hook_dir: /usr/lib/x86_64-linux-gnu/kea/hooks
 kea_conf: /etc/kea/kea-dhcp4.conf
+kea_ha_conf: /etc/kea/kea-dhcp4.ha.conf
+kea_standalone_conf: /etc/kea/kea-dhcp4.standalone.conf
 kea_lease_file: /var/lib/kea/kea-leases4.csv
 
 kea_role: "{{ 'primary' if inventory_hostname == 'lan-dns-01' else 'standby' }}"
