@@ -7,7 +7,7 @@ it; keepalived moves it between the two LBs.
 | Node | Host address | Role | VRRP priority |
 |---|---|---|---|
 | lb-01 (CT 103) | 172.16.0.29 | MASTER | 150 |
-| lb-02 (CT 146) | 172.16.0.31 | BACKUP | 100 |
+| lb-02 (CT 147, pve01) | 172.16.0.31 | BACKUP | 100 |
 
 VRRP runs **unicast** (`unicast_src_ip` / `unicast_peer`) because multicast on
 the SDN bridge is not dependable. `chk_nginx` tracks `/usr/bin/pgrep -x nginx`
