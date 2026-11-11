@@ -127,6 +127,25 @@ finds the Hue bridge), but it *does* answer **NAT-PMP**. `frigate-natpmp-renew.s
 go2rtc advertises `stun:8555` so it learns that public ip:port itself. That is
 the whole router-side setup - nobody needs to open the Google Home app.
 
+### The fix: pin the Nest PeerConnection UDP ports (do not lose this)
+
+The nest sources' Pion PeerConnections used **ephemeral** UDP ports, so the Nest
+Wifi router's mapping expired about 60 s in and Google's media could not reach
+the CT - `tcpdump "udp port 8555"` showed nothing because 8555 is only go2rtc's
+own server, never the nest media path. SDM still said 200, which is why every
+other theory looked plausible.
+
+`go2rtc-nest-udpports.patch` makes `rtcConn` build its API with
+`webrtc.NewServerAPI("", "", &webrtc.Filters{UDPPorts: []uint16{8561, 8566}})` -
+six fixed ports, one per camera - and `frigate-natpmp-renew.sh` maps that range
+(plus 8555) with NAT-PMP every 30 minutes. Result: **6/6 cameras live and steady**,
+where every earlier configuration decayed to 0-4 within minutes.
+
+If a camera ever stalls again, bounce go2rtc (`docker exec frigate pkill -f
+/config/go2rtc`; s6 restarts it in ~5 s and all six re-dial). That is now the
+first line in `camera_health.py`: 10 min dead -> go2rtc bounce, still dead after
+the bounce -> full Frigate restart after an hour.
+
 ### Experiments that did NOT fix the media decay (do not repeat)
 
 Every one of these was measured on the live fleet, 2026-11-10/11:

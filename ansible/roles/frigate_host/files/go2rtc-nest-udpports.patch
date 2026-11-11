@@ -1,0 +1,18 @@
+diff --git a/pkg/nest/client.go b/pkg/nest/client.go
+index 189f4dc..ebac5d3 100644
+--- a/pkg/nest/client.go
++++ b/pkg/nest/client.go
+@@ -184,7 +184,12 @@ func rtcConn(nestAPI *API, rawURL, projectID, deviceID string) (*WebRTCClient, e
+ 	var lastErr error
+ 
+ 	for attempt := 0; attempt < maxRetries; attempt++ {
+-		rtcAPI, err := webrtc.NewAPI()
++		// Pin the Nest peer connections to a fixed UDP range (one port per
++		// camera) so NAT-PMP can map them. Ephemeral ports lose their router
++		// mapping after ~60s, which is exactly when the streams used to die.
++		rtcAPI, err := webrtc.NewServerAPI("", "", &webrtc.Filters{
++			UDPPorts: []uint16{8561, 8566},
++		})
+ 		if err != nil {
+ 			return nil, err
+ 		}

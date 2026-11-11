@@ -63,6 +63,12 @@ git -c user.name=amd -c user.email=amd@frigate-01 \
 git apply --3way "$PATCH_DIR/go2rtc-nest-quota.patch"
 git -c user.name=amd -c user.email=amd@frigate-01 \
   commit --quiet -am "nest: sliding-window Device Access quota limiter (carried patch)"
+# Third patch: pin the nest PeerConnections to UDP 8561-8566. Their sockets used
+# to be ephemeral, so the router's UDP mapping expired ~60 s in and every camera
+# died 1-2 minutes after starting. frigate-natpmp-renew.sh maps that range.
+git apply --3way "$PATCH_DIR/go2rtc-nest-udpports.patch"
+git -c user.name=amd -c user.email=amd@frigate-01 \
+  commit --quiet -am "nest: pin PeerConnection UDP ports so NAT-PMP can map them (carried patch)"
 
 PATH="$GO_HOME/go/bin:$PATH" CGO_ENABLED=0 \
   go build -trimpath -ldflags "-s -w" -o "$OUT" .

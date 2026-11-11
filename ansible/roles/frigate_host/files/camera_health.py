@@ -36,8 +36,9 @@ FRIGATE = os.environ.get("FRIGATE_URL", "http://localhost:5000")
 COMPOSE_DIR = "/opt/frigate"
 STATE_PATH = "/var/lib/frigate-camera-health.json"
 
-DEAD_CHECKS = int(os.environ.get("DEAD_CHECKS", "6"))              # consecutive ticks (~30 min)
-RESTART_COOLDOWN = int(os.environ.get("RESTART_COOLDOWN", "3600"))  # seconds
+DEAD_CHECKS = int(os.environ.get("DEAD_CHECKS", "2"))              # consecutive ticks (~10 min)
+RESTART_COOLDOWN = int(os.environ.get("RESTART_COOLDOWN", "3600"))  # full container restart
+GO2RTC_COOLDOWN = int(os.environ.get("GO2RTC_COOLDOWN", "900"))     # go2rtc-only bounce
 DRY = "--dry-run" in sys.argv
 
 
@@ -72,6 +73,21 @@ def restart_frigate():
     )
 
 
+def restart_go2rtc():
+    """Re-dial every nest source without touching Frigate.
+
+    s6 supervises go2rtc inside the container, so killing the process brings it
+    straight back (~5 s) and all six cameras negotiate fresh WebRTC sessions.
+    This is the cheap first-line recovery: it costs 6 ExecuteDeviceCommand calls
+    (well inside the 10/min budget) and does not disturb Frigate's detect
+    threads, recordings or the API.
+    """
+    subprocess.run(
+        ["docker", "exec", "frigate", "pkill", "-f", "/config/go2rtc"],
+        capture_output=True, timeout=30,
+    )
+
+
 def main():
     try:
         st = stats()
@@ -99,6 +115,7 @@ def main():
 
     ripe = [c for c in dead if streak.get(c, 0) >= DEAD_CHECKS]
     last_restart = float(state.get("last_restart", 0) or 0)
+    last_go2rtc = float(state.get("last_go2rtc", 0) or 0)
 
     if not ripe:
         log(f"{len(dead)} camera(s) at 0 fps {dead} - first sighting, rechecking next tick")
@@ -106,14 +123,29 @@ def main():
         save_state(state)
         return
 
+    # Cheap first line: bounce go2rtc (re-dials all six, Frigate untouched).
+    if now - last_go2rtc >= GO2RTC_COOLDOWN:
+        log(f"{len(ripe)} camera(s) dead {ripe} - restarting go2rtc to re-dial")
+        if DRY:
+            return
+        try:
+            restart_go2rtc()
+        except Exception as exc:  # noqa: BLE001
+            log(f"go2rtc restart failed: {exc}")
+        state["last_go2rtc"] = now
+        state["streak"] = {}
+        save_state(state)
+        return
+
     if now - last_restart < RESTART_COOLDOWN:
         left = int(RESTART_COOLDOWN - (now - last_restart))
-        log(f"{len(ripe)} camera(s) dead {ripe} - restart suppressed, {left}s of cooldown left")
+        log(f"{len(ripe)} camera(s) dead {ripe} - go2rtc already bounced, "
+            f"restart suppressed, {left}s of cooldown left")
         state["streak"] = streak
         save_state(state)
         return
 
-    log(f"{len(ripe)} camera(s) dead {ripe} for {DEAD_CHECKS}+ checks - restarting Frigate")
+    log(f"{len(ripe)} camera(s) still dead {ripe} after a go2rtc bounce - restarting Frigate")
     if DRY:
         return
     try:
@@ -121,7 +153,7 @@ def main():
     except Exception as exc:  # noqa: BLE001
         log(f"restart failed: {exc}")
         sys.exit(1)
-    save_state({"last_restart": now, "streak": {}})
+    save_state({"last_restart": now, "last_go2rtc": last_go2rtc, "streak": {}})
 
 
 if __name__ == "__main__":
