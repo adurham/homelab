@@ -109,6 +109,12 @@ go2rtc:
   webrtc:
     candidates:
       - {{ frigate_lan_ip }}:8555
+    filters:
+      # The nest: sources' PeerConnections are pinned to 8561-8566 in the
+      # carried go2rtc patch (one port per camera) so NAT-PMP can map them -
+      # ephemeral ports lose the router mapping after ~60s and every camera
+      # dies 1-2 minutes in. Mirrored here so the config shows the intent.
+      udp_ports: [8561, 8566]
 
 cameras:
 {% for name, label in frigate_cameras.items() %}
