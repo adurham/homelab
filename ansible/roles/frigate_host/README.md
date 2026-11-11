@@ -103,6 +103,17 @@ Verified 2026-11-10: in steady state every call returns 200 and there are no
 sessions still lapse every 1-2 minutes while extends return 200, which points at
 the media path (UDP/NAT between Nest's WebRTC peer and this CT), not the API.
 
+### Disable HA's Nest integration while Frigate owns the cameras
+
+HA's `nest` config entry competes for the same SDM sessions: while it was loaded,
+go2rtc's keep-alives came back `400 FAILED_PRECONDITION` ("invalid session or user
+id mismatch") every couple of minutes for the two cameras the integration was
+touching (basement, driveway) - Google treats the second client as taking over the
+session. Disabling the entry (Settings -> Devices & Services -> Nest -> Disable)
+left every SDM call at `status=200` with no 400s and no 429s in a 10-minute
+window. Nothing in the repo used the integration's entities (its only camera,
+`camera.basement_camera`, has no consumer), so it stays disabled.
+
 ### Last-good frames: kill the placeholder tiles
 
 Frigate's placeholder is what makes a stalled camera look *broken*. `lastgood.py`
