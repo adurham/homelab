@@ -1,0 +1,65 @@
+auth_enabled: false
+
+server:
+  # Explicit IPv4. Leaving this unset binds the IPv6 wildcard, which in
+  # these containers accepts no IPv4 connections at all.
+  http_listen_address: "{{ ansible_host }}"
+  http_listen_port: 3100
+  grpc_listen_address: "{{ ansible_host }}"
+  grpc_listen_port: 9096
+  log_level: info
+
+common:
+  instance_addr: "{{ ansible_host }}"
+  path_prefix: /var/lib/loki
+  storage:
+    s3:
+      endpoint: "{{ loki_s3_endpoint }}"
+      # Garage rejects Loki's default region with
+      # AuthorizationHeaderMalformed: expected scope '<date>/garage/...'
+      region: "{{ loki_s3_region | default('garage') }}"
+      bucketnames: "{{ loki_s3_bucket }}"
+      access_key_id: "{{ loki_s3_access_key }}"
+      secret_access_key: "{{ loki_s3_secret_key }}"
+      s3forcepathstyle: true
+      insecure: true
+  replication_factor: {{ loki_replication_factor | default(3) }}
+  ring:
+    kvstore:
+      store: memberlist
+
+memberlist:
+  bind_port: 7946
+  join_members:
+{% for h in groups['loki'] %}
+    - "{{ hostvars[h].ansible_host }}:7946"
+{% endfor %}
+
+# LOAD-BEARING for migrated history: `from` must be at or before the oldest
+# chunk in the bucket, and store/schema/prefix/period must match what the
+# importing instance wrote, or old ranges silently return nothing.
+schema_config:
+  configs:
+    - from: 2020-01-01
+      store: tsdb
+      object_store: s3
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /var/lib/loki/tsdb-index
+    cache_location: /var/lib/loki/tsdb-cache
+
+# Must be >= the migrated history's age, or the compactor deletes imported
+# chunks shortly after they land (retention_delete_delay).
+limits_config:
+  retention_period: "{{ loki_retention_period | default('1440h') }}"
+
+compactor:
+  working_directory: /var/lib/loki/compactor
+  delete_request_store: s3
+  retention_enabled: true
+  compaction_interval: 10m

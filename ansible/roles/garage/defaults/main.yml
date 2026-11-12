@@ -1,0 +1,4 @@
+---
+garage_version: "2.3.0"
+garage_replication_factor: 3
+# garage_rpc_secret / garage_admin_token live in vault.

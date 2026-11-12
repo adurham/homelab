@@ -1,0 +1,62 @@
+---
+# 3-node Garage cluster. Adopted from the live build; the config template
+# reproduces exactly what is running.
+#
+# Deliberately NOT in ha-manager / pvesr: migrating a ring member
+# resurrects a stale replica under the same node identity.
+
+- name: Ensure garage directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /var/lib/garage/meta
+    - /var/lib/garage/data
+
+- name: Install garage binary
+  ansible.builtin.get_url:
+    url: "https://garagehq.deuxfleurs.fr/_releases/v{{ garage_version }}/x86_64-unknown-linux-musl/garage"
+    dest: /usr/local/bin/garage
+    mode: '0755'
+    force: false
+
+- name: Render garage config
+  ansible.builtin.template:
+    src: garage.toml.j2
+    dest: /etc/garage.toml
+    mode: '0600'
+  notify: Restart garage
+
+- name: Install garage unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/garage.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Garage S3 object store
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      User=root
+      ExecStart=/usr/local/bin/garage -c /etc/garage.toml server
+      Restart=always
+      RestartSec=5
+      LimitNOFILE=65536
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable and start garage
+  ansible.builtin.systemd:
+    name: garage
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for the S3 API
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 3900
+    timeout: 60

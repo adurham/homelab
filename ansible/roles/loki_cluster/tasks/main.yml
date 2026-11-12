@@ -1,0 +1,89 @@
+---
+# 3-node Loki cluster backed by the shared Garage bucket.
+#
+# Separate from roles/loki (the original single-node build) so the old shape
+# stays intact until it is formally retired.
+#
+# NOT in ha-manager / pvesr: migrating a ring member resurrects a stale
+# replica under the same identity. Deploy with serial: 1 and gate on /ready
+# so a bad render never takes the whole cluster down at once.
+
+- name: Ensure loki directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /var/lib/loki/tsdb-index
+    - /var/lib/loki/tsdb-cache
+    - /var/lib/loki/compactor
+    - /etc/loki
+
+- name: Install unzip
+  ansible.builtin.package:
+    name: unzip
+    state: present
+
+- name: Download Loki
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/loki/releases/download/v{{ loki_version }}/loki-linux-amd64.zip"
+    dest: /tmp/loki.zip
+    mode: '0644'
+    force: false
+
+- name: Unpack Loki
+  ansible.builtin.unarchive:
+    src: /tmp/loki.zip
+    dest: /tmp
+    remote_src: true
+    creates: /tmp/loki-linux-amd64
+
+- name: Install Loki binary
+  ansible.builtin.copy:
+    src: /tmp/loki-linux-amd64
+    dest: /usr/local/bin/loki
+    mode: '0755'
+    remote_src: true
+
+- name: Render Loki config
+  ansible.builtin.template:
+    src: loki-config.yml.j2
+    dest: /etc/loki/loki.yml
+    mode: '0644'
+  notify: Restart loki
+
+- name: Install Loki unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/loki.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Loki log aggregation
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      User=root
+      ExecStart=/usr/local/bin/loki -config.file=/etc/loki/loki.yml
+      Restart=always
+      RestartSec=5
+      LimitNOFILE=65536
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable and start Loki
+  ansible.builtin.systemd:
+    name: loki
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for /ready
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:3100/ready"
+    status_code: 200
+  register: loki_ready
+  retries: 30
+  delay: 3
+  until: loki_ready.status == 200

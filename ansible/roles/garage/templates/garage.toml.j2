@@ -1,0 +1,27 @@
+# Garage node configuration (adopted from the live 3-node cluster).
+#
+# Bind addresses are deliberately IPv4: in these containers `[::]` accepts
+# no IPv4 connections, so LAN peers see "connection refused" while ss
+# still reports the port listening.
+#
+# replication_factor must equal the member count. A quorum system only
+# tolerates one loss when RF=3 across 3 members; RF=2 over 2 nodes needs
+# both members to acknowledge every write.
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "lmdb"
+
+replication_factor = {{ garage_replication_factor | default(3) }}
+
+rpc_bind_addr = "0.0.0.0:3901"
+rpc_public_addr = "{{ ansible_host }}:3901"
+rpc_secret = "{{ garage_rpc_secret }}"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "0.0.0.0:3900"
+root_domain = ".s3.garage.localhost"
+
+[admin]
+api_bind_addr = "0.0.0.0:3903"
+admin_token = "{{ garage_admin_token }}"

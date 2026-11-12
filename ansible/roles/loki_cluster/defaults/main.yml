@@ -1,0 +1,8 @@
+---
+loki_version: "3.7.1"
+loki_replication_factor: 3
+loki_retention_period: "1440h"
+loki_s3_region: "garage"
+loki_s3_bucket: "loki"
+# loki_s3_endpoint / access key / secret come from group_vars + vault:
+#   loki_s3_endpoint: "http://172.16.0.30:3900"

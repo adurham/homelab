@@ -1,0 +1,5 @@
+---
+- name: Restart garage
+  ansible.builtin.systemd:
+    name: garage
+    state: restarted
