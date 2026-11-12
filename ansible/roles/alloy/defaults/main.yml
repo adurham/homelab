@@ -13,7 +13,7 @@ loki_url: "http://172.16.0.30:3100/loki/api/v1/push"
 
 # VictoriaMetrics remote-write receiver. VM exposes this on the same :8428
 # port that serves the query API; no extra config needed on the VM side.
-vm_remote_write_url: "http://{{ hostvars['vm-01']['ansible_host'] }}:8428/api/v1/write"
+vm_remote_write_url: "http://172.16.0.30:8428/api/v1/write"
 
 # Extra labels stamped on all pushed metrics. Empty in production. Used
 # during the original promtail/node_exporter→alloy migration to mark
