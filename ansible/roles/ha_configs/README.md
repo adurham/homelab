@@ -153,3 +153,40 @@ rewrites them while running.
 Retention is the silent-loss trap: if the destination's
 `limits_config.retention_period` is shorter than the migrated history, the
 new compactor deletes the chunks hours after they land.
+
+## vmselect must run with -replicationFactor=2
+
+vminsert writes with `-replicationFactor=2`, but vmselect defaults to
+**1** unless told otherwise. With RF=1 a vmselect that cannot reach one
+vmstorage returns a *partial* result with no error — Grafana shows a
+silently reduced graph rather than a failure.
+
+Both vmselect units carry:
+
+```
+-replicationFactor=2 -dedup.minScrapeInterval=1m
+```
+
+The dedup interval must equal the scrape interval. Dedup shorter than the
+scrape interval puts the two agents' samples in different buckets, so
+nothing is collapsed and storage doubles.
+
+## Postgres clients follow the leader via local HAProxy, not a hardcoded IP
+
+Each Grafana host runs HAProxy on 127.0.0.1:5432 with:
+
+```
+option httpchk GET /primary
+server pg-01 172.16.0.44:5432 check port 8008
+server pg-02 172.16.0.48:5432 check port 8008 backup
+```
+
+`/primary` only answers on the current leader, so a demotion fails the
+check and traffic moves. Verified by a live `patronictl switchover`:
+both Grafana instances reported `database: ok` and authentik returned 302
+with no intervention.
+
+A vip-manager float would add a third arbitration layer on top of Patroni
+and HAProxy for no functional gain — do not add one. The prerequisite for
+it is also unmet: Patroni binds `postgresql.listen` to the node's own IP,
+so a floating VIP would ping but 5432 would refuse.
