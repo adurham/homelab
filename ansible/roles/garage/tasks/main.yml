@@ -60,3 +60,9 @@
     host: "{{ ansible_host }}"
     port: 3900
     timeout: 60
+
+# Cluster-state mutation: only runs with --tags garage_layout.
+- name: Layout assignment
+  ansible.builtin.include_tasks: layout.yml
+  tags: [garage_layout]
+  when: groups['garage'] | length > 0

@@ -1,4 +1,8 @@
 ---
 garage_version: "2.3.0"
 garage_replication_factor: 3
+garage_bin: /usr/local/bin/garage
+garage_config: /etc/garage.toml
+garage_layout_version: 1
 # garage_rpc_secret / garage_admin_token live in vault.
+# Per-host vars: garage_zone (pve01/pve02/pve03), garage_capacity, garage_node_id.

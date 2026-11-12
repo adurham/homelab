@@ -1,0 +1,77 @@
+---
+# Garage layout assignment — cluster-state mutation, so it is NOT part of a
+# normal playbook run. Invoke explicitly:
+#
+#   ansible-playbook ... --tags garage_layout
+#
+# `garage layout apply` requires a version that increments on every change,
+# so a blind `command:` fails on replay. Read the current state first and
+# only act when a node genuinely has no role yet.
+#
+# The DR argument for keeping this in code at all: losing a node and adding
+# it back needs `layout assign` + a new `apply` version. If that lives only
+# in a README, recovery is a 2am console session with Loki's S3 store down
+# behind it.
+
+- name: Read garage cluster status
+  ansible.builtin.command:
+    cmd: "{{ garage_bin }} -c {{ garage_config }} status"
+  register: garage_status
+  changed_when: false
+  run_once: true
+  check_mode: false
+
+- name: Decide whether the layout needs work
+  ansible.builtin.set_fact:
+    garage_needs_layout: "{{ 'NO ROLE ASSIGNED' in garage_status.stdout }}"
+  run_once: true
+
+- name: Show current layout
+  ansible.builtin.command:
+    cmd: "{{ garage_bin }} -c {{ garage_config }} layout show"
+  register: garage_layout_show
+  changed_when: false
+  run_once: true
+  check_mode: false
+  when: garage_needs_layout
+
+- name: Assign a zone per node in the inventory
+  ansible.builtin.command:
+    cmd: >-
+      {{ garage_bin }} -c {{ garage_config }} layout assign
+      -z {{ hostvars[item].garage_zone }}
+      -c {{ hostvars[item].garage_capacity | default('20G') }}
+      {{ hostvars[item].garage_node_id }}
+  loop: "{{ groups['garage'] }}"
+  run_once: true
+  check_mode: false
+  when: garage_needs_layout
+  changed_when: true
+
+- name: Apply the new layout version
+  ansible.builtin.command:
+    cmd: >-
+      {{ garage_bin }} -c {{ garage_config }} layout apply
+      --version {{ (garage_layout_version | default(0)) + 1 }}
+  run_once: true
+  check_mode: false
+  when: garage_needs_layout
+  register: garage_apply
+  failed_when: >
+    garage_apply.rc != 0 and 'nothing to do' not in (garage_apply.stderr | default(''))
+  changed_when: garage_apply.rc == 0
+
+- name: Confirm every node has a role
+  ansible.builtin.command:
+    cmd: "{{ garage_bin }} -c {{ garage_config }} status"
+  register: garage_status_after
+  changed_when: false
+  run_once: true
+  check_mode: false
+
+- name: Fail if the layout is still unassigned
+  ansible.builtin.assert:
+    that:
+      - "'NO ROLE ASSIGNED' not in garage_status_after.stdout"
+    fail_msg: "Garage layout still unassigned after apply — check `garage layout show`."
+  run_once: true
