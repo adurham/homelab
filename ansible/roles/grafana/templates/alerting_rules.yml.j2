@@ -5620,3 +5620,52 @@ groups:
     labels:
       severity: critical
     isPaused: false
+  - uid: relay_canary_stale
+    title: VictoriaMetrics :8428 relay is not forwarding
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        editorMode: code
+        expr: absent_over_time(relay_canary[5m])
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: threshold
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: "The socat relay on 172.16.0.42:8428 has stopped forwarding writes to the cluster VIP."
+      description: "Pushers that still hardcode 172.16.0.42:8428 are silently losing metrics. Check `systemctl status vmrelay` on vm-01 (CT 106) and the VIP shim on the LBs."
+    labels:
+      severity: warning
+    isPaused: false
