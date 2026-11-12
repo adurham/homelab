@@ -46,7 +46,7 @@ import websockets
 HA_HOST = "192.168.86.2"
 HA_PORT = 8123
 ADGUARD_INGRESS_PATH = "/api/hassio_ingress/iRwC5wuecKuGw8GYY2qIa_gQ2ENTb7658rUOCoyS-x4"
-LOKI_URL = "http://172.16.0.42:3100/loki/api/v1/push"
+LOKI_URL = "{{ loki_url | default('http://172.16.0.30:3100') }}/loki/api/v1/push"
 STATE_FILE = Path("/var/lib/adguard-log-shipper/state.json")
 TOKEN_FILE = Path("/etc/adguard-log-shipper/hass_token")
 MAX_PAGES_PER_RUN = 30  # 30 * 500 = 15k entries backfill ceiling per run

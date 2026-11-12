@@ -60,7 +60,7 @@ from pathlib import Path
 
 HASS_HOST = "192.168.86.2"
 HASS_PORT = 8123
-LOKI_URL = "http://172.16.0.42:3100/loki/api/v1/push"
+LOKI_URL = "{{ loki_url | default('http://172.16.0.30:3100') }}/loki/api/v1/push"
 STATE_FILE = Path("/var/lib/ha-log-shipper/state.json")
 TOKEN_FILE = Path("/etc/ha-log-shipper/hass_token")
 WINDOW_LINES = 500
