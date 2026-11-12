@@ -74,3 +74,26 @@ docker run -d --name ak-proxy -p 9300:9300 -p 9444:9000 --restart always \
 ```
 
 Both LBs carry `upstream outpost_backend` with `.50:9300` and `.60:9300`.
+
+## HA requires replication, not just the HA manager
+
+A guest can be entered into `ha-manager` and still be unstartable elsewhere:
+HA will try to start it on a surviving node, but with no replication job
+there is no disk image there. Audit both together:
+
+```
+ha-manager status | grep -oE 'ct:[0-9]+'          # what HA manages
+pvesr status | awk '/Yes/{print $1}'              # what has a live replica
+```
+
+Anything in the first list but not the second is a trap. This audit found
+CT 106 (vm-01/Loki), 130/131 (DNS pair), 141 (graf-02) and 142 (VM cluster
+storage) in that state; jobs were added for both other nodes each:
+
+```
+pvesr create-local-job <vmid>-0 <node-b>
+pvesr create-local-job <vmid>-1 <node-c>
+```
+
+Note `pvesr status` only lists jobs owned by the local node — check from the
+node that hosts the guest, or the jobs look missing.
