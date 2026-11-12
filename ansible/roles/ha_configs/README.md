@@ -97,3 +97,59 @@ pvesr create-local-job <vmid>-1 <node-c>
 
 Note `pvesr status` only lists jobs owned by the local node — check from the
 node that hosts the guest, or the jobs look missing.
+
+## Loki HA: 3x Loki + 3-node Garage
+
+Loki is a **quorum** system: `replication_factor` must divide into a member
+count that still has a majority after one loss. RF=2 over 2 nodes means a
+write needs both (quorum 2/2), so losing one node stops all ingestion —
+strictly worse than a single node. RF=3 over 3 nodes tolerates one loss.
+
+Guests (pinned to their node, **never** under pvesr/HA-manager — migrating a
+ring member resurrects a stale replica under the same identity):
+
+| role    | CT  | addr        | node  |
+|---------|-----|-------------|-------|
+| garage  | 151 | 172.16.0.71 | pve01 |
+| garage  | 152 | 172.16.0.72 | pve03 |
+| garage  | 153 | 172.16.0.74 | pve02 |
+| loki    | 154 | 172.16.0.75 | pve01 |
+| loki    | 155 | 172.16.0.76 | pve03 |
+| loki    | 156 | 172.16.0.77 | pve02 |
+
+Endpoints are single URLs through the VIP, never a node IP:
+
+- S3:   `http://172.16.0.30:3900` (nginx http proxy, **Host $http_host** —
+        `$host` strips the port and breaks SigV4)
+- Loki: `http://172.16.0.30:3100` (nginx upstream, /tail upgraded)
+
+### Traps that cost real time
+
+- **Bind addresses must be IPv4.** `[::]` / `*:3100` in these containers
+  accepts no IPv4 connections (bindv6only), so a peer on the LAN sees
+  "connection refused" while `ss` shows the port listening. Pin
+  `0.0.0.0` (Garage) or the node IP (Loki `http_listen_address`).
+- **Garage S3 region must match.** Loki signs with region `dummy` by
+  default; Garage answers `AuthorizationHeaderMalformed … expected
+  'garage'`. Set `region: garage` in the Loki S3 block.
+- **Kill stale processes** after editing bind addresses — an old garage
+  holding the socket makes a correct config look ignored.
+- **Never trust `ping` for a free IP.** `172.16.0.73` looked free and was
+  in use; it ARPed to a MAC that belonged to another guest. Verify with
+  `grep` across `/etc/pve/nodes/*/{lxc,qemu-server}/*.conf` **and** an ARP
+  check, and compare the responder MAC to the guest's `hwaddr`.
+
+### Chunk migration (filesystem -> S3) is NOT a file copy
+
+The filesystem client stores chunks as `fake/<fp>/<base64(from:through:checksum)>`;
+S3 keys are the decoded form `fake/<fp>/<from>:<through>:<checksum>`. A
+verbatim `rsync`/`aws s3 sync` of `chunks/fake` produces objects Loki never
+looks up, and every historical query 500s. Decode the name, then upload.
+
+Index files (`chunks/index/...tsdb.gz`) are not encoded and copy verbatim —
+but sync them **after** stopping the old instance, since the old compactor
+rewrites them while running.
+
+Retention is the silent-loss trap: if the destination's
+`limits_config.retention_period` is shorter than the migrated history, the
+new compactor deletes the chunks hours after they land.
