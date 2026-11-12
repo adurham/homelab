@@ -46,3 +46,30 @@ Neither baseline has an accompanying backup-time capture yet — they were
 taken from the live system. Until a manifest is captured *alongside* a
 backup, any restore proof can only establish "it opens and is at LSN X".
 Do not let that read as "backups verified".
+
+## Smoke restore performed 2026-11-12
+
+Archive: `vzdump-lxc-149-2026_11_12-02_18_24.tar.zst` (dns-02, 217 MB
+compressed / 708 MB uncompressed) on `vzdump-nvme`.
+
+What was actually run, and what it proves:
+
+1. `zstd -t <archive>` → passes. The archive decompresses end to end with
+   no corruption. (Does **not** prove the guest boots.)
+2. `tar -tf` lists the real filesystem, including
+   `./var/cache/bind/db.chi.lab.amd-e.com` and `db.lab.amd-e.com`.
+3. Extracting `./var/cache/bind/db.chi.lab.amd-e.com` yields a binary BIND
+   journal containing this environment's actual records — `auth`,
+   `authentik`, `dns-01`, `adblock-proxy-01` under `chi.lab.amd-e.com`.
+   That is the content proof: not "a file exists" but "the right records
+   are in it".
+4. Extracting `./etc/bind/named.conf.options` returns a readable config.
+
+**Scope of this proof:** it shows the backup is intact and contains correct,
+environment-specific data. It does **not** show that `pct restore` produces
+a booting guest with working networking and services — that needs a real
+restore to a spare VMID, which has not been done. Do not let this document
+be read as "restores verified".
+
+Note: vzdump targets `vzdump-nvme` (local, `/nvme-pool/vzdump-backups`), **not**
+the Garage cluster — so backup integrity does not depend on the Garage layout.
