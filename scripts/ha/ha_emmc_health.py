@@ -20,7 +20,7 @@ import sys
 
 HA_HOST = "192.168.86.2"  # the HAOS SSH add-on does not answer to mDNS from the private SDN
 HA_PORT = "2222"
-VM = "http://172.16.0.42:8428/api/v1/import/prometheus"
+VM = "http://172.16.0.30:8428/api/v1/import/prometheus"
 
 CMD = (
     "cat /sys/block/mmcblk0/device/life_time; "

@@ -13,4 +13,4 @@ pve_restore_verify_boot_timeout_s: 180
 pve_restore_verify_source: "offsite"
 pve_restore_verify_remote: "vmbackup_crypt:pve"
 pve_restore_verify_scratch_dir: "/nvme-pool/restore-verify"
-pve_restore_verify_metrics_url: "http://172.16.0.42:8428/api/v1/import/prometheus"
+pve_restore_verify_metrics_url: "http://172.16.0.30:8428/api/v1/import/prometheus"

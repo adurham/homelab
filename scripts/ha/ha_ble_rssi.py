@@ -14,7 +14,7 @@ import sys
 import urllib.request
 
 HA = "http://192.168.86.2:8123"
-VM = "http://172.16.0.42:8428"
+VM = "http://172.16.0.30:8428"
 TOKEN_FILE = "/etc/ha-ble-rssi/token"
 BT_ENTRY_FILE = "/etc/ha-ble-rssi/bluetooth_entry_id"
 # Yale/August devices in this house all use the 78:9C:85 OUI. Set PREFIX="" to

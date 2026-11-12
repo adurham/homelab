@@ -18,7 +18,7 @@ import json
 import urllib.parse
 import urllib.request
 
-VM = "http://172.16.0.42:8428"
+VM = "http://172.16.0.30:8428"
 
 
 def fetch(entity: str, start: int, end: int, step: int = 60):
