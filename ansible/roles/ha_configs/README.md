@@ -215,3 +215,12 @@ stopping the daemon), which is why the old VM was restored four times.
 Prove a relay on a scratch port first (`TCP-LISTEN:8429`), then swap onto
 the real port in separate short `pct exec` calls. Never run the stop and the
 relay start in one long script.
+
+**Correction (measured, not assumed):** on the LB pair, an HTTP probe to
+`127.0.0.1:80` returns nothing *from inside the container* even with
+`--noproxy '*'`, while nginx is demonstrably listening on `0.0.0.0:80`
+with a passing `nginx -t`. Using that probe makes keepalived hold the VIP
+at FAULT from both nodes. The LB pair therefore stays on `pgrep -x nginx`
+until the localhost reachability is understood. The DNS pair could be
+upgraded safely — `dig @127.0.0.1` answers there, and it is now a real
+query rather than a process check.
