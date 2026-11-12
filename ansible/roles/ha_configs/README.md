@@ -50,3 +50,27 @@ container, so this outpost is required.
   and not in the repo.
 - New CTs (149 dns-02, 148 outpost, 142/143 VM cluster) are not in the
   nightly backup jobs.
+
+## Outpost HA (second proxy outpost)
+
+authentik allows **one live connection per outpost token** — a second proxy
+container reusing the first outpost's token gets `403 Forbidden`. HA requires
+a second registered outpost with its own token and service account
+(`ak-outpost-<uuid>`), created via the Django model:
+
+```
+Outpost.objects.create(name="proxy-2", type=OutpostType.PROXY)
+# do NOT pass config={} — the property calls asdict() and a plain dict raises
+# TypeError: asdict() should be called on dataclass instances
+```
+
+Run the container in **bridge mode, not host mode** — under `--network host`
+it collides with the authentik server's :9000 and crash-loops:
+
+```
+docker run -d --name ak-proxy -p 9300:9300 -p 9444:9000 --restart always \
+  -e AUTHENTIK_HOST=http://172.16.0.20:9000 -e AUTHENTIK_INSECURE=true \
+  -e AUTHENTIK_TOKEN=<new outpost token> ghcr.io/goauthentik/proxy:2026.8.4
+```
+
+Both LBs carry `upstream outpost_backend` with `.50:9300` and `.60:9300`.
