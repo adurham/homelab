@@ -190,3 +190,28 @@ A vip-manager float would add a third arbitration layer on top of Patroni
 and HAProxy for no functional gain — do not add one. The prerequisite for
 it is also unmet: Patroni binds `postgresql.listen` to the node's own IP,
 so a floating VIP would ping but 5432 would refuse.
+
+## keepalived must track service health, not process presence
+
+Both VIP pairs originally tracked `pgrep -x <daemon>`. A hung daemon that
+still has a PID keeps the VIP, so the address stays on a node that is not
+answering — the exact failure the VIP exists to paper over.
+
+- LB pair:  `script "/usr/bin/curl -s -o /dev/null -m 2 http://127.0.0.1:80/"`
+- DNS pair: `script "/usr/bin/dig +time=1 +tries=1 +short @127.0.0.1 localhost A"`
+
+Combined with `weight 0` (not `weight -20` with a 50-point priority gap,
+which can never move the VIP) the pair now actually fails over on a
+non-serving daemon.
+
+## Old VictoriaMetrics retirement
+
+`:8428` on the old node is now a `socat` relay to the cluster VIP, created
+with `systemd-run --unit=vmrelay ...` — **transient, no unit file**. Writing
+a unit through `pct exec … sh -c 'echo <b64> | base64 -d > /etc/...'` failed
+silently and repeatedly (the surrounding script always died right after
+stopping the daemon), which is why the old VM was restored four times.
+
+Prove a relay on a scratch port first (`TCP-LISTEN:8429`), then swap onto
+the real port in separate short `pct exec` calls. Never run the stop and the
+relay start in one long script.
