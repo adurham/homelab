@@ -13,3 +13,16 @@ pool_runtime_hours:
   step: 1
   unit_of_measurement: "h"
   icon: mdi:pool-thermometer
+
+# Nudge for the basement mini-split target, in degrees F. The unit is steered
+# to the temperature the vent controller already plans for the basement
+# (ecobee setpoint + 2F heating / - 2F cooling); this shifts that target for
+# comfort tuning without editing the automation.
+basement_heatpump_offset:
+  name: "Basement Heat Pump Target Offset"
+  initial: 0
+  min: -4
+  max: 6
+  step: 0.5
+  unit_of_measurement: "°F"
+  icon: mdi:thermometer-plus

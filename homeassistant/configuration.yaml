@@ -93,6 +93,14 @@ input_boolean:
     name: "Smart Vent Watchdog Escalated"
     initial: false
 
+  # Master switch for the basement mini-split target tracking. The head's own
+  # thermostat sensor is unusable (see automations/basement_heatpump.yaml), so
+  # its setpoint is steered from the room sensor. Off = hands off, the unit
+  # keeps whatever setpoint it was last given.
+  basement_heatpump_auto:
+    name: "Basement Heat Pump Auto"
+    initial: true
+
 timer:
   garage_lights_motion_timeout:
     name: "Garage Lights Motion Timeout"
