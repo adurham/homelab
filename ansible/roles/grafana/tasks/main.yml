@@ -121,6 +121,21 @@
   become_user: grafana
   notify: Restart Image Renderer
 
+- name: Stat the built image renderer
+  ansible.builtin.stat:
+    path: /usr/local/share/grafana-image-renderer/grafana-image-renderer
+  register: gir_bin
+
+- name: Find image renderer sources
+  ansible.builtin.find:
+    paths: /usr/local/share/grafana-image-renderer
+    patterns: "*.go"
+    recurse: true
+  register: gir_src
+
+# Rebuild only when the binary is missing or a source file is newer than it.
+# The old `changed_when: true` rebuilt unconditionally, which notified the
+# restart handler and bounced Grafana on every single playbook run.
 - name: Build Grafana Image Renderer (Go)
   ansible.builtin.shell: |
     /usr/local/go/bin/go build -buildvcs=false -o grafana-image-renderer .
@@ -132,6 +147,9 @@
     CGO_ENABLED: "0"
     GOCACHE: "/usr/local/share/grafana-image-renderer/.cache/go-build"
     GOMODCACHE: "/usr/local/share/grafana-image-renderer/.cache/go-mod"
+  when: >
+    not gir_bin.stat.exists or
+    ((gir_src.files | map(attribute='mtime') | max | default(0)) > gir_bin.stat.mtime)
   changed_when: true
   notify: Restart Image Renderer
 
