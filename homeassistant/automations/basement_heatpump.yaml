@@ -1,38 +1,37 @@
 - alias: "Basement Heat Pump Track Room Target"
   id: "basement_heatpump_track_target"
   description: >-
-    The head's own thermostat cannot be trusted to hold a temperature, so the
-    unit is run as a dumb heater/cooler and the ROOM sensor makes every
-    decision.
+    Steers the basement mini split from the room instead of from the head's
+    own thermostat.
 
-    Measured 2026-11-13: the head's return-air sensor (climate
-    current_temperature) wandered 70F -> 78F -> 74F in five minutes with the
-    compressor drawing 0W, i.e. it tracks its own electronics, not the room.
-    It read 78F while the room was 67.8F, and all of November in cool mode it
-    read 4-7F LOW, so the unit sat satisfied and never ran in either season.
-    Because the reading drifts on its own, an offset-corrected setpoint just
-    chases it upward (tested: the commanded setpoint was walked 69 -> 72 -> 75
-    while the compressor stayed at 0W). So the setpoint is used only as an
-    on/off switch: 84F = "run" in heat, 61F = "idle" in heat (mirrored in
-    cool; not 85/60 because HA rejects those two exact values on the
-    Fahrenheit->Celsius boundary). Nothing else about it is load-bearing.
+    Measured 2026-11-13: the head's temperature sensor is unreliable - it
+    wandered 64F -> 83F with no relationship to the room (67.6F), read 82F
+    while the room was 67F, and moved several degrees in minutes with the
+    compressor at 0W. Since anything an automation can send is 60-85F, there
+    is no setpoint that reliably sits above that wandering reading, so the
+    head cannot be trusted to decide anything.
 
-    Target is what the other automations already plan for this room: ecobee
-    heat setpoint + 2F (the vent controller's downstairs heating bonus) or
-    ecobee cool setpoint - 2F in cooling, plus
-    input_number.basement_heatpump_offset for tuning. Reference is
-    sensor.7wq7_temperature (the local Zigbee sensor the vent controller
-    already uses for this room), falling back to the ecobee basement sensor
-    when the Zigbee one is stale or missing.
+    Demand therefore comes from the room, and the target is what the rest of
+    the house already plans for this room: ecobee heat setpoint + 2F (the
+    vent controller's downstairs heating bonus) or ecobee cool setpoint - 2F
+    in cooling, plus input_number.basement_heatpump_offset.
+
+    The setpoint sent is the ROOM TARGET itself, never an extreme: if the
+    head ever behaves normally this is an ordinary thermostat command and
+    cannot overheat the room. Idle is expressed as 61F in heat mode / 84F in
+    cool mode, which is also ordinary behaviour for a healthy unit.
+
+    Reference is sensor.7wq7_temperature (the local Zigbee sensor the vent
+    controller already uses for this room), falling back to the ecobee
+    basement sensor when the Zigbee one is stale or missing.
   mode: single
   max_exceeded: silent
 
   trigger:
     - platform: time_pattern
-      minutes: "/2"
+      minutes: "/5"
     - platform: homeassistant
       event: start
-    # React to the room moving, not just to the clock.
     - platform: state
       entity_id:
         - sensor.7wq7_temperature
@@ -60,16 +59,17 @@
           {% set ca = (as_timestamp(now()) - as_timestamp(lu)) if lu else 99999 %}
           {% set c = states('sensor.ecobee_edgewater_road_basement_temperature') | float(0) %}
           {{ l if (ca < 1200 and 40 < l < 100) else (c if 40 < c < 100 else 0) }}
+        head: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'current_temperature') | float(0) }}"
         sp: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'temperature') | float(0) }}"
         offs: "{{ states('input_number.basement_heatpump_offset') | float(0) }}"
         heat_target: "{{ (states('sensor.ecobee_edgewater_road_desired_heat') | float(64)) + 2 + offs }}"
         cool_target: "{{ (states('sensor.ecobee_edgewater_road_desired_cool') | float(72)) - 2 + offs }}"
 
-    # Is the unit already being told to run? The setpoint extreme encodes it.
+    # Demand from the room. Hysteresis: start 0.7F outside the band, keep
+    # going until 0.3F past the target.
     - variables:
-        heating_now: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'heat') and sp | float(0) >= 80 }}"
-        cooling_now: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'cool') and sp | float(0) <= 65 }}"
-        # 0.7F to start, 0.3F past target to stop: hysteresis across the whole band.
+        heating_now: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'heat') and sp | float(0) > 62 }}"
+        cooling_now: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'cool') and sp | float(0) < 83 }}"
         do_heat: >-
           {{ (heating_now and ref | float(0) < heat_target | float(0) + 0.3)
              or (not heating_now and ref | float(0) <= heat_target | float(0) - 0.7) }}
@@ -89,13 +89,13 @@
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
                     hvac_mode: heat
-            - if: "{{ sp | float(0) < 83 }}"
+            - if: "{{ (sp | float(0) - heat_target | float(0)) | abs >= 0.5 }}"
               then:
                 - service: climate.set_temperature
                   target:
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
-                    temperature: 84
+                    temperature: "{{ [[heat_target | float(0), 84] | min, 61] | max | round(0) }}"
 
         - conditions:
             - condition: template
@@ -108,32 +108,48 @@
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
                     hvac_mode: cool
-            - if: "{{ sp | float(0) > 62 }}"
+            - if: "{{ (sp | float(0) - cool_target | float(0)) | abs >= 0.5 }}"
               then:
                 - service: climate.set_temperature
                   target:
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
-                    temperature: 61
+                    temperature: "{{ [[cool_target | float(0), 84] | min, 61] | max | round(0) }}"
 
-        # Inside the band with nothing demanded: make sure the unit is idling,
-        # using the off-side extreme for whichever mode it is sitting in.
+        # Nothing demanded: park it at the off-side of whatever mode it sits in.
         - conditions: []
           sequence:
-            - if: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'heat') and sp | float(0) >= 70 }}"
+            - if: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'heat') and sp | float(0) > 62 }}"
               then:
                 - service: climate.set_temperature
                   target:
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
                     temperature: 61
-            - if: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'cool') and sp | float(0) <= 74 }}"
+            - if: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'cool') and sp | float(0) < 83 }}"
               then:
                 - service: climate.set_temperature
                   target:
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
                     temperature: 84
+
+    # If the room wants heat while the head claims to be 5F+ warmer than the
+    # room, the call is being ignored and no command can fix it. Say so.
+    - if:
+        - condition: template
+          value_template: "{{ do_heat and head | float(0) > ref | float(0) + 5 }}"
+      then:
+        - service: persistent_notification.create
+          data:
+            title: Basement heat pump is ignoring the heat call
+            notification_id: basement_heatpump_sensor_blind
+            message: >-
+              The room wants {{ heat_target }}F but the head reports
+              {{ head }}F while the room sensor says {{ ref }}F. Its own
+              temperature sensor is off by enough that it believes the call is
+              already satisfied, so it will not run. This needs a physical look
+              at the indoor sensor on the head.
 
 - alias: "Basement Heat Pump Room Sensor Lost"
   id: "basement_heatpump_room_sensor_lost"
@@ -167,13 +183,13 @@
       target:
         entity_id: climate.basement_heatpump_basement_office_ac
       data:
-        temperature: 60
+        temperature: 61
     - service: persistent_notification.create
       data:
         title: Basement heat pump has no room reference
         notification_id: basement_heatpump_ref_lost
         message: >-
           Both the Zigbee basement sensor and the ecobee basement sensor are
-          unavailable, so the heat pump was set to idle (60F setpoint) rather
+          unavailable, so the heat pump was set to idle (61F setpoint) rather
           than left running on its own bad sensor. Check the sensor, or turn
           off Basement Heat Pump Auto and run it manually.
