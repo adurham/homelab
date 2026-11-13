@@ -43,6 +43,17 @@
     - "{{ media_ingest_state }}"
     - "{{ media_ingest_log_dir }}"
 
+# Keyring the units encrypt parked downloads with (GNUPGHOME in both unit
+# files). It holds the park recipient's PUBLIC key only; import it here once
+# per host -- the role does not carry key material.
+- name: Ensure park keyring directory (inside the state dir, service-visible)
+  ansible.builtin.file:
+    path: "{{ media_ingest_state }}/gnupg"
+    state: directory
+    owner: "{{ media_ingest_user }}"
+    group: "{{ media_ingest_user }}"
+    mode: '0700'
+
 # ─── Hardening: tmpfs for decrypted-media staging ──────────────────────────
 # The staging dir holds DECRYPTED media in flight to the gallery. Back it with
 # tmpfs so nothing viewable ever persists to disk — a stolen disk / Proxmox

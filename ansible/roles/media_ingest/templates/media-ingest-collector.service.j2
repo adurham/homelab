@@ -12,6 +12,9 @@ Type=simple
 User={{ media_ingest_user }}
 Group={{ media_ingest_user }}
 EnvironmentFile={{ media_ingest_dir }}/collector.env
+# ProtectHome hides the service user's ~/.gnupg, so gpg must be pointed at a
+# keyring inside the state dir or every park attempt exits 2.
+Environment=GNUPGHOME={{ media_ingest_state }}/gnupg
 ExecStart={{ media_ingest_dir }}/venv/bin/python {{ media_ingest_dir }}/collector.py
 Restart=always
 RestartSec=5

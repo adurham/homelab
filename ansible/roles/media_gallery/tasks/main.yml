@@ -811,6 +811,28 @@
     - "{{ media_gallery_serve_port }}"
   notify: Save tg iptables
 
+# The load balancers connect from their OWN addresses, never from the floating
+# VIP in ip_loadbalancer, so a VIP-only allow drops every proxied request (the
+# browser sees a 504 and the ingest pushes fail). `action: insert` matters on a
+# host that already has the DROP rules: an appended ACCEPT lands after them and
+# never matches.
+- name: "iptables: allow the load balancer nodes to service ports"
+  ansible.builtin.iptables:
+    chain: INPUT
+    action: insert
+    protocol: tcp
+    source: "{{ item.0 }}"
+    destination_port: "{{ item.1 }}"
+    jump: ACCEPT
+    comment: "media-gallery: lb node {{ item.1 }}"
+    state: present
+  loop: >-
+    {{ ip_loadbalancer_nodes | product([
+         media_gallery_gallery_port, media_gallery_thumb_port,
+         media_gallery_trash_port, media_gallery_upload_port,
+         media_gallery_serve_port]) | list }}
+  notify: Save tg iptables
+
 - name: "iptables: drop all other access to service ports"
   ansible.builtin.iptables:
     chain: INPUT

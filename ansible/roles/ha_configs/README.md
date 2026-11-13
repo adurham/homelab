@@ -39,9 +39,11 @@ no shared DB load balancer in the path.
 ## authentik outpost (`authentik-outpost.compose.yml`)
 
 `ghcr.io/goauthentik/proxy` on CT 148 (`172.16.0.50`) with
-`--network host`, listening on `:9300`; both LBs' `auth_request` point at it.
-authentik 2026.8 does not serve `/outpost.goauthentik.io` from the server
-container, so this outpost is required.
+`--network host`. Its only reachable port is `:9300`, which is the metrics
+listener (see "Outpost HA" below) — the LBs must not use it for `auth_request`.
+The forward-auth endpoint that answers correctly today is `:9000` on the two
+authentik guests (`172.16.0.20`, `172.16.0.60`): `401` without a session and a
+`302` to the provider's authorize URL from `/start`.
 
 ## Not yet automated
 
@@ -73,7 +75,24 @@ docker run -d --name ak-proxy -p 9300:9300 -p 9444:9000 --restart always \
   -e AUTHENTIK_TOKEN=<new outpost token> ghcr.io/goauthentik/proxy:2026.8.4
 ```
 
-Both LBs carry `upstream outpost_backend` with `.50:9300` and `.60:9300`.
+Both LBs carry `upstream outpost_backend` with `172.16.0.20:9000` and
+`172.16.0.60:9000`.
+
+**`:9300` is the outpost's Prometheus metrics listener, not its HTTP
+listener.** It answers `200` with metrics text to *every* path, including
+`/outpost.goauthentik.io/auth/nginx`, so an `auth_request` pointed at it
+passes every unauthenticated request — the gate silently becomes a no-op while
+`/ping` and the health checks all look fine. The upstream must be a listener
+that returns `401` to a request with no session cookie. Check after any change
+to this upstream, from a client with no cookies, against the VIP and against
+each LB node's own address:
+
+```
+curl -sk -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+  --resolve gallery.chi.lab.amd-e.com:443:<lb-node-ip> \
+  https://gallery.chi.lab.amd-e.com/gallery/manifest.json
+# must be: 302 .../outpost.goauthentik.io/start?rd=...   (never 200)
+```
 
 ## HA requires replication, not just the HA manager
 
