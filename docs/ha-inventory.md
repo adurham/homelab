@@ -20,7 +20,7 @@ Re-run before trusting: this is a snapshot.
 | Grafana | 107 /.41 pve03 · 141 /.45 pve01 | → Patroni; → Discord, mail-01 | both 200 |
 | authentik servers | 100 /.20 pve01 · 150 /.60 pve02 | → Patroni | live + ready 200 |
 | authentik outposts | 148 /.50 pve03 · second on 150 /.60 | ← LB `auth_request` | 302 gate verified through VIP and both LBs |
-| Load balancer | 103 /.29 pve03 · 147 /.31 pve01, VIP `.30` | fronts every vhost | VIP on lb-01; health check still `pgrep` |
+| Load balancer | 103 /.29 pve03 · 147 /.31 pve01, VIP `.30` | fronts every vhost | VIP on lb-01; HTTP liveness check with Host header — hung-nginx failover proven (SIGSTOP → VIP moved → SIGCONT → returned) |
 | BIND (lab zone) | 102 /.9 pve03 · 149 /.14 pve01, VIP `.10` | lab service names | both answer |
 | LAN DNS + DHCP (AdGuard/Kea) | 130 /.4 pve01 · 131 /.5 pve02 | LAN clients | hot-standby |
 | **VictoriaMetrics cluster** | 142 /.57 pve01 · 143 /.58 pve03 · **145 /.59 pve02 (new)** | ← vmagent .42/.45 | 3 storage nodes, RF=2 → survives one node loss (proven: writes accepted + stored with .59 vmstorage stopped) |

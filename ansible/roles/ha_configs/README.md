@@ -235,11 +235,19 @@ Prove a relay on a scratch port first (`TCP-LISTEN:8429`), then swap onto
 the real port in separate short `pct exec` calls. Never run the stop and the
 relay start in one long script.
 
-**Correction (measured, not assumed):** on the LB pair, an HTTP probe to
-`127.0.0.1:80` returns nothing *from inside the container* even with
-`--noproxy '*'`, while nginx is demonstrably listening on `0.0.0.0:80`
-with a passing `nginx -t`. Using that probe makes keepalived hold the VIP
-at FAULT from both nodes. The LB pair therefore stays on `pgrep -x nginx`
-until the localhost reachability is understood. The DNS pair could be
-upgraded safely — `dig @127.0.0.1` answers there, and it is now a real
-query rather than a process check.
+**Correction (measured twice, second time by drill):** a *bare* request to
+`127.0.0.1:80` returns nothing from inside the container — that is the 64
+`return 444` catch-alls answering, not unreachable HTTP (`curl` exits 52 on an
+empty reply). A probe **with a real Host header** answers normally
+(`-H 'Host: auth.chi.lab.amd-e.com' http://127.0.0.1/` → 301), which is what
+the running `chk_nginx` script does. So the LB pair is on a real HTTP liveness
+check, not `pgrep`.
+
+Proven by hanging nginx rather than stopping it (`pkill -STOP -x nginx` on
+lb-01: PID still present, nothing served): keepalived went FAULT after
+`fall 2`, the VIP moved to lb-02, the site kept answering `302` through the
+VIP, and `pkill -CONT` returned the VIP on preemption. A `pgrep` check would
+have sat on a dead node for the whole outage.
+
+The DNS pair is on the equivalent real query (`dig @127.0.0.1`).
+
