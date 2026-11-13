@@ -282,9 +282,15 @@ all:
     mail_server:
       hosts:
         mail-01:
-          ansible_host: "{{ ip_mail_server }}"
+          # .40 is the keepalived VIP; the container itself is .17 since the
+          # mail pair was built (2026-11-13). Manage the real address.
+          ansible_host: 172.16.0.17
           vmid: 104
           target_node: pve03
+        mail-02:
+          ansible_host: 172.16.0.18
+          vmid: 158
+          target_node: pve01
       vars:
         ansible_user: amd
         ansible_become: true
@@ -292,9 +298,14 @@ all:
     ntp_server:
       hosts:
         ntp-01:
-          ansible_host: "{{ ip_ntp_server }}"
+          # .11 is the keepalived VIP; the container itself is .15.
+          ansible_host: 172.16.0.15
           vmid: 105
           target_node: pve03
+        ntp-02:
+          ansible_host: 172.16.0.16
+          vmid: 157
+          target_node: pve01
       vars:
         ansible_user: amd
         ansible_become: true
@@ -849,19 +860,30 @@ all:
             # insert/select tiers. vmagent on vm-01 scrapes once and
             # remote-writes to the cluster.
             vm-clus-01:
-              ansible_host: 172.16.0.46
+              ansible_host: 172.16.0.57
               vmid: 142
               template: debian-12-standard_12.12-1_amd64.tar.zst
-              target_node: pve02
+              target_node: pve01
               features: "nesting=1"
-              net_private_ip: 172.16.0.46/24
+              net_private_ip: 172.16.0.57/24
             vm-clus-02:
-              ansible_host: 172.16.0.47
+              ansible_host: 172.16.0.58
               vmid: 143
               template: debian-12-standard_12.12-1_amd64.tar.zst
               target_node: pve03
               features: "nesting=1"
-              net_private_ip: 172.16.0.47/24
+              net_private_ip: 172.16.0.58/24
+            # Third storage node added 2026-11-13: RF=2 over two nodes needs
+            # both alive, so a single node loss stopped ingest entirely.
+            # Three vmstorage nodes at RF=2 tolerate one. No rebalance:
+            # historical series stay where they were written.
+            vm-clus-03:
+              ansible_host: 172.16.0.59
+              vmid: 145
+              template: debian-12-standard_12.12-1_amd64.tar.zst
+              target_node: pve02
+              features: "nesting=1"
+              net_private_ip: 172.16.0.59/24
         grafana:
           hosts:
             graf-01:

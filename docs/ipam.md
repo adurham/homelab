@@ -2293,3 +2293,25 @@ Round-34 (2026-10-18 ~10:15): overnight run on the defective module = userspace 
 - Pending: owner installs BOTH modules (64 GB is the requirement) + reboot; then the test ladder
   4800 (baseline) -> 4000 MT/s -> fan profile max -> DIMM VDD 1.15 -> 3600, stopping at 0 incidents on
   two consecutive runs, panic = revert, max 6 runs.
+
+## 2026-11-13 — HA build additions
+
+Second members for the two remaining single-instance services, plus the third
+VictoriaMetrics storage node. VIPs reuse the addresses clients already used, so
+no consumer had to change.
+
+| Host | VMID | Node | Old IP | New IP | VIP |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `mail-01` | 104 | pve03 | `172.16.0.40` | `172.16.0.17` | `.40` (keepalived, VRID 54) |
+| `mail-02` | 158 | pve01 | — | `172.16.0.18` | `.40` |
+| `ntp-01` | 105 | pve03 | `172.16.0.11` | `172.16.0.15` | `.11` (keepalived, VRID 53) |
+| `ntp-02` | 157 | pve01 | — | `172.16.0.16` | `.11` |
+| `vm-clus-03` | 145 | pve02 | — | `172.16.0.59` | via LB `.30` |
+
+`vm-clus-01`/`02` are at `.57`/`.58` (the table above still lists `.46`/`.47` —
+stale). Both carry all three storage nodes in `-storageNode` at RF=2.
+
+**Test clients moved off service addresses** (they were ARP-hijacking Garage):
+`tc-rhel9` 312 `.72 → .90`, `tc-rhel8` 314 `.74 → .91`. A stopped-but-onboot
+twin still owns its address — check `onboot` before renumbering anything else.
+
