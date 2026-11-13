@@ -73,3 +73,35 @@ be read as "restores verified".
 
 Note: vzdump targets `vzdump-nvme` (local, `/nvme-pool/vzdump-backups`), **not**
 the Garage cluster — so backup integrity does not depend on the Garage layout.
+
+## Full `pct restore` drill performed 2026-11-13
+
+Beyond the smoke test: an actual restore of a live guest to a spare VMID.
+
+Archive: `vzdump-lxc-149-2026_11_13-02_08_07.tar.zst` (dns-02).
+
+```
+pct restore 999 <archive> --rootfs nvme-data:4     # no --start
+```
+
+Result:
+- config regenerated with the **original** hostname `dns-02`, MAC
+  `BC:24:11:82:FB:F1` and IP `172.16.0.14` — which is exactly why it must
+  **not** be started: it would collide with the live guest.
+- `rootfs: nvme-data:subvol-999-disk-1,size=4G`
+- mounted rootfs = 347 MB, containing a real `/etc/bind` (4 `*.conf*`
+  files plus `bind.keys`). Not an empty shell.
+- destroyed afterwards with `pct destroy 999 --purge`.
+
+**Operational note:** a long `pct restore` run through `pve-shell` (or any
+console proxy that idles out) gets killed mid-extract, leaving
+`lock: create` on the guest and no `rootfs:` line. Clean up with
+`pct unlock <vmid>` then `pct destroy`, and re-run the restore detached:
+
+```
+setsid nohup sh -c "pct restore 999 <archive> --rootfs nvme-data:4 > /tmp/r999.log 2>&1" < /dev/null &
+```
+
+This proves the restore path works end to end (storage driver, rootfs
+regeneration, config merge). It still does **not** prove the guest boots
+with working services — that needs a start on an isolated network.
