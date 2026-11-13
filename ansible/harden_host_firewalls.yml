@@ -19,6 +19,13 @@
       - 9100
       - 3000
       - 8081
+      # 9094 is the Grafana alerting gossip port (unified_alerting
+      # ha_listen/ha_peers). Without it the two replicas never join: each
+      # evaluates every rule and notifies independently, so every alert is
+      # delivered twice. Found 2026-11-13 -- graf-02 logged
+      # "Failed to join 172.16.0.41:9094: dial tcp ... i/o timeout" while
+      # the config on both sides looked correct.
+      - 9094
     host_nftables_allowed_sources:
       - "172.16.0.0/24"
       - "192.168.86.0/24"

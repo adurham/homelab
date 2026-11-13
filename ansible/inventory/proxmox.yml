@@ -68,7 +68,7 @@ all:
           # rule alerts if a production LXC drops out of this coverage again.
           pve_backup_job_id: "41c3b19b-20ea-4ba0-b760-52a79d1cb83a"
           pve_backup_schedule: "Mon..Sun 02:00"
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 171, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 142, 143, 148, 149, 150, 170, 171, 201, 203, 205, 240, 241]
         pve02:
           ansible_host: 192.168.86.12
           pve_sync_vlan_ip: "172.20.0.12"
@@ -77,7 +77,12 @@ all:
           pve_backup_job_id: "08bcc363-a9bf-4de3-9c73-5c4581cc0b78"
           pve_backup_schedule: "Mon..Sun 02:30"
           # Same union vmid list as pve01 -- migration-proof; see the comment there.
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 171, 240, 241]
+          # 200/202/204 (ts-01/tms-01/tzs-01 Tanium appliances) are deliberately
+          # OUT: their disks are 185G/310G/17G and a ts-01 dump alone is a 111G
+          # archive, which cannot coexist with them on this node's 928G pool.
+          # They are rebuilt from template-tanos-1.8.6, and the last good ts-01
+          # archive (2026-11-11) is kept on pve01's vzdump-nvme.
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 142, 143, 148, 149, 150, 170, 171, 201, 203, 205, 240, 241]
           # SMART textfile export (roles/smartctl_exporter) added
           # 2026-09-16 -- pve02's boot HDD (ST500LM034-2GH17A, 35k+
           # power-on hrs) has no spare to replace it with, so tracking
@@ -100,7 +105,7 @@ all:
           pve_backup_schedule: "Mon..Sun 03:00"
           # 201/203/205 are the 500G TanOS appliances that live here. Local
           # retention is keep-last=1 cluster-wide (see the role default).
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 113, 114, 115, 116, 117, 118, 119, 170, 171, 201, 203, 205, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 142, 143, 148, 149, 150, 170, 171, 201, 203, 205, 240, 241]
           # Same as pve02 -- see comment there. pve03's boot HDD
           # (ST500LM021-1KJ152) is the one that actually corrupted
           # pve-cluster's config.db on 2026-09-10.

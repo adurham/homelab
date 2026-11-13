@@ -17,7 +17,7 @@ Re-run before trusting: this is a snapshot.
 | Service | Members | Backs / depends on | State at capture |
 |---|---|---|---|
 | Postgres / Patroni | pg-02 `.48` pve01 leader · graf-db-01 `.44` pve03 sync (lag 0) | Grafana + authentik | healthy |
-| Grafana | 107 /.41 pve03 · 141 /.45 pve01 | → Patroni; → Discord, mail-01 | both 200 |
+| Grafana | 107 /.41 pve03 · 141 /.45 pve01 | → Patroni; → Discord, mail-01 | both 200; alerting gossip on :9094 now actually clustered (see below) |
 | authentik servers | 100 /.20 pve01 · 150 /.60 pve02 | → Patroni | live + ready 200 |
 | authentik outposts | 148 /.50 pve03 · second on 150 /.60 | ← LB `auth_request` | 302 gate verified through VIP and both LBs |
 | Load balancer | 103 /.29 pve03 · 147 /.31 pve01, VIP `.30` | fronts every vhost | VIP on lb-01; HTTP liveness check with Host header — hung-nginx failover proven (SIGSTOP → VIP moved → SIGCONT → returned) |
@@ -48,7 +48,6 @@ Tanium appliances 200–205 · tc-* clients 301–314 · templates 9000–9002
 - Backups: nightly vzdump per node → `vzdump-nvme` (keep-last=1) → weekly encrypted GDrive → workstation copy.
 
 ## Address map for the 2026-11-13 additions
-
 | Guest | VMID | IP | Node | Notes |
 |---|---|---|---|---|
 | vm-clus-03 | 145 | 172.16.0.59 | pve02 | vmstorage + vminsert + vmselect, rootfs on `local-lvm` (nvme-data on pve02 is 97 % full) |
@@ -56,3 +55,33 @@ Tanium appliances 200–205 · tc-* clients 301–314 · templates 9000–9002
 | mail-02 | 158 | 172.16.0.18 | pve01 | postfix twin of mail-01, keepalived VIP .40, VRID 54 |
 | tc-rhel9 | 312 | 172.16.0.90 | pve03 | moved off .72 (was hijacking garage-02) |
 | tc-rhel8 | 314 | 172.16.0.91 | pve03 | moved off .74 (was hijacking garage-03) |
+
+## Alerting path — what broke and how it was found (2026-11-13)
+
+Grafana's own alert state is readable with the account in `/etc/grafana/grafana.ini`
+(`admin` + `admin_password`; the earlier 401s were a probe sending an empty
+username, not a bad password). What that state showed, once readable:
+
+- **The two replicas were never clustered.** `[unified_alerting]` appeared twice
+  in grafana.ini — once carrying `ha_listen/ha_advertise/ha_peers`, once with
+  `enabled = true` — and the duplicate section wins, so the ha_* keys were
+  ignored. Beyond that, graf-01's nftables baseline (`harden_host_firewalls.yml`)
+  did not allow TCP 9094, so graf-02 logged
+  `Failed to join 172.16.0.41:9094: dial tcp ... i/o timeout`. Both fixed: the
+  sections are merged and 9094 is in the allowlist. Proof is the log pair
+  `Waiting for gossip to settle` → `gossip settled` and zero
+  `refresh result=failure` on both replicas.
+- **pve_exporter was dead** with `No usable temporary directory` after the 08:53
+  event, which latched `Start request too quickly`; `reset-failed` + start
+  brought it back. It then 500'd because the scrape config had drifted to bare
+  IP targets while the exporter verifies TLS: PVE's cert is issued for
+  `pveNN.chi.lab.amd-e.com`, so `certificate verify failed: IP address mismatch`.
+  Targets are FQDNs again (matching `prometheus.yml.j2`), and both vmagent
+  instances now scrape one exporter at `172.16.0.42:9221` instead of each
+  assuming a loopback copy.
+- **`adguard_dns_down` / `dnsmasq_dhcp_down` were paused.** They watch the HA
+  Green at `192.168.86.2`, which no longer serves the LAN: DHCP option 6 hands
+  out `192.168.86.4/.5` (AdGuard on CT 130/131, Kea hot-standby). Both fired
+  critical continuously. A real replacement should be a `dig`-based probe
+  against the AdGuard pair, not an API check against a retired add-on.
+
