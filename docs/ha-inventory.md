@@ -47,6 +47,51 @@ Tanium appliances 200–205 · tc-* clients 301–314 · templates 9000–9002
 - Grafana alert rules → Discord webhook + mail `VIP .40` SMTP + healthchecks.io dead-man switch.
 - Backups: nightly vzdump per node → `vzdump-nvme` (keep-last=1) → weekly encrypted GDrive → workstation copy.
 
+## Pair/ring placement policy (enforced 2026-11-13)
+
+The split is no longer hand-built — PVE enforces it.
+
+**3-node quorum sets** (etcd, Garage, Loki, VictoriaMetrics storage): one member per
+PVE node. Members are **pinned**: taken out of `ha-manager` and `pvesr`
+(ct 106, 140, 142, 143 were removed from both — a resurrected ring member with a
+stale disk is worse than a stopped one, and the ring itself is the redundancy).
+
+**2-node pairs**: BOTH members are now `ha-manager`-managed and `pvesr`-replicated,
+so either can float — but a negative resource-affinity rule forbids them sharing a
+node. Rules (order after `frigate-prefer-pve01`):
+
+| rule | resources |
+|---|---|
+| pair-lb | ct:103, ct:147 |
+| pair-dns | ct:102, ct:149 |
+| pair-authentik | ct:100, ct:150 |
+| pair-grafana | ct:107, ct:141 |
+| pair-landns | ct:130, ct:131 |
+| pair-mail | ct:104, ct:158 |
+| pair-ntp | ct:105, ct:157 |
+
+Verify placement any time (each vmid must show a different node inside its set):
+
+```bash
+pvesh get /cluster/resources --type vm --output-format json \
+  | jq -r '.data[] | [.vmid,.name,.node] | @tsv' | sort -n
+pvesh get /cluster/ha/rules --output-format json | jq -r '.data[] | [.rule,.affinity,.resources] | @tsv'
+```
+
+Proof the rule bites — an HA migration onto the twin's node is refused:
+
+```
+# ha-manager migrate ct:147 pve03
+cannot migrate resource 'ct:147' to node 'pve03':
+- resource 'ct:103' on target node 'pve03' in negative affinity with resource 'ct:147'
+```
+
+Only HA-managed guests can appear in rules (`cannot use unmanaged resource(s)`),
+which is why the twins had to be brought under HA first. mail-02/ntp-02 also had
+to move their rootfs from `local-lvm` to `nvme-data` (LVM-thin cannot replicate);
+`pct move-volume` failed with a stale `lock: disk` and had to go through the API
+(`PUT .../config delete=lock`, then `POST .../move_volume volume=rootfs storage=nvme-data`).
+
 ## Address map for the 2026-11-13 additions
 | Guest | VMID | IP | Node | Notes |
 |---|---|---|---|---|
