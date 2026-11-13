@@ -5669,3 +5669,52 @@ groups:
     labels:
       severity: warning
     isPaused: false
+  - uid: ha_tier_probe_down
+    title: HA tier endpoint unreachable
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        editorMode: code
+        expr: probe_success{job="blackbox_ha_tier"} == 0
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: threshold
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: "An HA tier endpoint stopped accepting TCP connections through its VIP."
+      description: "One of loki-vip (3100), vmselect-vip (8481), garage-s3-vip (3900), patroni-rest (8008) or outpost-01 (9300) stopped listening. Check the guest behind it before assuming the VIP is at fault."
+    labels:
+      severity: critical
+    isPaused: false
