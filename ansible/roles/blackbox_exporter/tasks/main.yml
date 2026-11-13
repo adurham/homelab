@@ -150,6 +150,33 @@
             method: GET
             fail_if_not_ssl: false
             preferred_ip_protocol: ip4
+
+        # The gallery has no auth of its own: the Authentik forward-auth gate
+        # on the load balancers is the only thing between it and anyone on the
+        # network. That gate failed OPEN once (the auth_request upstream was
+        # pointed at an outpost's metrics port, which answers 200 to anything)
+        # and nothing noticed, because every health check still passed.
+        # This probe is a request with NO session: it must be bounced to the
+        # outpost login (302 + Location). A 200 means the gallery is being
+        # served to anyone who asks. Host header + SNI are pinned so the same
+        # module can be aimed at the VIP and at each LB node's own address --
+        # a node behind the VIP can be open while the VIP looks fine.
+        gallery_auth_gate:
+          prober: http
+          timeout: 8s
+          http:
+            method: GET
+            follow_redirects: false
+            valid_status_codes: [302]
+            fail_if_not_ssl: true
+            preferred_ip_protocol: ip4
+            headers:
+              Host: gallery.chi.lab.amd-e.com
+            fail_if_header_not_matches:
+              - header: Location
+                regexp: '/outpost\.goauthentik\.io/start'
+            tls_config:
+              server_name: gallery.chi.lab.amd-e.com
     owner: root
     group: blackbox_exporter
     mode: '0640'

@@ -119,6 +119,26 @@
     mode: '0750'
   notify: Restart Collector Collector
 
+- name: Deploy Metrics Writer
+  ansible.builtin.copy:
+    src: ingest_metrics.py
+    dest: "{{ media_ingest_dir }}/ingest_metrics.py"
+    owner: "{{ media_ingest_user }}"
+    group: "{{ media_ingest_user }}"
+    mode: '0750'
+  notify: Restart Collector Collector
+
+# Textfile-collector directory the collector and the sweep write counts and
+# timestamps into (no identifiers). World-readable so the metrics agent can
+# scrape it; kept OUT of the state dir, which is private to the service user.
+- name: Ensure metrics directory
+  ansible.builtin.file:
+    path: "{{ media_ingest_metrics_dir }}"
+    state: directory
+    owner: "{{ media_ingest_user }}"
+    group: "{{ media_ingest_user }}"
+    mode: '0755'
+
 - name: Deploy Collector Collector
   ansible.builtin.copy:
     src: collector.py

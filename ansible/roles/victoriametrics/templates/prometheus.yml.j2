@@ -407,3 +407,28 @@ scrape_configs:
         target_label: target
       - target_label: __address__
         replacement: 127.0.0.1:9115
+
+  # Unauthenticated request to a gallery DATA path, against the VIP and each
+  # load balancer node. Must be a 302 to the login; see the gallery_auth_gate
+  # module in roles/blackbox_exporter for why a 200 here is an incident.
+  - job_name: 'blackbox_gallery_auth_gate'
+    scrape_interval: 30s
+    metrics_path: /probe
+    params:
+      module: [gallery_auth_gate]
+    static_configs:
+      - targets: ['https://{{ ip_loadbalancer }}/gallery/manifest.json']
+        labels:
+          instance: 'lb-vip'
+{% for node in ip_loadbalancer_nodes %}
+      - targets: ['https://{{ node }}/gallery/manifest.json']
+        labels:
+          instance: 'lb-node-{{ node }}'
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: 127.0.0.1:9115

@@ -1,0 +1,794 @@
+# Media pipeline alerts: ingest capture, park, sweep, staging, and the gallery auth gate.
+# Generated; source of truth is roles/grafana/files/alerting_rules_media_pipeline.yml.
+apiVersion: 1
+groups:
+- orgId: 1
+  name: media-pipeline
+  folder: Infrastructure
+  interval: 1m
+  rules:
+  - uid: media_capture_lost
+    title: 'Media ingest: item LOST (no copy captured)'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'increase(media_ingest_capture_lost_total[6h])'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 0s
+    annotations:
+      summary: 'An incoming item could not be captured at all on {{ $labels.instance }}'
+      description: 'The collector could not download the item into staging AND could not stream it into the encrypted park. If it was disappearing media it is gone at the source. Check /var/log/media-ingest/collector.log for the LOST line and ask the sender to re-send.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_capture_failed
+    title: 'Media ingest: live capture did not reach the gallery'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'increase(media_ingest_capture_failures_total[30m])'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 0s
+    annotations:
+      summary: 'A live capture failed to push on {{ $labels.instance }} (bytes are parked)'
+      description: 'The push to the gallery failed or staging was unusable. The bytes are held encrypted in /var/lib/media-ingest/failed (and in RAM staging if there was room); the sweep pushes them when the gallery answers. Find out why the push failed NOW: disappearing media arriving during the outage depends on the park.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_park_failed
+    title: 'Media ingest: encrypted park FAILED'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'increase(media_ingest_park_failures_total[30m])'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 0s
+    annotations:
+      summary: 'gpg park failed on {{ $labels.instance }} — the safety net is broken'
+      description: 'A failed push could not be parked. Until this is fixed any push failure can lose disappearing media. Check the keyring (GNUPGHOME in the unit) and disk space under /var/lib/media-ingest/failed.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_parked_needs_manual
+    title: 'Media ingest: parked items need the off-box key'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'media_ingest_parked_needs_manual'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 0s
+    annotations:
+      summary: 'Parked item(s) on {{ $labels.instance }} exist only as ciphertext'
+      description: 'These items are not in the gallery and their plaintext is no longer in staging (reboot or full staging). Decrypt them with the park key from the password manager and upload; see docs/media-ingest-recovery.md.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_parked_backlog
+    title: 'Media ingest: parked items not draining'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'media_ingest_parked_items'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 45m
+    annotations:
+      summary: 'Item(s) parked on {{ $labels.instance }} for 45+ minutes'
+      description: 'Two sweeps have run without clearing the park, so pushes are still failing or the gallery is unreachable.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_sweep_failing
+    title: 'Media ingest: reconcile sweep failing'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'media_ingest_sweep_failed'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 25m
+    annotations:
+      summary: 'Reconcile sweep on {{ $labels.instance }} is failing pushes'
+      description: 'The backstop sweep cannot push to the gallery. Two consecutive sweeps have failed. Check /var/log/media-ingest/reconcile.log; a 504 means the gallery host is dropping the load balancer, a 400 on the token URL means gallery auth is broken.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_sweep_have_check
+    title: 'Media ingest: gallery have-check failing'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'media_ingest_sweep_have_check_ok'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 25m
+    annotations:
+      summary: 'Sweep on {{ $labels.instance }} cannot ask the gallery what it holds'
+      description: 'Without the have-check the sweep re-downloads its whole lookback window every run, which is what filled staging before. The gallery ingest API is unreachable or rejecting the token.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_staging_filling
+    title: 'Media ingest: staging filling up'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'media_ingest_staging_used_bytes / media_ingest_staging_size_bytes'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: 'Ingest staging on {{ $labels.instance }} is over half full'
+      description: 'Staging is RAM and should be empty between captures. Something is leaving files behind. A full staging dir is what turned a push outage into lost media.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_collector_stale
+    title: 'Media ingest: collector heartbeat stale'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'time() - media_ingest_collector_heartbeat_timestamp_seconds'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 300
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: 'Live collector on {{ $labels.instance }} has stopped ticking'
+      description: 'The collector''s poll loop writes a heartbeat every minute. It is hung, crashed, or not writing metrics. Disappearing media is only captured by the live collector.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_sweep_stale
+    title: 'Media ingest: reconcile sweep not running'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'time() - media_ingest_sweep_last_run_timestamp_seconds'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 3600
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: 'No completed sweep on {{ $labels.instance }} for over an hour'
+      description: 'The sweep runs every 20 minutes. It has not finished one in over an hour.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_unit_failed
+    title: 'Media pipeline: service failed'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'node_systemd_unit_state{state="failed", name=~"media-ingest.*|media-gallery.*"}'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 15m
+    annotations:
+      summary: '{{ $labels.name }} is failed on {{ $labels.instance }}'
+      description: 'A media ingest or gallery unit is in the failed state. For the periodic collectors this means the last run exited non-zero; read the unit journal.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: media_gallery_crashloop
+    title: 'Media gallery: service crash-looping'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'node_systemd_unit_state{state="activating", name=~"media-gallery-(gallery|serve|thumb|trash|upload).service"}'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: '{{ $labels.name }} has been restarting for 10+ minutes on {{ $labels.instance }}'
+      description: 'A long-running gallery service is stuck in activating/auto-restart. Usually its port is held by another process.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: gallery_auth_gate_open
+    title: 'GALLERY IS SERVING WITHOUT LOGIN'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'probe_http_status_code{job="blackbox_gallery_auth_gate"}'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 199.5
+            - 200.5
+            type: within_range
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 1m
+    annotations:
+      summary: 'Unauthenticated request to the gallery returned 200 via {{ $labels.instance }}'
+      description: 'A request with no session got gallery data instead of a redirect to the login. The forward-auth gate on that load balancer is not enforcing. Check `upstream outpost_backend` in the LB nginx config: it must point at a listener that returns 401 without a cookie (never the outpost metrics port).'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false
+  - uid: gallery_auth_gate_probe
+    title: 'Gallery auth-gate probe failing'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'probe_success{job="blackbox_gallery_auth_gate"}'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: 'Auth-gate probe via {{ $labels.instance }} is not seeing a login redirect'
+      description: 'The no-session probe did not get a 302 to the outpost login. Either the gallery vhost is down on that load balancer or the gate is answering something other than a redirect.'
+    labels:
+      severity: critical
+      pipeline: media
+    isPaused: false

@@ -4,6 +4,10 @@ media_ingest_user: mediaingest
 media_ingest_dir: /opt/media-ingest          # code + venv
 media_ingest_state: /var/lib/media-ingest    # session, staging (RW)
 media_ingest_log_dir: /var/log/media-ingest
+# Scraped by the host's metrics agent (textfile collector). The inventory sets
+# textfile_collector_enabled + smartctl_exporter_textfile_dir to this path for
+# the media_ingest group; the alert rules in roles/grafana depend on it.
+media_ingest_metrics_dir: /var/lib/media-ingest-metrics
 
 # Pin source; bump deliberately.
 media_ingest_telethon_version: "1.43.2"

@@ -421,6 +421,17 @@
     mode: '0644'
   notify: Restart Grafana
 
+# Separate group so the media pipeline's alerts (ingest capture/park/sweep and
+# the gallery auth gate) are all critical and are not buried among the generic
+# warnings: a failed ingest unit used to surface only as one more "systemd unit
+# failed" next to several chronically-firing ones, and went unread for days.
+- name: Provision Grafana Alert Rules (media pipeline)
+  ansible.builtin.copy:
+    src: alerting_rules_media_pipeline.yml
+    dest: /etc/grafana/provisioning/alerting/rules_media_pipeline.yml
+    mode: '0644'
+  notify: Restart Grafana
+
 - name: Configure Grafana Environment (Unsigned Plugins)
   ansible.builtin.lineinfile:
     path: /etc/default/grafana-server

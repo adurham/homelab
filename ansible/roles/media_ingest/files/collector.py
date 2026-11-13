@@ -38,11 +38,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from telethon import TelegramClient as SourceClient, events
+from telethon import TelegramClient as SourceClient, events, utils as tl_utils
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import store_client  # noqa: E402
+import ingest_metrics  # noqa: E402
 
 API_ID = int(os.environ["TG_API_ID"])
 API_HASH = os.environ["TG_API_HASH"]
@@ -61,15 +62,27 @@ FAILED = Path(os.environ.get("TG_FAILED_DIR", "/var/lib/media-ingest/failed"))
 # manager, so a compromise of this box yields ciphertext only. Nothing here can
 # decrypt, which is the point; recovery is done off-box.
 PARK_RECIPIENT = os.environ.get("STAGING_PARK_RECIPIENT", "park@media-ingest.local")
+# After a failed push the plaintext is kept in staging (RAM) beside its
+# encrypted disk copy only while staging is under this fraction; see
+# reconcile.KEEP_PLAIN_BELOW, which must stay in step.
+KEEP_PLAIN_BELOW = float(os.environ.get("TG_KEEP_PLAIN_BELOW", "0.5"))
 
 
 def _encrypt_file(src: Path, dst: Path) -> None:
     """Encrypt src to dst for PARK_RECIPIENT (gpg public-key, no local secret)."""
-    subprocess.run(
-        ["gpg", "--batch", "--yes", "--quiet", "--trust-model", "always",
-         "--recipient", PARK_RECIPIENT, "--output", str(dst), "--encrypt", str(src)],
-        check=True,
-    )
+    # Write beside the target and rename: a gpg that dies half-way must never
+    # replace an earlier good ciphertext of the same item with a truncated one.
+    part = dst.with_name(dst.name + ".part")
+    try:
+        subprocess.run(
+            ["gpg", "--batch", "--yes", "--quiet", "--trust-model", "always",
+             "--recipient", PARK_RECIPIENT, "--output", str(part), "--encrypt", str(src)],
+            check=True,
+        )
+        os.replace(part, dst)
+    finally:
+        if part.exists():
+            part.unlink()
 
 # Active-pull backstop interval (seconds). Telegram deprioritizes update fan-out
 # to idle-looking secondary sessions (a userbot that only pings looks dormant),
@@ -270,34 +283,213 @@ def _refresh_excluded():
 _seen = set()
 
 
-def _park_failed(stem: str, folder: str, date_iso: str) -> None:
+def _park_failed(stem: str, folder: str, date_iso: str, keep_plain: bool = False) -> bool:
     """Keep a downloaded-but-unpushed file instead of deleting it.
 
     STAGING is a tmpfs and the old cleanup ran in a `finally`, so a failed push
     destroyed the only copy while the source had already purged TTL media. Move
     the bytes to the durable FAILED dir plus a .json sidecar (folder + date) so
     a retry can push them correctly. Best-effort: never mask the original error.
+
+    keep_plain=True writes the encrypted copy but leaves the staged plaintext
+    in place: used to park ephemeral media BEFORE the push is attempted, so no
+    later failure (push, park, a full staging dir) can be the only thing
+    standing between that item and permanent loss.
     """
+    done = 0
     try:
         FAILED.mkdir(parents=True, exist_ok=True)
-        files = [p for p in STAGING.glob(stem + "*") if p.suffix != ".json"]
+        files = [p for p in ingest_metrics.stem_files(STAGING, stem)
+                 if p.suffix != ".json" and p.stat().st_size > 0]
         if not files:
-            return
+            return False
         for p in files:
             dst = FAILED / (p.name + ".gpg")
             _encrypt_file(p, dst)
-            p.unlink()  # plaintext never lands on persistent storage
+            done += 1
+            if not keep_plain:
+                p.unlink()  # plaintext never lands on persistent storage
         (FAILED / (stem + ".json")).write_text(
             json.dumps({"stem": stem, "folder": folder, "date": date_iso,
                         "encrypted": True}),
             encoding="utf-8",
         )
         log.warning(
-            "PARKED %s (%d file(s), encrypted) in %s — push failed, kept for retry",
+            "PARKED %s (%d file(s), encrypted) in %s — %s",
             stem, len(files), FAILED,
+            "held until the push is confirmed" if keep_plain else "push failed, kept for retry",
         )
+        return True
     except Exception as e:  # noqa: BLE001
         log.warning("could not park %s: %s: %s", stem, type(e).__name__, e)
+        _bump("media_ingest_park_failures_total")
+        if done:
+            _write_sidecar(stem, folder, date_iso)
+        return done > 0
+
+
+def _unpark(stem: str) -> None:
+    """Drop a parked copy once the gallery has confirmed the push. Media first,
+    sidecar last: a sidecar without media is harmless, the reverse is not."""
+    try:
+        for p in ingest_metrics.stem_files(FAILED, stem):
+            if p.suffix != ".json":
+                p.unlink()
+        side = FAILED / (stem + ".json")
+        if side.exists():
+            side.unlink()
+    except OSError as e:
+        log.warning("could not clear parked copy of %s: %s", stem, e)
+
+
+def _open_staged(path):
+    return open(path, "wb")
+
+
+async def _capture_to_park(client, msg, stem: str, folder, date_iso: str, tee=None):
+    """Stream the media from the source straight into gpg -> FAILED.
+
+    Nothing here depends on STAGING, and nothing is held in memory beyond one
+    chunk, which is why a full or broken staging dir can no longer lose an
+    item. Returns (plaintext byte count, staged path or None); raises if no
+    bytes arrived or gpg failed.
+
+    tee=<staging path stem>: ALSO write each chunk to a staging file, so one
+    fetch from the source yields both the durable ciphertext and the plaintext
+    to push. Used for ephemeral media, which must never need a second fetch.
+    A staging failure (full, read-only) only drops the tee; the ciphertext
+    capture carries on.
+    """
+    FAILED.mkdir(parents=True, exist_ok=True)
+    ext = tl_utils.get_extension(msg.media) or ""
+    dst = FAILED / (stem + ext + ".gpg")
+    part = FAILED / (stem + ext + ".gpg.part")
+    staged = out = None
+    if tee is not None:
+        staged = tee.with_name(tee.name + ext)
+        try:
+            out = _open_staged(staged)
+        except OSError as e:
+            log.error("staging unusable for %s (%s: %s) — capturing ciphertext only",
+                      stem, type(e).__name__, e)
+            staged = out = None
+
+    def drop_tee():
+        nonlocal staged, out
+        try:
+            if out is not None:
+                out.close()
+        except OSError:
+            pass
+        try:
+            if staged is not None and staged.exists():
+                staged.unlink()
+        except OSError:
+            pass
+        staged = out = None
+
+    proc = await asyncio.create_subprocess_exec(
+        "gpg", "--batch", "--yes", "--quiet", "--trust-model", "always",
+        "--recipient", PARK_RECIPIENT, "--output", str(part), "--encrypt",
+        stdin=asyncio.subprocess.PIPE,
+    )
+    n = 0
+    try:
+        async for chunk in client.iter_download(msg.media):
+            proc.stdin.write(chunk)
+            await proc.stdin.drain()
+            if out is not None:
+                try:
+                    out.write(chunk)
+                except OSError as e:
+                    log.error("staging write failed for %s (%s: %s) — capturing "
+                              "ciphertext only", stem, type(e).__name__, e)
+                    drop_tee()
+            n += len(chunk)
+        proc.stdin.close()
+        rc = await proc.wait()
+        if out is not None:
+            try:
+                out.close()
+                out = None
+            except OSError as e:
+                log.error("staging flush failed for %s (%s)", stem, e)
+                drop_tee()
+    except BaseException:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        if part.exists():
+            part.unlink()
+        drop_tee()
+        raise
+    if rc != 0 or n == 0:
+        if part.exists():
+            part.unlink()
+        drop_tee()
+        raise RuntimeError(f"direct capture got {n} bytes, gpg rc={rc}")
+    os.replace(part, dst)
+    _write_sidecar(stem, folder, date_iso)
+    log.warning("PARKED %s (%d bytes, encrypted%s) in %s",
+                stem, n, "" if staged else ", captured without staging", FAILED)
+    return n, staged
+
+
+# Counters for the textfile collector. Process-lifetime; the alert rules look
+# at increases, so a restart resetting them to zero is harmless.
+_metrics = {
+    "media_ingest_capture_failures_total": 0,   # a live capture did not reach the gallery
+    "media_ingest_capture_lost_total": 0,       # ...and no copy of the bytes was kept at all
+    "media_ingest_park_failures_total": 0,      # gpg park attempt failed
+    "media_ingest_captures_total": 0,           # live captures pushed
+    "media_ingest_slow_captures_total": 0,      # reached us > SLOW_CAPTURE_S after it was sent
+}
+
+
+def _write_metrics() -> None:
+    used, size = ingest_metrics.staging_usage(STAGING)
+    ingest_metrics.write("media_ingest_collector", {
+        **_metrics,
+        "media_ingest_collector_heartbeat_timestamp_seconds": ingest_metrics.now(),
+        "media_ingest_staging_used_bytes": used,
+        "media_ingest_staging_size_bytes": size,
+        "media_ingest_parked_items": ingest_metrics.parked_count(FAILED),
+    })
+
+
+def _bump(name: str) -> None:
+    _metrics[name] += 1
+    _write_metrics()
+
+
+def _drop_empty_staged(stem: str) -> None:
+    """Remove zero-byte leftovers of a download that never wrote a byte. They
+    carry no data, and left in place they make the next attempt pick a
+    'stem (N)' name and pile up."""
+    for p in ingest_metrics.stem_files(STAGING, stem):
+        try:
+            if p.is_file() and p.stat().st_size == 0:
+                p.unlink()
+        except OSError:
+            pass
+
+
+_inflight = set()   # stems being captured right now (NewMessage + MessageEdited race)
+SLOW_CAPTURE_S = float(os.environ.get("TG_SLOW_CAPTURE_SECONDS", "60"))
+
+
+def _write_sidecar(stem: str, folder, date_iso: str) -> None:
+    """(Re)write a parked item's sidecar. folder may be None while the gallery
+    has not been asked yet; the sweep then routes by the chat id in the stem."""
+    try:
+        FAILED.mkdir(parents=True, exist_ok=True)
+        (FAILED / (stem + ".json")).write_text(
+            json.dumps({"stem": stem, "folder": folder, "date": date_iso,
+                        "encrypted": True}),
+            encoding="utf-8",
+        )
+    except OSError as e:
+        log.warning("could not write sidecar for %s: %s", stem, e)
 
 
 async def handle(event):
@@ -311,14 +503,31 @@ async def handle(event):
         return
     cid = event.chat_id
     stem = f"{cid}_{msg.id}"
-    if stem in _seen:
+    if stem in _seen or stem in _inflight:
         return
-    _refresh_excluded()
+    # Cached ledger only. NOTHING that talks to the gallery may run before the
+    # bytes are safe: those calls are synchronous and wait out the gateway
+    # timeout when the gallery is down, which delayed each capture by minutes
+    # -- long enough for disappearing media to be gone.
     if stem in _excluded:
         log.info("skip excluded stem=%s", stem)
         return
-    chat = await event.get_chat()
-    folder = folder_for(cid, getattr(chat, "title", None) or getattr(chat, "first_name", None))
+    _inflight.add(stem)
+    # The sweep is a separate process working on the same files. Whoever holds
+    # the item's lock owns it; the sweep parks on failure exactly as we do.
+    lock = ingest_metrics.StemLock(STAGING, stem)
+    if not lock.acquire():
+        _inflight.discard(stem)
+        log.info("stem=%s is being handled by the sweep — leaving it there", stem)
+        return
+    try:
+        await _capture(event, msg, cid, stem, kind)
+    finally:
+        lock.release()
+        _inflight.discard(stem)
+
+
+async def _capture(event, msg, cid, stem, kind):
     date_iso = msg.date.isoformat() if msg.date else ""
     eph = " ephemeral" if ttl_of(getattr(msg, "media", None)) else ""
     # Delivery lag = how long Telegram took to hand us this update after the
@@ -330,30 +539,110 @@ async def handle(event):
         md = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=dt.timezone.utc)
         lag_s = (now - md).total_seconds()
     lag_str = f" lag={lag_s:.1f}s" if lag_s is not None else ""
-    log.info("MEDIA%s from chat=%s stem=%s kind=%s -> folder=%s%s", eph, cid, stem, kind, folder, lag_str)
+    log.info("MEDIA%s from chat=%s stem=%s kind=%s%s", eph, cid, stem, kind, lag_str)
+    if lag_s is not None and lag_s > SLOW_CAPTURE_S:
+        _bump("media_ingest_slow_captures_total")
 
     tmp = STAGING / stem
     pushed = False
+    held = False   # an encrypted copy exists in FAILED
+    folder = None
     try:
-        path = await msg.download_media(file=str(tmp))
-        if not path or os.path.getsize(path) == 0:
-            log.warning("empty download for %s", stem)
+        # 1) Bytes first.
+        path = None
+        direct = False
+        if eph:
+            # Ephemeral media is fetched exactly ONCE. That single stream is
+            # written to the encrypted disk copy and to staging at the same
+            # time, so no failure of staging, of the push or of the gallery
+            # can leave it needing a second fetch the source may refuse.
+            _n, staged = await _capture_to_park(event.client, msg, stem, None,
+                                                date_iso, tee=tmp)
+            held = True
+            path = str(staged) if staged else None
+            direct = path is None
+        else:
+            # Staging is a small tmpfs; if it is full, missing or read-only
+            # the download fails or yields nothing. That used to be the end
+            # of the item. Now it falls through to a capture that does not
+            # use staging at all.
+            try:
+                path = await msg.download_media(file=str(tmp))
+            except OSError as e:
+                log.error("staging download failed %s: %s: %s — capturing without staging",
+                          stem, type(e).__name__, e)
+            if not path or os.path.getsize(path) == 0:
+                path = None
+                _drop_empty_staged(stem)
+                await _capture_to_park(event.client, msg, stem, None, date_iso)
+                held = direct = True
+
+        # 2) Only now ask the gallery where it goes -- off the event loop, so a
+        #    slow or dead gallery cannot stall the next capture either.
+        chat = await event.get_chat()
+        name = getattr(chat, "title", None) or getattr(chat, "first_name", None)
+        folder = await asyncio.to_thread(folder_for, cid, name)
+        await asyncio.to_thread(_refresh_excluded)
+        if held:
+            _write_sidecar(stem, folder, date_iso)
+        if stem in _excluded:
+            log.info("skip excluded stem=%s (dropped after capture)", stem)
+            _unpark(stem)
+            pushed = True   # earns the staging cleanup below
             return
-        store_client.push_media(folder, path, stem, date_iso, is_out=False)
+        if direct:
+            # The bytes are safe but only as ciphertext this host cannot read,
+            # so this item needs the off-box key to finish. Count it as a
+            # failed live capture so it alerts.
+            _bump("media_ingest_capture_failures_total")
+            return
+
+        # 3) Push, also off the event loop (an upload can take minutes).
+        await asyncio.to_thread(store_client.push_media, folder, path, stem, date_iso, False)
         _seen.add(stem)
         pushed = True
         log.info("PUSHED %s to gallery folder %s", stem, folder)
+        _bump("media_ingest_captures_total")
+        if held:
+            _unpark(stem)
     except Exception as e:  # noqa: BLE001
         log.error("capture/push failed %s: %s: %s", stem, type(e).__name__, e)
-        _park_failed(stem, folder, date_iso)
+        _bump("media_ingest_capture_failures_total")
+        # Encrypt whatever is staged. The plaintext stays in the RAM-only
+        # staging dir while there is room, so the next sweep can push it by
+        # itself once the gallery answers; past that it is removed and the
+        # ciphertext is the sole copy.
+        used, size = ingest_metrics.staging_usage(STAGING)
+        room = bool(size) and (used / size) < KEEP_PLAIN_BELOW
+        if held:
+            # The ciphertext already exists and is not rewritten. Only decide
+            # whether the plaintext may stay in RAM for the sweep to push.
+            _write_sidecar(stem, folder, date_iso)
+            if not room:
+                for p in ingest_metrics.stem_files(STAGING, stem):
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+        elif not _park_failed(stem, folder, date_iso, keep_plain=room):
+            # Nothing staged and nothing parked: try once more to pull the
+            # bytes straight into the park before giving up on the item.
+            try:
+                await _capture_to_park(event.client, msg, stem, folder, date_iso)
+            except Exception as e2:  # noqa: BLE001
+                log.error("LOST %s%s: no copy could be captured (%s: %s)",
+                          stem, eph, type(e2).__name__, e2)
+                _bump("media_ingest_capture_lost_total")
     finally:
         # Only a successful push earns deletion; a failed one was just parked.
         if pushed:
-            for p in STAGING.glob(stem + "*"):
+            for p in ingest_metrics.stem_files(STAGING, stem):
                 try:
                     p.unlink()
                 except OSError:
                     pass
+        else:
+            _drop_empty_staged(stem)
 
 
 async def main():
@@ -374,7 +663,11 @@ async def main():
              getattr(me, "username", None) or getattr(me, "first_name", "?"), me.id)
     # sanity: confirm gallery auth works at startup
     try:
+        global _excluded, _excluded_ts
         ex = store_client.get_excluded()
+        # prime the cached ledger: handle() consults it without a network call
+        _excluded = ex
+        _excluded_ts = ingest_metrics.now()
         log.info("gallery auth OK; %d excluded stems", len(ex))
     except Exception as e:  # noqa: BLE001
         log.error("gallery auth FAILED at startup: %s", e)
@@ -398,12 +691,18 @@ async def main():
             log.info("active-pull poll DISABLED (TG_POLL_INTERVAL<=0)")
             return
         log.info("active-pull poll loop online (every %.0fs)", POLL_INTERVAL)
+        last_beat = 0.0
         while True:
             await asyncio.sleep(POLL_INTERVAL)
             try:
                 await client.catch_up()
             except Exception as e:  # noqa: BLE001
                 log.debug("poll catch_up failed (will retry): %s", e)
+            # Heartbeat + gauges once a minute, so a hung collector or a
+            # filling staging dir is visible without waiting for a capture.
+            if ingest_metrics.now() - last_beat >= 60:
+                last_beat = ingest_metrics.now()
+                _write_metrics()
 
     poll_task = asyncio.ensure_future(_poll_loop())
     try:

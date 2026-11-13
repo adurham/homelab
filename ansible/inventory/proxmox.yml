@@ -331,6 +331,11 @@ all:
         # line -- NEVER allowlisted. ssh/cron/postfix/systemd-journald
         # are safe, content-free infra signal -- allowlisted.
         alloy_log_unit_allowlist: '^(ssh(@.*)?|cron|postfix(@.*)?|systemd-journald)\.service$'
+        # Capture/park/sweep/staging metrics (roles/media_ingest writes
+        # *.prom here; counts and timestamps only). The media-pipeline alert
+        # group in roles/grafana has nothing to evaluate without this.
+        textfile_collector_enabled: true
+        smartctl_exporter_textfile_dir: /var/lib/media-ingest-metrics
         # Fleet log-retention audit 2026-09-10: no app-level log producer
         # anywhere in the cluster had rotation configured (only stock
         # OS-package logrotate.d entries existed). media-ingest-collector
