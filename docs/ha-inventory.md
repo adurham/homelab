@@ -124,9 +124,20 @@ username, not a bad password). What that state showed, once readable:
   Targets are FQDNs again (matching `prometheus.yml.j2`), and both vmagent
   instances now scrape one exporter at `172.16.0.42:9221` instead of each
   assuming a loopback copy.
-- **`adguard_dns_down` / `dnsmasq_dhcp_down` were paused.** They watch the HA
-  Green at `192.168.86.2`, which no longer serves the LAN: DHCP option 6 hands
-  out `192.168.86.4/.5` (AdGuard on CT 130/131, Kea hot-standby). Both fired
-  critical continuously. A real replacement should be a `dig`-based probe
-  against the AdGuard pair, not an API check against a retired add-on.
+- **`adguard_dns_down` / `dnsmasq_dhcp_down` / `adguard_down` were paused.** They watch
+  the HA Green at `192.168.86.2`, which no longer serves the LAN: DHCP option 6 hands
+  out `192.168.86.4/.5` (AdGuard on CT 130/131, Kea hot-standby). All three fired
+  critical continuously. A real replacement should be a `dig`-based probe against
+  the AdGuard pair, not an API check against a retired add-on.
+- **Retired `adblock-canary` and `adguard-log-shipper` on adblock-proxy-01.** Both
+  only worked against the HA add-on — the canary read DHCP leases over HA's
+  supervisor websocket, the shipper minted an HA ingress session. Repointing them
+  at CT 130 (:8000) is a rewrite, not a host swap, so they are disabled rather than
+  left failing. The AdGuard API on 130 is `192.168.86.4:8000`.
+- **The two vmagent instances must scrape the same exporters.** graf-02's copy still
+  pointed blackbox jobs at its own `127.0.0.1:9115` (no exporter there) and the
+  pve_exporter job at a bare IP, so both collectors wrote contradictory `up`
+  samples — the "Host down" alerts for outpost-01/loki-vip/garage-s3-vip were that
+  fight, not an outage. Both now use `172.16.0.42:9115` / `172.16.0.42:9221`.
+
 
