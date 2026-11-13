@@ -251,3 +251,31 @@ have sat on a dead node for the whole outage.
 
 The DNS pair is on the equivalent real query (`dig @127.0.0.1`).
 
+
+## PVE console through the VIP needs node pinning + Host/Origin rewriting
+
+`proxmox.chi.lab.amd-e.com` is the only way the cluster UI is reached, so the
+noVNC/xterm console has to survive the LB. It did not: the pane sat on
+"Connecting..." forever.
+
+Two independent reasons, both measured on 2026-11-13:
+
+1. **The console endpoints are node-local.** `vncproxy` mints a ticket on the
+   node that runs the guest, and `vncwebsocket` only attaches on that node.
+   Proxied to the round-robin `proxmox_cluster` upstream, the request lands on a
+   different node, which answers `400`.
+2. **PVE validates the upgrade's Host and Origin.** With a browser behind the
+   VIP the request carries `Origin: https://proxmox.chi.lab.amd-e.com`. PVE
+   wants `Host` = its own FQDN and any `Origin` to match that Host:
+   `Host=pve02… + Origin=https://proxmox.chi.lab…` → **rejected**;
+   `Host=pve02… + Origin=https://pve02…` → `101` + RFB banner.
+
+Fix: the three regex locations in `files/nginx-pve-console-pin.conf`, placed
+above `location /` in the proxmox vhost, one per node, rewriting both headers to
+that node's FQDN. Applied live to lb-01 and lb-02 (backups under
+`/root/nginx-bak/`), `nginx -t` clean, verified end-to-end through the VIP
+(`101 Switching Protocols` + `RFB 003.008`).
+
+Note: `nginx -t` loads EVERY file in `sites-enabled/`, so a `.bak` written next
+to the vhost fails the test with `duplicate upstream`. Keep backups in
+`/root/nginx-bak/`.
