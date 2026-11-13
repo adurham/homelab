@@ -1,0 +1,14 @@
+---
+# Garage S3 cluster (3 nodes, RF=3, one zone per Proxmox host).
+#
+# The layout is cluster state, not host state: a normal run of this playbook
+# never touches it. To reconcile the layout:
+#
+#   ansible-playbook deploy_garage.yml --tags garage_layout
+#
+- name: Garage S3 cluster
+  hosts: garage
+  serial: 1
+  gather_facts: false
+  roles:
+    - garage

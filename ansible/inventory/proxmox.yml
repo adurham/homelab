@@ -129,6 +129,36 @@ all:
         ansible_user: amd
         ansible_become: true
 
+    # 3-node Garage S3 cluster backing Loki. Never put these in ha-manager or
+    # pvesr: migrating a ring member resurrects a stale replica under the same
+    # node identity. garage_zone must match the PVE host each guest lives on.
+    garage:
+      hosts:
+        garage-01:
+          ansible_host: 172.16.0.71
+          vmid: 151
+          target_node: pve01
+          garage_zone: pve01
+          garage_node_id: "2624a0204b6a2c47"
+          garage_capacity: "20G"
+        garage-02:
+          ansible_host: 172.16.0.72
+          vmid: 152
+          target_node: pve03
+          garage_zone: pve03
+          garage_node_id: "a64fdbc723170849"
+          garage_capacity: "20G"
+        garage-03:
+          ansible_host: 172.16.0.74
+          vmid: 153
+          target_node: pve02
+          garage_zone: pve02
+          garage_node_id: "4e3550c8f85de52c"
+          garage_capacity: "20G"
+      vars:
+        ansible_user: root
+        ansible_become: true
+
     authentik_server:
       hosts:
         authentik:
