@@ -63,7 +63,7 @@ ip_tailscale_gw_lan: "192.168.86.10"  # tailscale-gw eth0 on the LAN (vmbr0), ST
                                        # static-outside-DHCP at .11/.12/.13.
 ip_media_gallery: "172.16.0.46"
 ip_media_ingest: "172.16.0.47"
-ip_media_ingest_02: "172.16.0.48"
+ip_media_ingest_02: "172.16.0.80"
 # Local tmpfs metadata serve port on the gallery CT (media-gallery-serve.service,
 # role media_gallery). lb-01 routes the SPA's metadata fetches (/ and
 # /gallery/{index.html,manifest.json,folders.json,dedup.json}) here instead of

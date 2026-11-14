@@ -37,6 +37,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -147,6 +148,30 @@ LIKE_ENABLED = os.environ.get("M02_LIKES_ENABLED", "").lower() in ("1", "true", 
 LIKE_DAILY_CAP = int(os.environ.get("M02_LIKES_DAILY_CAP", "500"))
 LIKE_PER_MODEL_CAP = int(os.environ.get("M02_LIKES_PER_MODEL_CAP", "50"))
 LIKE_STATE_FILE = Path(os.environ.get("M02_LIKE_STATE_FILE", str(STAGING.parent / "like_state.json")))
+# Where the upstream scraper writes its own per-run logs (one dated subdir per
+# day, one file per invocation).
+SCRAPER_LOG_DIR = Path(os.environ.get("M02_SCRAPER_LOG_DIR", str(Path(CONFIG_FILE).parent / "logging")))
+
+# When the scraper cannot authenticate it prints a "how should auth.json look"
+# help block and exits 0. A network fault (DNS, TLS) lands in the same branch,
+# so a sweep can look healthy while every model silently does nothing. Match
+# the markers, name the reason, and log it as an error.
+_SCRAPER_FAILURE_REASONS = (
+    ("for an example of how your auth file should look", "source auth rejected (session cookie expired?)"),
+    ("temporary failure in name resolution", "DNS resolution failed"),
+    ("nameresolutionerror", "DNS resolution failed"),
+    ("max retries exceeded", "source unreachable (connection failed)"),
+)
+
+
+def _scraper_failure_reason(r):
+    """Return a short reason when the scraper never got as far as doing work,
+    else None."""
+    out = ((r.stdout or "") + (r.stderr or "")).lower()
+    for marker, reason in _SCRAPER_FAILURE_REASONS:
+        if marker in out:
+            return reason
+    return None
 
 
 def _check_auth():
@@ -192,7 +217,11 @@ def _run_scraper_pass(label, model_args, timeout_min=90):
     if r.returncode != 0:
         log.error("pass [%s] scraper exited %d: %s", label, r.returncode, (r.stderr or "")[-2000:])
     else:
-        log.info("pass [%s] scraper exit 0. stdout tail: %s", label, (r.stdout or "")[-500:])
+        reason = _scraper_failure_reason(r)
+        if reason:
+            log.error("pass [%s] scraper did no work: %s", label, reason)
+        else:
+            log.info("pass [%s] scraper exit 0. stdout tail: %s", label, (r.stdout or "")[-500:])
     return r
 
 
@@ -295,6 +324,16 @@ def _load_scraper_modules():
     os.environ["OFSC_CONFIG_FILE_NAME"] = os.path.basename(CONFIG_FILE)
     venv_site = os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "lib", "site-packages")
     sys.path.insert(0, venv_site)
+    # The upstream package calls log.traceback_() from its error paths, but the
+    # plain stdlib logger it ends up holding in this direct-import path has no
+    # such method — a real failure therefore surfaces as "AttributeError:
+    # 'Logger' object has no attribute 'traceback_'" and hides its own cause.
+    # Give the stdlib logger that method so the original error is what lands in
+    # our log (this was exactly how a dead resolver looked like an auth bug).
+    if not hasattr(logging.Logger, "traceback_"):
+        def _traceback_(self, msg, *args, **kwargs):
+            self.error(msg, *args, **kwargs)
+        setattr(logging.Logger, "traceback_", _traceback_)
     try:
         mods = {
             "read_args": importlib.import_module(f"{SCRAPER_PKG}.utils.args.accessors.read"),
@@ -779,10 +818,14 @@ def _like_base_cmd():
     ]
 
 
-def _count_likes_from_output(r):
-    """Try to count how many posts were actually liked by parsing the scraper's
-    stdout/stderr output. Returns the number of likes performed, or 0 if
-    undetermined."""
+def _count_likes(r, started_at=None):
+    """Count how many posts were actually liked.
+
+    The scraper's console output only carries a summary line, so the per-post
+    "changed to liked" records are read from the run log it writes itself.
+    Counting only stdout meant this always returned 0: the daily like cap
+    never decremented, so every sweep liked another batch until the source
+    throttled the account."""
     import re
     output = (r.stdout or "") + (r.stderr or "")
     # Look for explicit "Liked X posts" or "liked X" patterns
@@ -790,6 +833,19 @@ def _count_likes_from_output(r):
         m = re.search(pattern, output, re.IGNORECASE)
         if m:
             return int(m.group(1))
+    if started_at is not None:
+        count = 0
+        today = dt.date.today()
+        for day in (today, today - dt.timedelta(days=1)):
+            day_dir = SCRAPER_LOG_DIR / ("main_profile_" + day.isoformat())
+            try:
+                for f in day_dir.glob("*.log"):
+                    if f.stat().st_mtime >= started_at - 2:
+                        count += f.read_text(errors="ignore").count("changed to liked")
+            except OSError as e:
+                log.warning("could not read scraper logs to count likes: %s", e)
+        if count:
+            return count
     # Fallback: count "Liking" action lines
     count = output.count("Liking") + output.count("liking")
     if count > 0:
@@ -878,13 +934,17 @@ def _run_like_pass():
                 "--username", model,
             ]
             try:
+                started = time.time()
                 r = subprocess.run(cmd, check=False, capture_output=True, text=True,
                                    timeout=LIKE_PER_MODEL_TIMEOUT)
             except subprocess.TimeoutExpired:
                 log.warning("like pass [backlog:%s] timed out after %dmin",
                             model, LIKE_PER_MODEL_TIMEOUT)
                 return
-            actual = _count_likes_from_output(r)
+            reason = _scraper_failure_reason(r)
+            if reason:
+                log.error("like pass [backlog:%s] did no work: %s", model, reason)
+            actual = _count_likes(r, started)
             log.info("like pass [backlog:%s] exit=%d, liked=%d", model, r.returncode, actual)
             state["daily_likes_used"] = state.get("daily_likes_used", 0) + actual
             _write_like_state(state)
@@ -914,13 +974,17 @@ def _run_like_pass():
         # Persist state before each daily model too — saves progress if killed
         _write_like_state(state)
         try:
+            started = time.time()
             r = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=15 * 60)
         except subprocess.TimeoutExpired:
             log.warning("like pass [daily:%s] timed out after 15min", model)
             continue
+        reason = _scraper_failure_reason(r)
+        if reason:
+            log.error("like pass [daily:%s] did no work: %s", model, reason)
         if r.returncode != 0:
             log.warning("like pass [daily:%s] exit %d: %s", model, r.returncode, (r.stderr or "")[-500:])
-        actual = _count_likes_from_output(r)
+        actual = _count_likes(r, started)
         if actual > 0:
             log.info("like pass [daily:%s] liked %d posts", model, actual)
         likes_used += actual

@@ -2,7 +2,7 @@
 # Service account + install layout for the secondary source gallery collector.
 # Mirrors roles/media_ingest (the primary source collector) but runs against a
 # different upstream source platform and on its own CT (media-ingest-02, vmid 117,
-# ip_media_ingest_02 172.16.0.48). The gallery push path is identical: OAuth2
+# ip_media_ingest_02 172.16.0.80). The gallery push path is identical: OAuth2
 # client_credentials against Authentik, then POST /ingest/upload/<folder> with a
 # stem + date override, exactly like the primary collector.
 media_ingest_02_user: mediaingest
