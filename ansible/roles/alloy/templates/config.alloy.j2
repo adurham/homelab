@@ -183,9 +183,11 @@ loki.source.journal "system" {
 {% endif %}
 
 loki.write "vm" {
+{% for _loki_endpoint in (loki_urls | default([loki_url])) %}
     endpoint {
-        url = "{{ loki_url }}"
+        url = "{{ _loki_endpoint }}"
     }
+{% endfor %}
 }
 {% else %}
 // Log shipping deliberately disabled on this host (alloy_ship_logs:

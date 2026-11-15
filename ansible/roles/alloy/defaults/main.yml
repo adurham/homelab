@@ -10,15 +10,17 @@ alloy_listen_addr: "127.0.0.1:12345"
 
 # Loki push endpoint — same shape promtail used.
 #
-# LIVE != REPO (checked 2026-11-15): since the 2026-11-12 commit this defaults to the
-# HA Loki ring behind the VIP, but every deployed Alloy still pushes to the old
-# single Loki on vm-01 (172.16.0.42:3100) and Grafana's Loki datasource still reads
-# vm-01 (roles/grafana/templates/datasource.yml.j2). The VIP ring holds logs from one
-# test host only. Deploying THIS role to the fleet before the Grafana datasource is
-# repointed would move every host's logs to a Loki Grafana does not query, and every
-# log-based alert rule (kernel I/O error, backup job errors, service restart loops...)
-# would go quiet without any error. Cut over the datasource and the shippers together.
+# State as of 2026-11-15 (docs/loki-cutover-2026-11.md): the fleet dual-writes to this HA ring AND
+# the old single Loki on vm-01 (loki_urls override in inventory/group_vars/all.yml), and Grafana's
+# 'loki' datasource reads this ring. Do not point loki_urls at anything else without moving the
+# Grafana datasource in the same change: logs sent to a Loki that Grafana does not read make every
+# log-based alert rule quiet, with no error anywhere.
 loki_url: "http://172.16.0.30:3100/loki/api/v1/push"
+# Every Loki endpoint logs are pushed to. Alloy fans each entry out to ALL of them, each with its
+# own queue, so a dead endpoint does not stall the others. Default is the one above; set a list in
+# group_vars to dual-write during a cutover (see docs/loki-cutover-2026-11.md).
+loki_urls:
+  - "{{ loki_url }}"
 
 # VictoriaMetrics remote-write receiver. VM exposes this on the same :8428
 # port that serves the query API; no extra config needed on the VM side.

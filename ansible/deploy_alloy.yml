@@ -1,0 +1,25 @@
+---
+# Roll the alloy role (telemetry agent) to the fleet in small batches.
+#
+# deploy_monitoring.yml already installs Alloy as one of many plays; this is the
+# alloy role on its own so a log/metrics endpoint change can be rolled without
+# re-running the whole monitoring build. Same host pattern as that play.
+#
+# Usage:
+#   ansible-playbook deploy_alloy.yml --limit lb-01,tc-ubuntu22         # pilot
+#   ansible-playbook deploy_alloy.yml --limit <group or host list>
+# Note: the alloy role cannot run in --check mode (its version-detect tasks are
+# skipped, so the next set_fact fails). To preview a config change, render the
+# template alone:
+#   ansible <host> -m template -a "src=roles/alloy/templates/config.alloy.j2 \
+#     dest=/etc/alloy/config.alloy" --check --diff -e @roles/alloy/defaults/main.yml
+- name: Roll Alloy
+  # Unlike deploy_monitoring.yml's agent play this does NOT exclude the victoriametrics and
+  # grafana groups: those hosts run Alloy too and ship logs, they are just installed from
+  # their own plays there.
+  hosts: all:!localhost:!tanium_cluster:!bwt_lab
+  gather_facts: true
+  serial: 5
+  max_fail_percentage: 20
+  roles:
+    - alloy

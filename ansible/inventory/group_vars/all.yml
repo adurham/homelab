@@ -140,6 +140,13 @@ lan_dns_resolvers:
 dns_server_forwarders:
   - 1.1.1.1
   - 9.9.9.9
+# Loki cutover (2026-11-15): every shipper writes to BOTH the HA Loki ring (VIP) and the old
+# single Loki on vm-01, so either one holds the complete log stream and Grafana's datasource
+# can flip between them with no gap. Drop the vm-01 line (and let loki_urls fall back to
+# roles/alloy's default) once the old one is retired. See docs/loki-cutover-2026-11.md.
+loki_urls:
+  - http://172.16.0.30:3100/loki/api/v1/push
+  - http://172.16.0.42:3100/loki/api/v1/push
 # Long-lived access token for the VictoriaMetrics → HA Prometheus scrape.
 homeassistant_token: !vault |
           $ANSIBLE_VAULT;1.1;AES256

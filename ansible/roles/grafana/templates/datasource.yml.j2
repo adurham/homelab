@@ -12,8 +12,19 @@ datasources:
     jsonData:
       httpMethod: POST
 
+  # uid 'loki' is what every Loki-based alert rule queries. It points at the HA ring
+  # behind the VIP (cutover 2026-11-15, docs/loki-cutover-2026-11.md); the old single Loki
+  # on vm-01 stays available as 'loki-legacy' for pre-cutover history.
   - name: Loki
     uid: loki
+    type: loki
+    access: proxy
+    url: {{ grafana_loki_url | default('http://172.16.0.30:3100') }}
+    version: 2
+    editable: true
+
+  - name: Loki (legacy vm-01)
+    uid: loki-legacy
     type: loki
     access: proxy
     url: http://{{ hostvars['vm-01']['ansible_host'] }}:3100
