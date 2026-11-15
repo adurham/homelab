@@ -75,8 +75,11 @@ Proving the mechanism (link down vs driver hang) needs a deliberate one-node tes
 see `docs/proxmox-nic-failover-test.md` for the runbook, preconditions and the
 timings to record. Do not run it blind.
 
-**Recurrence 2026-11-15** on the equalised kernel (all three on 7.0.14-26): same
-signature, same fence. See `docs/pve01-network-stall-2026-11-15.md`.
+**Recurred 2026-11-09 and 2026-11-15** on the equalised kernel (all three on
+7.0.14-26), so the "-25 is the cause" theory does not hold. The kernel log shows `e1000e ...
+Detected Hardware Unit Hang` on pve01's NIC both times (pve01 has a different
+I219-LM than pve02/pve03). See `docs/pve01-network-stall-2026-11-15.md` for the
+evidence and the TSO/GSO-off mitigation.
 
 Structural note: a single-NIC HA node self-fences on any NIC stall. If this
 recurs on a node after the kernel is equalised, the fix is a second corosync

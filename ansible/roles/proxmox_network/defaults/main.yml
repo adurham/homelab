@@ -2,3 +2,8 @@
 physical_interface: "nic0"
 # Default to nic0 for Dell Optiplex Micro.
 # If different nodes have different names, override in inventory/host_vars.
+# Turn TSO/GSO off on the physical NIC. Only pve01 sets this: its I219-LM
+# (8086:15f9) is the one that hit "e1000e: Detected Hardware Unit Hang" on
+# 2026-11-09 and 2026-11-15 and fell off the network until the HA watchdog reset
+# it. See docs/pve01-network-stall-2026-11-15.md.
+proxmox_network_tso_gso_off: false

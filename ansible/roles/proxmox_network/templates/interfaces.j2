@@ -3,6 +3,10 @@ iface lo inet loopback
 
 auto {{ physical_interface }}
 iface {{ physical_interface }} inet manual
+{% if proxmox_network_tso_gso_off | default(false) %}
+{# e1000e Tx Unit Hang workaround, see docs/pve01-network-stall-2026-11-15.md #}
+	post-up ethtool -K {{ physical_interface }} tso off gso off
+{% endif %}
 
 auto vmbr0
 iface vmbr0 inet static

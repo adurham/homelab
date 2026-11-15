@@ -4,35 +4,28 @@ Read from the live cluster (`/cluster/resources`, `ha-manager status`, `pvesr st
 per node, per-service probes), not from the older IPAM table, which has drifted.
 Re-run before trusting: this is a snapshot.
 
-## Placement drift since capture (checked live 2026-11-15)
+## Placement re-checked live 2026-11-15 (after the pve01 fence)
 
-The node names in the tables below are the 2026-11-13 design. Seven HA-managed
-guests are no longer where the tables put them, and HA does not fail them back
-(only `ct:170` has a node-affinity rule, `frigate-prefer-pve01`, which is why it
-returned on its own):
+On 2026-11-15 06:37 pve01's NIC hung and HA fenced the node, recovering
+`ct:102`, `ct:130`, `ct:141`, `ct:158`, `ct:170` and `vm:241` onto pve02/pve03
+(`docs/pve01-network-stall-2026-11-15.md`). Seven HA guests then sat off the node
+the tables below name: 100, 130, 141, 147, 149, 157, 158. HA does not fail
+guests back (only `ct:170` has a node-affinity rule, `frigate-prefer-pve01`), so
+at 11:22–11:28 CST they were put back one at a time with
+`ha-manager migrate ct:<id> pve01` (about 40 s each, ping or `dig` health check
+before the next). Every vmid:node claim in the tables was then compared with
+`/cluster/resources`: no mismatches. Why 100, 147, 149 and 157 were off pve01
+before the fence was not established.
 
-| vmid | guest | tables say | live |
-|---|---|---|---|
-| 100 | authentik | pve01 | **pve03** |
-| 130 | lan-dns-01 | pve01 | **pve03** |
-| 141 | graf-02 | pve01 | **pve02** |
-| 147 | lb-02 | pve01 | **pve02** |
-| 149 | dns-02 | pve01 | **pve02** |
-| 157 | ntp-02 | pve01 | **pve02** |
-| 158 | mail-02 | pve01 | **pve02** |
+Guests per node afterwards: pve01 24, pve02 14, pve03 23. Pair rules still hold;
+the 3-node rings are one member per node.
 
-- Today's cause for 130, 141 and 158 (plus ct:102, ct:170 and vm:241): pve01
-  stalled at 06:37 CST and HA recovered its services elsewhere — see
-  `docs/pve01-network-stall-2026-11-15.md`. 100, 147, 149 and 157 were already off
-  pve01 before that; the HA recovery log for today does not include them, and
-  why they moved was not established.
-- Every pair rule still holds (each pair is split across pve02/pve03), but pve01
-  now carries **no pair member**: the primary of every pair sits on pve03 and the
-  twin on pve02. The 3-node rings are unchanged (one member per node; pve01 has
-  `142`, `144`, `151`, `154`).
-- Put a guest back with `ha-manager migrate ct:<id> pve01` (restart migration;
-  the guests are `pvesr`-replicated, so it copies a delta, not the disk).
-- `gallery-01` (115, not HA) was moved pve02 → pve01 by hand the same day.
+After any fence or reboot of a node, re-run the verification command in
+"Pair/ring placement policy" below and move guests back by hand: nothing else
+will.
+
+`gallery-01` (115, not HA, not replicated) was moved pve02 → pve01 by hand on
+the same day.
 
 ## 3-node (quorum systems — survive one node loss)
 
@@ -126,8 +119,8 @@ to move their rootfs from `local-lvm` to `nvme-data` (LVM-thin cannot replicate)
 | Guest | VMID | IP | Node | Notes |
 |---|---|---|---|---|
 | vm-clus-03 | 145 | 172.16.0.59 | pve02 | vmstorage + vminsert + vmselect, rootfs on `local-lvm` (nvme-data on pve02 was 97 % full on 2026-11-13; after the 2026-11-15 snapshot trim the pool is 72 % allocated, 673 G of 928 G) |
-| ntp-02 | 157 | 172.16.0.16 | pve01 (live: pve02) | chrony + keepalived VIP .11, VRID 53 |
-| mail-02 | 158 | 172.16.0.18 | pve01 (live: pve02) | postfix twin of mail-01, keepalived VIP .40, VRID 54; failed over 2026-11-15 |
+| ntp-02 | 157 | 172.16.0.16 | pve01 | chrony + keepalived VIP .11, VRID 53 |
+| mail-02 | 158 | 172.16.0.18 | pve01 | postfix twin of mail-01, keepalived VIP .40, VRID 54 |
 | tc-rhel9 | 312 | 172.16.0.90 | pve03 | moved off .72 (was hijacking garage-02) |
 | tc-rhel8 | 314 | 172.16.0.91 | pve03 | moved off .74 (was hijacking garage-03) |
 

@@ -7,6 +7,13 @@ all:
           pve_sync_vlan_ip: "172.20.0.11"
           pve_migrate_vlan_ip: "172.21.0.11"
           zfs_scrub_day_of_month: 1
+          # pve01's NIC is an I219-LM (8086:15f9); pve02/pve03 have a different
+          # I219-LM (8086:0d4c). Only pve01 has hit "e1000e: Detected Hardware
+          # Unit Hang" (2026-11-09, 2026-11-15), which wedges the NIC until the
+          # HA watchdog resets the node. TSO/GSO off is the usual workaround for
+          # that hang; applied live and in /etc/network/interfaces 2026-11-15.
+          # See docs/pve01-network-stall-2026-11-15.md.
+          proxmox_network_tso_gso_off: true
           # Lab-corner UPS (CyberPower GX1500U) USB data cable is attached
           # to THIS node (verified 2026-10-01: 0764:0601 "CPS GX1500U",
           # serial QA9RQ7001561). roles/nut_ups runs here; the flag also
