@@ -450,6 +450,17 @@
     mode: '0644'
   notify: Restart Grafana
 
+# PVE platform alerts (2026-11-15): HA node fencing, the e1000e hang, ZFS pool and
+# vzdump capacity. Metrics-based on purpose: during a hang the node has no network, so
+# the live signal comes from the surviving nodes (pve_ha_state) and the cause from
+# textfile metrics published after the node returns (roles/pve_stall_witness).
+- name: Provision Grafana Alert Rules (pve platform)
+  ansible.builtin.copy:
+    src: alerting_rules_pve_platform.yml
+    dest: /etc/grafana/provisioning/alerting/rules_pve_platform.yml
+    mode: '0644'
+  notify: Restart Grafana
+
 - name: Configure Grafana Environment (Unsigned Plugins)
   ansible.builtin.lineinfile:
     path: /etc/default/grafana-server

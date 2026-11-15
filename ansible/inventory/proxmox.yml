@@ -4,6 +4,7 @@ all:
       hosts:
         pve01:
           ansible_host: 192.168.86.11
+          pve_backup_quota_gib: 260  # vzdump-backups ceiling; see roles/proxmox_storage
           pve_sync_vlan_ip: "172.20.0.11"
           pve_migrate_vlan_ip: "172.21.0.11"
           zfs_scrub_day_of_month: 1
@@ -14,6 +15,7 @@ all:
           # that hang; applied live and in /etc/network/interfaces 2026-11-15.
           # See docs/pve01-network-stall-2026-11-15.md.
           proxmox_network_tso_gso_off: true
+          proxmox_network_nic_msglvl: "0x2087"
           # Lab-corner UPS (CyberPower GX1500U) USB data cable is attached
           # to THIS node (verified 2026-10-01: 0764:0601 "CPS GX1500U",
           # serial QA9RQ7001561). roles/nut_ups runs here; the flag also
@@ -84,6 +86,7 @@ all:
           pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 130, 131, 140, 141, 142, 143, 144, 145, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 170, 171, 201, 203, 205, 240, 241]
         pve02:
           ansible_host: 192.168.86.12
+          pve_backup_quota_gib: 130  # vzdump-backups ceiling; see roles/proxmox_storage
           pve_sync_vlan_ip: "172.20.0.12"
           pve_migrate_vlan_ip: "172.21.0.12"
           zfs_scrub_day_of_month: 8
@@ -111,6 +114,7 @@ all:
             - /dev/nvme0n1
         pve03:
           ansible_host: 192.168.86.13
+          pve_backup_quota_gib: 360  # vzdump-backups ceiling; see roles/proxmox_storage
           pve_sync_vlan_ip: "172.20.0.13"
           pve_migrate_vlan_ip: "172.21.0.13"
           zfs_scrub_day_of_month: 15

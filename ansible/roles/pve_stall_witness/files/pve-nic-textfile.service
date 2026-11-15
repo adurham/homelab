@@ -1,0 +1,6 @@
+[Unit]
+Description=Publish NIC hang history and offload state as textfile metrics
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pve_nic_textfile.sh nic0

@@ -1,0 +1,14 @@
+---
+# Deploys the e1000e hang witness + capture + textfile metrics to every PVE node.
+# Safe on a live cluster: it installs scripts and units and (re)starts only
+# kernel-witness and a metrics timer; it does not touch networking.
+#
+# Usage:
+#   ansible-playbook deploy_pve_stall_witness.yml --limit pve01 --check --diff
+#   ansible-playbook deploy_pve_stall_witness.yml
+- name: Deploy the PVE stall witness
+  hosts: proxmox_nodes
+  become: false
+  gather_facts: false
+  roles:
+    - pve_stall_witness

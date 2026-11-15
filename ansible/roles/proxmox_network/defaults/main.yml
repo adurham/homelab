@@ -7,3 +7,8 @@ physical_interface: "nic0"
 # 2026-11-09 and 2026-11-15 and fell off the network until the HA watchdog reset
 # it. See docs/pve01-network-stall-2026-11-15.md.
 proxmox_network_tso_gso_off: false
+# e1000e driver message level (ethtool -s <nic> msglvl). 0x2087 = drv+probe+link
+# plus tx_err and hw: with hw set, a "Detected Hardware Unit Hang" also prints the
+# register and ring dump, which is the evidence the 2026-11 hangs were missing.
+# Empty = leave the driver default (0x7).
+proxmox_network_nic_msglvl: ""

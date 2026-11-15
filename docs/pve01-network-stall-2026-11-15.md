@@ -1,10 +1,10 @@
 # pve01 network stall and HA fence — 2026-11-09 and 2026-11-15
 
-Status: **cause identified, trigger not proven, mitigation applied 2026-11-15
-~11:30 CST.** pve01's `e1000e` NIC driver logs `Detected Hardware Unit Hang` and the
-NIC stops passing traffic until the HA watchdog reboots the node. TSO/GSO is now
-off on pve01's `nic0`; whether that prevents the hang is unknown until it has gone
-a few weeks without one. All times CST.
+Status: **cause identified, trigger not proven. Mitigation, full-fidelity capture and
+alerts all in place 2026-11-15.** pve01's `e1000e` NIC driver logs `Detected Hardware
+Unit Hang` and the NIC stops passing traffic until the HA watchdog reboots the node.
+TSO/GSO is off on pve01's `nic0`; whether that prevents the hang is unknown until it
+has gone a few weeks without one. All times CST.
 
 ## What happens, step by step (2026-11-15)
 
@@ -34,22 +34,48 @@ Three facts pin it to pve01's own NIC:
   line every second until 06:38:02. It was not a kernel freeze; the reset came from
   the HA watchdog about 60 s after the hang began.
 
+`nic_stall_watch` (`scripts/network/nic_stall_watch.sh`, `/root/nic_stall.log`)
+caught the stall at 06:37:15 and recorded what the NIC itself was doing:
+
+- `rx_packets` and `tx_packets` both **frozen** (delta 0 over 1 s), while
+  `rx_missed_errors` rose by 186 in that second: frames were still arriving at the
+  MAC and nothing was draining them. `tx_timeout_count` stayed 0, so the driver's
+  own TX-timeout reset path never ran.
+- 11-09 18:24:17 looked different at the instant it was caught: TX frozen (delta 0)
+  but RX still climbing (38 packets). Same 10 `Hardware Unit Hang` lines either way.
+  Whether RX stops a moment after TX is not settled by two samples.
+
 The evidence is in `/root/kernel_witness.log` on pve01 (a persistent copy of the
 kernel log; the journal itself is `Storage=volatile` and loses the previous boot)
 and `/root/lab_witness.log` on all three nodes.
 
-## It has happened three times
+## Two proven hangs, one presumed
 
 | when | kernel | evidence |
 |---|---|---|
-| 2026-10-27 09:12 | 7.0.14-25 | `docs/2026-10-27-pve01-nic-stall-and-kernel-revert.md`; same signature. No kernel log exists (the kernel witness started 10-30) |
-| 2026-11-09 18:24 | 7.0.14-26 | 33 `Hardware Unit Hang` lines 18:24–18:25, `watchdog: watchdog0: watchdog did not stop!` at 18:24:56, node back 18:26:01. pve02/pve03 saw only `pve01=down`. No note about it existed until now |
-| 2026-11-15 06:37 | 7.0.14-26 | above |
+| 2026-10-27 09:12 | 7.0.14-25 | `docs/2026-10-27-pve01-nic-stall-and-kernel-revert.md`; same network signature (everything lost at once, carrier up, watchdog reset). **Presumed** the same fault: no kernel log exists, the kernel witness started 10-30 |
+| 2026-11-09 18:24 | 7.0.14-26 | **Proven.** 33 `Hardware Unit Hang` lines 18:24–18:25, `watchdog did not stop!` at 18:24:56, node back 18:26:01. pve02/pve03 saw only `pve01=down`. No note about it existed until now |
+| 2026-11-15 06:37 | 7.0.14-26 | **Proven.** Above |
 
 Uptime at the hang was about 6 days on 11-09 (pve01 came back from the 11-03
 crash at 13:45) and 5.5 days on 11-15, so it is not a fixed uptime. The "-25
 kernel is the cause" theory from 10-27 is out: all three nodes run
 `7.0.14-26-pve` and only pve01 hangs.
+
+### Most "stall" records are not this
+
+`nic_stall_watch` triggers on **gateway ICMP unreachable** and has written 135
+blocks since 10-30. Reading every block's counters: **131 have `rx_packets` and
+`tx_packets` still climbing** (hundreds of packets a second, peers on :22 up) --
+the gateway stopped answering or the path to it blipped while the NIC was fine.
+Two more frozen blocks are link-down events (10-30 13:43 and the 11-03 13:01
+all-three-nodes crash). Only 11-09 18:24 and 11-15 06:37 carry the hang signature
+(hang lines plus a stopped datapath). 11-08 alone has 54 gateway blips. That is a
+separate, recurring upstream problem (router, switch or WAN side), not this fault,
+and it is not investigated here.
+
+**An alert must key on the hang lines, never on "gateway unreachable"**; the second
+would page about once an hour.
 
 ## Why only pve01
 
@@ -64,6 +90,13 @@ EEE settings and the same kernel command line. The silicon differs:
 That is a correlation across three nodes, not proof. pve02 and pve03 show no
 `e1000e` lines in their current-boot kernel logs.
 
+Also checked, all identical across nodes: EEE `enabled - inactive`, private flags
+`s0ix-enabled: on` / `disable-k1: off`, no `pcie_aspm` option. `lspci -vv` shows no
+`LnkCtl`/ASPM capability on `00:1f.6` (the MAC is PCH-integrated), so ASPM is not a
+lever here. `tx_tcp_seg_good` (TSO use) is non-zero on both pve01 and pve02, so TSO
+was genuinely in use on both -- which is why "TSO is the trigger" is a hypothesis,
+not something the evidence shows.
+
 ## Mitigation (applied)
 
 TSO and GSO off on pve01's `nic0`, which is the usual workaround for the `e1000e`
@@ -76,6 +109,12 @@ Tx Unit Hang on I219 parts:
 - In the repo: `proxmox_network_tso_gso_off` in `roles/proxmox_network`, set only
   for pve01 in `inventory/proxmox.yml`. The template renders the same line as the
   hand edit, so the next role run changes nothing and restarts nothing.
+
+- Second line, same place: `post-up ethtool -s nic0 msglvl 0x2087` (adds `tx_err` and
+  `hw` to the driver's message level). With `hw` set, e1000e prints its register and
+  TX-ring dump when it detects a hang. `proxmox_network_nic_msglvl` in the role.
+  Applied live and by hand on pve01, like the TSO line: **never run the
+  `proxmox_network` role on a live node**, its handler restarts networking.
 
 Not changed: pve02 and pve03 (no hang on record), GRO, EEE, ASPM.
 
@@ -109,20 +148,73 @@ second physical NIC on a different switch port, which this lab does not have.
   hangs themselves, since the carrier stayed up and pve02/pve03 saw their own
   links normal.
 
+## Second opinion (Fable, 2026-11-15)
+
+Asked to sanity-check the mitigation and the capture plan with the evidence above.
+Its answer, condensed:
+
+- **TSO/GSO off is a reasonable first step, but nothing in the evidence implicates
+  TSO.** pve02/pve03 run the same offloads without hanging. Keep it, do **not** stack
+  more changes on top yet (that would confound the result), and fix the capture.
+- **Why only pve01** is most likely platform: `15f9` is a newer-generation PCH MAC
+  than `0d4c`, so a model-specific driver/ME/PHY bug or one bad unit fit equally well.
+- **ASPM, EEE, SmartPowerDown, GRO, interrupt throttle, ring size, an out-of-tree
+  driver:** not worth touching (EEE is inactive, ASPM does not apply, the rest have
+  no evidence behind them).
+- **If it hangs again, in this order:** `ethtool -A nic0 rx off tx off`; the
+  `disable-k1` private flag (`ethtool --set-priv-flags nic0 disable-k1 on`);
+  BIOS/ME update with AMT off; then TX checksum offload off.
+- **Proof bar:** hangs are about 6 days apart, so 3-4 hang-free weeks before calling
+  it fixed.
+- **The HA watchdog is behaving correctly; do not touch it or its timeouts.** An
+  in-place reset (`ip link down/up`, or unbind/bind, which also drops nic0 from the
+  bridge and re-enables TSO) is HA-safe only if it runs once and early (by about
+  15 s), after the capture, and it is unknown whether it would work: the driver
+  already resets itself after a 5 s TX timeout, and the unbroken 2 s cadence with
+  `tx_timeout_count 0` suggests that path never ran. Rehearse it on a healthy node
+  before ever automating it. **Not done.**
+- **Place critical guests on pve02/pve03** while pve01 is suspect (see decisions).
+
+## What now watches for it
+
+| layer | what | where |
+|---|---|---|
+| full kernel log | every line except audit/apparmor, fsynced per line, 4 MiB x2 rotation (was: a grep that kept only the first line of the hang report) | `/root/kernel_witness.log` on all three nodes; `roles/pve_stall_witness` |
+| hang-time capture | on the first `Detected Hardware Unit Hang`: `ethtool -d/-S/-k/-a`, `ip -s`, `tc -s`, `/proc/interrupts`, `tx_timeout`, carrier, a pcap, `lspci -vvv`, one pass every 2 s for ~60 s (the watchdog resets at about that point) | `/root/nic-hang/<stamp>/` |
+| driver dump | `msglvl 0x2087` so e1000e prints its own register and ring dump | pve01 `post-up` |
+| metrics | `pve_nic_hang_last_timestamp_seconds`, `pve_nic_offload_enabled{feature}`, `pve_kernel_witness_active` published once a minute from the witness log | `pve_nic.prom` textfile, Alloy |
+| alert, live | `pve_node_fenced` (critical): `pve_ha_state{id="node/..",state=~"fence|gone|unknown"}`, seen by the surviving nodes, fires ~1-2 min into a stall | Grafana, group `pve-platform` |
+| alert, cause | `pve_nic_hang_recent` (critical): a hang line in the last 24 h. It can only appear **after** the node is back, because the network is dead during the hang | same |
+| alert, drift | `pve_nic_mitigation_missing` (TSO on again on pve01), `pve_kernel_witness_down` | same |
+
+Both critical alerts route to Discord and email. `pve_nic_hang_recent` fired
+immediately after deployment, because today's hang is inside its 24 h window; that
+was the end-to-end test of the path and it clears itself about 06:38 on 11-16.
+
+Correction to an earlier version of this note: a generic `pve_node_rebooted`
+(warning, `changes(node_boot_time_seconds[1h])`) already existed and would have
+matched both hangs. Nothing says anyone read it, which is why the 11-09 event had no
+note for six days; the new alerts are critical and name the cause.
+
 ## Not established
 
-- **What triggers the hang.** The kernel witness kept only the first line of each
-  hang report, not the TDH/TDT and status registers, so the detail that would show
-  whether TSO is the trigger was not captured. TSO off is a mitigation chosen from
-  the pattern, not a proven fix. If it hangs again with TSO off, capture the whole
-  report before anything else.
+- **What triggers the hang.** TSO off is a mitigation chosen from the pattern. The
+  register/ring dump that would show it was discarded on both proven hangs (the old
+  witness kept only the first line). The next hang will be the first with the full
+  record.
+- **Whether RX stops with TX or after it.** One sample each way (see above).
+- **Whether the 10-27 stall was the same fault.** No kernel log survives.
 - **Whether pve02/pve03 can hang.** No evidence either way beyond "has not".
 
-## Follow-ups
+## Open decisions
 
-- Widen `kernel_witness` on pve01 to keep the lines after
-  `Detected Hardware Unit Hang` (the register dump).
-- Nothing alerts on this. `Hardware Unit Hang` in the kernel log, or a node
-  entering `fence`, should page.
-- The HA guests the 11-15 fence displaced were put back on pve01 the same day; see
-  `docs/ha-inventory.md`.
+- **Guest placement.** pve01 is the node that hangs, yet the 11-15 failback put
+  authentik, lan-dns-01, graf-02, lb-02, dns-02, ntp-02 and mail-02 back on it, as
+  asked. Every pair still has its twin on another node, so one more hang is survivable;
+  the cost is the ~3 minutes of failover per hang. An HA node-affinity rule
+  (`pve02,pve03` preferred) would keep them off pve01. Not set.
+- **Rehearse the in-place reset** on pve02/pve03 once, during a quiet window, to learn
+  whether it recovers a NIC at all. Not done.
+- **Untouched on purpose:** `nic_stall_watch` still triggers on gateway ICMP loss;
+  its 131 non-hang blocks are noise for this investigation but real data about the
+  upstream path.

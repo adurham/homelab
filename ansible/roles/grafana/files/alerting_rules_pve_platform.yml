@@ -1,0 +1,424 @@
+# PVE platform alerts: HA fencing, e1000e NIC hang, ZFS pool and vzdump capacity.
+# Source of truth is this file (roles/grafana/files/alerting_rules_pve_platform.yml); the
+# 'Provision Grafana Alert Rules (pve platform)' task copies it next to the media-pipeline file.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pve-platform
+    folder: Infrastructure
+    interval: 1m
+    rules:
+      - uid: pve_node_fenced
+        title: PVE node fenced or lost by HA
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (id, state) (pve_ha_state{id=~"node/.*", state=~"fence|gone|unknown"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: HA reports {{ $labels.id }} in state {{ $labels.state }}
+          description: 'The Proxmox HA manager no longer sees {{ $labels.id }} as online (state {{ $labels.state
+            }}). A node that stays in ''unknown'' for about a minute is fenced and its HA services are recovered
+            on the other nodes about 3 minutes after the loss. If the node is pve01 this is probably the e1000e
+            Hardware Unit Hang (docs/pve01-network-stall-2026-11-15.md): when it is back, read /root/kernel_witness.log
+            and the newest directory under /root/nic-hang/ on the node BEFORE anything else, then move displaced
+            guests back (ha-manager migrate ct:<id> <node>) -- HA does not fail guests back by itself.'
+        labels:
+          severity: critical
+        isPaused: false
+      - uid: pve_nic_hang_recent
+        title: PVE node NIC reported a Hardware Unit Hang in the last 24h
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (instance) ((time() - pve_nic_hang_last_timestamp_seconds) < 86400 and pve_nic_hang_last_timestamp_seconds
+                > 0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: '{{ $labels.instance }}: e1000e Detected Hardware Unit Hang within the last 24h'
+          description: 'The persistent kernel witness on {{ $labels.instance }} logged ''e1000e ... Detected Hardware
+            Unit Hang'' in the last 24 hours. It is published from /root/kernel_witness.log, so it appears when
+            the node is back (the network is dead during the hang itself; pve_node_fenced is the live signal). pve01
+            runs TSO/GSO off as an UNPROVEN mitigation: a hang with TSO off means the mitigation did not work. Evidence
+            on the node: /root/kernel_witness.log (full kernel log) and /root/nic-hang/<stamp>/ (registers, ring
+            state, interrupts, pcap, one pass every 2 s). If it recurs, try in this order: ethtool -A nic0 rx off
+            tx off, then the disable-k1 private flag, then BIOS/ME update with AMT off, then TX checksum offload
+            off.'
+        labels:
+          severity: critical
+        isPaused: false
+      - uid: pve_nic_mitigation_missing
+        title: pve01 NIC TSO is on again (hang mitigation not in effect)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (instance) (pve_nic_offload_enabled{instance="pve01", feature="tso"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: pve01 nic0 has TCP segmentation offload enabled again
+          description: 'pve01''s e1000e hang mitigation is TSO/GSO off (post-up in /etc/network/interfaces, roles/proxmox_network).
+            TSO reads on, so the setting was lost: check `ethtool -k nic0 | grep segmentation` on pve01 and re-apply
+            `ethtool -K nic0 tso off gso off`.'
+        labels:
+          severity: warning
+        isPaused: false
+      - uid: pve_kernel_witness_down
+        title: PVE kernel witness is not running
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (instance) (pve_kernel_witness_active{instance=~"pve0[123]"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        annotations:
+          summary: kernel-witness.service is not running on {{ $labels.instance }}
+          description: kernel-witness.service keeps the full kernel log on disk across the HA self-fence reset (the
+            journal is volatile) and starts the NIC hang capture. While it is down a hang leaves no evidence. `systemctl
+            status kernel-witness` on the node; roles/pve_stall_witness deploys it.
+        labels:
+          severity: warning
+        isPaused: false
+      - uid: pve_pool_capacity_high
+        title: PVE ZFS pool above 80% (early warning)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (id) (100 * pve_disk_usage_bytes{id=~"storage/.*/nvme-data"} / pve_disk_size_bytes{id=~"storage/.*/nvme-data"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 80
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        annotations:
+          summary: '{{ $labels.id }}: ZFS pool is above 80% allocated'
+          description: 'Early-warning tier below pve_zfs_pool_capacity_high (85%). The pool holds every guest disk,
+            the weekly lab snapshots and this node''s vzdump archives; pve02 sat at 85% with nobody told. See what
+            holds space: `zfs list -o name,used,refer -S used`, `zfs list -t snap -o name,used -S used` (the churny
+            Tanium zvols hold up to ~60 GiB per weekly) and the vzdump dataset. lab-vm-snapshots.sh prunes weeklies
+            itself above 78%. Measured as used/(used+avail) of the pool dataset, which runs a few points above zpool''s
+            capacity.'
+        labels:
+          severity: warning
+        isPaused: false
+      - uid: pve_vzdump_storage_high
+        title: PVE vzdump storage above 85% of its quota
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (id) (100 * pve_disk_usage_bytes{id=~"storage/.*/vzdump-nvme"} / pve_disk_size_bytes{id=~"storage/.*/vzdump-nvme"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 85
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 3h
+        annotations:
+          summary: '{{ $labels.id }} is above 85% of its quota'
+          description: 'The vzdump dataset has a ZFS quota (roles/proxmox_storage, pve_backup_quota_gib) sized as
+            archives kept + the largest single archive, because vzdump writes the new archive before pruning the
+            old one. Sustained above 85% means the next backup run can fail. Usual causes: archives of guests that
+            moved nodes (pve-vzdump-supersede.timer deletes those daily; check it ran) or a new large guest in the
+            job''s vmid list.'
+        labels:
+          severity: warning
+        isPaused: false
+      - uid: pve_vzdump_supersede_stale
+        title: vzdump superseded-archive cleanup has not succeeded for 3 days
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (instance) (time() - pve_vzdump_supersede_last_success_timestamp_seconds)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 259200
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 30m
+        annotations:
+          summary: '{{ $labels.instance }}: pve-vzdump-supersede has not succeeded for over 3 days'
+          description: pve-vzdump-supersede.timer deletes a node's vzdump archives once a newer archive of the same
+            guest exists on another node. Without it, every HA failover or migration leaves a full archive behind
+            on the old node. `journalctl -u pve-vzdump-supersede` on the node; it aborts without deleting anything
+            if any node's storage listing cannot be read.
+        labels:
+          severity: warning
+        isPaused: false

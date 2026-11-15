@@ -7,6 +7,10 @@ iface {{ physical_interface }} inet manual
 {# e1000e Tx Unit Hang workaround, see docs/pve01-network-stall-2026-11-15.md #}
 	post-up ethtool -K {{ physical_interface }} tso off gso off
 {% endif %}
+{% if proxmox_network_nic_msglvl | default('') != '' %}
+{# driver message level: hw+tx_err make e1000e print its register/ring dump on a hang #}
+	post-up ethtool -s {{ physical_interface }} msglvl {{ proxmox_network_nic_msglvl }}
+{% endif %}
 
 auto vmbr0
 iface vmbr0 inet static

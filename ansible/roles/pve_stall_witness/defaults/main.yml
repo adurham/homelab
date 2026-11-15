@@ -1,0 +1,7 @@
+---
+# NIC the witness watches and the textfile metrics are labelled with. The three PVE
+# nodes all use nic0 (see roles/proxmox_network physical_interface).
+pve_stall_witness_nic: nic0
+# Alloy's textfile collector reads this directory (same one smartctl_exporter and
+# nut_ups write to).
+pve_stall_witness_textfile_dir: /var/lib/node_exporter/textfile_collector

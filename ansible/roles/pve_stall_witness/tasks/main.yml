@@ -1,0 +1,55 @@
+---
+# Persistent, full-fidelity kernel log + hang-time capture + textfile metrics for
+# the e1000e "Detected Hardware Unit Hang" that fences pve01 (2026-11-09,
+# 2026-11-15). Read docs/pve01-network-stall-2026-11-15.md first.
+#
+# This role never touches /etc/network/interfaces and never restarts networking:
+# the NIC offload / msglvl settings live in roles/proxmox_network, and applying that
+# role on a live node flaps the bridge. Apply those lines by hand (see the incident
+# note) and keep the template in step.
+
+- name: Install kernel witness, hang capture and textfile exporter scripts
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "/usr/local/sbin/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - { src: kernel_witness.sh, dest: kernel_witness.sh }
+    - { src: nic_hang_capture.sh, dest: nic_hang_capture.sh }
+    - { src: pve_nic_textfile.sh, dest: pve_nic_textfile.sh }
+  notify: Restart kernel-witness
+
+- name: Install systemd units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - kernel-witness.service
+    - pve-nic-textfile.service
+    - pve-nic-textfile.timer
+  notify: Reload systemd for pve_stall_witness
+
+- name: Ensure the textfile collector directory exists
+  ansible.builtin.file:
+    path: "{{ pve_stall_witness_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Flush handlers so the units exist before enabling them
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable the kernel witness and the metrics timer
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - kernel-witness.service
+    - pve-nic-textfile.timer

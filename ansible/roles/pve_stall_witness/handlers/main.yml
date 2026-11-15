@@ -1,0 +1,9 @@
+---
+- name: Reload systemd for pve_stall_witness
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart kernel-witness
+  ansible.builtin.systemd:
+    name: kernel-witness.service
+    state: restarted
