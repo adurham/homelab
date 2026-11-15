@@ -12,6 +12,7 @@ This repository manages a hyper-converged private cloud built on Proxmox VE. The
   - **Physical**: LAN (`vmbr0`, `192.168.86.0/24`).
   - **SDN**: VXLAN-based private network (`172.16.0.0/24`) for isolated service communication.
   - **Ingress**: Tailscale Gateway (`172.16.0.1`) for secure remote access and NAT — also acts as the SDN VNet gateway.
+  - **Reaching the private subnet**: `172.16.0.0/24` is directly reachable only from the PVE hosts. Anything that must be reachable from the home or lab LAN either gets a vhost on the load balancer (`lb-01`/`lb-02`, VIP `172.16.0.30`) or goes through the Tailscale subnet router (`tailscale-gw`, CT 101). A CT that is itself a tailnet node (`gallery-01`) is reached on its tailnet address, not its private one: through the subnet router the request arrives unchanged with a tailnet source address, and the CT's route back to that address is `tailscale0`, not the gateway, so the private IP does not answer tailnet clients (observed 2026-11-15; the reply packets themselves were not captured).
 - **Identity**: Authentik (`auth.chi.lab.amd-e.com`) with OIDC integration for Proxmox SSO.
 - **Storage**: ZFS (NVMe) with automated replication for High Availability.
 
@@ -129,13 +130,15 @@ dashboard issue #1 doesn't get ignored silently.
 
 - **Login auth** — every operator-facing UI flows through Authentik:
   Proxmox WebUI (OIDC), Grafana (OAuth2), Tanium console (SAML),
-  VictoriaMetrics + whoami (nginx forward-auth via the Authentik
-  embedded outpost). Grafana also has a local `admin` password as
+  VictoriaMetrics + whoami (nginx forward-auth via the standalone
+  Authentik outposts on CT 148/150). Grafana also has a local `admin` password as
   documented emergency-access fallback.
-- **DNS** — `dns-01` (bind9) forwards upstream to AdGuard Home on the
-  homeassistant host, which handles the encrypted DoT/DoH egress to
-  Cloudflare and applies adblock lists. Lab queries fail closed if
-  AdGuard is down (`forward only;`).
+- **DNS** — `dns-01`/`dns-02` (bind9, lab zone) forward upstream to
+  `1.1.1.1` and `9.9.9.9` directly (`dns_server_forwarders`). This is
+  deliberately external: forwarding to the LAN resolver pair made the alerting
+  path depend on the resolvers Grafana monitors. Lab clients therefore get no
+  adblocking. LAN clients use AdGuard Home on CT 130/131 (`192.168.86.4`/`.5`,
+  DoT upstreams, Kea DHCP hot-standby), handed out as DHCP option 6.
 - **Per-CT firewalls** — authentik, mail-01, proxy-01, and all 6 Tanium
   CTs have allow-listed inbound rules. Other service CTs (tailscale-gw,
   dns-01, lb-01, ntp-01, vm-01, graf-01) live in the trusted-SDN zone.
