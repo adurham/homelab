@@ -1,0 +1,6 @@
+[Unit]
+Description=Delete vzdump archives superseded by a newer copy on another node
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pve_vzdump_supersede.py

@@ -112,3 +112,40 @@
       - (pve_backup_job_final.stdout | from_json)['prune-backups'] | default({}) == pve_backup_prune_desired
       - (pve_backup_job_final.stdout | from_json)['mailnotification'] | default('always') == pve_backup_mailnotification
     fail_msg: "Backup job {{ pve_backup_job_id }} on {{ inventory_hostname }} did not converge (node/vmid/prune-backups mismatch after deploy)."
+
+# ---------------------------------------------------------------------------
+# Superseded-archive cleanup (2026-11-15). vzdump-nvme is per-node local storage
+# and every node's job carries the union vmid list, so when HA or a migration
+# moves a guest its OLD archive is never pruned (keep-last=1 only sees one node's
+# storage). Result: 16 leftovers / 115 GiB sitting on the same ZFS pool as the
+# guests' disks. This job deletes an archive only when a strictly newer one for
+# the same guest exists on another node, and aborts without deleting anything if
+# any node's listing cannot be read. See files/pve_vzdump_supersede.py.
+- name: Install the superseded-archive cleanup script
+  ansible.builtin.copy:
+    src: pve_vzdump_supersede.py
+    dest: /usr/local/sbin/pve_vzdump_supersede.py
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the cleanup units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - pve-vzdump-supersede.service
+    - pve-vzdump-supersede.timer
+  notify: Reload systemd for vzdump supersede
+
+- name: Flush handlers so the cleanup timer unit exists
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable the cleanup timer
+  ansible.builtin.systemd:
+    name: pve-vzdump-supersede.timer
+    state: started
+    enabled: true

@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily cleanup of superseded vzdump archives (after the 02:00-04:00 backup window)
+
+[Timer]
+# pve03's job starts 03:00 and the largest archive (ts-02) takes under an hour;
+# 05:20 is clear of all three nodes' jobs and of the Sunday 04:30 lab snapshots.
+OnCalendar=*-*-* 05:20:00
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target

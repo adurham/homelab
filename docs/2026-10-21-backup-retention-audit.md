@@ -338,3 +338,36 @@ script.
 
 Other snapshots on pve02 were left alone (`pre-tanos-0089` on `vm-200-disk-1`,
 and the `pre-patch-*` ones on the CT subvols).
+
+### Update 2026-11-15 (later) — archives that outlive a guest's move, and the ceiling
+
+Second leak found the same day. `vzdump-nvme` is a per-node local directory and every
+node's job carries the same union vmid list, so when a guest moves (HA failover or
+migration) the next backup lands on its new node and `keep-last=1` there never sees
+the old one. Result on 2026-11-15: **16 archives, 115 GiB**, each superseded by a newer
+archive of the same guest on another node (vm-01 alone: 38.8 G + 34.6 G, beside the
+current 40.5 G on pve02), on the same ZFS pool as the guest disks. They were deleted
+through the PVE API after checking each had a strictly newer copy elsewhere; every guest
+now has exactly one archive cluster-wide (44 archives, 441 GiB across the three nodes).
+
+Kept on purpose: ts-01's 110.8 GiB archive on pve01 (no job covers VM 200, so it is
+the only copy) and the one archive of retired CT 113 (29.8 GiB on pve01), which the
+cleanup reports as `pve_vzdump_orphan_bytes` and leaves for an owner decision.
+
+What stops it recurring (all three nodes):
+
+| guard | detail |
+|---|---|
+| `pve-vzdump-supersede.timer`, daily 05:20 | `roles/proxmox_backup_jobs`. Deletes a node's archive only if a strictly newer one of the same guest exists on another node (by more than an hour, >= 1 MiB), it is not protected, and **every** node's listing was read; any error deletes nothing. Never touches a guest's newest or only archive. Tested with dummy archives of a fake guest 9999: newer copy kept, older deleted |
+| ZFS quota on `nvme-pool/vzdump-backups` | pve01 260 G, pve02 130 G, pve03 360 G (`pve_backup_quota_gib`, `roles/proxmox_storage`). Sized as archives kept + the largest single archive, because vzdump writes the new archive before pruning the old one (pve03: ts-02 ~130 G). A full quota fails that node's backup run (existing `guest_backup_stale` alert) instead of squeezing guest disks |
+| weekly-snapshot capacity guard | `lab-vm-snapshots.sh`: above 78 % pool use it destroys the oldest weekly of whichever volume has more than one and that holds the most space, at most 3 per run, newest per volume untouched, waits for ZFS to finish freeing before re-checking. Added because the weeklies were the bigger leak on pve02 |
+| alerts | `pve_pool_capacity_high` (80 %, early tier under the existing 85 % `pve_zfs_pool_capacity_high`), `pve_vzdump_storage_high` (85 % of quota for 3 h), `pve_vzdump_supersede_stale` (no success for 3 days) -- `roles/grafana/files/alerting_rules_pve_platform.yml` |
+
+Both percentages use `used/(used+avail)` of the pool dataset (what Proxmox shows for the
+storage). `zpool list` capacity runs 3-6 points lower because it ignores reservations;
+do not mix the two when comparing numbers.
+
+Gotcha for anyone testing the cleanup under Ansible: `pvesh get /nodes/<other>/...`
+hops by ssh, and Ansible's forwarded agent makes that hop fail with "Too many
+authentication failures". The script fails closed (deletes nothing). Run it as
+`env -u SSH_AUTH_SOCK ...`; the systemd unit has no agent and is unaffected.

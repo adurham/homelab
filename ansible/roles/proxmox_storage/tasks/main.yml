@@ -111,3 +111,23 @@
     - pvesm_vzdump_check.rc != 0
   run_once: true
   delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+
+# 2026-11-15: vzdump-backups shares the ZFS pool with every guest disk and had no
+# quota, so a backup run (or archives left behind by guests that moved nodes) could
+# fill the pool and starve the guests. pve02 sat at 85 % allocated with 220 GiB of
+# snapshots and 115 GiB of orphaned archives elsewhere in the cluster. The quota turns
+# "pool full, guests suffer" into "this node's backup job fails and alerts".
+# Size it as: archives kept now + the largest single guest archive, because vzdump
+# writes the new archive BEFORE pruning the old one (pve03: ts-02 is ~130 GiB).
+- name: Read the current quota on the vzdump dataset
+  ansible.builtin.command: "zfs get -Hp -o value quota {{ zfs_pool_name }}/vzdump-backups"
+  register: zfs_vzdump_quota_now
+  changed_when: false
+  when: pve_backup_quota_gib is defined
+
+- name: Cap the vzdump dataset so backups cannot starve guest disks
+  ansible.builtin.command: "zfs set quota={{ pve_backup_quota_gib }}G {{ zfs_pool_name }}/vzdump-backups"
+  when:
+    - pve_backup_quota_gib is defined
+    - (zfs_vzdump_quota_now.stdout | trim | int) != (pve_backup_quota_gib | int * 1073741824)
+  changed_when: true
