@@ -21,3 +21,9 @@ adblock_phone_capture_src: "192.168.86.126"
 # Port for the capture listener. Anything but 8443 — that is the ad-blocking
 # listener, and this instance has no SNI filter.
 adblock_phone_capture_port: 8445
+
+# Bypass canary (devices resolving past AdGuard). Its data source is the dnsmasq
+# lease table on the HA box, which was retired with the Kea DHCP cutover — the
+# canary now fails every run with "lease lookup failed (Connection refused)".
+# Off until a Kea-based replacement reads the lease table from the new pair.
+adblock_canary_enabled: false

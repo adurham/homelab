@@ -78,7 +78,13 @@ groups:
           type: prometheus
           uid: victoriametrics
         editorMode: code
-        expr: up{job!="exo", instance!~"tc-.*", instance!="amd-workstation"}
+        # Host liveness only. This used to match EVERY `up` series, so a blackbox
+        # probe for a service endpoint (a DB port, a console, an exit-node check)
+        # that briefly failed was reported as "<host> is down" — the pve03 flaps on
+        # 2026-11-15 were a 5s tcp probe racing its scrape timeout, while pve03's
+        # node_exporter answered the whole time. Service-level probes belong to
+        # their own rules, not to this one.
+        expr: up{job="node_exporter", instance!="amd-workstation"}
         instant: true
         intervalMs: 1000
         maxDataPoints: 43200

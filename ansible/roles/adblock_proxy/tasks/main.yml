@@ -413,12 +413,18 @@
     group: root
     mode: '0644'
 
-- name: Enable & Start Bypass Canary Timer
+- name: Set Bypass Canary timer state
   ansible.builtin.systemd:
     name: adblock-canary.timer
-    state: started
-    enabled: true
+    state: "{{ 'started' if adblock_canary_enabled else 'stopped' }}"
+    enabled: "{{ adblock_canary_enabled }}"
     daemon_reload: true
+
+- name: Clear any latched canary failure (its lease source is retired)
+  ansible.builtin.command: systemctl reset-failed adblock-canary.service
+  changed_when: false
+  failed_when: false
+  when: not adblock_canary_enabled
 
 # ─── DNS-level ad/tracker blocking (exit-node path only) ───────────────────
 # The Discord SNI filter above only covers Discord. Every other app on a
