@@ -75,6 +75,9 @@ Proving the mechanism (link down vs driver hang) needs a deliberate one-node tes
 see `docs/proxmox-nic-failover-test.md` for the runbook, preconditions and the
 timings to record. Do not run it blind.
 
+**Recurrence 2026-11-15** on the equalised kernel (all three on 7.0.14-26): same
+signature, same fence. See `docs/pve01-network-stall-2026-11-15.md`.
+
 Structural note: a single-NIC HA node self-fences on any NIC stall. If this
 recurs on a node after the kernel is equalised, the fix is a second corosync
 link on a separate path, not another post-mortem.

@@ -310,3 +310,31 @@ snapshots touch no config and cannot lock a guest.
 
 What this does NOT cover: node loss (snapshots live on the same pool). Off-node
 copies need either more free space or thinner lab disks.
+
+### Update 2026-11-15 — the "~0 B" figure did not hold
+
+The 796 K / ~0 B cost was measured at creation. Four weeks later the weeklies on
+the two busy Tanium appliances on pve02 held real space, because those guests
+rewrite a lot of blocks between runs (`zfs list -t snap`, USED column):
+
+| snapshot | held |
+|---|---|
+| `vm-202-disk-1@auto-weekly-202643` (Oct 21) | 63.3 G |
+| `vm-202-disk-1@auto-weekly-202644` (Nov 1) | 46.3 G |
+| `vm-200-disk-1@auto-weekly-202643` (Oct 21) | 30.7 G |
+| `vm-200-disk-1@auto-weekly-202644` (Nov 1) | 13.0 G |
+
+Together with the newer weeks that was about 220 G of pve02's 928 G pool, which
+sat at 85 % allocated. On 2026-11-15 the four snapshots above were destroyed by
+hand (owner-approved), taking the pool to 72 % (673 G allocated, 255 G free).
+Retention on pve02 is therefore 2 weeklies per busy zvol (`202645`, `202646`),
+not the 4 that `lab-vm-snapshots.sh` keeps. The next two Sunday runs (11-22,
+11-29) add a week each and the script will not prune again until a fifth exists,
+so retention rebuilds to 4 by 2026-11-29 and the held space grows back with it
+(it was ~220 G at 4 weeklies; how fast depends on how much the appliances
+rewrite). Unless `KEEP` is lowered for pve02 or the busy zvols are excluded,
+expect pve02's pool to drift back up. Open decision; no change made to the
+script.
+
+Other snapshots on pve02 were left alone (`pre-tanos-0089` on `vm-200-disk-1`,
+and the `pre-patch-*` ones on the CT subvols).
