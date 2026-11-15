@@ -351,7 +351,10 @@ all:
           ansible_host: 100.83.114.12
           ansible_ssh_common_args: ""
           vmid: 115
-          target_node: pve02
+          # Moved pve02 -> pve01 on 2026-11-15 (restart migration, MAC and IP
+          # kept) to take pressure off pve02's pool. Not HA-managed and not
+          # replicated, so it stays wherever it was last put by hand.
+          target_node: pve01
       vars:
         ansible_user: amd
         ansible_become: true

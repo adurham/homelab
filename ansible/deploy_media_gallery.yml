@@ -1,8 +1,10 @@
 ---
 # Two-stage deploy of the encrypted media store (browser gallery):
-#   1. media_gallery_host runs on pve02 to create the LXC (vmid 115,
+#   1. media_gallery_host runs on the node hosting the CT (pve01 since
+#      2026-11-15; first created on pve02) to create the LXC (vmid 115,
 #      ip_media_gallery, hostname gallery-01) and inject SSH keys + TUN
-#      passthrough for Tailscale.
+#      passthrough for Tailscale. Keep `hosts:` in step with `target_node`
+#      for gallery-01 in inventory/proxmox.yml.
 #   2. media_gallery runs against the CT to install rclone + the gallery/thumb/
 #      trash/upload services, the manifest builder, the dedup scanner, and the
 #      single-page app, wiring the systemd units. Access is via lb-01 (Authentik
@@ -12,7 +14,7 @@
 #   ansible-playbook deploy_media_gallery.yml --ask-vault-pass
 
 - name: Provision Media Gallery Container
-  hosts: pve02
+  hosts: pve01
   gather_facts: false
   roles:
     - media_gallery_host
