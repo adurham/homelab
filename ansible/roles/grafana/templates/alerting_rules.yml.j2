@@ -120,6 +120,8 @@ groups:
     labels:
       severity: critical
     isPaused: false
+  # Paused 2026-11-15: exo is decommissioned on both Macs and the owner
+  # acked its alerts -- the host is deliberately left powered down.
   - uid: exo_server_down
     title: exo server process down
     condition: C
@@ -179,7 +181,9 @@ groups:
         hardware failure.
     labels:
       severity: critical
-    isPaused: false
+    isPaused: true
+  # Paused 2026-11-15: exo is decommissioned on both Macs and the owner
+  # acked its alerts -- the host is deliberately left powered down.
   - uid: exo_runners_not_ready
     title: exo model runners not ready
     condition: C
@@ -240,7 +244,9 @@ groups:
         DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-Vision-Exp ./start_cluster.sh).'
     labels:
       severity: critical
-    isPaused: false
+    isPaused: true
+  # Paused 2026-11-15: exo is decommissioned on both Macs and the owner
+  # acked its alerts -- the host is deliberately left powered down.
   - uid: exo_runner_stuck_loading
     title: exo runner stuck loading
     condition: C
@@ -300,7 +306,7 @@ groups:
         line, then consider a clean relaunch with ./start_cluster.sh.
     labels:
       severity: warning
-    isPaused: false
+    isPaused: true
   - uid: tanium_appliance_unreachable
     title: Tanium appliance unreachable
     condition: C
@@ -4468,6 +4474,9 @@ groups:
     labels:
       severity: critical
     isPaused: false
+  # Paused 2026-11-15: the LAN DHCP lease source moved to the Kea pair
+  # (CT130/CT131) and the HA dnsmasq app has been gone since 2026-11-10, so
+  # adblock_dnsmasq_up is permanently 0. A Kea-based check is the replacement.
   - uid: dnsmasq_dhcp_down
     title: dnsmasq DHCP app down
     condition: C
@@ -4581,7 +4590,7 @@ groups:
       description: "The addon writes its heartbeat every 60s from a liveness thread that does not depend on traffic, so a heartbeat older than 5 minutes with :8443 listening means the addon is dead, erroring, or its heartbeat write is blocked \u2014 exit-node clients keep browsing and Discord/Reddit ads come back with no other symptom. A quiet night no longer trips this: read adblock_tls_last_seen_age_seconds to see whether any client sent TLS at all. Fix path: systemctl restart adblock-proxy-transparent, then confirm the heartbeat moves."
     labels:
       severity: warning
-    isPaused: false
+    isPaused: true
   - uid: adblock_dns_bypass_clients
     title: Devices resolving past AdGuard
     condition: C
