@@ -66,9 +66,15 @@ all:
           # The win-*/usda-*/bnp-* case VMs were destroyed the same day, and the
           # tc-* test clients stay excluded. The Grafana `guest_backup_missing`
           # rule alerts if a production LXC drops out of this coverage again.
+          # 2026-11-14: the HA rebuild fleet was missing from this list -- 16 production
+          # guests (lan-dns-01/02, dns-02, lb-02, ntp-02, mail-02, graf-02, graf-db-01,
+          # pg-02, loki-01/02/03, garage-01/02/03, vm-clus-03) had no backup job at all,
+          # which `guest_backup_missing` caught as 16 simultaneous warnings. They are
+          # small (16 GiB used across all of them), so the union list carries them with
+          # no pool-capacity concern; the tc-* clients and 200/202/204 stay excluded.
           pve_backup_job_id: "41c3b19b-20ea-4ba0-b760-52a79d1cb83a"
           pve_backup_schedule: "Mon..Sun 02:00"
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 142, 143, 148, 149, 150, 170, 171, 201, 203, 205, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 130, 131, 140, 141, 142, 143, 144, 145, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 170, 171, 201, 203, 205, 240, 241]
         pve02:
           ansible_host: 192.168.86.12
           pve_sync_vlan_ip: "172.20.0.12"
@@ -82,7 +88,7 @@ all:
           # archive, which cannot coexist with them on this node's 928G pool.
           # They are rebuilt from template-tanos-1.8.6, and the last good ts-01
           # archive (2026-11-11) is kept on pve01's vzdump-nvme.
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 142, 143, 148, 149, 150, 170, 171, 201, 203, 205, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 130, 131, 140, 141, 142, 143, 144, 145, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 170, 171, 201, 203, 205, 240, 241]
           # SMART textfile export (roles/smartctl_exporter) added
           # 2026-09-16 -- pve02's boot HDD (ST500LM034-2GH17A, 35k+
           # power-on hrs) has no spare to replace it with, so tracking
@@ -105,7 +111,7 @@ all:
           pve_backup_schedule: "Mon..Sun 03:00"
           # 201/203/205 are the 500G TanOS appliances that live here. Local
           # retention is keep-last=1 cluster-wide (see the role default).
-          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 142, 143, 148, 149, 150, 170, 171, 201, 203, 205, 240, 241]
+          pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 130, 131, 140, 141, 142, 143, 144, 145, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 170, 171, 201, 203, 205, 240, 241]
           # Same as pve02 -- see comment there. pve03's boot HDD
           # (ST500LM021-1KJ152) is the one that actually corrupted
           # pve-cluster's config.db on 2026-09-10.
