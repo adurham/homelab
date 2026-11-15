@@ -14,10 +14,29 @@ generation that doesn't cost anything to read back.
 | 2. Off-site | newest archive per guest, rclone-crypt encrypted | `vmbackup_crypt:pve/` (Google Drive) | weekly, Sat 05:00, `pve-backup-push.timer` | newest 4 per guest |
 | 3. Local second generation | newest archive per guest, staged copy | `/mnt/vault/pve-backups/<YYYYMMDD>/` on amd-workstation (8TB `vault`) | weekly, immediately after tier 2 (`ExecStartPost`) | ≤ 2 TiB, oldest generations pruned |
 
-Tier 2 and 3 both start from the same staging dir
-(`/nvme-pool/pve-backup-stage` on pve01), which is pruned one day after a
-run — that is why tier 3 is an `ExecStartPost` of the push unit and not an
-independent timer.
+Tier 2 pushes through a staging dir (`/nvme-pool/pve-backup-stage` on pve01, the
+same ZFS pool the guests live on). **The staging dir is empty between runs.**
+Since 2026-11-15 `pve-backup-push.sh` works one archive at a time: fetch it,
+`rclone copyto` it, delete it, and skip any archive Drive already holds with the
+same name and size. Peak staging use is the largest single archive (~133 GiB,
+ts-02), not a whole generation.
+
+> **What was wrong before (found 2026-11-15):** the script staged the whole
+> generation first and only pruned files older than a day at the end of the *next*
+> run, so a full generation sat on the guest pool all week. Once the TanOS
+> appliances joined the jobs (2026-11-08) that generation was **399 GiB, 43 % of
+> pve01's 928 GiB pool**, in the pool's root dataset, where per-guest and
+> per-dataset space checks never saw it. It was deleted by hand after every file
+> was confirmed on Drive and in the vault with identical sizes.
+
+**Tier 3 is not automatic right now.** The `ExecStartPost` that copies the staging
+dir to the vault is the drop-in
+`/etc/systemd/system/pve-backup-push.service.d/vault-copy.conf.disabled`
+(note the suffix: systemd ignores it) and neither it nor
+`pve-backup-vault-push.sh` is in this repo. The `20261114` vault generation exists,
+so it ran at least once. With the new per-file flow the staging dir is empty after
+a push, so re-enabling tier 3 as it was would copy nothing; it needs reworking to
+run per file (or against the node dumps directly) before it is turned back on.
 
 ## Tier 3 — the 8TB vault copy
 

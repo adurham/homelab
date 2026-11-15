@@ -43,6 +43,26 @@
   quota. The encrypted tree currently holds 196 GB (192 GB of VictoriaMetrics
   daily snapshots + 3.7 GB of Home Assistant).
 
+## Update 2026-11-15 — the "43 GB generation" is now ~300 GiB
+
+The TanOS appliances joined the nightly jobs on 2026-11-08 (ts-02 130 GiB, tms-02 42 GiB,
+tzs-02 22 GiB, plus ts-01 111 GiB when it has an archive), and vm-01 is 41 GiB. One
+generation is now **~300 GiB of new data per week** (the dry run on 11-15 listed 42
+archives, 299 GiB), not 43 GB. Two consequences, both fixed in
+`roles/pve_backup_offsite`:
+
+- Staging held the whole generation until the next week's run: 399 GiB on pve01's guest
+  pool (see `docs/backups.md`). Now one archive at a time, empty between runs.
+- The push compared files by modtime, and every staged copy has a fresh mtime, so an
+  unchanged archive (ts-01's 111 GiB, which no job refreshes) would be re-uploaded every
+  week. Now skipped by name + size.
+
+What this does **not** fix: ~300 GiB a week is still a lot of upstream. The uplink was
+measured at ~16 Mbit/s (~2 MB/s), which is ~40 hours for 300 GiB, longer than the weekly
+cadence leaves room for if the runs overlap. Excluding the three Tanium VMs from the
+off-site push (they are rebuildable and have weekly ZFS snapshots on-site), or pushing them
+monthly, would cut it to ~90 GiB. That is a decision, not a change made here.
+
 ## Still open
 
 - Restore from Drive has not been exercised (same class of gap as the earlier

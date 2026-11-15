@@ -4,7 +4,7 @@ all:
       hosts:
         pve01:
           ansible_host: 192.168.86.11
-          pve_backup_quota_gib: 260  # vzdump-backups ceiling; see roles/proxmox_storage
+          pve_backup_quota_gib: 130  # vzdump-backups ceiling; see roles/proxmox_storage (was 260 while it held the 111 GiB ts-01 archive)
           pve_sync_vlan_ip: "172.20.0.11"
           pve_migrate_vlan_ip: "172.21.0.11"
           zfs_scrub_day_of_month: 1
