@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
-# VictoriaMetrics daily snapshot + encrypted GDrive backup.
-# Runs via systemd timer (victoriametrics-backup.timer).
+# VictoriaMetrics daily snapshot + encrypted GDrive backup (3-node cluster).
+# Runs via systemd timer (victoriametrics-backup.timer) on vm-01.
+#
+# 2026-11-15: ported from the retired single-node VM to the vm-clus-0{1,2,3}
+# cluster. The old script POSTed /snapshot/create at localhost:8428, which after
+# the rebuild is a socat front to the cluster's vminsert -- it answers 404, so
+# every run from 2026-11-13 on failed while the timer kept firing.
 #
 # Flow:
-#   1. POST /snapshot/create on local VM -> creates consistent snapshot dir
-#   2. rclone copy -L snapshot -> vmbackup_crypt:daily/<date> (encrypted, GDrive)
-#      (-L dereferences symlinks: VM snapshots use symlinks for data/big,
-#       data/small, data/indexdb pointing back into the live data dir;
-#       without -L rclone silently skips them and you get an 8-byte useless backup.)
-#   3. On success: record size, DELETE local snapshot, apply retention
-#   4. On failure: leave local snapshot, log to stderr + journal, exit non-zero
+#   1. POST /snapshot/create on EACH vmstorage node (:8482), then rsync -L its
+#      snapshot dir back to a staging generation dir on vm-01. Each node holds
+#      its own shard, so a restorable copy needs all three. -L is required:
+#      the snapshot's data/{big,small,indexdb} are symlinks into the live tree,
+#      and a copy that keeps them as symlinks is useless on another host.
+#   2. rclone copy -L the generation -> vmbackup_crypt:daily/<ts> (encrypted).
+#   3. On success: record size, delete every remote snapshot + the staging copy,
+#      apply retention. On failure: leave everything in place and exit non-zero.
 #
-# Tiering: data older than 2y rolls off local VM per -retentionPeriod=2y.
+# Tiering: data older than 2y rolls off local vmstorage per -retentionPeriod=2y.
 # A SEPARATE yearly job (victoriametrics-archive-yearly.service) snapshots the
-# full local dataset to vmbackup_crypt:archive-yearly/ before that rolloff.
-# That is the cold tier the user can restore from.
+# full dataset to vmbackup_crypt:archive-yearly/ before that rolloff.
 #
 # RETENTION (rewritten 2026-09-28) — generation-aware + hard size cap.
 # The old model was "keep everything younger than N days", which has no
@@ -22,20 +27,15 @@
 # GB/day, so an age-based rule silently grows without bound (90d x 21.7GiB
 # = 1.9 TiB and climbing, which is what triggered this rewrite).
 # New model:
-#   - at most ONE snapshot per calendar day (newest wins) -- this alone
-#     kills the duplicate class produced by the old hourly restart-loop,
-#     which no age-based rule could ever collect
+#   - at most ONE snapshot per calendar day (newest wins)
 #   - keep every day younger than DAILY_KEEP_DAYS
 #   - beyond that, keep the newest snapshot of each ISO week for
 #     WEEKLY_KEEP_WEEKS back
 #   - then enforce MAX_TOTAL_GB: drop the OLDEST retained entries until the
 #     total is under the cap, but never drop below ALWAYS_KEEP newest
 #     (safety floor so a cap smaller than one snapshot can't wipe history)
-# The cap is the structural fix: it bounds the footprint no matter how much
-# the dataset grows.
 
 set -euo pipefail
-VM_URL="http://localhost:8428"
 RCLONE="/usr/bin/rclone"
 RCLONE_CONF="/root/.config/rclone/rclone.conf"
 REMOTE_DAILY="vmbackup_crypt:daily"
@@ -46,70 +46,86 @@ WEEKLY_KEEP_WEEKS={{ vm_backup_weekly_keep_weeks }}
 MAX_TOTAL_GB={{ vm_backup_max_total_gb }}
 ALWAYS_KEEP={{ vm_backup_always_keep }}
 
+# vmstorage nodes: "<name>=<ip>" pairs; each runs vmstorage on :8482
+VMSTORAGE_NODES="{{ vm_backup_vmstorage_nodes }}"
+SSH_KEY="/root/.ssh/vmclus_backup"
+STAGE_BASE="/var/lib/victoria-metrics/snapshots"
+DEST_NAME="$(date -u +%Y%m%dT%H%M%SZ)"
+GEN_DIR="$STAGE_BASE/$DEST_NAME"
+
 mkdir -p "$STATE_DIR"
 
 log() { logger -t "$LOG_TAG" -- "$*"; echo "[$(date -Is)] $*" >&2; }
 
-# --- 1. Create VM snapshot ---
-SNAP_RESP=$(curl -fsS -X POST "$VM_URL/snapshot/create") || {
-  log "ERROR: snapshot/create failed"
+[ -f "$SSH_KEY" ] || { log "ERROR: $SSH_KEY missing (vmstorage snapshot pull key)"; exit 1; }
+mkdir -p "$GEN_DIR"
+CREATED=()
+
+fail() {
+  log "ERROR: $*"
+  log "Left staged generation $GEN_DIR and any remote snapshots in place for inspection"
   exit 1
 }
-SNAP_NAME=$(echo "$SNAP_RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["snapshot"])' 2>/dev/null || echo "")
-if [ -z "$SNAP_NAME" ]; then
-  log "ERROR: could not parse snapshot name from response: $SNAP_RESP"
-  exit 1
-fi
-SNAP_PATH="/var/lib/victoria-metrics/snapshots/$SNAP_NAME"
-log "Created snapshot: $SNAP_NAME"
-[ -d "$SNAP_PATH" ] || { log "ERROR: snapshot path $SNAP_PATH does not exist"; exit 1; }
+
+# --- 1. Snapshot every vmstorage node and stage a self-contained generation ---
+for spec in $VMSTORAGE_NODES; do
+  host=${spec%%=*}
+  ip=${spec##*=}
+  SNAP_RESP=$(curl -fsS -X POST "http://$ip:8482/snapshot/create") \
+    || fail "snapshot/create failed on $host ($ip)"
+  SNAP_NAME=$(echo "$SNAP_RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["snapshot"])' 2>/dev/null || echo "")
+  [ -n "$SNAP_NAME" ] || fail "could not parse snapshot name from $host: $SNAP_RESP"
+  CREATED+=("$ip:$SNAP_NAME")
+  log "Created snapshot $SNAP_NAME on $host"
+  if ! rsync -aL --delete \
+      -e "ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
+      "root@$ip:/var/lib/vmstorage/snapshots/$SNAP_NAME/" "$GEN_DIR/$host/"; then
+    fail "rsync of $host snapshot $SNAP_NAME failed"
+  fi
+  log "Staged $host: $(du -sh "$GEN_DIR/$host" | cut -f1)"
+done
+log "Staged generation $DEST_NAME ($(du -sh "$GEN_DIR" | cut -f1))"
 
 # --- 2. Upload to GDrive (encrypted, dereferencing symlinks) ---
-DEST_NAME="$(date -u +%Y%m%dT%H%M%SZ)"
 DEST="$REMOTE_DAILY/$DEST_NAME"
-log "Uploading $SNAP_PATH -> $DEST"
-if ! $RCLONE --config "$RCLONE_CONF" copy -L "$SNAP_PATH/" "$DEST/" --transfers 4 --stats=10s --stats-one-line 2>&1 | logger -t "$LOG_TAG"; then
-  log "ERROR: rclone copy failed for $SNAP_NAME"
-  exit 2
+log "Uploading $GEN_DIR -> $DEST"
+if ! $RCLONE --config "$RCLONE_CONF" copy -L "$GEN_DIR/" "$DEST/" --transfers 4 --stats=10s --stats-one-line 2>&1 | logger -t "$LOG_TAG"; then
+  fail "rclone copy failed for $DEST_NAME"
 fi
 log "Upload complete: $DEST"
 
 # --- 3. Verify upload by listing the dest ---
 if ! $RCLONE --config "$RCLONE_CONF" lsd "$DEST" >/dev/null 2>&1; then
-  log "ERROR: uploaded destination $DEST not found - rclone may have silently failed"
-  exit 3
+  fail "uploaded destination $DEST not found - rclone may have silently failed"
 fi
 log "Verified: $DEST exists on GDrive"
 
 # --- 3b. Record this snapshot's size for the cap math ---
 # Sizes are recorded at upload time (files are fresh/hot) so the prune step
-# never has to tree-walk every snapshot -- that walk is what made the old
-# prune slow enough to blow the unit timeout. Unknown sizes are tolerated
-# (recorded as 0) and simply don't count toward the cap.
+# never has to tree-walk every snapshot.
 SIZE_BYTES=$($RCLONE --config "$RCLONE_CONF" size "$DEST" 2>/dev/null | sed -n 's/.*(\([0-9][0-9]*\) Byte).*/\1/p' || echo "")
 [ -n "$SIZE_BYTES" ] || SIZE_BYTES=0
 printf '%s %s\n' "$DEST_NAME" "$SIZE_BYTES" >> "$STATE_DIR/sizes.txt"
 log "Recorded size: $DEST_NAME = $((SIZE_BYTES / 1073741824)) GiB"
 
-# --- 4. Delete local snapshot ---
-if curl -fsS -X POST "$VM_URL/snapshot/delete?snapshot=$SNAP_NAME" >/dev/null; then
-  log "Deleted local snapshot $SNAP_NAME"
-else
-  log "WARN: could not delete local snapshot $SNAP_NAME (disk will accumulate)"
-fi
+# --- 4. Delete remote snapshots + the staged generation ---
+for entry in "${CREATED[@]}"; do
+  ip=${entry%%:*}
+  name=${entry#*:}
+  if curl -fsS -X POST "http://$ip:8482/snapshot/delete?snapshot=$name" >/dev/null; then
+    log "Deleted snapshot $name on $ip"
+  else
+    log "WARN: could not delete snapshot $name on $ip (will accumulate on that node)"
+  fi
+done
+rm -rf --one-file-system "$GEN_DIR"
 
 # --- 5. Mark success for the watchdog ---
-# Written HERE (immediately after the verified upload), not at the end: the
-# success signal must not depend on the janitorial prune below. 2026-09-28:
-# the old prune's full-tree walk grew past TimeoutStartSec=3600 while the
-# upload had already succeeded, so last_success stopped updating and the
-# watchdog false-fired CRITICAL every 6h.
+# Written immediately after the verified upload, not at the end: the success
+# signal must not depend on the janitorial prune below.
 date -u +%s > "$STATE_DIR/last_success"
 
 # --- 6. Apply retention ---
-# Pure name/list math against the recorded sizes -- no tree walks, seconds
-# not hours. The listing and the keep/purge decision happen in one python
-# block for clarity; it emits the dirs to purge, which we then purge.
 LIST=$(mktemp)
 PURGE_LIST=$(mktemp)
 if ! $RCLONE --config "$RCLONE_CONF" lsf "$REMOTE_DAILY" --dirs-only 2>/dev/null | sed 's#/$##' > "$LIST"; then
@@ -180,18 +196,13 @@ for wk, (dt, n) in by_week.items():
 
 # --- rule 4: hard size cap (drop oldest kept, never below the floor) ---
 #
-# The floor exists so a cap smaller than one snapshot can't wipe ALL history.
-# But a large fixed floor silently DEFEATS the cap as the dataset grows:
-# e.g. floor=7 with 180 GiB snapshots pins 1.26 TiB regardless of a 200 GiB
-# cap (caught by the offline test on 2026-09-28). So the floor is capped in
-# turn -- it never holds more than CAP_FLOOR_FRACTION of the budget, which
-# means the cap always wins eventually while still guaranteeing >=1 snapshot.
+# The floor prevents a cap smaller than one snapshot from wiping ALL history,
+# but a large fixed floor silently DEFEATS the cap as the dataset grows, so the
+# floor is capped in turn: never more than CAP_FLOOR_FRACTION of the budget.
 CAP_FLOOR_FRACTION = 0.25
 ordered_kept = [n for _, n in deduped if n in keep]        # oldest -> newest
 total = sum(sizes.get(n, 0) for n in ordered_kept)
 
-# effective floor: the configured floor, but never more than a quarter of the
-# cap's worth of snapshots (at least 1, always).
 if ordered_kept:
     avg = total / len(ordered_kept)
     max_floor_by_cap = max(1, int((max_bytes * CAP_FLOOR_FRACTION) / avg)) if avg > 0 else always_keep
@@ -229,8 +240,7 @@ while IFS= read -r n; do
 done < "$PURGE_LIST"
 log "Prune: purged $PRUNE_COUNT snapshot dir(s)"
 
-# Trim the size ledger to only snapshots that still exist (it would otherwise
-# grow forever).
+# Trim the size ledger to only snapshots that still exist.
 if [ -s "$LIST" ] && [ -f "$STATE_DIR/sizes.txt" ]; then
   awk 'NR==FNR{keep[$0]=1; next} ($1 in keep)' "$LIST" "$STATE_DIR/sizes.txt" \
     > "$STATE_DIR/sizes.txt.new" 2>/dev/null \

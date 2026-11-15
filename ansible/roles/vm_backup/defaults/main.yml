@@ -37,3 +37,11 @@ vm_backup_max_total_gb: 200         # hard ceiling for the ENTIRE daily/ tree
 vm_backup_always_keep: 7            # never prune below this many snapshots
 
 vm_backup_state_dir: "/var/lib/vm-backup"
+
+# VictoriaMetrics cluster members that the daily/yearly jobs snapshot. Each node
+# runs its own vmstorage (:8482) holding one shard of the dataset, so a
+# restorable copy needs all of them. vm-01 pulls each snapshot over rsync with a
+# dedicated key (/root/.ssh/vmclus_backup) authorized on the nodes' root account.
+# Retired single-node layout: the old job POSTed localhost:8428, which is now a
+# socat front to vminsert and answers 404 -- see vm-backup-daily.sh.j2 header.
+vm_backup_vmstorage_nodes: "vm-clus-01=172.16.0.57 vm-clus-02=172.16.0.58 vm-clus-03=172.16.0.59"

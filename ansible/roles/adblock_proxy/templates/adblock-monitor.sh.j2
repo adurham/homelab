@@ -8,11 +8,14 @@
 #   adblock_dnsmasq_up      — DHCP is the other single point of failure on the HA box.
 #   adblock_interceptor_listener — mitmdump bound :8443 (fail-open guard covers the
 #                             routing side; this is the raw liveness signal).
-#   adblock_addon_heartbeat_age_seconds — the addon touches a file per TLS
-#                             connection. A listening mitmdump with a dead or
-#                             erroring addon looks identical from outside, so a
-#                             stale heartbeat is the only real "is it filtering?"
-#                             signal. Alerts should fire above ~900s.
+#   adblock_addon_heartbeat_age_seconds — addon liveness. Written every 60s by
+#                             a thread that does not depend on traffic, so a stale
+#                             value means the addon itself is dead/wedged, not that
+#                             the network was quiet. Alerts fire above ~300s.
+#   adblock_tls_last_seen_age_seconds — age of the last TLS ClientHello the addon
+#                             actually processed. Lets a rule or dashboard tell
+#                             "no client is using the exit node" apart from "the
+#                             interceptor stopped receiving traffic".
 #   adblock_proxy_open_fds / _fd_soft_limit — descriptors. 2026-11-05: the process
 #                             saturated a 1024 soft limit and every accept failed
 #                             with EMFILE while the unit still looked healthy —
@@ -57,6 +60,13 @@ else
     age=99999
 fi
 
+TLS_SEEN=/var/lib/adblock-proxy/tls_seen
+if [ -f "${TLS_SEEN}" ]; then
+    tls_age=$(( $(date +%s) - $(stat -c %Y "${TLS_SEEN}") ))
+else
+    tls_age=99999
+fi
+
 PID=$(systemctl show -p MainPID --value "$UNIT")
 fds=0
 soft=0
@@ -87,9 +97,9 @@ fi
 disk=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
 disk=${disk:-0}
 
-logger -t adblock-monitor "agh=${agh} dnsmasq=${dnsmasq} listener=${listener} heartbeat_age=${age} fds=${fds}/${soft} accept_errors=${accept_errors} addon_errors=${addon_errors} nat=${nat_rules} exit_node=${exit_node} disk=${disk}%"
+logger -t adblock-monitor "agh=${agh} dnsmasq=${dnsmasq} listener=${listener} heartbeat_age=${age} tls_age=${tls_age} fds=${fds}/${soft} accept_errors=${accept_errors} addon_errors=${addon_errors} nat=${nat_rules} exit_node=${exit_node} disk=${disk}%"
 
-printf 'adblock_agh_up %d\nadblock_dnsmasq_up %d\nadblock_interceptor_listener %d\nadblock_addon_heartbeat_age_seconds %d\nadblock_proxy_open_fds %d\nadblock_proxy_fd_soft_limit %d\nadblock_proxy_accept_errors %d\nadblock_proxy_rss_bytes %d\nadblock_nat_redirect_rules %d\nadblock_tailscale_exit_node %d\nadblock_disk_used_percent %d\nadblock_addon_errors %d\n' \
-    "${agh}" "${dnsmasq}" "${listener}" "${age}" "${fds}" "${soft}" \
+printf 'adblock_agh_up %d\nadblock_dnsmasq_up %d\nadblock_interceptor_listener %d\nadblock_addon_heartbeat_age_seconds %d\nadblock_tls_last_seen_age_seconds %d\nadblock_proxy_open_fds %d\nadblock_proxy_fd_soft_limit %d\nadblock_proxy_accept_errors %d\nadblock_proxy_rss_bytes %d\nadblock_nat_redirect_rules %d\nadblock_tailscale_exit_node %d\nadblock_disk_used_percent %d\nadblock_addon_errors %d\n' \
+    "${agh}" "${dnsmasq}" "${listener}" "${age}" "${tls_age}" "${fds}" "${soft}" \
     "${accept_errors}" "${rss}" "${nat_rules}" "${exit_node}" "${disk}" "${addon_errors}" \
     | curl -s -m 8 --data-binary @- "${VM}" >/dev/null

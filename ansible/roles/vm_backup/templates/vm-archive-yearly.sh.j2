@@ -1,27 +1,36 @@
 #!/usr/bin/env bash
-# VictoriaMetrics YEARLY archive - pushes the full local dataset to the
+# VictoriaMetrics YEARLY archive - pushes the full cluster dataset to the
 # GDrive cold tier (archive-yearly/) before it rolls off the 2y local retention.
 #
 # Runs via systemd timer (victoriametrics-archive-yearly.timer) on Jan 1 04:00.
 # Keeps the yearly snapshot forever (or until manually pruned).
+#
+# 2026-11-15: ported to the vm-clus-0{1,2,3} cluster the same way as the daily
+# job -- snapshot each vmstorage on :8482 and rsync its snapshot back to a
+# staging generation, because the old localhost:8428 endpoint is now vminsert.
 #
 # This is the "cold tier": data >2y old is ONLY restorable from this archive.
 # To query archived data: restore a yearly snapshot to a scratch VM instance.
 # See docs/vm-backup-restore.md for the restore procedure.
 
 set -euo pipefail
-VM_URL="http://localhost:8428"
 RCLONE="/usr/bin/rclone"
 RCLONE_CONF="/root/.config/rclone/rclone.conf"
 REMOTE_ARCHIVE="vmbackup_crypt:archive-yearly"
 STATE_DIR="{{ vm_backup_state_dir }}"
 LOG_TAG="vm-archive-yearly"
 
+# vmstorage nodes: "<name>=<ip>" pairs; each runs vmstorage on :8482
+VMSTORAGE_NODES="{{ vm_backup_vmstorage_nodes }}"
+SSH_KEY="/root/.ssh/vmclus_backup"
+STAGE_BASE="/var/lib/victoria-metrics/snapshots"
+
 mkdir -p "$STATE_DIR"
 log() { logger -t "$LOG_TAG" -- "$*"; echo "[$(date -Is)] $*" >&2; }
 
 YEAR=$(date -u +%Y)
 DEST="$REMOTE_ARCHIVE/$YEAR"
+GEN_DIR="$STAGE_BASE/archive-$YEAR"
 
 # Idempotent: if this year's archive already exists, skip
 if $RCLONE --config "$RCLONE_CONF" lsd "$DEST" >/dev/null 2>&1; then
@@ -29,31 +38,51 @@ if $RCLONE --config "$RCLONE_CONF" lsd "$DEST" >/dev/null 2>&1; then
   exit 0
 fi
 
-# --- 1. Create VM snapshot ---
-SNAP_RESP=$(curl -fsS -X POST "$VM_URL/snapshot/create") || {
-  log "ERROR: snapshot/create failed"; exit 1
+[ -f "$SSH_KEY" ] || { log "ERROR: $SSH_KEY missing (vmstorage snapshot pull key)"; exit 1; }
+mkdir -p "$GEN_DIR"
+CREATED=()
+
+fail() {
+  log "ERROR: $*"
+  log "Left staged archive $GEN_DIR and any remote snapshots in place for inspection"
+  exit 1
 }
-SNAP_NAME=$(echo "$SNAP_RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["snapshot"])' 2>/dev/null || echo "")
-[ -n "$SNAP_NAME" ] || { log "ERROR: could not parse snapshot name: $SNAP_RESP"; exit 1; }
-SNAP_PATH="/var/lib/victoria-metrics/snapshots/$SNAP_NAME"
-log "Created snapshot: $SNAP_NAME"
+
+# --- 1. Snapshot every vmstorage node and stage one self-contained generation ---
+for spec in $VMSTORAGE_NODES; do
+  host=${spec%%=*}
+  ip=${spec##*=}
+  SNAP_RESP=$(curl -fsS -X POST "http://$ip:8482/snapshot/create") || fail "snapshot/create failed on $host ($ip)"
+  SNAP_NAME=$(echo "$SNAP_RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["snapshot"])' 2>/dev/null || echo "")
+  [ -n "$SNAP_NAME" ] || fail "could not parse snapshot name from $host: $SNAP_RESP"
+  CREATED+=("$ip:$SNAP_NAME")
+  log "Created snapshot $SNAP_NAME on $host"
+  if ! rsync -aL --delete \
+      -e "ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
+      "root@$ip:/var/lib/vmstorage/snapshots/$SNAP_NAME/" "$GEN_DIR/$host/"; then
+    fail "rsync of $host snapshot $SNAP_NAME failed"
+  fi
+  log "Staged $host: $(du -sh "$GEN_DIR/$host" | cut -f1)"
+done
 
 # --- 2. Upload to archive-yearly/<year> (-L dereferences symlinks; see daily script) ---
 log "Uploading full dataset -> $DEST"
-if ! $RCLONE --config "$RCLONE_CONF" copy -L "$SNAP_PATH/" "$DEST/" \
+if ! $RCLONE --config "$RCLONE_CONF" copy -L "$GEN_DIR/" "$DEST/" \
     --transfers 4 --stats=30s --stats-one-line 2>&1 | logger -t "$LOG_TAG"; then
-  log "ERROR: rclone copy failed for yearly archive $SNAP_NAME"
-  exit 2
+  fail "rclone copy failed for yearly archive $DEST"
 fi
 
 # --- 3. Verify + cleanup ---
-$RCLONE --config "$RCLONE_CONF" lsd "$DEST" >/dev/null 2>&1 || {
-  log "ERROR: archive $DEST not found after upload"; exit 3
-}
+$RCLONE --config "$RCLONE_CONF" lsd "$DEST" >/dev/null 2>&1 || fail "archive $DEST not found after upload"
 log "Verified: $DEST exists on GDrive"
 
-curl -fsS -X POST "$VM_URL/snapshot/delete?snapshot=$SNAP_NAME" >/dev/null || \
-  log "WARN: could not delete local snapshot $SNAP_NAME"
+for entry in "${CREATED[@]}"; do
+  ip=${entry%%:*}
+  name=${entry#*:}
+  curl -fsS -X POST "http://$ip:8482/snapshot/delete?snapshot=$name" >/dev/null \
+    || log "WARN: could not delete snapshot $name on $ip"
+done
+rm -rf --one-file-system "$GEN_DIR"
 
 echo "$YEAR" > "$STATE_DIR/last_archive_year"
 log "Yearly archive complete: $DEST"

@@ -15,7 +15,12 @@
 #     -e 'ansible_ssh_common_args="-o ProxyCommand=\"ssh -W %h:%p -q root@100.119.249.49\" -o StrictHostKeyChecking=accept-new"'
 #
 - name: Install VM GDrive backup (vm-01)
-  hosts: victoriametrics
+  # Pin to vm-01, NOT the `victoriametrics` group: that group now also holds the
+  # vm-clus-0{1,2,3} cluster members, and this role installs an rclone config
+  # (GDrive credentials) plus timers that assume they run on the single host that
+  # holds the snapshot pull key. Running it on a cluster node spreads the GDrive
+  # secret and starts a backup unit that cannot reach its own snapshots.
+  hosts: vm-01
   gather_facts: true
   tasks:
     - name: Install VM GDrive backup

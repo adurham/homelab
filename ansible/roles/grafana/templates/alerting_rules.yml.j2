@@ -4553,7 +4553,7 @@ groups:
         conditions:
         - evaluator:
             params:
-            - 900
+            - 300
             type: gt
           operator:
             type: and
@@ -4577,14 +4577,8 @@ groups:
     execErrState: Alerting
     for: 10m
     annotations:
-      summary: mitmproxy is listening but its addon has seen no TLS for 15+ minutes
-      description: "The heartbeat file is written by the addon on every TLS ClientHello,\
-        \ so a stale heartbeat with a listening :8443 means the addon is dead, erroring,\
-        \ or its file write is blocked \u2014 exit-node clients keep browsing and\
-        \ Discord/Reddit ads come back with no other symptom. Quiet-network caveat:\
-        \ no clients online = stale heartbeat with nothing wrong; check the flow count\
-        \ in `journalctl -u adblock-proxy-transparent` before acting. Fix path: `systemctl\
-        \ restart adblock-proxy-transparent`, then confirm the heartbeat moves."
+      summary: mitmproxy addon heartbeat is stale (addon dead or wedged)
+      description: "The addon writes its heartbeat every 60s from a liveness thread that does not depend on traffic, so a heartbeat older than 5 minutes with :8443 listening means the addon is dead, erroring, or its heartbeat write is blocked \u2014 exit-node clients keep browsing and Discord/Reddit ads come back with no other symptom. A quiet night no longer trips this: read adblock_tls_last_seen_age_seconds to see whether any client sent TLS at all. Fix path: systemctl restart adblock-proxy-transparent, then confirm the heartbeat moves."
     labels:
       severity: warning
     isPaused: false

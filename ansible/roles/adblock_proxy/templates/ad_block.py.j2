@@ -105,6 +105,7 @@ except ImportError:  # pragma: no cover
     brotli = None
 import re
 import time
+import threading
 from pathlib import Path
 
 from mitmproxy import ctx, http, tls
@@ -146,8 +147,20 @@ LOG_TAG_DISCORD = "DISCORD_TRAFFIC"
 LOG_TAG_REDDIT = "REDDIT_TRAFFIC"
 
 HEARTBEAT_PATH = Path("/var/lib/adblock-proxy/heartbeat")
+# Last TLS ClientHello the addon actually processed. Separate from the
+# heartbeat on purpose: the heartbeat is now pure liveness, so "is real traffic
+# arriving?" has its own timestamp and the monitor exports its age.
+TLS_SEEN_PATH = Path("/var/lib/adblock-proxy/tls_seen")
 _HEARTBEAT_MIN_INTERVAL = 5
+_HEARTBEAT_LIVENESS_SEC = 60
 _last_heartbeat = 0.0
+
+
+def _touch(path: Path) -> None:
+    try:
+        path.write_text(str(int(time.time())))
+    except OSError:
+        pass
 
 
 def _heartbeat() -> None:
@@ -160,10 +173,26 @@ def _heartbeat() -> None:
     if now - _last_heartbeat < _HEARTBEAT_MIN_INTERVAL:
         return
     _last_heartbeat = now
-    try:
-        HEARTBEAT_PATH.write_text(str(int(now)))
-    except OSError:
-        pass
+    _touch(HEARTBEAT_PATH)
+
+
+def _heartbeat_liveness() -> None:
+    """Write the heartbeat every 60s, with or without traffic.
+
+    Before 2026-11-15 the heartbeat was written ONLY from tls_client_hello, so a
+    quiet exit node (no client device routing through it for days) looked
+    identical to a dead addon and the "not filtering" alert fired for 4 days on
+    a healthy addon. Liveness is now its own signal (heartbeat age); whether
+    traffic is actually arriving is the tls_seen age, and whether it is being
+    filtered is judged by the listener / nat-redirect gauges.
+    """
+    while True:
+        _touch(HEARTBEAT_PATH)
+        time.sleep(_HEARTBEAT_LIVENESS_SEC)
+
+
+def load(loader) -> None:
+    threading.Thread(target=_heartbeat_liveness, name="heartbeat", daemon=True).start()
 
 
 def _is_discord_host(host: str) -> bool:
@@ -273,6 +302,7 @@ def tls_clienthello(data: tls.ClientHelloData) -> None:
     /cert/pem. Confirmed live 2026-07-27: an iPhone tapping the cert
     link got a 404 until this exclusion was added."""
     _heartbeat()
+    _touch(TLS_SEEN_PATH)
     sni = data.client_hello.sni
     # mitmproxy 11 dropped ClientHelloData.client_conn in favour of .context;
     # try both so a version bump doesn't silently turn client scoping off
