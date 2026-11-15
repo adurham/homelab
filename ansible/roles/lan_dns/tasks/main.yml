@@ -56,14 +56,17 @@
   when: not adguard_binary.stat.exists
 
 - name: Find the AdGuard Home binary in the unpacked tree
-  ansible.builtin.shell: find /tmp/adguardhome-unpack -type f -name AdGuardHome | head -1
-  register: adguard_binary_path
-  changed_when: false
+  ansible.builtin.find:
+    paths: /tmp/adguardhome-unpack
+    recurse: true
+    patterns: AdGuardHome
+    file_type: file
+  register: adguard_binary_found
   when: not adguard_binary.stat.exists
 
 - name: Install the AdGuard Home binary
   ansible.builtin.copy:
-    src: "{{ adguard_binary_path.stdout }}"
+    src: "{{ adguard_binary_found.files[0].path }}"
     dest: "{{ adguard_home_dir }}/AdGuardHome"
     remote_src: true
     mode: '0755'
@@ -122,16 +125,14 @@
   register: adguard_unit
   notify: Restart AdGuardHome
 
-- name: Reload systemd when the unit changed
-  ansible.builtin.systemd:
-    daemon_reload: true
-  when: adguard_unit.changed
-
+# daemon_reload here (not a separate "reload when changed" task): the unit may have
+# just been written, and the restart handler reloads systemd itself.
 - name: Enable and start AdGuardHome
   ansible.builtin.systemd:
     name: AdGuardHome
     enabled: true
     state: started
+    daemon_reload: true
 
 - name: Wait for :53 to accept connections
   ansible.builtin.wait_for:

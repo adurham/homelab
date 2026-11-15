@@ -44,9 +44,9 @@
     daemon_reload: true
 
 - name: Wait for the DHCP socket
-  ansible.builtin.shell: ss -lunp | grep -q ':67 '
+  ansible.builtin.command: ss -lun
   register: kea_dhcp_socket
-  until: kea_dhcp_socket.rc == 0
+  until: "':67 ' in kea_dhcp_socket.stdout"
   retries: 10
   delay: 2
   changed_when: false
@@ -60,7 +60,11 @@
   delegate_to: localhost
 
 - name: Show the HA state
-  ansible.builtin.shell: journalctl -u kea-dhcp4-server -n 80 --no-pager -o cat | grep HA_STATE_TRANSITION | tail -2
+  ansible.builtin.shell: |
+    set -o pipefail
+    journalctl -u kea-dhcp4-server -n 80 --no-pager -o cat | grep HA_STATE_TRANSITION | tail -2
+  args:
+    executable: /bin/bash
   register: kea_ha_state
   changed_when: false
   failed_when: false
