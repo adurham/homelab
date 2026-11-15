@@ -1,38 +1,52 @@
 # vm_backup
 
-Encrypted VictoriaMetrics snapshot backup to Google Drive for vm-01.
+Encrypted VictoriaMetrics snapshot backup to Google Drive, run from vm-01.
 
 ## Architecture (hybrid tiered storage)
 
 ```
-                    vm-01 (CT 106, 250G disk)
-                    ┌─────────────────────────────┐
-  Prometheus scrape │ VictoriaMetrics              │
-  ────────────────► │ -retentionPeriod=2y          │ (~86G/2y)
-                    │ /var/lib/victoria-metrics    │
-                    └─────────────┬───────────────┘
-                                  │ daily 03:00 CT
-                                  ▼
+     vm-clus-01 (.57)   vm-clus-02 (.58)   vm-clus-03 (.59)
+     vmstorage :8482    vmstorage :8482    vmstorage :8482     ← live shards, 2y retention
+            │                  │                  │
+            └──────── snapshot + rsync -L ────────┘
+                               │
+                    vm-01 (CT 106) staging generation
                     ┌─────────────────────────────┐
                     │ vm-backup-daily.sh           │
-                    │ 1. POST /snapshot/create      │
-                    │ 2. rclone copy -L (encrypt)   │
-                    │ 3. verify + delete local      │
-                    │ 4. prune GDrive >90d           │
+                    │ 1. POST /snapshot/create ×3  │
+                    │ 2. rsync each tree to vm-01  │
+                    │ 3. rclone copy -L (encrypt)  │
+                    │ 4. verify + delete snapshots │
+                    │ 5. prune GDrive (cap-based)  │
                     └─────────────┬───────────────┘
                                   ▼
                     ┌─────────────────────────────┐
                     │ gdrive:vm-backup/ (encrypted) │
-                    │  daily/<ts>      (90d)        │ ← DR backup
-                    │  archive-yearly/<year> (5y+) │ ← cold tier
+                    │  daily/<ts>      (capped)     │ ← DR backup
+                    │  archive-yearly/<year> (5y+)  │ ← cold tier
                     └─────────────────────────────┘
 ```
 
-- **2y queryable locally** in VM. Grafana charts the last 2y at full 15s resolution.
+- **2y queryable locally** across the three vmstorage nodes. Grafana charts the whole
+  window at full 15s resolution through the vmselect VIP.
 - **>2y archived to GDrive** as yearly snapshots (cold tier). Not directly queryable —
   restore to a scratch VM to query (see Restore below).
-- **Daily snapshots** to GDrive with 90d retention = DR capability against disk/CT loss.
+- **Daily snapshots** to GDrive = DR capability against disk/CT loss.
 - **All data encrypted client-side** via rclone crypt (AES). Google only sees ciphertext.
+
+### Cluster-era details (2026-11-15)
+
+The dataset is three shards, so one restorable copy needs all three snapshots in one
+generation (`daily/<ts>/vm-clus-0N/`). Each snapshot's `data/{big,small,indexdb}` are
+symlinks into the live tree; the copy is materialised with `rsync -L` / `rclone -L`,
+because a tree of dangling symlinks restores nothing.
+
+vm-01 pulls the snapshots with its own key, `/root/.ssh/vmclus_backup`, whose public
+half is authorized for root on the three storage containers. That key is provisioned
+by hand (the containers do not accept the fleet `id_ansible` key) — document any
+rebuild of a storage node as needing it re-authorized, or the daily job fails at the
+rsync step with `Permission denied`. `rsync` must be installed on vm-01 and on every
+vmstorage node.
 
 ## Why not 5y local?
 

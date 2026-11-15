@@ -7,7 +7,10 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/usr/local/bin/vm-backup-daily.sh
 User=root
-TimeoutStartSec=3600
+# The job stages three vmstorage snapshots over rsync and then uploads ~2-3x
+# the old single-node dataset to GDrive; at home upload speeds that no longer
+# fits in an hour, and a timeout kill looks exactly like a failed backup.
+TimeoutStartSec=21600
 Restart=on-failure
 RestartSec=300
 
