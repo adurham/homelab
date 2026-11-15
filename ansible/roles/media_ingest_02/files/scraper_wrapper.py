@@ -819,37 +819,44 @@ def _like_base_cmd():
 
 
 def _count_likes(r, started_at=None):
-    """Count how many posts were actually liked.
+    """Count how many posts were actually liked in this run.
 
-    The scraper's console output only carries a summary line, so the per-post
-    "changed to liked" records are read from the run log it writes itself.
-    Counting only stdout meant this always returned 0: the daily like cap
-    never decremented, so every sweep liked another batch until the source
-    throttled the account."""
+    Sources, in order of trust: the scraper's own "[Action Like] [N posts
+    checked, (M liked, ...)]" summary recorded in its run log, then the
+    per-post "changed to liked" records (a run killed mid-action has no
+    summary but keeps those), then an explicit "liked N posts" line on
+    stdout.
+
+    Never fall back to a bare substring count: the old one matched
+    "actionable for liking" and reported one phantom like per model per
+    sweep, so the daily cap filled up with likes that never happened."""
     import re
+    if started_at is not None:
+        summaries = []
+        per_post = 0
+        today = dt.date.today()
+        for day in (today, today - dt.timedelta(days=1)):
+            day_dir = SCRAPER_LOG_DIR / ("main_profile_" + day.isoformat())
+            try:
+                for f in day_dir.glob("*.log"):
+                    if f.stat().st_mtime < started_at - 2:
+                        continue
+                    text = f.read_text(errors="ignore")
+                    per_post += text.count("changed to liked")
+                    for m in re.finditer(r"\[Action Like\] \[\d+ posts checked, \((\d+) liked", text):
+                        summaries.append(int(m.group(1)))
+            except OSError as e:
+                log.warning("could not read scraper logs to count likes: %s", e)
+        if summaries:
+            return sum(summaries)
+        if per_post:
+            return per_post
     output = (r.stdout or "") + (r.stderr or "")
     # Look for explicit "Liked X posts" or "liked X" patterns
     for pattern in [r"[Ll]iked\s+(\d+)\s+posts?", r"(\d+)\s+posts?\s+liked"]:
         m = re.search(pattern, output, re.IGNORECASE)
         if m:
             return int(m.group(1))
-    if started_at is not None:
-        count = 0
-        today = dt.date.today()
-        for day in (today, today - dt.timedelta(days=1)):
-            day_dir = SCRAPER_LOG_DIR / ("main_profile_" + day.isoformat())
-            try:
-                for f in day_dir.glob("*.log"):
-                    if f.stat().st_mtime >= started_at - 2:
-                        count += f.read_text(errors="ignore").count("changed to liked")
-            except OSError as e:
-                log.warning("could not read scraper logs to count likes: %s", e)
-        if count:
-            return count
-    # Fallback: count "Liking" action lines
-    count = output.count("Liking") + output.count("liking")
-    if count > 0:
-        return count
     return 0
 
 
