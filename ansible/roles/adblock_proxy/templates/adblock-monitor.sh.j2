@@ -3,9 +3,13 @@
 # Runs every 60s from adblock-monitor.timer; metrics land in VictoriaMetrics.
 #
 # Why each gauge exists:
-#   adblock_agh_up          — AdGuard is the LAN's only resolver. 0 = every client
+#   adblock_agh_up          — the LAN resolver pair answers on :53 (CT130/CT131).
+#                             0 = no resolver is listening, so every LAN client
 #                             loses DNS within a lease/cache TTL.
-#   adblock_dnsmasq_up      — DHCP is the other single point of failure on the HA box.
+#   adblock_dnsmasq_up      — RETIRED 2026-11-15: DHCP leases come from the Kea
+#                             pair now and the HA dnsmasq app is gone, so this
+#                             reads 0 by design. Kept as a series for history;
+#                             its alert rule is paused.
 #   adblock_interceptor_listener — mitmdump bound :8443 (fail-open guard covers the
 #                             routing side; this is the raw liveness signal).
 #   adblock_addon_heartbeat_age_seconds — addon liveness. Written every 60s by
@@ -35,16 +39,24 @@
 #                             interceptor down just as hard.
 set -uo pipefail
 
-AGH_API="http://100.77.245.39:45158"        # AdGuard admin API, loopback-only on HA,
-                                            # exposed on the HA box's tailnet IP by a
-                                            # socat forwarder in the Advanced SSH app
 DNSMASQ_UI="http://192.168.86.2:8976/"      # dnsmasq app web API
 VM="http://172.16.0.30:8428/api/v1/import/prometheus"
 HB=/var/lib/adblock-proxy/heartbeat
 UNIT=adblock-proxy-transparent
 
 agh=0
-curl -sf -m 5 -o /dev/null "${AGH_API}/control/status" && agh=1
+DNS_UP_LIST=""
+# The LAN resolvers are the AdGuard pair (CT130/CT131, lan_dns_resolvers). This
+# used to query the HA-hosted AdGuard admin API, which was removed 2026-11-10 —
+# the old check then read 0 forever and kept "AdGuard DNS not answering" firing
+# on a perfectly healthy LAN. Probe the resolver port itself instead, and accept
+# the pair as healthy while at least one member answers.
+for r in {{ lan_dns_resolvers | join(' ') }}; do
+    if timeout 3 bash -c ": < /dev/tcp/$r/53" 2>/dev/null; then
+        DNS_UP_LIST="${DNS_UP_LIST}${r} "
+        agh=1
+    fi
+done
 
 dnsmasq=0
 code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "${DNSMASQ_UI}")

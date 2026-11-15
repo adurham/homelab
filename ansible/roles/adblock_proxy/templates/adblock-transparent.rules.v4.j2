@@ -93,6 +93,10 @@ COMMIT
 -A OUTPUT -d {{ ip_loadbalancer }} -p tcp --dport 8428 -j ACCEPT
 -A OUTPUT -d {{ ip_vm }} -p tcp --dport 3100 -j ACCEPT
 -A OUTPUT -d {{ ip_vm }} -p tcp --dport 8428 -j ACCEPT
+# LAN resolver pair (CT130/CT131): the monitor's DNS liveness probe opens a TCP
+# connection to :53 on each member.
+-A OUTPUT -d {{ lan_dns_resolvers[0] }} -p tcp --dport 53 -j ACCEPT
+-A OUTPUT -d {{ lan_dns_resolvers[1] }} -p tcp --dport 53 -j ACCEPT
 # AdGuard Home query log API + Home Assistant core API, both served from
 # the same host.
 -A OUTPUT -d {{ ip_homeassistant }} -p tcp --dport 8123 -j ACCEPT
