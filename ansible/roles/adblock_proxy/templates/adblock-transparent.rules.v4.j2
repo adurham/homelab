@@ -85,9 +85,13 @@ COMMIT
 -A OUTPUT -o lo -j ACCEPT
 -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 # Loki push (adguard-log-shipper.sh + Alloy, once this CT joins the
-# monitoring fleet).
+# monitoring fleet). The Loki and VictoriaMetrics clusters sit behind the
+# load-balancer VIP, so the VIP is the destination the monitor actually uses;
+# ip_vm stays allowed for anything still writing to vm-01 directly.
+-A OUTPUT -d {{ ip_loadbalancer }} -p tcp --dport 3100 -j ACCEPT
+# VictoriaMetrics remote-write (monitor_push.sh + Alloy node_exporter push).
+-A OUTPUT -d {{ ip_loadbalancer }} -p tcp --dport 8428 -j ACCEPT
 -A OUTPUT -d {{ ip_vm }} -p tcp --dport 3100 -j ACCEPT
-# VictoriaMetrics remote-write (Alloy node_exporter metrics push).
 -A OUTPUT -d {{ ip_vm }} -p tcp --dport 8428 -j ACCEPT
 # AdGuard Home query log API + Home Assistant core API, both served from
 # the same host.
