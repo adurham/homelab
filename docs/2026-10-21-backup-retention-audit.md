@@ -371,3 +371,34 @@ Gotcha for anyone testing the cleanup under Ansible: `pvesh get /nodes/<other>/.
 hops by ssh, and Ansible's forwarded agent makes that hop fail with "Too many
 authentication failures". The script fails closed (deletes nothing). Run it as
 `env -u SSH_AUTH_SOCK ...`; the systemd unit has no agent and is unaffected.
+
+### Update 2026-11-15 (evening) — the biggest backup item on pve01 was invisible
+
+While making room to move tms-01 to pve01 the numbers did not add up, and the missing space
+was **399 GiB in `/nvme-pool/pve-backup-stage`**: the off-site push's staging directory, which
+lives in the pool's *root* dataset (so every per-guest and per-dataset check, including the
+audit above and the 11-15 quota sizing, never counted it). It held a whole weekly generation
+for a week because pruning only ran at the end of the *next* run. Fixed in
+`roles/pve_backup_offsite` (one archive at a time, empty between runs; details and the
+unproven tier 3 in `docs/backups.md`). Deleted by hand first, after every staged file was
+matched by name and size on Drive and in the vault.
+
+Also: the 111 GiB ts-01 archive that was kept on pve01's `vzdump-nvme` was removed after a
+sha256 match against the vault copy (both `b8b8979e...4de`), and pve01's vzdump quota
+dropped from 260 to 130 GiB. ts-01 now has no on-site archive, only the off-site tiers and
+the weekly ZFS snapshots on pve02.
+
+tms-01 (VM 202) was moved pve02 -> pve01 the same evening so the Tanium VMs match the
+intended spread (ts-01/tzs-01 pve02, ts-02/tms-02/tzs-02 pve03, tms-01 pve01). Method: full
+`zfs send -R -c` with all snapshot history while it ran (the first, uncompressed attempt
+sent 478 GiB logical for a pool that compresses 2.4x and was abandoned), ACPI shutdown, an
+incremental, snapshot GUIDs compared on both ends, config moved by `mv` between node
+directories, started on pve01 (:22 and :5433 up, both blackbox probes 1). The source zvols
+were **renamed, not deleted**: `nvme-pool/moved-20261115-vm-202-disk-{0,1}` on pve02
+(204 GiB). Remove them after 2026-11-22 once tms-01 has run a week and its first weekly
+snapshot exists on pve01:
+
+    zfs destroy -r nvme-pool/moved-20261115-vm-202-disk-1
+    zfs destroy -r nvme-pool/moved-20261115-vm-202-disk-0
+
+`lab-vm-snapshots.timer` on pve01 will start snapshotting vm-202 on Sunday 11-22.
