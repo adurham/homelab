@@ -31,6 +31,14 @@ postgresql:
   connect_address: {{ patroni_ip }}:5432
   data_dir: /var/lib/postgresql/15/main
   bin_dir: /usr/lib/postgresql/15/bin
+  # use_pg_rewind (bootstrap block above) only helps when the rewind can run. On 2026-11-15 the
+  # fenced ex-leader pg-02 came back on a diverged timeline and sat for 12 h as a dead replica
+  # (Postgres in recovery, no primary_conninfo, refusing connections) while everything else
+  # looked healthy. If the rewind fails or the timelines diverged, wipe the data dir so Patroni
+  # re-clones from the leader on its own. The databases total ~400 MB, and with
+  # synchronous_mode the leader always holds everything the replica acknowledged.
+  remove_data_directory_on_rewind_failure: true
+  remove_data_directory_on_diverged_timelines: true
   authentication:
     replication:
       username: replicator

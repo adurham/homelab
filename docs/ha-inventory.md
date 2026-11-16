@@ -35,7 +35,14 @@ recovery logging `waiting for WAL to become available`, refusing connections, wi
 `primary_conninfo`, so `patronictl list` showed `Replica / running / TL blank / lag unknown`.
 Everything else looked fine (`ha-manager` said started, Patroni's REST port listened, both
 Grafanas were up) until a transient `database: failing` on graf-02 at 18:38 pointed at it.
-Fixed with `patronictl -c /etc/patroni/*.yml reinit grafana pg-02 --force` (re-clones from the
+Cause: pg-02 had been the leader (TL 6, `patronictl history`), so it returned as a diverged
+ex-primary. `use_pg_rewind: true` was already set, but only in the `bootstrap:` block, which
+Patroni reads once at first init, and no auto-wipe option was set, so nothing recovered it.
+`remove_data_directory_on_rewind_failure` and `remove_data_directory_on_diverged_timelines` are
+now `true` in the local `postgresql:` section (template + both live configs, reloaded, no
+restart); a repeat should re-clone itself. Not drilled: that needs a deliberate 12-minute block
+of 5432 pg-02 -> pg-01, which leaves Grafana's DB on one copy while it runs.
+Fixed on the day with `patronictl -c /etc/patroni/*.yml reinit grafana pg-02 --force` (re-clones from the
 leader; the databases total ~400 MB); pg-02 is `Sync Standby`, TL 7, lag 0.
 
 Nothing measured replica health, so this is now measured: vmagent on vm-01 and graf-02 scrape
