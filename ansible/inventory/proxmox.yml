@@ -930,6 +930,7 @@ all:
             # node, so a node loss restarts one of them elsewhere.
             graf-02:
               ansible_host: 172.16.0.45
+              grafana_ack_bot_channel_reconcile: false   # standby bot: must not sweep the primary's messages
               vmid: 141
               template: debian-12-standard_12.12-1_amd64.tar.zst
               target_node: pve01

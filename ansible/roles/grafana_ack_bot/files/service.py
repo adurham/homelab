@@ -220,13 +220,47 @@ _reaction_lock = asyncio.Lock()
 # ── Grafana alertmanager webhook payload -> Discord message ──────────────
 
 
+def _is_eval_failure(alert: dict) -> bool:
+    """True when this notification is Grafana failing to EVALUATE a rule, not the rule's condition.
+
+    A rule with execErrState Alerting (or Error) fires with only the datasource labels
+    (datasource_uid, ref_id) and none of the labels its query would have produced, so its own
+    summary renders as "root SSH login on [no value]" -- an outage of the datasource read as a real
+    event, which is what flooded the channel during the graf-02 database loss (2026-11-16).
+    """
+    labels = alert.get("labels", {})
+    summary = alert.get("annotations", {}).get("summary", "") or ""
+    return (
+        labels.get("alertname") in ("DatasourceError", "DatasourceNoData")
+        or ("datasource_uid" in labels and "ref_id" in labels)
+        or "[no value]" in summary
+    )
+
+
+def _headline(alert: dict) -> str:
+    """One-line title: the rule's own summary, or an honest 'could not evaluate' line."""
+    labels = alert.get("labels", {})
+    annotations = alert.get("annotations", {})
+    if _is_eval_failure(alert):
+        rule = labels.get("rulename") or labels.get("alertname", "alert")
+        if rule in ("DatasourceError", "DatasourceNoData"):
+            rule = labels.get("rulename") or "(unnamed rule)"
+        ds = labels.get("datasource_uid", "?")
+        err = (annotations.get("Error") or annotations.get("error") or "").strip().splitlines()
+        tail = f" -- {err[0][:160]}" if err else ""
+        return f"\N{WARNING SIGN} could not evaluate rule \"{rule}\" (datasource `{ds}`) -- NOT a real event{tail}"
+    return annotations.get("summary") or labels.get("alertname", "alert")
+
+
 def _severity_and_summary(alert: dict) -> tuple[str, str]:
     labels = alert.get("labels", {})
     annotations = alert.get("annotations", {})
     severity = labels.get("severity", "unknown")
-    summary = annotations.get("summary") or labels.get("alertname", "alert")
-    description = annotations.get("description", "")
-    text = f"**{severity}** — {summary}"
+    summary = _headline(alert)
+    # The rule's description describes the real condition; on an evaluation failure it would
+    # present a datasource outage as that condition, so it is dropped.
+    description = "" if _is_eval_failure(alert) else annotations.get("description", "")
+    text = f"**{severity}** \u2014 {summary}"
     if description:
         text += f"\n{description}"
     return severity, text
@@ -373,7 +407,7 @@ def _history_line(alert: dict, event: str) -> str:
     labels = alert.get("labels", {})
     annotations = alert.get("annotations", {})
     alertname = labels.get("alertname", "alert")
-    summary = annotations.get("summary") or alertname
+    summary = _headline(alert)
     severity = labels.get("severity", "unknown")
     ts = alert.get("startsAt" if event == "FIRING" else "endsAt", "")
     emoji = "\N{FIRE}" if event == "FIRING" else "\N{WHITE HEAVY CHECK MARK}"
@@ -932,6 +966,18 @@ class DiscordDeleteFailed(RuntimeError):
     """
 
 
+async def _delete_via_bot_token(session: aiohttp.ClientSession, message_id: int) -> None:
+    async with session.delete(
+        f"https://discord.com/api/v10/channels/{DISCORD_CHANNEL_ID}/messages/{message_id}",
+        headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}"},
+    ) as r:
+        if r.status < 300 or r.status == 404:
+            return
+        body_text = await r.text()
+        log.warning("Fallback delete of message %s via bot token failed: %s %s", message_id, r.status, body_text)
+        raise DiscordDeleteFailed(f"bot-token delete of message {message_id} failed with HTTP {r.status}")
+
+
 async def _delete_via_webhook(
     session: aiohttp.ClientSession, message_id: int, max_attempts: int = 4
 ) -> None:
@@ -950,9 +996,15 @@ async def _delete_via_webhook(
         async with session.delete(
             f"{DISCORD_WEBHOOK_URL}/messages/{message_id}",
         ) as del_resp:
-            if del_resp.status < 300 or del_resp.status == 404:
-                # 404 = already gone (e.g. manually deleted) -- treat as
-                # success, nothing left to clean up.
+            if del_resp.status < 300:
+                return
+            if del_resp.status == 404:
+                # 404 means "gone" OR "not authored by THIS webhook". After the 2026-11-15
+                # webhook rotation every message posted by the old webhook answered 404 here, the
+                # sweep logged "deleted" and the cleared alerts stayed in the channel for days.
+                # The bot token (Manage Messages) can delete any message, so ask it; its own 404
+                # is the only proof the message is really gone.
+                await _delete_via_bot_token(session, message_id)
                 return
             if del_resp.status == 429:
                 try:
@@ -1120,7 +1172,14 @@ class AckBotClient(discord.Client):
         global _channel_reconcile_started
         if not _channel_reconcile_started:
             _channel_reconcile_started = True
-            asyncio.create_task(_reconcile_channel_once())
+            # Only the instance that OWNS the channel's state may sweep it. A standby replica
+            # (graf-02) has its own state.json that does not know the primary's live messages,
+            # so on its first successful start it deleted seven still-firing alerts as
+            # "orphans" (2026-11-16). The role sets CHANNEL_RECONCILE_ON_START=0 there.
+            if os.environ.get("CHANNEL_RECONCILE_ON_START", "1") != "0":
+                asyncio.create_task(_reconcile_channel_once())
+            else:
+                log.info("Channel reconcile disabled on this instance (standby replica)")
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         if payload.channel_id != DISCORD_CHANNEL_ID:
