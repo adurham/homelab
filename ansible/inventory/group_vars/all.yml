@@ -33,6 +33,9 @@ healthchecks_dms_ping_url: !vault |
           39303339653033663436366132613536663435373734663139613736353239373464643632343062
           39613235386264336665373963646438623536383465343438653439646661313261616239306230
           353631636331656265303266333232633433
+# Per-job heartbeats for the two off-site backup jobs (roles/pve_backup_offsite); the URLs are in the vault.
+pve_backup_offsite_hc_push_url: "{{ vault_healthchecks_pve_push_url }}"
+pve_backup_offsite_hc_tanium_url: "{{ vault_healthchecks_pve_tanium_url }}"
 
 # Webhook ID HA listens on for Grafana alerts; must match
 # /config/secrets.yaml: grafana_alert_webhook_id on the HA host.

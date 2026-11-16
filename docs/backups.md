@@ -49,7 +49,13 @@ Both jobs can ping their own healthchecks.io check (`/start`, success, `/fail`) 
 `pve_backup_offsite_hc_push_url`, `pve_backup_offsite_hc_tanium_url`). This is deliberately outside
 Grafana: it is the one place a stale backup is reported without the node_exporter, VictoriaMetrics,
 Grafana and mail chain, and it complements the always-firing `dead_mans_switch` (Grafana's own
-heartbeat). Healthchecks is told the schedule (weekly + grace), so a job that never starts alerts too.
+heartbeat). Live since 2026-11-15: checks `pve-backup-push` (cron `0 5 * * 6`, America/Chicago, grace 12 h) and
+`pve-tanium-offsite` (cron `0 5 * * 0`, same timezone and grace) in the same healthchecks.io project as the
+dead-man's switch, notifying the same email integration. Their ping URLs are vault variables
+(`vault_healthchecks_pve_push_url`, `vault_healthchecks_pve_tanium_url`), wired in
+`inventory/group_vars/all.yml` and written to `/etc/pve-backup-heartbeat.conf` on pve01. A check that has
+never been pinged does not alert, so each one only starts guarding after its first real run. Healthchecks
+knows the schedule, so a job that never starts alerts too (the missing /start trips the grace timer).
 
 ## History kept below
 
