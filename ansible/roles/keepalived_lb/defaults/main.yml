@@ -1,0 +1,10 @@
+---
+# Two-node VRRP pair (lb-01 MASTER prio 150, lb-02 BACKUP prio 100) holding the lab VIP. Per-host values live in inventory.
+keepalived_vip: "172.16.0.30/24"
+keepalived_interface: eth0
+keepalived_vrid: 51
+keepalived_instance: PG        # historical name from when the VIP fronted Postgres; VRRP identity is the vrid, so renaming is cosmetic
+keepalived_auth_pass: "{{ vault_keepalived_auth_pass }}"   # PASS auth only ever uses the first 8 characters, and is visible on the wire
+# Health check: the node only keeps the VIP while nginx answers a real vhost, not merely while the process exists.
+keepalived_check_host_header: "auth.chi.lab.amd-e.com"
+keepalived_check_interval: 2

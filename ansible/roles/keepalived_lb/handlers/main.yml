@@ -1,0 +1,6 @@
+---
+- name: reload keepalived
+  # reload (SIGHUP) re-reads the config without dropping the VIP; a restart would hand it to the peer.
+  ansible.builtin.systemd:
+    name: keepalived
+    state: reloaded

@@ -1,0 +1,28 @@
+---
+# VIP pair. BACKUP first, one node at a time; afterwards the VIP must be held by exactly one node.
+#   ansible-playbook deploy_keepalived.yml --check --diff -e keepalived_no_log=false
+- name: keepalived on the load balancers
+  hosts: loadbalancer
+  become: true
+  gather_facts: false
+  serial: 1
+  order: reverse_inventory
+  roles:
+    - keepalived_lb
+  post_tasks:
+    - name: does this node hold the VIP?
+      ansible.builtin.shell: "ip -4 -o addr show {{ keepalived_interface }} | grep -c ' {{ keepalived_vip | regex_replace('/.*', '') }}/' || true"
+      register: vip_here
+      changed_when: false
+      check_mode: false
+
+- name: exactly one load balancer holds the VIP
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: count VIP holders
+      ansible.builtin.assert:
+        that: (groups['loadbalancer'] | map('extract', hostvars, ['vip_here', 'stdout']) | map('int') | sum) == 1
+        fail_msg: "VIP holders: {{ groups['loadbalancer'] | map('extract', hostvars, ['vip_here', 'stdout']) | list }} - expected exactly one"
+        quiet: true

@@ -1,0 +1,30 @@
+# Managed by Ansible (roles/keepalived_lb). Do not edit by hand.
+global_defs {
+    # The health check runs a script; without this keepalived warns "SECURITY VIOLATION" and `--config-test` fails.
+    # The script is /usr/bin/curl (root-owned, not writable), so running it as root adds nothing.
+    enable_script_security
+    script_user root
+}
+
+vrrp_script chk_nginx {
+    script "/usr/bin/curl -s -o /dev/null -m 2 -H Host:{{ keepalived_check_host_header }} http://127.0.0.1/"
+    interval {{ keepalived_check_interval }}
+    fall 2
+    rise 2
+    weight 0
+}
+
+vrrp_instance {{ keepalived_instance }} {
+    state {{ keepalived_state }}
+    interface {{ keepalived_interface }}
+    virtual_router_id {{ keepalived_vrid }}
+    priority {{ keepalived_priority }}
+    advert_int 1
+    unicast_src_ip {{ keepalived_src_ip }}
+    unicast_peer { {{ keepalived_peer_ip }} }
+    authentication { auth_type PASS
+        auth_pass {{ keepalived_auth_pass }}
+    }
+    virtual_ipaddress { {{ keepalived_vip }} }
+    track_script { chk_nginx }
+}

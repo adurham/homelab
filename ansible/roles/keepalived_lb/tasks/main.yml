@@ -1,0 +1,23 @@
+---
+- name: keepalived and curl (health check) installed
+  ansible.builtin.apt:
+    name: [keepalived, curl]
+    state: present
+    cache_valid_time: 3600
+
+- name: keepalived config (syntax-checked by keepalived itself before it replaces the live file)
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0600"
+    validate: "keepalived --config-test --use-file %s"
+  no_log: "{{ keepalived_no_log | default(true) }}"
+  notify: reload keepalived
+
+- name: keepalived enabled and running
+  ansible.builtin.systemd:
+    name: keepalived
+    enabled: true
+    state: started

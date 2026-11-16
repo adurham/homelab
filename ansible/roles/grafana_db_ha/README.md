@@ -10,7 +10,7 @@ stable endpoint. Grafana never talks to a specific Postgres node.
 | `pg-01` | CT 140, 172.16.0.44 (pve03) | Patroni-managed PostgreSQL 15 |
 | `pg-02` | CT 144, 172.16.0.48 (pve01) | Patroni-managed PostgreSQL 15 |
 | etcd | 172.16.0.44 (pg-01), 172.16.0.48 (pg-02), 172.16.0.43 (`pg-dcs-03`, CT 146 on pve02) | 3 voters on 3 different PVE nodes; `roles/etcd_member` |
-| HAProxy | lb-01, 172.16.0.30:5432 | routes to the Patroni leader |
+| HAProxy | on each client (Grafana / authentik nodes), 127.0.0.1:5432 | routes to the Patroni leader. The old shared one on lb-01 (172.16.0.30:5432) was retired 2026-11-16: nothing used it, and lb-02 never had one |
 
 Scope `grafana`, database `grafana_prod`. `synchronous_mode: true`, so a
 committed write exists on both nodes before Grafana sees it.
@@ -48,5 +48,5 @@ it over.
 
 ## HAProxy config
 
-`files/haproxy.cfg` — replaced wholesale on lb-01; only the `pg` frontend is
-homelab-specific.
+The per-client HAProxy is rendered by the Grafana / authentik roles. The `pg` frontend health-checks Patroni's
+`:8008/primary`, which answers 200 only on the leader.

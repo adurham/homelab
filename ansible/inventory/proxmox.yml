@@ -147,13 +147,23 @@ all:
     loadbalancer:
       hosts:
         lb-01:
-          ansible_host: "{{ ip_loadbalancer }}"
+          # eth0's OWN address. ip_loadbalancer (.30) is the shared VIP: connecting there reaches whichever node holds it,
+          # so a failover would make "lb-01" tasks silently run on lb-02.
+          ansible_host: 172.16.0.29
           vmid: 103
-          target_node: pve02
+          target_node: pve03
+          keepalived_state: MASTER
+          keepalived_priority: 150
+          keepalived_src_ip: 172.16.0.29
+          keepalived_peer_ip: 172.16.0.31
         lb-02:
           ansible_host: "{{ ip_loadbalancer_02 }}"
           vmid: 147
           target_node: pve01
+          keepalived_state: BACKUP
+          keepalived_priority: 100
+          keepalived_src_ip: 172.16.0.31
+          keepalived_peer_ip: 172.16.0.29
       vars:
         ansible_user: amd
         ansible_become: true

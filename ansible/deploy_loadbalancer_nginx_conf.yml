@@ -36,6 +36,13 @@
         force: true
       register: lb_link
 
+    # Debian's stock `default` site also claims default_server on :80, so the next nginx (re)start fails with
+    # "duplicate default server" (it stopped lb-02's nginx during an unrelated apt run on 2026-11-16). lb-01 never had it.
+    - name: Remove the stock default site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
     - name: Validate the whole nginx configuration
       ansible.builtin.command: nginx -t
       changed_when: false
