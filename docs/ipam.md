@@ -1152,7 +1152,7 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | `media-ingest-02` | 117 | `172.16.0.48`   | -                  | Secondary-source gallery collector (outbound-only) |
 | `adblock-proxy-01` | 118 | `172.16.0.49`  | DHCP (`192.168.86.x`) | mitmproxy explicit HTTPS proxy for personal-device Discord ad-stripping (Tailscale-only ingress, joins tailnet directly like hermes-gw-01) |
 | `print-01`      | 119  | `172.16.0.120`   | -                  | Bambu/MakerWorld → Creality K2 converter + slicer web app (Creality Print CLI headless; private-SDN only, joins the tailnet for ingress) |
-| `frigate-01`    | 170  | `172.16.0.45`    | `192.168.86.17` (static) | Frigate NVR (Docker-in-LXC); eth0 on vmbr0 for RTSP/HA + eth1 on `private` |
+| `frigate-01`    | 170  | `172.16.0.121`   | `192.168.86.17` (static) | Frigate NVR (Docker-in-LXC); eth0 on vmbr0 for RTSP/HA + eth1 on `private`. Moved .45 -> .121 on 2026-11-16: graf-02 (CT 141) was built on the same address, and the duplicate dropped graf-02's DB/gossip connections and Frigate's Loki/VM pushes ~75% of the time (MAC `BC:24:11:3F:0A:BE` preserved). |
 
 `172.16.0.40` was previously assigned to **both** `mail-01` and `vm-01` (ARP race). Resolved 2026-05-01 — moved `vm-01` to `.42`. See commit `12bb4c2`.
 

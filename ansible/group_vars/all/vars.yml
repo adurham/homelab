@@ -86,7 +86,7 @@ upstream_printfarm: "100.120.18.93:8765"
 adblock_proxy_pac_port: 8090
 # Frigate NVR (CT 170, pve01). Private-subnet IP for the eth1 interface; eth0
 # is DHCP on the LAN so Frigate can reach the go2rtc RTSP source + HA MQTT.
-ip_frigate: "172.16.0.45"
+ip_frigate: "172.16.0.121"
 
 # Subnets the tailscale-gw advertises to the tailnet. Both 172.16/24 (private
 # SDN) and 10.99/24 (BWT lab) flow through CT 101. The same CT carries an IP

@@ -219,7 +219,7 @@ all:
     # `private` SDN at ip_frigate. See roles/frigate_host + deploy_frigate.yml.
     #
     # ansible_host uses the LAN IP (dhcp-assigned, via a static DHCP
-    # reservation — see docs/ipam.md), NOT ip_frigate/172.16.0.45, as a
+    # reservation — see docs/ipam.md), NOT ip_frigate/172.16.0.121, as a
     # deliberate workaround: TCP to the private-SDN IP consistently times
     # out at the SYN stage specifically when reached from the primary
     # workstation's Tailscale client, even though Tailscale's own `ping`

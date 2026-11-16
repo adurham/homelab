@@ -17,7 +17,7 @@ proxmox host — so the whole stand-up is one play against `pve01`.
 
 - Creates CT 170: 8 cores / 8 GiB RAM / 60 GiB rootfs on `nvme-data`.
 - `eth0` on `vmbr0` (DHCP) so Frigate can reach HA's MQTT on the LAN;
-  `eth1` on the `private` SDN at `ip_frigate` (172.16.0.45).
+  `eth1` on the `private` SDN at `ip_frigate` (172.16.0.121).
 - Deploys `config.yml` (Nest cameras via go2rtc, CPU detector, tracks
   person+cat, snapshots only — no recording) and `docker-compose.yml`.
 - Mounts a **patched go2rtc binary** at `/config/go2rtc` inside the Frigate
