@@ -1,7 +1,7 @@
 # Managed by Ansible — roles/media_gallery (first deploy only; force:false).
 # Two remotes:
 #   gdrive: raw Google Drive (OAuth token from `rclone authorize "drive"`)
-#   gcrypt: crypt layer wrapping gdrive:media-gallery — client-side encryption
+#   gcrypt: crypt layer wrapping gdrive:<media_gallery_gdrive_folder> — client-side encryption
 #           of BOTH filenames and contents. Google only ever sees ciphertext.
 #
 # All secret values are vaulted. The two crypt passwords are the OBSCURED
@@ -17,7 +17,7 @@ team_drive =
 
 [gcrypt]
 type = crypt
-remote = gdrive:media-gallery
+remote = gdrive:{{ media_gallery_gdrive_folder }}
 filename_encryption = standard
 directory_name_encryption = true
 password = {{ vault_media_gallery_crypt_password }}

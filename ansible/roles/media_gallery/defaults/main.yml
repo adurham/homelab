@@ -1,13 +1,16 @@
 ---
 # Service account + install layout for the upstream source media collector.
 media_gallery_user: mediagallery
+# The Drive folder the gcrypt crypt remote wraps. LIVE is tg-harvester (the template used to say media-gallery, which was never true).
+# During the 2026-11 crypt re-key the new tree is tg-harvester-v2; switch this together with the vault crypt passwords at cutover.
+media_gallery_gdrive_folder: "tg-harvester"
 media_gallery_dir: /opt/media-gallery        # code + venv
 media_gallery_state: /var/lib/media-gallery  # session, captures (ReadWrite)
 media_gallery_log_dir: /var/log/media-gallery
 
 # Storage / sync.
 # gcrypt: = the rclone crypt remote (client-side encryption) wrapping
-# gdrive:media-gallery. Configured one-time via the authorize flow; see README.
+# gdrive:{{ media_gallery_gdrive_folder }}. Configured one-time via the authorize flow; see README.
 media_gallery_rclone_remote: "gcrypt:"
 media_gallery_cache_days: 7          # keep this many days of captures locally
 media_gallery_sync_interval: "15min" # how often to encrypt+upload+prune
