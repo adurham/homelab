@@ -5098,7 +5098,9 @@ groups:
           type: prometheus
           uid: victoriametrics
         editorMode: code
-        expr: (time() - max_over_time(pve_backup_vault_last_success_timestamp_seconds[12d]))
+        # max() across series: the retired pve01 push left an unlabeled series that stays in the
+        # 12d window and, evaluated alone, kept this firing after a clean push (2026-11-16).
+        expr: (time() - max(max_over_time(pve_backup_vault_last_success_timestamp_seconds[12d])))
           > bool 691200 or absent_over_time(pve_backup_vault_last_success_timestamp_seconds[12d])
         instant: true
         intervalMs: 1000
