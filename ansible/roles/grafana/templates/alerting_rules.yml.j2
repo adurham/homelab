@@ -2184,7 +2184,9 @@ groups:
         datasource:
           type: prometheus
           uid: victoriametrics
-        expr: sum(rate(loki_request_duration_seconds_count{job="loki",route="loki_api_v1_push",status_code=~"5.."}[5m]))
+        # Ratio, per instance: a bare "any 5xx > 0" paged critical on 0.3% of pushes that
+        # Loki answered 500 only because the CLIENT hung up ("context canceled", <1 ms).
+        expr: sum by (instance) (rate(loki_request_duration_seconds_count{job="loki",route="loki_api_v1_push",status_code=~"5.."}[5m])) / sum by (instance) (rate(loki_request_duration_seconds_count{job="loki",route="loki_api_v1_push"}[5m]))
         instant: true
         intervalMs: 1000
         maxDataPoints: 43200
@@ -2196,7 +2198,7 @@ groups:
         conditions:
         - evaluator:
             params:
-            - 0
+            - 0.05
             type: gt
           operator:
             type: and
@@ -2220,9 +2222,9 @@ groups:
     execErrState: Error
     for: 5m
     annotations:
-      summary: Loki rejecting push requests on vm-01
-      description: "Loki's /loki/api/v1/push endpoint is returning 5xx responses for\
-        \ 5+ minutes \u2014 Promtails somewhere are failing to ship logs. Check `loki_panic_total`,\
+      summary: Loki rejecting push requests on {{ '{{' }} $labels.instance }}
+      description: "Loki's /loki/api/v1/push endpoint is returning 5xx for more than\
+        \ 5% of pushes for 5+ minutes \u2014 Promtails somewhere are failing to ship logs. Check `loki_panic_total`,\
         \ `loki_distributor_ingester_append_failures_total`, and the loki.service\
         \ journal."
     labels:
