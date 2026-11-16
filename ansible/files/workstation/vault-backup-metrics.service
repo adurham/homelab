@@ -1,0 +1,7 @@
+[Unit]
+Description=Vault backup freshness metric (collector, not an alerter)
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/vault-backup-metrics.sh
+Nice=10

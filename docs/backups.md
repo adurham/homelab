@@ -99,10 +99,15 @@ run per file (or against the node dumps directly) before it is turned back on.
 - `vault-prune.sh` keeps the newest generations until the 2 TiB cap and
   never deletes the newest one. It only ever touches dated dirs under
   `/mnt/vault/pve-backups`.
-- Metrics pushed to VictoriaMetrics from pve01 (writes from the workstation
-  to `:8428/api/v1/import/prometheus` are accepted but do not land — use a
-  PVE node):
-  - `pve_backup_vault_last_success_timestamp_seconds`
+- Metrics: measured on the vault host, not reported by the push. The per-node
+  `pve-vault-push.sh` emits nothing, and the retired `pve-backup-vault-push.sh` that
+  used to push these from pve01 is gone, which left the `pve_vault_backup_stale` rule
+  reading a dead series (it fired for 8 days after a clean push, 2026-11-16).
+  `~/bin/vault-backup-metrics.sh` (user timer `vault-backup-metrics.timer`, hourly; copy in
+  `ansible/files/workstation/`) writes a node_exporter textfile
+  `/var/lib/prometheus/node-exporter/vault_backup.prom`:
+  - `pve_backup_vault_last_success_timestamp_seconds` — newest generation that is complete
+    (no `.part`) and non-empty for all three nodes; value = newest node-dir mtime
   - `pve_backup_vault_bytes`
   - `pve_backup_vault_generations`
 
