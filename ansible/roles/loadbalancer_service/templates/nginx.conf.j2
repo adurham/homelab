@@ -1,3 +1,17 @@
+# authentik runs as TWO nodes (ip_authentik, ip_authentik_02) behind these upstreams. Forward-auth (outpost_backend :9000) and the
+# public login (auth_backend :9443) both use them; mark a node `down` here to drain it (never point a location straight at one node).
+upstream outpost_backend {
+    server {{ ip_authentik }}:9000 max_fails=3 fail_timeout=10s;
+    server {{ ip_authentik_02 }}:9000 max_fails=3 fail_timeout=10s;
+    keepalive 8;
+}
+
+upstream auth_backend {
+    server {{ ip_authentik }}:9443 max_fails=3 fail_timeout=10s;
+    server {{ ip_authentik_02 }}:9443 max_fails=3 fail_timeout=10s;
+    keepalive 8;
+}
+
 # Don't leak the nginx version in `Server:` headers or default error pages.
 server_tokens off;
 
@@ -329,6 +343,51 @@ server {
         proxy_ssl_verify off;
     }
 
+    # pve01: console/VNC/term endpoints only exist on the node running the guest.
+    location ~ ^/api2/(json|extjs)/nodes/pve01/(qemu|lxc)/[0-9]+/(vncwebsocket|vncproxy|termproxy|spiceproxy)$ {
+        proxy_pass https://192.168.86.11:8006;
+        proxy_set_header Host pve01.chi.lab.amd-e.com;
+        proxy_set_header Origin https://pve01.chi.lab.amd-e.com;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_ssl_verify off;
+    }
+
+    # pve02: console/VNC/term endpoints only exist on the node running the guest.
+    location ~ ^/api2/(json|extjs)/nodes/pve02/(qemu|lxc)/[0-9]+/(vncwebsocket|vncproxy|termproxy|spiceproxy)$ {
+        proxy_pass https://192.168.86.12:8006;
+        proxy_set_header Host pve02.chi.lab.amd-e.com;
+        proxy_set_header Origin https://pve02.chi.lab.amd-e.com;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_ssl_verify off;
+    }
+
+    # pve03: console/VNC/term endpoints only exist on the node running the guest.
+    location ~ ^/api2/(json|extjs)/nodes/pve03/(qemu|lxc)/[0-9]+/(vncwebsocket|vncproxy|termproxy|spiceproxy)$ {
+        proxy_pass https://192.168.86.13:8006;
+        proxy_set_header Host pve03.chi.lab.amd-e.com;
+        proxy_set_header Origin https://pve03.chi.lab.amd-e.com;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_ssl_verify off;
+    }
+
     location / {
         proxy_pass https://proxmox_cluster;
         proxy_set_header Host $host;
@@ -372,7 +431,7 @@ server {
     }
 
     location /outpost.goauthentik.io {
-        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
+        proxy_pass http://outpost_backend/outpost.goauthentik.io;
         proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
         proxy_set_header X-Real-IP $remote_addr;
@@ -422,7 +481,10 @@ server {
         limit_req zone=auth_general burst=150 nodelay;
         limit_req zone=auth_login   burst=15  nodelay;
 
-        proxy_pass https://{{ ip_authentik }};
+        proxy_pass https://auth_backend;
+        proxy_ssl_server_name on;
+        proxy_ssl_name auth.chi.lab.amd-e.com;
+        proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         # Public edge: OVERWRITE, never append -- a client-supplied X-Forwarded-For must not
@@ -513,7 +575,9 @@ server {
 {{ security_headers }}
 
     location / {
-        proxy_pass http://{{ ip_grafana }}:3000;
+        proxy_pass http://grafana_backend;
+        proxy_connect_timeout 3s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -554,7 +618,7 @@ server {
         auth_request_set $auth_cookie $upstream_http_set_cookie;
         add_header Set-Cookie $auth_cookie;
 
-        proxy_pass http://{{ ip_vm }}:8428;
+        proxy_pass http://{{ ip_loadbalancer }}:8481/select/0/vmui/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -562,7 +626,7 @@ server {
     }
 
     location /outpost.goauthentik.io {
-        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
+        proxy_pass http://outpost_backend/outpost.goauthentik.io;
         proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
         proxy_set_header X-Real-IP $remote_addr;
@@ -820,7 +884,7 @@ server {
     # exact-match auth-check path fixes this at the root, rather than
     # tuning cache timing (which would just narrow the race, not close it).
     location = /outpost.goauthentik.io/auth/nginx {
-        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io/auth/nginx;
+        proxy_pass http://outpost_backend/outpost.goauthentik.io/auth/nginx;
         proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
         proxy_set_header X-Real-IP $remote_addr;
@@ -856,7 +920,7 @@ server {
     # chain. Must NEVER be cached; each hit needs a fresh answer from
     # Authentik (new OAuth state, session creation, etc.).
     location /outpost.goauthentik.io {
-        proxy_pass https://auth.chi.lab.amd-e.com/outpost.goauthentik.io;
+        proxy_pass http://outpost_backend/outpost.goauthentik.io;
         proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
         proxy_set_header X-Real-IP $remote_addr;
@@ -872,5 +936,56 @@ server {
         internal;
         add_header Set-Cookie $auth_cookie;
         return 302 /outpost.goauthentik.io/start?rd=$request_uri;
+    }
+}
+
+upstream grafana_backend {
+    server 172.16.0.41:3000 max_fails=2 fail_timeout=10s;
+    server 172.16.0.45:3000 backup;
+}
+
+upstream ack_bot_backend {
+    server 172.16.0.41:8990 max_fails=2 fail_timeout=10s;
+    server 172.16.0.45:8990 backup;
+}
+
+server {
+    listen 8990;
+    location / {
+        proxy_pass http://ack_bot_backend;
+        proxy_connect_timeout 3s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_set_header Host $host;
+    }
+}
+upstream vminsert_backend {
+    server 172.16.0.57:8480 max_fails=2 fail_timeout=10s;
+    server 172.16.0.58:8480 max_fails=2 fail_timeout=10s;
+}
+
+upstream vmselect_backend {
+    server 172.16.0.57:8481 max_fails=2 fail_timeout=10s;
+    server 172.16.0.58:8481 max_fails=2 fail_timeout=10s;
+}
+
+server {
+    listen 8480;
+    client_max_body_size 0;
+    location / {
+        proxy_pass http://vminsert_backend;
+        proxy_request_buffering off;
+        proxy_connect_timeout 3s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_set_header Host $host;
+    }
+}
+
+server {
+    listen 8481;
+    location / {
+        proxy_pass http://vmselect_backend;
+        proxy_connect_timeout 3s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_set_header Host $host;
     }
 }

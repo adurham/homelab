@@ -41,6 +41,7 @@ authentik_url: "https://auth.chi.lab.amd-e.com"
 # (PVE side) and the authentik_provider role read this one value.
 authentik_pve_client_id: "D2YzWfFOmQgUJBpRjHzyOQeD6ODWhh0QUVEFgOHZ"
 ip_loadbalancer: "172.16.0.30"
+ip_loadbalancer_02: "172.16.0.31"   # lb-02 (CT 147, pve01); keepalived peer of lb-01
 # ip_loadbalancer is the floating VIP. The two nginx nodes behind it source
 # their upstream connections from these addresses, so any backend firewall
 # that admits "the load balancer" must admit these, not just the VIP.

@@ -249,11 +249,14 @@
     - /var/lib/nginx/scgi
     - /var/lib/nginx/uwsgi
 
+# force: nginx on lb-01/lb-02 was serving a hand-edited REGULAR FILE at sites-enabled/proxmox, which `state: link` refuses to replace
+# (so the role could never deploy and live drifted from the repo). Replace it with the symlink; the content is identical.
 - name: Enable Nginx Site
   ansible.builtin.file:
     src: /etc/nginx/sites-available/proxmox
     dest: /etc/nginx/sites-enabled/proxmox
     state: link
+    force: true
   notify: Restart Nginx
 
 - name: Remove Default Site

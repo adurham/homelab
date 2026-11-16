@@ -1,0 +1,53 @@
+---
+# Push ONLY the nginx site config (roles/loadbalancer_service/templates/nginx.conf.j2) to every load balancer, one at a time.
+#
+# Why this exists: lb-02 is a hand-built keepalived peer, so the full loadbalancer_service role would also rewrite its LAN interface,
+# install acme.sh and the whoami service. Config pushes should not do that, and they must never take both load balancers down at once:
+#   * serial: 1            - the second LB keeps serving while the first is changed
+#   * validate before use  - `nginx -t` runs against the rendered file before it replaces the live one
+#   * reload, not restart  - open connections are not dropped
+# Run:  ansible-playbook -i inventory/proxmox.yml deploy_loadbalancer_nginx_conf.yml [--limit lb-02] [--check --diff]
+- name: Push the nginx site config to the load balancers (one at a time)
+  hosts: loadbalancer
+  serial: 1
+  gather_facts: false
+  vars:
+    acme_dedyn_token_proxmox: "{{ vault_desec_token_proxmox }}"
+    noip_username: "{{ vault_noip_username }}"
+    noip_password: "{{ vault_noip_password }}"
+    noip_hostname: "chiamd-e.no-ip.biz"
+  tasks:
+    - name: Render the site config (validated with nginx before it replaces the live file)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/roles/loadbalancer_service/templates/nginx.conf.j2"
+        dest: /etc/nginx/sites-available/proxmox
+        mode: "0644"
+        owner: root
+        group: root
+        backup: true
+      register: lb_conf
+
+    # nginx serves sites-enabled; it must be a symlink to sites-available, never a separately hand-edited copy.
+    - name: Make sites-enabled/proxmox the symlink (replaces a hand-made regular file if present)
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/proxmox
+        dest: /etc/nginx/sites-enabled/proxmox
+        state: link
+        force: true
+      register: lb_link
+
+    - name: Validate the whole nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+      when: lb_conf.changed or lb_link.changed
+
+    - name: Reload nginx (graceful)
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+      when: lb_conf.changed or lb_link.changed
+
+    - name: Confirm nginx is listening on 443 after the change
+      ansible.builtin.wait_for:
+        port: 443
+        timeout: 20

@@ -288,6 +288,7 @@ yd_gated_hosts:
   - pve02
   - pve03
   - lb-01
+  - lb-02
   - dns-01
   - proxy-01
   - mail-01

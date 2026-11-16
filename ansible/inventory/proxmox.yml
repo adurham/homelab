@@ -150,6 +150,10 @@ all:
           ansible_host: "{{ ip_loadbalancer }}"
           vmid: 103
           target_node: pve02
+        lb-02:
+          ansible_host: "{{ ip_loadbalancer_02 }}"
+          vmid: 147
+          target_node: pve01
       vars:
         ansible_user: amd
         ansible_become: true
