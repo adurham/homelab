@@ -22,6 +22,10 @@ REMOTE="vmbackup_crypt:{{ pve_backup_offsite_gdrive_subdir }}"
 NODES="{% for n in pve_backup_offsite_nodes %}{{ n }} {% endfor %}"
 LOCAL_NODE="{{ pve_backup_offsite_nodes[0] }}"
 DRY="${DRY_RUN:-0}"
+# MAX_MIB=N: test mode, only archives up to N MiB are considered (the rest are left alone and their
+# guests are not pruned), so the real fetch -> upload -> delete -> skip -> prune path can be
+# exercised on a few tiny guests without a 300 GiB upload.
+MAX_MIB="${MAX_MIB:-0}"
 SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 mkdir -p "$STAGE"
 
@@ -75,6 +79,7 @@ while IFS='|' read -r node key path size; do
   [ -z "${path:-}" ] && continue
   base=$(basename "$path")
   if grep -qxF "$size $base" <<<"$drive"; then skipped=$((skipped+1)); KEY_OK[$key]=1; continue; fi
+  if [ "$MAX_MIB" -gt 0 ] && [ $((size/1048576)) -gt "$MAX_MIB" ]; then continue; fi
   if [ "$DRY" = 1 ]; then
     echo "pve-backup-push: WOULD upload $base ($((size/1048576)) MiB from $node)"
     pushed=$((pushed+1)); bytes=$((bytes+size)); KEY_OK[$key]=1; continue
