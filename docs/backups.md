@@ -140,10 +140,46 @@ keychain (`VMBackupCryptPassword`). Note: the push script's header says
 "Managed by Ansible — roles/pve_backup_offsite", but that role is not in
 this repo — the live unit + script are hand-maintained on pve01.
 
+## Restore from nothing (only 1Password + the public repo)
+
+Proven 2026-11-16 from a fresh `git clone` on the workstation: the vault password in 1Password -> the
+vaulted Drive OAuth + crypt keys -> a working rclone config -> a real `pct restore`. Nothing else is needed
+(the old "rclone.conf" 1Password item was deleted on purpose; it duplicated a live Drive token).
+
+```bash
+# 1. fresh clone + the rclone binary (checksum-verified against the official SHA256SUMS for that version)
+D=$(mktemp -d) && cd $D && git clone https://github.com/adurham/homelab.git repo
+curl -fsSLO https://downloads.rclone.org/rclone-current-linux-amd64.zip
+unzip -q rclone-current-linux-amd64.zip && install -m755 rclone-*/rclone $D/rclone
+
+# 2. render the rclone config exactly as production does. ./vault-pass reads the vault password from 1Password
+#    (op://Hermes/o2lf3jadisyvglinp35ixcs7sa/password) through the op bridge; with the desktop `op` CLI it falls back to that.
+cd $D/repo/ansible && umask 077 && mkdir -p $D/rc
+ansible localhost -i localhost, -c local -m template \
+  -a "src=roles/pve_backup_offsite/templates/rclone.conf.j2 dest=$D/rc/rclone.conf mode=0600" \
+  -e @group_vars/all/vault.yml -e @inventory/group_vars/all.yml -e pve_backup_offsite_gdrive_folder=vm-backup
+
+# 3. list, fetch (crypt decrypts client-side), integrity-check
+$D/rclone --config $D/rc/rclone.conf lsf vmbackup_crypt:pve/ | tail
+$D/rclone --config $D/rc/rclone.conf copy vmbackup_crypt:pve/<archive> $D/ && zstd -t $D/<archive>
+
+# 4. restore into a SCRATCH id (never the live one), do not start it, then destroy it
+scp $D/<archive> root@pve03:/var/tmp/x.tar.zst
+ssh root@pve03 'pct restore 99158 /var/tmp/x.tar.zst --storage nvme-data --unprivileged 1 && pct mount 99158 && ls /var/lib/lxc/99158/rootfs/etc | head; pct unmount 99158; pct destroy 99158 --purge 1; rm /var/tmp/x.tar.zst'
+```
+
+PVE storage ids are `nvme-data` (ZFS), `vzdump-nvme` (dir), `local`; `nvme-pool` is the ZFS pool name, not a storage id.
+Tanium ZFS streams (`pve-zfs/`) restore with `rclone cat ... | zstd -d | zfs recv`, see `pve-tanium-offsite.sh drill`.
+
+The v2 crypt keys (backup + gallery) are also stored as plain text in 1Password item `bb6iflhyeh5swzzymk5hsrufam`;
+that alone (plus the Drive OAuth from the vault) rebuilds a crypt remote with `rclone obscure`. Proven: a 1.1 MB
+object read through keys built only from that item had the same sha256 as through the old keys.
+
 ## Restore drills
 
 | Date | What | Result |
 | :-- | :-- | :-- |
+| 2026-11-16 | CT 158 (`mail-02`) from Drive: fresh clone + 1Password only, 201 MiB in 8 s, `zstd -t` clean, `pct restore` into scratch CT 99158 on pve03 (never started): 18,051 files, hostname + postfix config present, destroyed | PASS |
 | 2026-11-09 | CT 105 (`ntp-01`) from the 2026-11-08 03:01 vzdump, restored to VMID 900 on pve03 `nvme-data`, net0 removed before boot to avoid an IP clash | PASS — booted as `ntp-01`, `/etc/chrony/chrony.conf` intact, `chrony` active; VMID 900 destroyed after the check |
 
 ## Restore drill, 2026-11-15 (the first one ever run)
