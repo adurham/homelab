@@ -10,6 +10,11 @@
 # Runs on pve01 because Proxmox's cluster root keys give it SSH to pve02/pve03
 # without any new trust relationship, and the dump dirs are node-local.
 pve_backup_offsite_stage_dir: "/nvme-pool/pve-backup-stage"
+# ZFS dataset mounted at the staging dir, with a quota: the largest single archive (ts-02,
+# ~133 GiB) plus margin. The push stages one archive at a time, so this is a ceiling, not a
+# working size.
+pve_backup_offsite_stage_dataset: "nvme-pool/pve-backup-stage"
+pve_backup_offsite_stage_quota_gib: 160
 pve_backup_offsite_dump_dir: "/nvme-pool/vzdump-backups/dump"
 pve_backup_offsite_nodes:
   - 192.168.86.11

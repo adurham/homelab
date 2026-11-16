@@ -35,6 +35,20 @@ done
 feat() { ethtool -k "$NIC" 2>/dev/null | awk -v k="$1:" '$1==k {print ($2=="on")?1:0; found=1} END{if(!found)print 0}'; }
 active=0; systemctl is-active --quiet kernel-witness.service && active=1
 
+# Files written straight into the pool's ROOT dataset belong to no guest and no child
+# dataset, so per-guest and per-dataset space checks never see them. A 399 GiB staging
+# directory lived there for a week (2026-11-15). Everything legitimate is a child dataset.
+POOL="${2:-nvme-pool}"
+root_bytes=$(zfs get -Hp -o value usedbydataset "$POOL" 2>/dev/null || echo 0)
+ptmp=$(mktemp "$DIR/.pve_pool.XXXXXX")
+{
+  echo '# HELP pve_zfs_root_dataset_bytes Bytes held directly in the pool root dataset (outside every child dataset).'
+  echo '# TYPE pve_zfs_root_dataset_bytes gauge'
+  echo "pve_zfs_root_dataset_bytes{pool=\"$POOL\"} ${root_bytes:-0}"
+} > "$ptmp"
+chmod 0644 "$ptmp"
+mv -f "$ptmp" "$DIR/pve_pool.prom"
+
 tmp=$(mktemp "$DIR/.pve_nic.XXXXXX")
 {
   echo '# HELP pve_nic_hang_last_timestamp_seconds Newest e1000e Detected Hardware Unit Hang line in the persistent kernel witness log (0 = none).'

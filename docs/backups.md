@@ -29,6 +29,17 @@ ts-02), not a whole generation.
 > per-dataset space checks never saw it. It was deleted by hand after every file
 > was confirmed on Drive and in the vault with identical sizes.
 
+Hardening added the same evening: a `flock` so a 40-hour run cannot overlap the next timer tick;
+the staging dir is now its own ZFS dataset (`nvme-pool/pve-backup-stage`, 160 GiB quota) so a
+half-fetched archive left by a mid-run fence can never exceed it and the space shows up in
+`zfs list` (it was invisible in the pool's root dataset); leftovers are deleted at the start of
+every run (a watchdog reset runs no trap); Drive pruning is gated **per guest** on that guest's
+newest archive being on Drive, so one failing guest cannot freeze pruning for the rest; and the
+`sort -t'\t'` in the prune step, which GNU sort rejects ("separator must be exactly one
+character long"), is fixed. The original script had the same line, so Drive pruning could never
+have worked. It had not mattered yet: Drive never held more than four copies of any guest. What
+that line did to past runs (the unit's journal is volatile) was not established.
+
 **Tier 3 is not automatic right now.** The `ExecStartPost` that copies the staging
 dir to the vault is the drop-in
 `/etc/systemd/system/pve-backup-push.service.d/vault-copy.conf.disabled`

@@ -12,3 +12,7 @@ proxmox_network_tso_gso_off: false
 # register and ring dump, which is the evidence the 2026-11 hangs were missing.
 # Empty = leave the driver default (0x7).
 proxmox_network_nic_msglvl: ""
+# Turn off the I219's K1 link power state (private flag `disable-k1`). Both proven
+# hangs happened with the NIC nearly idle (~2 MiB/s, its baseline), which is the K1
+# failure pattern, not a load pattern. Costs a little idle power, nothing else.
+proxmox_network_nic_disable_k1: false

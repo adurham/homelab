@@ -27,6 +27,24 @@ will.
 `gallery-01` (115, not HA, not replicated) was moved pve02 → pve01 by hand on
 the same day.
 
+## The Postgres pair silently ran with one copy for 12 hours (2026-11-15)
+
+pve01's 06:37 fence took pg-02 (the Patroni leader at the time) down; pg-01 on pve03 was
+promoted (timeline 7). When pg-02 came back at 06:39 it never rejoined: its Postgres sat in
+recovery logging `waiting for WAL to become available`, refusing connections, with no
+`primary_conninfo`, so `patronictl list` showed `Replica / running / TL blank / lag unknown`.
+Everything else looked fine (`ha-manager` said started, Patroni's REST port listened, both
+Grafanas were up) until a transient `database: failing` on graf-02 at 18:38 pointed at it.
+Fixed with `patronictl -c /etc/patroni/*.yml reinit grafana pg-02 --force` (re-clones from the
+leader; the databases total ~400 MB); pg-02 is `Sync Standby`, TL 7, lag 0.
+
+Nothing measured replica health, so this is now measured: vmagent on vm-01 and graf-02 scrape
+Patroni's `/metrics` (job `patroni`) and three rules fire on it (`patroni_no_sync_standby`
+critical after 10 min, `patroni_postgres_not_running`, `patroni_scrape_down`). The same blind
+spot applies to every pair in this file: "the HA manager says started" proves a container is
+running, not that its twin is replicating. Pairs with no application-level health metric yet:
+Garage, etcd, VictoriaMetrics storage, mail/NTP VIPs.
+
 ## 3-node (quorum systems — survive one node loss)
 
 | Service | Members | Backs | State at capture |

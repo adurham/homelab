@@ -57,3 +57,17 @@ is on, so no data is lost either way.
 After a week of clean operation: remove the vm-01 line from `loki_urls` in `group_vars/all.yml`
 (the role default is then the VIP only), run `deploy_alloy.yml`, confirm the old Loki's ingest rate
 drops to zero, then stop its `loki.service`. Keep `loki-legacy` until its data is not wanted.
+
+## Follow-ups found after the flip (same evening)
+
+- **Nothing scraped the new ring.** The `loki` scrape job pointed at `127.0.0.1:3100`, which is
+  right on vm-01 and wrong on graf-02's own vmagent (it scraped its own localhost and wrote a
+  contradictory `up` for vm-01). Now real addresses for vm-01 and loki-01/02/03, on both
+  vmagents and in `roles/victoriametrics/templates/prometheus.yml.j2`, so "Loki rejecting
+  writes" covers the ring. (Both vmagents read the same path but their copies have drifted;
+  the Patroni and Loki edits were applied to each live file, not by re-rendering the template.)
+- Three transient push 500s (`context canceled`, microseconds) on vm-01's Loki during the
+  rollout are Alloy hosts reconnecting while they were restarted; harmless.
+- `loki.write` fans out to both endpoints from one receiver. If one endpoint stalls while the
+  other is healthy, check this Alloy version for back-pressure before the vm-01 line is removed:
+  remove it while vm-01's Loki is still up, never after stopping it.

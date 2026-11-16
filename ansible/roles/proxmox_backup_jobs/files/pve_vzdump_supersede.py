@@ -46,7 +46,7 @@ def pvesh(path, **params):
     return json.loads(r.stdout)
 
 
-def write_metrics(ok, deleted_bytes, pending_bytes, local_count, local_bytes, orphan_bytes):
+def write_metrics(ok, deleted_bytes, pending_bytes, local_count, local_bytes, orphan_bytes, guest_ages=None):
     os.makedirs(TEXTFILE_DIR, exist_ok=True)
     now = int(time.time())
     prev = 0
@@ -73,7 +73,11 @@ def write_metrics(ok, deleted_bytes, pending_bytes, local_count, local_bytes, or
         f"pve_vzdump_local_bytes {local_bytes}\n"
         "# TYPE pve_vzdump_orphan_bytes gauge\n"
         f"pve_vzdump_orphan_bytes {orphan_bytes}\n"
+        "# HELP pve_vzdump_guest_newest_age_seconds Age of the newest vzdump archive, anywhere in the cluster, of each guest a backup job covers (1e10 = no archive at all).\n"
+        "# TYPE pve_vzdump_guest_newest_age_seconds gauge\n"
     )
+    for (vmid, name), age in sorted((guest_ages or {}).items()):
+        body += f'pve_vzdump_guest_newest_age_seconds{{vmid="{vmid}",name="{name}"}} {age}\n'
     tmp = path + ".tmp"
     with open(tmp, "w") as fh:
         fh.write(body)
@@ -84,7 +88,14 @@ def write_metrics(ok, deleted_bytes, pending_bytes, local_count, local_bytes, or
 def main():
     try:
         nodes = [n["node"] for n in pvesh("/nodes")]
-        guests = {r["vmid"] for r in pvesh("/cluster/resources", type="vm")}
+        res = [r for r in pvesh("/cluster/resources", type="vm") if not r.get("template")]
+        guests = {r["vmid"] for r in res}
+        names = {r["vmid"]: r.get("name", "") for r in res}
+        covered = set()
+        for job in pvesh("/cluster/backup"):
+            for v in str(job.get("vmid", "")).split(","):
+                if v.strip().isdigit():
+                    covered.add(int(v))
         archives = []
         for n in nodes:
             for i in pvesh(f"/nodes/{n}/storage/{STORAGE}/content", content="backup"):
@@ -98,6 +109,10 @@ def main():
     for a in archives:
         if a[0] not in newest or a[4] > newest[a[0]][4]:
             newest[a[0]] = a
+    now = int(time.time())
+    guest_ages = {
+        (v, names.get(v, "")): (now - newest[v][4] if v in newest else 10**10) for v in sorted(covered & guests)
+    }
     local = [a for a in archives if a[1] == NODE]
     orphan = sum(a[3] for a in newest.values() if a[1] == NODE and a[0] not in guests)
 
@@ -135,7 +150,7 @@ def main():
     if DRY:
         return 0
     left = [a for a in local if a[2] not in deleted_ids]
-    write_metrics(not failed, deleted, pending - deleted, len(left), sum(a[3] for a in left), orphan)
+    write_metrics(not failed, deleted, pending - deleted, len(left), sum(a[3] for a in left), orphan, guest_ages)
     return 1 if failed else 0
 
 

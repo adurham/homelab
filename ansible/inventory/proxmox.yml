@@ -16,6 +16,7 @@ all:
           # See docs/pve01-network-stall-2026-11-15.md.
           proxmox_network_tso_gso_off: true
           proxmox_network_nic_msglvl: "0x2087"
+          proxmox_network_nic_disable_k1: true  # 2026-11-15 18:30, applied live + in /etc/network/interfaces
           # Lab-corner UPS (CyberPower GX1500U) USB data cable is attached
           # to THIS node (verified 2026-10-01: 0764:0601 "CPS GX1500U",
           # serial QA9RQ7001561). roles/nut_ups runs here; the flag also

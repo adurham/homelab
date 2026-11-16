@@ -25,7 +25,31 @@
     group: root
     mode: "0600"
 
-- name: Ensure staging dir exists
+# The staging dir is its own ZFS dataset with a quota. It used to be a plain directory in the
+# pool's ROOT dataset, which no per-dataset space check sees: a whole backup generation
+# (399 GiB, 43 % of the pool) sat there for a week (2026-11-15). As a dataset it shows up in
+# `zfs list`, and the quota (largest single archive + margin) is a hard ceiling for the
+# half-fetched file a mid-run fence can leave behind.
+- name: Check whether the staging dataset exists
+  ansible.builtin.command: "zfs list -H -o name {{ pve_backup_offsite_stage_dataset }}"
+  register: pve_backup_offsite_stage_ds
+  changed_when: false
+  failed_when: false
+
+- name: Create the staging dataset
+  ansible.builtin.command: "zfs create -o quota={{ pve_backup_offsite_stage_quota_gib }}G {{ pve_backup_offsite_stage_dataset }}"
+  when: pve_backup_offsite_stage_ds.rc != 0
+
+- name: Read the staging dataset quota
+  ansible.builtin.command: "zfs get -Hp -o value quota {{ pve_backup_offsite_stage_dataset }}"
+  register: pve_backup_offsite_stage_quota_now
+  changed_when: false
+
+- name: Keep the staging dataset quota at the declared size
+  ansible.builtin.command: "zfs set quota={{ pve_backup_offsite_stage_quota_gib }}G {{ pve_backup_offsite_stage_dataset }}"
+  when: (pve_backup_offsite_stage_quota_now.stdout | trim | int) != (pve_backup_offsite_stage_quota_gib | int * 1073741824)
+
+- name: Ensure staging dir permissions
   ansible.builtin.file:
     path: "{{ pve_backup_offsite_stage_dir }}"
     state: directory

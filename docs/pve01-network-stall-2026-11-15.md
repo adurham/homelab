@@ -196,9 +196,37 @@ Correction to an earlier version of this note: a generic `pve_node_rebooted`
 matched both hangs. Nothing says anyone read it, which is why the 11-09 event had no
 note for six days; the new alerts are critical and name the cause.
 
+## Second review (Fable, 2026-11-15 evening) and what testing it showed
+
+Fable's headline inference was that the hangs are **load-triggered by the Saturday off-site
+push** (11-15 is the day after a Sat 05:00 run, 11-09 is 61 h after one). It was tested against
+VictoriaMetrics' own history of pve01's `nic0` and **rejected**: in the ten minutes before each
+hang the NIC was nearly idle, about its baseline.
+
+| hang | TX, last 10 min avg / max | RX, last 10 min avg / max | prior 24 h avg TX |
+|---|---|---|---|
+| 11-09 18:24 | 2.8 / 7.9 MiB/s | 2.5 / 2.6 MiB/s | 1.7 MiB/s |
+| 11-15 06:37 | 1.9 / 3.5 MiB/s | 2.8 / 3.2 MiB/s | 9.3 MiB/s (the day's 400 GiB staging copy ended hours earlier) |
+
+Idle-time failure is the signature of a **link power-state** problem, not of a transmit-path
+bug that heavy traffic would provoke. The I219 has a K1 power state it enters when the link is
+quiet; `ethtool --show-priv-flags nic0` showed `disable-k1: off` (K1 enabled) on all nodes.
+Fable had ranked disabling K1 second, behind TSO, on the premise that nothing pointed at a
+cause. This does, so on 2026-11-15 18:30 `disable-k1` was turned on at pve01 as well (live
+and in `/etc/network/interfaces`; `proxmox_network_nic_disable_k1`). It re-initialised the
+link for about a second: quorum, HA and both corosync links were unaffected.
+
+Two changes are now in effect on pve01, so a hang-free month will not say *which* one fixed
+it. That was the argument for waiting; it was judged worth giving up because every hang costs
+a node fence and a ~3 minute failover of everything on pve01.
+
+Other Fable points acted on: the capture/witness are unchanged; nothing was done about the
+watchdog or in-place reset (still unrehearsed).
+
 ## Not established
 
-- **What triggers the hang.** TSO off is a mitigation chosen from the pattern. The
+- **What triggers the hang.** The load theory was tested and rejected (above); K1 is now the leading
+  suspect but unproven. TSO off is a mitigation chosen from the pattern. The
   register/ring dump that would show it was discarded on both proven hangs (the old
   witness kept only the first line). The next hang will be the first with the full
   record.

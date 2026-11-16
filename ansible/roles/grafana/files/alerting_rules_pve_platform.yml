@@ -422,3 +422,352 @@ groups:
         labels:
           severity: warning
         isPaused: false
+      - uid: pve_pool_root_dataset_growth
+        title: PVE pool root dataset holds more than 20 GiB
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (instance, pool) (pve_zfs_root_dataset_bytes)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 21474836480
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 30m
+        annotations:
+          summary: '{{ $labels.instance }}: {{ $labels.pool }} root dataset holds files outside any guest or child
+            dataset'
+          description: 'Every legitimate consumer of the ZFS pool is a child dataset (guest disks, vzdump-backups,
+            the off-site staging dataset). Bytes in the ROOT dataset itself are files somebody wrote straight into
+            /nvme-pool: per-guest and per-dataset space checks cannot see them, and on 2026-11-15 a 399 GiB backup
+            staging directory sat there for a week. Find them with `du -xh --max-depth=1 /nvme-pool | sort -h |
+            tail`. Expected baseline on pve01: ~7 GiB (root-backups, haos-test).'
+        labels:
+          severity: warning
+        isPaused: false
+      - uid: pve_guest_backup_age_high
+        title: A guest's newest vzdump archive is older than 36 h
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (vmid, name) (pve_vzdump_guest_newest_age_seconds)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 129600
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 2h
+        annotations:
+          summary: '{{ $labels.name }} ({{ $labels.vmid }}): no new vzdump archive for over 36 h'
+          description: 'Measured across the whole cluster by pve-vzdump-supersede.timer (05:20 daily), for every
+            guest a backup job covers: 1e10 means the guest has no archive at all. Two missed nightly runs trip
+            this. Typical causes: the vzdump-backups quota is full (see pve_vzdump_storage_high), the guest is locked,
+            or it moved to a node whose job did not pick it up. `pvesh get /nodes/<node>/tasks --typefilter vzdump`
+            shows the failing run.'
+        labels:
+          severity: warning
+        isPaused: false
+      - uid: pve_lab_snapshot_pressure_prune
+        title: Lab snapshot capacity guard destroyed weekly snapshots
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (instance) (pve_lab_snapshot_pressure_prunes)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: '{{ $labels.instance }}: the capacity guard destroyed weekly lab snapshots on its last run'
+          description: 'lab-vm-snapshots.sh destroyed weekly ZFS snapshots because the pool was above 78 % (it never
+            goes below 2 weeklies per volume). Those snapshots are the only on-site restore points of the Tanium
+            VMs, so treat this as a symptom: find what is actually filling the pool (`zfs list -o name,used -S used`,
+            and pve_pool_root_dataset_growth) instead of letting the guard keep eating restore points.'
+        labels:
+          severity: warning
+        isPaused: false
+      - uid: patroni_no_sync_standby
+        title: Patroni cluster has no healthy sync standby
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: sum by (scope) (max by (scope, instance) (patroni_sync_standby))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: Patroni cluster {{ $labels.scope }} has no synchronous standby
+          description: 'The Postgres pair behind Grafana (and authentik) is down to a single copy: a leader loss
+            now means data loss or an outage. On 2026-11-15 pg-02 sat in this state for 12 hours after the 06:37
+            pve01 fence (its Postgres was up in recovery, waiting for WAL it could never fetch, refusing connections,
+            with no primary_conninfo) while ha-manager showed everything started and the Patroni REST port was listening.
+            Look: `patronictl -c /etc/patroni/*.yml list` in the pg CTs, `journalctl -u patroni`, the Postgres log.
+            If the replica is stuck, `patronictl reinit <scope> <member> --force` re-clones it from the leader (the
+            databases are ~400 MB in total; that is what fixed it).'
+        labels:
+          severity: critical
+        isPaused: false
+      - uid: patroni_postgres_not_running
+        title: A Patroni member's Postgres is not running
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: min by (scope, instance) (patroni_postgres_running)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: '{{ $labels.instance }} ({{ $labels.scope }}): Postgres is not running under Patroni'
+          description: Patroni is up and answering its REST API but reports its Postgres as not running.
+        labels:
+          severity: warning
+        isPaused: false
+      - uid: patroni_scrape_down
+        title: Patroni metrics are not being scraped
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (instance) (up{job="patroni"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: '{{ $labels.instance }}: Patroni''s /metrics is unreachable from vmagent'
+          description: The patroni job (added to both vmagents on 2026-11-15) cannot scrape :8008/metrics, so patroni_no_sync_standby
+            is blind. Check the CT, Patroni's REST listener and the CT firewall (vmagent comes from vm-01 and graf-02).
+        labels:
+          severity: warning
+        isPaused: false

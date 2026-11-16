@@ -31,7 +31,7 @@ KEEP="${KEEP:-4}"
 # for the storage and the pve_pool_capacity_high alert reads (80 %) -- not zpool's
 # ALLOC/SIZE, which runs 3-6 points lower because it ignores reservations. 78 acts
 # before the 80 % early warning.
-# DRY_RUN=1 prints what would go.
+# DRY_RUN=1 prints what would go. Never prunes a volume below 2 weeklies.
 POOL_MAX_PCT="${POOL_MAX_PCT:-78}"
 PRESSURE_MAX_PRUNES="${PRESSURE_MAX_PRUNES:-3}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -71,7 +71,10 @@ while [ "$(pool_pct)" -gt "$POOL_MAX_PCT" ] && [ "$pruned" -lt "$PRESSURE_MAX_PR
     for v in "${vols[@]}"; do
         mapfile -t weeklies < <(zfs list -Hp -t snapshot -o name,used -r "$v" 2>/dev/null \
             | grep -E "@auto-weekly-[0-9]{6}[[:space:]]" | sort)
-        [ "${#weeklies[@]}" -gt 1 ] || continue
+        # never below TWO weeklies per volume: a guard that fires because something ELSE
+        # filled the pool (as a 399 GiB staging dir did on 2026-11-15) must not eat the
+        # only restore points of a VM that has no vzdump coverage
+        [ "${#weeklies[@]}" -gt 2 ] || continue
         cand="${weeklies[0]%%[[:space:]]*}"
         used="${weeklies[0]##*[[:space:]]}"
         if [ "$used" -gt "$victim_used" ]; then victim="$cand"; victim_used="$used"; fi
@@ -93,5 +96,15 @@ while [ "$(pool_pct)" -gt "$POOL_MAX_PCT" ] && [ "$pruned" -lt "$PRESSURE_MAX_PR
         break
     fi
 done
+
+TF=/var/lib/node_exporter/textfile_collector
+if [ -d "$TF" ] && [ "$DRY_RUN" != 1 ]; then
+    {
+        echo "# TYPE pve_lab_snapshot_pressure_prunes gauge"
+        echo "pve_lab_snapshot_pressure_prunes $pruned"
+        echo "# TYPE pve_lab_snapshot_last_run_timestamp_seconds gauge"
+        echo "pve_lab_snapshot_last_run_timestamp_seconds $(date +%s)"
+    } > "$TF/.pve_lab_snap.tmp" && mv -f "$TF/.pve_lab_snap.tmp" "$TF/pve_lab_snapshots.prom"
+fi
 
 echo "done on $(hostname): $(zfs list -H -t snapshot -o name -r "$POOL" 2>/dev/null | grep -c "@$TAG$") snapshot(s) tagged $TAG"
