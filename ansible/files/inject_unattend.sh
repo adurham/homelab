@@ -1,6 +1,8 @@
 #!/bin/bash
 VMID=9002
-ADMIN_PASS="Password123!"
+# The build-time Administrator password comes from the environment, never from this file (the repo is public):
+#   ADMIN_PASS="$(ansible-vault view group_vars/all/vault.yml | sed -n 's/^vault_win_admin_password: *"\(.*\)"/\1/p')" ./inject_unattend.sh
+: "${ADMIN_PASS:?set ADMIN_PASS (vault_win_admin_password) in the environment}"
 
 # Define XML Content
 cat > /tmp/Unattend.xml <<EOF
