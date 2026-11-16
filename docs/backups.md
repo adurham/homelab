@@ -102,3 +102,36 @@ this repo — the live unit + script are hand-maintained on pve01.
 | Date | What | Result |
 | :-- | :-- | :-- |
 | 2026-11-09 | CT 105 (`ntp-01`) from the 2026-11-08 03:01 vzdump, restored to VMID 900 on pve03 `nvme-data`, net0 removed before boot to avoid an IP clash | PASS — booted as `ntp-01`, `/etc/chrony/chrony.conf` intact, `chrony` active; VMID 900 destroyed after the check |
+
+## Restore drill, 2026-11-15 (the first one ever run)
+
+Both restores were done into scratch guests with **no network interface** (VMIDs 8801/8802;
+9000-9002 are templates) and destroyed afterwards.
+
+| what | result |
+|---|---|
+| Drive -> crypt -> pve01: `vzdump-lxc-100` (authentik) 11-14, 5.3 GiB | 54 MiB/s, ~100 s; `zstd -t` clean |
+| `pct restore` of it, no NIC, started | 13 GiB at 85 MiB/s; `is-system-running: running`, 0 failed units, 8 docker containers present |
+| `pct restore` of `vzdump-lxc-140` (graf-db-01, on-site archive from 03:06), Postgres started by hand | Grafana DB has **109 alert rules; the live one has 122**. The 13 are exactly the pve-platform rules provisioned later that day. 16 dashboards, 2 users, authentik DB 12 users in both |
+
+A restored Patroni member is a replica: its data dir carries `standby.signal`, which has to be
+removed to start it standalone, and the restored CT config still carries the LIVE static IP and
+MAC, so delete every `net*` before the first start or it collides with the real one.
+
+**Gaps the drill exposed**
+
+- The Drive crypt keys (`password`, `password2`) existed only in `/root/.config/rclone/rclone.conf`
+  on pve01. Lose that disk and every Drive archive is unreadable. A copy is now in 1Password,
+  Hermes vault, item "rclone.conf (pve backup Drive + crypt keys)" (base64 field, byte-for-byte
+  round-trip checked). The Drive OAuth token inside may need re-authorising; the crypt keys are
+  the permanent part.
+- **24 of 58 guests have no archive on Drive**, among them pg-02, graf-db-01, graf-02, lan-dns-01,
+  loki-03, the garage trio, tms-01 and tzs-01. Saturday's run started 11-14 05:06 and pve01 was
+  fenced 11-15 06:37, about 25 h in, on a run that needs ~40 h: consistent with the push having
+  been killed mid-way. The new flock + start-of-run cleanup handle the debris, but a 40 h run
+  that a fence can interrupt will never finish on a node that hangs.
+- **tms-01 (202) and tzs-01 (204) are in no vzdump job** (the jobs list 201, 203, 205), so they
+  have no archive anywhere; their only copies are same-pool ZFS weeklies. Until that is decided,
+  do not run the 2026-11-23 cleanup of `moved-20261115-vm-202-disk-*` on pve02: it is the only
+  copy of tms-01 that does not live on pve01's pool.
+
