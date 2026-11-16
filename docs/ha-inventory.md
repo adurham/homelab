@@ -88,9 +88,12 @@ Tanium appliances 200–205 · tc-* clients 301–314 · templates 9000–9002
 
 Tanium appliance placement is by hand (not HA, not replicated), deliberately spread:
 ts-01 + tzs-01 on pve02, ts-02 + tms-02 + tzs-02 on pve03, **tms-01 on pve01** (moved
-2026-11-15, see `docs/2026-10-21-backup-retention-audit.md`). Their only on-site
-protection is the weekly ZFS snapshots on whichever node holds them, so losing that node
-loses their history; the off-site tiers hold the last vzdump archives.
+2026-11-15, see `docs/2026-10-21-backup-retention-audit.md`). On-site, ts-01/tms-01/tzs-01 are in
+no vzdump job; their only on-site protection is the weekly ZFS snapshots on the same pool as
+the live disks, so losing that node loses their history. Off-site, only the **active pair** (ts-01,
+tms-01) is covered: weekly ZFS streams to Google Drive (`pve-tanium-offsite`, `docs/backups.md`).
+tzs-01 and the standby VMs have no off-site copy, by the owner's decision. A node loss does not
+restart any of them by itself: restore from the stream, or `qm` migrate if the pool survived.
 
 ## What backs what
 

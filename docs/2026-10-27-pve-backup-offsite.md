@@ -34,8 +34,8 @@
 ## Numbers
 
 - One generation (newest per guest, all nodes) ≈ **43 GB** across 20 archives.
-- Observed upload rate from pve01 ≈ 2 MB/s (~16 Mbit/s), so a full baseline is
-  ~6 hours. The first run was stopped deliberately mid-upload to avoid saturating
+- Upload rate from pve01 was recorded here as ≈ 2 MB/s (~16 Mbit/s); that was wrong or stale: on
+  2026-11-15 a 1 GiB test measured 21-27 MiB/s on the 1 Gbit line, so a 43 GB baseline is ~30 minutes. The first run was stopped deliberately mid-upload to avoid saturating
   the uplink during the day; the Saturday timer completes the baseline from the
   already-staged files.
 - The Drive account is a 5 TB plan with **2.82 TB free** — the 200 GB
@@ -58,17 +58,16 @@ archives, 299 GiB), not 43 GB. Two consequences, both fixed in
   week. Now skipped by name + size.
 
 What this does **not** fix: ~300 GiB a week is still a lot of upstream. The uplink was
-measured at ~16 Mbit/s (~2 MB/s), which is ~40 hours for 300 GiB, longer than the weekly
-cadence leaves room for if the runs overlap. Excluding the three Tanium VMs from the
+first recorded as ~16 Mbit/s (~40 hours for 300 GiB); the measured rate is 21-27 MiB/s (~3.5 hours). Excluding the three Tanium VMs from the
 off-site push (they are rebuildable and have weekly ZFS snapshots on-site), or pushing them
-monthly, would cut it to ~90 GiB. That is a decision, not a change made here.
+monthly, would cut it to ~90 GiB. That decision was made on 2026-11-15: only ts-01 and tms-01 go off-site, as ZFS streams (see docs/backups.md).
 
 ## Still open
 
 - Restore from Drive has not been exercised (same class of gap as the earlier
   LXC restore drill): `rclone copy vmbackup_crypt:pve/<archive> /nvme-pool/vzdump-backups/dump/`
   then `pct restore` / `qm restore`.
-- 43 GB/week of upstream is a real cost at ~16 Mbit/s. If that hurts, options are
+- (Written when the uplink was thought to be 16 Mbit/s; it is not.) If upstream ever hurts, options are
   fortnightly cadence, or excluding the largest guests (frigate-01 8.1 GB and the
   TanOS appliance VMs) and keeping only config-level guests off-site.
 

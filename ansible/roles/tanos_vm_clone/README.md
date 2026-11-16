@@ -16,7 +16,7 @@ The template is a fully-finished TanOS 1.8.6 appliance:
 | Gateway | `10.99.0.1` |
 | DNS | `1.1.1.1`, `8.8.8.8` |
 | NTP | `pool.ntp.org` |
-| EULA | accepted (acknowledger: `adam.durham@tanium.com`) |
+| EULA | accepted (acknowledger: the lab owner (work address omitted from the public repo)) |
 | `tanadmin` password | in vault as `vault_bwt_tanadmin_password` |
 | `tanadmin` SSH keys | `personal_macbook.pub` + `tanium_macbook.pub` |
 

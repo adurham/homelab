@@ -1,25 +1,57 @@
 # Backups — where every copy lives
 
-Three tiers, on purpose: the on-site dump is fast to restore from, the
-off-site copy survives the house, and the vault copy is a local second
-generation that doesn't cost anything to read back.
+Four copies, on purpose: the on-site dump is fast to restore from, the off-site copies survive
+the house, and the weekly ZFS snapshots are the only on-site restore points of the big Tanium VMs.
+Measured on 2026-11-15: the uplink is 1 Gbit symmetric and one rclone stream to Drive does
+21-27 MiB/s (download 54 MiB/s).
 
-| Tier | What | Where | Cadence | Retention |
+| Copy | What | Where | Cadence | Retention |
 | :-- | :-- | :-- | :-- | :-- |
-| 1. On-site | `vzdump` snapshot of every guest | `/nvme-pool/vzdump-backups/dump` on each PVE node | nightly 02:00 / 02:30 / 03:00 (one job per node) | 3 daily + 2 weekly |
+| 1. On-site dump | `vzdump` snapshot of every guest in the three per-node jobs. **Not** ts-01/tms-01/tzs-01 (VMIDs 200/202/204): their disks are too big for the dump dir | `/nvme-pool/vzdump-backups/dump` on each node (130 GiB quota on pve01/pve02 as seen by `vzdump-nvme`) | nightly, 02:00 pve01 / 02:30 pve02 / 03:00 pve03 | `keep-last 1` per guest (the job setting; older docs said "3 daily + 2 weekly", which is not what is configured) |
+| 2. Weekly ZFS snapshots | zvol snapshots `@auto-weekly-YYYYWW` of the lab VMs (200-205, 270-272) | the same pool as the live disks | Sun 04:30 (`lab-vm-snapshots.timer`) | 4; the capacity guard prunes the heaviest when the pool is above 78 %, never below 2 per volume |
+| 3. Off-site, general | newest vzdump archive per guest, rclone-crypt encrypted, **except** the standby Tanium VMs 201/203/205 (`pve_backup_offsite_exclude_vmids`) | `vmbackup_crypt:pve/` (Google Drive) | weekly, Sat 05:00, `pve-backup-push.timer` on pve01; ~100 GiB, ~1.2 h | newest 4 per guest |
+| 4. Off-site, active Tanium | **ZFS send streams** of ts-01 (200) and tms-01 (202), encrypted, size-checked, with config + sha256 manifest | `vmbackup_crypt:pve-zfs/` | weekly, Sun 05:00, `pve-tanium-offsite.timer` on pve01; ~310 GiB, ~3.5 h | 2 generations |
+| (vault) | local second generation on amd-workstation's 8 TB drive | `/mnt/vault/pve-backups/` | **disabled**, see below | |
 
-> The TanOS appliances (VMIDs 200-205, `ts-*`/`tms-*`/`tzs-*`) were added to
-> the per-node jobs on 2026-11-08 after ts-01 was found with no restore point
-> at all while it was down.
-| 2. Off-site | newest archive per guest, rclone-crypt encrypted | `vmbackup_crypt:pve/` (Google Drive) | weekly, Sat 05:00, `pve-backup-push.timer` | newest 4 per guest |
-| 3. Local second generation | newest archive per guest, staged copy | `/mnt/vault/pve-backups/<YYYYMMDD>/` on amd-workstation (8TB `vault`) | weekly, immediately after tier 2 (`ExecStartPost`) | ≤ 2 TiB, oldest generations pruned |
+The owner decided on 2026-11-15 that only the **active** Tanium VMs (ts-01, tms-01, assuming the
+-01 pair is the active one; 7-day CPU/network averages confirm it) need off-site copies. tzs-01 (204)
+and the standby VMs therefore have no off-site copy, by decision. ts-01/tms-01/tzs-01 are in no
+vzdump job; ts-02/tms-02/tzs-02 (201/203/205) are, nightly.
 
-Tier 2 pushes through a staging dir (`/nvme-pool/pve-backup-stage` on pve01, the
-same ZFS pool the guests live on). **The staging dir is empty between runs.**
-Since 2026-11-15 `pve-backup-push.sh` works one archive at a time: fetch it,
-`rclone copyto` it, delete it, and skip any archive Drive already holds with the
-same name and size. Peak staging use is the largest single archive (~133 GiB,
-ts-02), not a whole generation.
+## Copy 3 in detail — pve-backup-push
+
+`pve-backup-push.sh` works one archive at a time through a staging dataset
+(`nvme-pool/pve-backup-stage` on pve01, 160 GiB quota, empty between runs): fetch it, `rclone copyto`
+it, delete it, and skip any archive Drive already holds with the same name and size. One run at a
+time (`flock`); leftovers from a run that died (a watchdog reset runs no trap) are deleted at the
+start of the next; Drive pruning keeps the newest 4 per guest and is gated per guest on that guest's
+newest archive being on Drive. On success it writes `pve_backup_push.prom` for node_exporter; the
+rule `pve_offsite_push_stale` fires after 9 days without one. Optional per-job heartbeat: see
+"Per-job heartbeats" below.
+
+## Copy 4 in detail — pve-tanium-offsite
+
+No local copy exists at any point. Per VM: one atomic snapshot of all its zvols (crash-consistent,
+like a vzdump snapshot-mode backup without the guest agent), `zfs send -c | rclone rcat` to Drive,
+byte count and sha256 taken on the **source node** before any ssh leg, upload as `<name>.partial`
+and rename only when the Drive size equals the source count, then config + manifest, then prune to
+2 generations, then destroy the snapshot. A run starts by deleting `.partial` objects, objects of a
+(vmid, stamp) without a config file, and stale `@offsite-*` snapshots. Restore (script header has the
+exact commands): `rclone cat <object> | zfs recv -F <pool>/<disk>` per zvol, then put the saved config
+back. Drilled with a 1 GiB scratch zvol, source on pve01 and on pve02 (the ssh leg): restored sha256
+equal. **Not yet drilled at full size**; do that before deleting the old tms-01 zvols
+(`moved-20261115-vm-202-disk-*` on pve02, see `docs/2026-10-21-backup-retention-audit.md`).
+
+## Per-job heartbeats
+
+Both jobs can ping their own healthchecks.io check (`/start`, success, `/fail`) from
+`/etc/pve-backup-heartbeat.conf` (0600, written by the role only when the URLs are set:
+`pve_backup_offsite_hc_push_url`, `pve_backup_offsite_hc_tanium_url`). This is deliberately outside
+Grafana: it is the one place a stale backup is reported without the node_exporter, VictoriaMetrics,
+Grafana and mail chain, and it complements the always-firing `dead_mans_switch` (Grafana's own
+heartbeat). Healthchecks is told the schedule (weekly + grace), so a job that never starts alerts too.
+
+## History kept below
 
 > **What was wrong before (found 2026-11-15):** the script staged the whole
 > generation first and only pruned files older than a day at the end of the *next*
@@ -29,7 +61,7 @@ ts-02), not a whole generation.
 > per-dataset space checks never saw it. It was deleted by hand after every file
 > was confirmed on Drive and in the vault with identical sizes.
 
-Hardening added the same evening: a `flock` so a 40-hour run cannot overlap the next timer tick;
+Hardening added the same evening: a `flock` so one run cannot overlap the next timer tick;
 the staging dir is now its own ZFS dataset (`nvme-pool/pve-backup-stage`, 160 GiB quota) so a
 half-fetched archive left by a mid-run fence can never exceed it and the space shows up in
 `zfs list` (it was invisible in the pool's root dataset); leftovers are deleted at the start of

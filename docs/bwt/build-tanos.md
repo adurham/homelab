@@ -97,7 +97,7 @@ Template `template-tanos-1.8.6-bwt` (VMID 9002):
 - FQDN: `bwt-tanos-template.bwt.local` (placeholder)
 - DNS: `1.1.1.1`, `8.8.8.8`
 - NTP: `pool.ntp.org`
-- EULA accepted (acknowledger: `adam.durham@tanium.com`)
+- EULA accepted (acknowledger: the lab owner (work address omitted from the public repo))
 - SSH pubkeys for `personal_macbook` + `tanium_macbook` injected into
   tanadmin's authorized_keys via `add pubkeys` (this happened after
   initial config finished; required logging in to a privileged shell

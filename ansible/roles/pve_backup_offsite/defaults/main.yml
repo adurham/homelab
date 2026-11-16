@@ -50,3 +50,10 @@ pve_tanium_offsite_keep: 2
 # Measured 2026-11-15: one rclone stream to Drive does 21-27 MiB/s on this 1 Gbit line, so this cap
 # never binds in practice; it exists so a faster day cannot starve corosync on the single 1 GbE NIC.
 pve_tanium_offsite_bwlimit: "30M"
+
+# Optional healthchecks.io heartbeat URLs for the two jobs (full ping URL, no trailing slash). Empty
+# = no heartbeat. Set them from the vault in group_vars, never here. The role writes them to
+# /etc/pve-backup-heartbeat.conf (0600); the scripts ping /start, success and /fail.
+pve_backup_offsite_hc_push_url: ""
+pve_backup_offsite_hc_tanium_url: ""
+

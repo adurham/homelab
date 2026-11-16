@@ -13,7 +13,7 @@ Coverage: 35 hosts audited, 3 Macs, HA, edge. 17 hosts unreachable (see bottom).
 
 ## Internet-facing surface
 
-Public IPv4 108.88.208.88 (No-IP) forwards only 80/443 to `lb-01`; 22 and 8006
+Public IPv4 <home public IP> (No-IP) forwards only 80/443 to `lb-01`; 22 and 8006
 are closed from the WAN. Only `auth.` and `tanium.` resolve in public DNS.
 
 Every 443 server block except the Authentik login and Tanium carries an explicit

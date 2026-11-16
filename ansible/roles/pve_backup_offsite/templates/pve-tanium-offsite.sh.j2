@@ -113,6 +113,17 @@ if [ "$MODE" = drill ]; then
   exit 0
 fi
 
+# Optional per-job heartbeat (healthchecks.io): /start when the job really begins, a plain ping on
+# success, /fail on any non-zero exit. URL comes from /etc/pve-backup-heartbeat.conf (root, 0600),
+# written by the role only when set. A failed ping never fails the job.
+HC_URL=""; HC_TANIUM_URL=""
+[ -r /etc/pve-backup-heartbeat.conf ] && . /etc/pve-backup-heartbeat.conf
+HC_URL="${HC_TANIUM_URL:-}"
+HC_ACTIVE=0
+hc() { [ -n "${HC_URL:-}" ] || return 0; curl -fsS -m 10 --retry 3 -o /dev/null "$HC_URL$1" 2>/dev/null || true; }
+hc_finish() { rc=$?; if [ "$HC_ACTIVE" = 1 ]; then if [ "$rc" -eq 0 ]; then hc ""; else hc "/fail"; fi; fi; exit "$rc"; }
+trap hc_finish EXIT
+HC_ACTIVE=1; hc "/start"
 failed=0
 cleanup_orphans
 for vmid in $VMIDS; do

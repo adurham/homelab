@@ -107,3 +107,16 @@
     group: root
     mode: "0644"
   notify: Reload systemd and enable Tanium push timer
+
+- name: Per-job heartbeat URLs (healthchecks.io)
+  ansible.builtin.copy:
+    dest: /etc/pve-backup-heartbeat.conf
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      HC_PUSH_URL="{{ pve_backup_offsite_hc_push_url }}"
+      HC_TANIUM_URL="{{ pve_backup_offsite_hc_tanium_url }}"
+  no_log: true
+  when: (pve_backup_offsite_hc_push_url | length > 0) or (pve_backup_offsite_hc_tanium_url | length > 0)
+

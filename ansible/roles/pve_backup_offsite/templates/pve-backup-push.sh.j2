@@ -31,6 +31,17 @@ MAX_MIB="${MAX_MIB:-0}"
 SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o IdentityAgent=none"
 mkdir -p "$STAGE"
 
+# Optional per-job heartbeat (healthchecks.io): /start when the job really begins, a plain ping on
+# success, /fail on any non-zero exit. URL comes from /etc/pve-backup-heartbeat.conf (root, 0600),
+# written by the role only when set. A failed ping never fails the job.
+HC_URL=""; HC_PUSH_URL=""
+[ -r /etc/pve-backup-heartbeat.conf ] && . /etc/pve-backup-heartbeat.conf
+HC_URL="${HC_PUSH_URL:-}"
+HC_ACTIVE=0
+hc() { [ -n "${HC_URL:-}" ] || return 0; curl -fsS -m 10 --retry 3 -o /dev/null "$HC_URL$1" 2>/dev/null || true; }
+hc_finish() { rc=$?; if [ "$HC_ACTIVE" = 1 ]; then if [ "$rc" -eq 0 ]; then hc ""; else hc "/fail"; fi; fi; exit "$rc"; }
+trap hc_finish EXIT
+
 # One run at a time. A 40-hour upload can overlap the next timer tick, and two runs would
 # fight over the same staging files. With the lock held nothing else touches the staging
 # dir, so anything in it now is debris from a run that died without cleaning up (a watchdog
@@ -41,6 +52,7 @@ if ! flock -n 9; then
   exit 0
 fi
 if [ "$DRY" != 1 ]; then
+  HC_ACTIVE=1; hc "/start"
   find "$STAGE" -maxdepth 1 -type f \( -name '*.tmp' -o -name '*.tar.zst' -o -name '*.vma.zst' \) -delete
 fi
 

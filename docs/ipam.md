@@ -174,7 +174,7 @@ documented wired-pod ping-jitter signature) and returns a plain HTTP 404
 rather than a refused connection (unlike real pod hardware, which refuses
 every port — worth noting as a device-type distinction if `.40` gets probed
 again later). Main/living-room unit confirmed LAN IP 192.168.86.1, WAN IP
-108.88.208.88, model G6ZUC also. The two net_a1_6e76/net_a1_c76a mDNS names
+<home public IP>, model G6ZUC also. The two net_a1_6e76/net_a1_c76a mDNS names
 at .218/.220 seen earlier in this incident are NOT the basement pod (that
 guess was wrong) — likely the game-room pod (reported unplugged/reset
 earlier the same day) in some transient state, or stale entries; not
