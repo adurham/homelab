@@ -1,0 +1,14 @@
+---
+# One etcd member of the Patroni DCS (cluster token "grafana-db"). Plain HTTP on the private 172.16.0.0/24 only,
+# exactly as the cluster was built; TLS/auth for the DCS is a separate hardening task (docs/ha-inventory.md).
+etcd_member_name: "{{ inventory_hostname }}"
+etcd_member_ip: "{{ ansible_host }}"
+etcd_member_cluster_token: "grafana-db"
+# Everything in the `etcd` group is a member. Override at JOIN time only (a brand-new member must be started
+# with the list `etcdctl member add` printed, which still contains the member that is about to be retired).
+etcd_member_peers: "{{ groups['etcd'] }}"
+etcd_member_initial_cluster_override: ""
+# ETCD_INITIAL_CLUSTER_* are only read when a data dir does not exist. "existing" is the safe value for every member:
+# with "new" a wiped member would bootstrap its own one-node cluster instead of rejoining.
+etcd_member_initial_cluster_state: "existing"
+etcd_member_packages: [etcd-server, etcd-client]

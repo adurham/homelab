@@ -1,0 +1,6 @@
+---
+# Patroni member identity comes from inventory (group `patroni`): patroni_name / patroni_ip default to the host.
+patroni_name: "{{ inventory_hostname }}"
+patroni_ip: "{{ ansible_host }}"
+# One shared secret for the replication and superuser roles (as built on 2026-11). Vaulted as vault_patroni_password.
+patroni_password: "{{ vault_patroni_password }}"

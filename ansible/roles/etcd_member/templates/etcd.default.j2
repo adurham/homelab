@@ -1,0 +1,14 @@
+# Managed by Ansible (roles/etcd_member). Do not edit by hand.
+ETCD_NAME="{{ etcd_member_name }}"
+ETCD_DATA_DIR="/var/lib/etcd/{{ etcd_member_name }}"
+ETCD_LISTEN_PEER_URLS="http://{{ etcd_member_ip }}:2380"
+ETCD_LISTEN_CLIENT_URLS="http://{{ etcd_member_ip }}:2379,http://127.0.0.1:2379"
+ETCD_INITIAL_ADVERTISE_PEER_URLS="http://{{ etcd_member_ip }}:2380"
+{% if etcd_member_initial_cluster_override %}
+ETCD_INITIAL_CLUSTER="{{ etcd_member_initial_cluster_override }}"
+{% else %}
+ETCD_INITIAL_CLUSTER="{% for h in etcd_member_peers | sort %}{{ hostvars[h].etcd_member_name | default(h) }}=http://{{ hostvars[h].ansible_host }}:2380{{ ',' if not loop.last else '' }}{% endfor %}"
+{% endif %}
+ETCD_INITIAL_CLUSTER_STATE="{{ etcd_member_initial_cluster_state }}"
+ETCD_INITIAL_CLUSTER_TOKEN="{{ etcd_member_cluster_token }}"
+ETCD_ADVERTISE_CLIENT_URLS="http://{{ etcd_member_ip }}:2379"

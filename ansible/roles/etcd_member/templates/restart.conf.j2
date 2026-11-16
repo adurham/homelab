@@ -1,0 +1,10 @@
+# Managed by Ansible (roles/etcd_member).
+# The packaged unit has Restart=on-abnormal, which does not cover a clean exit(1): a member that died that way stayed
+# down for 8 hours and silently left the DCS at 2/3 voters. Quorum daemons restart unconditionally.
+[Unit]
+StartLimitIntervalSec=0
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStopSec=30

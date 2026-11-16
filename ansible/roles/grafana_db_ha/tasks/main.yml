@@ -1,0 +1,19 @@
+---
+# Adopts the hand-built Patroni pair (pg-01 / pg-02). Deliberately only manages the Patroni config file: PostgreSQL itself,
+# its data dir and the HAProxy front end stay as built (see README). Rendering must match the live file apart from the
+# intended drift (etcd3.hosts now derives from the `etcd` inventory group).
+- name: Patroni config
+  ansible.builtin.template:
+    src: patroni.yml.j2
+    dest: /etc/patroni/config.yml
+    owner: postgres
+    group: postgres
+    mode: "0600"
+  no_log: "{{ patroni_no_log | default(true) }}"
+  notify: reload patroni
+
+- name: Patroni running and enabled
+  ansible.builtin.systemd:
+    name: patroni
+    enabled: true
+    state: started

@@ -56,7 +56,7 @@ Garage, etcd, VictoriaMetrics storage, mail/NTP VIPs.
 
 | Service | Members | Backs | State at capture |
 |---|---|---|---|
-| etcd (DCS) | 140 /.44 pve03 · 144 /.48 pve01 · 106 /.42 pve02 | Patroni | 3 of 3 (member on 106 was dead 02:53–11:00, restarted, `Restart=always` set) |
+| etcd (DCS) | 140 /.44 pve03 · 144 /.48 pve01 · **146 /.43 pve02** (`pg-dcs-03`, dedicated since 2026-11-16) | Patroni | 3 of 3, one member per node; all units `Restart=always`; managed by `roles/etcd_member` (`deploy_etcd.yml`) |
 | Garage S3 | 151 /.71 pve01 · 152 /.72 pve03 · 153 /.74 pve02 | Loki chunks | 3 of 3, layout zone redundancy maximum |
 | Loki | 154 /.75 pve01 · 155 /.76 pve03 · 156 /.77 pve02 | log queries | `/ready` 200; historical range queries answer in 0.2 s |
 

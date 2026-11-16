@@ -1,10 +1,11 @@
+# Managed by Ansible (roles/grafana_db_ha). Do not edit by hand: secrets come from the vault.
 scope: grafana
 name: {{ patroni_name }}
 restapi:
   listen: {{ patroni_ip }}:8008
   connect_address: {{ patroni_ip }}:8008
 etcd3:
-  hosts: 172.16.0.44:2379,172.16.0.48:2379,172.16.0.42:2379
+  hosts: {{ groups['etcd'] | sort | map('extract', hostvars, 'ansible_host') | map('regex_replace', '$', ':2379') | join(',') }}
 bootstrap:
   dcs:
     ttl: 30

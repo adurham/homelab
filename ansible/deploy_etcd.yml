@@ -1,0 +1,20 @@
+---
+# Patroni DCS members. Usage:
+#   ansible-playbook deploy_etcd.yml --check --diff            # adoption check: shows only intended corrections
+#   ansible-playbook deploy_etcd.yml --limit pg-dcs-03 -e etcd_member_initial_cluster_override='<string from etcdctl member add>'
+- name: etcd members
+  hosts: etcd
+  become: true
+  gather_facts: false
+  serial: 1
+  roles:
+    - etcd_member
+  post_tasks:
+    - name: cluster health from this member
+      ansible.builtin.command: etcdctl --endpoints=http://127.0.0.1:2379 endpoint health
+      environment:
+        ETCDCTL_API: "3"
+      register: etcd_health
+      check_mode: false
+      changed_when: false
+      failed_when: "'is healthy' not in (etcd_health.stdout ~ etcd_health.stderr)"

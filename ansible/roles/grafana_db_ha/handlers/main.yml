@@ -1,0 +1,6 @@
+---
+- name: reload patroni
+  # SIGHUP re-reads the config without restarting PostgreSQL; a restart of a leader would be a failover.
+  ansible.builtin.systemd:
+    name: patroni
+    state: reloaded

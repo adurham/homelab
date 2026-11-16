@@ -1,0 +1,19 @@
+---
+# Patroni config for the Grafana/authentik database pair. One node at a time; never both at once.
+#   ansible-playbook deploy_patroni.yml --check --diff
+- name: Patroni pair
+  hosts: patroni
+  become: true
+  gather_facts: false
+  serial: 1
+  roles:
+    - grafana_db_ha
+  post_tasks:
+    - name: cluster state after this node
+      ansible.builtin.command: patronictl -c /etc/patroni/config.yml list
+      register: pl
+      changed_when: false
+      check_mode: false
+    - name: show it
+      ansible.builtin.debug:
+        msg: "{{ pl.stdout_lines }}"

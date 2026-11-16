@@ -1,0 +1,64 @@
+---
+- name: etcd packages
+  ansible.builtin.apt:
+    name: "{{ etcd_member_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: is this a brand-new member (no data dir yet)?
+  ansible.builtin.stat:
+    path: "/var/lib/etcd/{{ etcd_member_name }}"
+  register: etcd_member_datadir
+
+- name: member environment file
+  # Deliberately NO restart handler: these variables are only read at first bootstrap, and bouncing a live quorum
+  # member to re-read an unchanged runtime config is exactly the risk this role exists to remove.
+  ansible.builtin.template:
+    src: etcd.default.j2
+    dest: /etc/default/etcd
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: systemd drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/etcd.service.d
+    state: directory
+    mode: "0755"
+
+- name: restart policy drop-in
+  ansible.builtin.template:
+    src: restart.conf.j2
+    dest: /etc/systemd/system/etcd.service.d/restart.conf
+    mode: "0644"
+  notify: etcd daemon-reload
+
+- name: apply the drop-in now (daemon-reload does not restart the service)
+  ansible.builtin.meta: flush_handlers
+
+- name: first start of a NEW member - drop the packaged default instance and start on this config
+  # Debian's package auto-starts a single-node "default" etcd on install. Without this the new member would keep
+  # running that instead of joining the cluster (it happened on the first pg-dcs-03 attempt). Existing members
+  # (data dir present) are never restarted by this role.
+  when: not etcd_member_datadir.stat.exists
+  block:
+    - name: stop the packaged default instance
+      ansible.builtin.systemd:
+        name: etcd
+        state: stopped
+    - name: remove its throw-away data
+      ansible.builtin.file:
+        path: /var/lib/etcd/default
+        state: absent
+    - name: start on the managed config
+      ansible.builtin.systemd:
+        name: etcd
+        enabled: true
+        state: started
+
+- name: etcd enabled and running
+  ansible.builtin.systemd:
+    name: etcd
+    enabled: true
+    state: started
