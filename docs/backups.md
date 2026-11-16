@@ -153,3 +153,33 @@ MAC, so delete every `net*` before the first start or it collides with the real 
 - tms-01/tzs-01 (and ts-01) were in no vzdump job. tzs-01 (204) still is, by decision. The
   2026-11-23 cleanup of `moved-20261115-vm-202-disk-*` on pve02 can wait for the first complete
   tms-01 stream (check `rclone lsf vmbackup_crypt:pve-zfs/`), after which tms-01 has an off-site copy.
+
+### Third Fable review, 2026-11-15 evening: what was checked and changed
+
+- **Which Tanium pair is active** (the off-site list assumes the -01 pair): 7-day averages say so.
+  ts-01 7% CPU / 163 KiB/s out vs ts-02 1.8% / 10 KiB/s; tms-01 31% CPU vs tms-02 0.4%.
+- **Drive headroom:** 5.0 TiB total, 2.1 TiB free, ~100 GiB in trash (rclone default `use_trash`; a
+  pruned generation stays counted for 30 days). The encrypted tree is 582 GiB. Peak for the two
+  ZFS-stream VMs is three generations (upload happens before prune), ~930 GiB. Fine.
+- **Stream integrity (changed):** byte count and sha256 are now taken on the SOURCE node, before the
+  ssh leg (previously on pve01, so a stream truncated in transit would have agreed with its own
+  checksum); the remote side runs under `bash -c` with `pipefail` so a failing `zfs send` or ssh fails
+  the run. Objects upload as `<name>.partial` and are renamed only after the Drive size equals the
+  source count. Every run first deletes `*.partial` objects and any object of a (vmid, stamp) with no
+  config file, and destroys stale `@offsite-*` snapshots. Disks come from the main section of the VM
+  config only. Drilled twice with a 1 GiB scratch zvol: once on pve01 and once with the source on pve02
+  (`DRILL_NODE=pve02`, which exercises the ssh leg); restored sha256 equal both times.
+- **ssh from these scripts** now sets `IdentityAgent=none`: a forwarded agent with several keys made
+  pve02 hang up with "Too many authentication failures" before its own key was tried.
+- **Drive keys rebuilt without pve01's file:** `rclone.conf` rendered from the repo's Ansible vault
+  alone (vault password from 1Password) has all five fields, its crypt passwords hash-equal the live
+  ones, and it lists the same 88 decrypted objects. So Drive is recoverable from GitHub + 1Password;
+  the 1Password copy of the rendered config is redundant. (Run from the workstation, with pve01's
+  rclone binary; a laptop with no pve01 involvement was not tried.)
+- **Patroni's DCS** is a 3-member etcd, one member per node (pg-01 on pve03, pg-02 on pve01,
+  pg-dcs-02 on vm-01 / pve02): any single node loss keeps quorum.
+- **Capacity guard** only matches `@auto-weekly-NNNNNN` on the lab VMIDs' zvols; pvesr's
+  `__replicate_*` snapshots cannot be touched.
+- `pve_nic_k1_disabled` exported (1 on pve01 now) with rule `pve_nic_k1_enabled`: the private flag does
+  not survive a reboot unless the post-up line ran.
+

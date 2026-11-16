@@ -62,6 +62,10 @@ tmp=$(mktemp "$DIR/.pve_nic.XXXXXX")
   echo "pve_nic_offload_enabled{nic=\"$NIC\",feature=\"tso\"} $(feat tcp-segmentation-offload)"
   echo "pve_nic_offload_enabled{nic=\"$NIC\",feature=\"gso\"} $(feat generic-segmentation-offload)"
   echo "pve_nic_offload_enabled{nic=\"$NIC\",feature=\"gro\"} $(feat generic-receive-offload)"
+  # K1 link power state (e1000e private flag). 1 = K1 DISABLED, which is the hang mitigation; the
+  # flag is not stored in the NIC, so a reboot that skipped the post-up line leaves K1 on again.
+  k1=$(ethtool --show-priv-flags "$NIC" 2>/dev/null | awk '/disable-k1/{print ($NF=="on") ? 1 : 0}')
+  echo "pve_nic_k1_disabled{nic=\"$NIC\"} ${k1:-0}"
   echo '# HELP pve_kernel_witness_active 1 when kernel-witness.service is running.'
   echo '# TYPE pve_kernel_witness_active gauge'
   echo "pve_kernel_witness_active $active"

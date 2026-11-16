@@ -26,7 +26,9 @@ DRY="${DRY_RUN:-0}"
 # guests are not pruned), so the real fetch -> upload -> delete -> skip -> prune path can be
 # exercised on a few tiny guests without a 300 GiB upload.
 MAX_MIB="${MAX_MIB:-0}"
-SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10"
+# IdentityAgent=none: a forwarded agent with many keys makes sshd hang up ("Too many authentication
+# failures") before the node's own key is tried; these jobs only ever use the host key.
+SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o IdentityAgent=none"
 mkdir -p "$STAGE"
 
 # One run at a time. A 40-hour upload can overlap the next timer tick, and two runs would

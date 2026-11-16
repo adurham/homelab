@@ -188,6 +188,64 @@ groups:
         labels:
           severity: warning
         isPaused: false
+      - uid: pve_nic_k1_enabled
+        title: pve01 NIC K1 link power state is on again (hang mitigation not in effect)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: max by (instance) (1 - pve_nic_k1_disabled{instance="pve01"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: pve01 nic0 has K1 enabled again (disable-k1 is off)
+          description: disable-k1 is the second pve01 e1000e hang mitigation (post-up in /etc/network/interfaces,
+            roles/proxmox_network, proxmox_network_nic_disable_k1). The private flag does not survive a reboot unless
+            that post-up line ran. `ethtool --show-priv-flags nic0` on pve01; re-apply `ethtool --set-priv-flags
+            nic0 disable-k1 on`.
+        labels:
+          severity: warning
+        isPaused: false
       - uid: pve_kernel_witness_down
         title: PVE kernel witness is not running
         condition: C
