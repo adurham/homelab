@@ -1,7 +1,8 @@
 ---
 # Application-consistent dump of authentik's database, captured by the nightly vzdump.
 - name: authentik nightly PostgreSQL dump
-  hosts: authentik_server
+  # Pinned to the primary: both nodes share one Patroni database, one dump is enough.
+  hosts: authentik
   become: true
   gather_facts: false
   roles:

@@ -1,20 +1,23 @@
 #!/bin/bash
 # Managed by Ansible — roles/authentik_pgdump.
+# authentik's database is the Patroni cluster behind the local haproxy ({{ authentik_pgdump_host }}:{{ authentik_pgdump_port }});
+# there is no postgres container on this CT any more, so pg_dump runs from a throwaway
+# client container on the host network. The password lives in a root-only env file.
 set -uo pipefail
 DEST="{{ authentik_pgdump_dir }}"
 KEEP={{ authentik_pgdump_keep }}
-C="{{ authentik_pgdump_container }}"
 out="$DEST/authentik-$(date +%Y%m%d-%H%M).sql.gz"
 
 mkdir -p "$DEST"
-if ! docker exec "$C" pg_dump -U authentik -d authentik --clean --if-exists 2>/tmp/pgdump.err | gzip -9 > "$out"; then
-  echo "authentik-pgdump: pg_dump failed: $(tail -2 /tmp/pgdump.err)" >&2
-  rm -f "$out"
-  exit 1
+if ! docker run --rm --network host --env-file /etc/authentik-pgdump.env "{{ authentik_pgdump_image }}" \
+     pg_dump -h {{ authentik_pgdump_host }} -p {{ authentik_pgdump_port }} -U {{ authentik_pgdump_user }} -d {{ authentik_pgdump_db }} --no-owner \
+     | gzip -9 > "$out.tmp"; then
+  rm -f "$out.tmp"; echo "authentik-pgdump: pg_dump failed" >&2; exit 1
 fi
-if ! gzip -t "$out" 2>/dev/null; then
-  echo "authentik-pgdump: $out is not a valid gzip — discarding" >&2
-  rm -f "$out"; exit 1
+# pipefail covers pg_dump; also refuse a truncated/empty archive.
+if ! gzip -t "$out.tmp" || [ "$(stat -c %s "$out.tmp")" -lt 1048576 ]; then
+  rm -f "$out.tmp"; echo "authentik-pgdump: dump failed integrity/size check" >&2; exit 1
 fi
-echo "authentik-pgdump: wrote $out ($(du -h "$out" | cut -f1))"
-ls -1t "$DEST"/authentik-*.sql.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+mv "$out.tmp" "$out"
+ls -1t "$DEST"/authentik-*.sql.gz | tail -n +$((KEEP + 1)) | xargs -r rm -f
+echo "authentik-pgdump: wrote $out ($(stat -c %s "$out") bytes)"

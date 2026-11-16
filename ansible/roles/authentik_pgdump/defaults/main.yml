@@ -7,4 +7,10 @@
 authentik_pgdump_dir: /var/backups/authentik
 authentik_pgdump_keep: 7
 authentik_pgdump_schedule: "*-*-* 02:45:00 America/Chicago"
-authentik_pgdump_container: authentik-postgresql-1
+# Client image only (the database is the Patroni cluster); v16 client can dump the v15 server.
+authentik_pgdump_image: postgres:16-alpine
+# Where the dump connects: the local haproxy that follows the Patroni leader.
+authentik_pgdump_host: "{{ ansible_host }}"
+authentik_pgdump_port: 5432
+authentik_pgdump_user: authentik
+authentik_pgdump_db: authentik_utf8

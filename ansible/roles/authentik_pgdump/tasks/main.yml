@@ -7,6 +7,15 @@
     group: root
     mode: "0700"
 
+- name: Install dump credentials (root-only env file)
+  ansible.builtin.copy:
+    content: "PGPASSWORD={{ authentik_pg_password }}\n"
+    dest: /etc/authentik-pgdump.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
 - name: Install dump script
   ansible.builtin.template:
     src: authentik-pgdump.sh.j2
