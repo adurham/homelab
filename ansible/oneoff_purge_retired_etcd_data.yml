@@ -1,0 +1,64 @@
+---
+# One-off, self-removing cleanup. On 2026-11-16 the third etcd voter moved off vm-01 to its own CT (pg-dcs-03); the old member's
+# data dir was only renamed, as a rollback copy. This installs a daily timer on vm-01 that deletes it once:
+#   - the date is 2026-11-23 or later (one week of grace),
+#   - the 3 remaining members all report healthy,
+#   - etcd is not running on vm-01 at all (it was removed from the cluster and disabled),
+# and then removes the timer, service and script. If any condition fails it simply tries again the next day.
+#   ansible-playbook oneoff_purge_retired_etcd_data.yml
+- name: Install the self-removing purge of the retired etcd data dir
+  hosts: vm-01
+  become: true
+  gather_facts: false
+  vars:
+    purge_after: "2026-11-23"
+    retired_dir: "/var/lib/etcd/pg-dcs-02.retired-20261116"
+  tasks:
+    - name: purge script
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/purge-retired-etcd-data.sh
+        mode: "0750"
+        content: |
+          #!/bin/bash
+          # Managed by Ansible (oneoff_purge_retired_etcd_data.yml). Removes itself after a successful purge.
+          set -u
+          D="{{ retired_dir }}"
+          selfclean() {
+            systemctl disable --now purge-retired-etcd.timer >/dev/null 2>&1
+            rm -f /etc/systemd/system/purge-retired-etcd.timer /etc/systemd/system/purge-retired-etcd.service /usr/local/sbin/purge-retired-etcd-data.sh
+            systemctl daemon-reload
+          }
+          if [ ! -d "$D" ]; then echo "retired etcd data already gone"; selfclean; exit 0; fi
+          if [ "$(date +%s)" -lt "$(date -d '{{ purge_after }}' +%s)" ]; then echo "grace period not over yet"; exit 0; fi
+          if systemctl is-active --quiet etcd; then echo "etcd is running on this host - leaving the rollback copy"; exit 1; fi
+          H=$(ETCDCTL_API=3 etcdctl --endpoints=http://172.16.0.44:2379,http://172.16.0.48:2379,http://172.16.0.43:2379 endpoint health 2>&1 | grep -c "is healthy")
+          if [ "$H" != "3" ]; then echo "DCS is $H/3 healthy - keeping the rollback copy, will retry tomorrow"; exit 1; fi
+          rm -rf --one-file-system -- "$D" && echo "purged $D" && selfclean
+    - name: purge service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/purge-retired-etcd.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Delete the retired etcd member's data dir after the grace period
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/purge-retired-etcd-data.sh
+    - name: purge timer (daily, Persistent so a missed run happens at the next boot)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/purge-retired-etcd.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Daily check for the retired etcd data purge
+          [Timer]
+          OnCalendar=*-*-* 06:15:00
+          Persistent=true
+          [Install]
+          WantedBy=timers.target
+    - name: enable the timer
+      ansible.builtin.systemd:
+        name: purge-retired-etcd.timer
+        enabled: true
+        state: started
+        daemon_reload: true
