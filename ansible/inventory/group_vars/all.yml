@@ -293,6 +293,7 @@ yd_gated_hosts:
   - mail-01
   - ntp-01
   - authentik
+  - authentik_02
   - frigate-01
   - tailscale-gw
   - gallery-01

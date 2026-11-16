@@ -1,6 +1,5 @@
 ---
-- name: Restart Nginx
+- name: Reload haproxy
   ansible.builtin.service:
-    name: nginx
-    state: restarted
-    enabled: true
+    name: haproxy
+    state: reloaded

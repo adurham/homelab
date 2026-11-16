@@ -6,7 +6,9 @@
     - authentik_host
 
 - name: Configure Authentik Service
-  hosts: authentik
+  hosts: authentik_server
+  # every node in the group runs the same stack; bump versions one node at a time (see the role defaults)
+  serial: 1
   gather_facts: true
   pre_tasks: []
 

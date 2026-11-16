@@ -1,96 +1,50 @@
 ---
-version: "3.4"
-
+# Managed by Ansible (roles/authentik_service). Identical on every authentik node.
+# No local postgres, no redis, no proxy outpost: the database is the Patroni pair behind this
+# node's haproxy, and forward-auth is served by the embedded outpost on the server container
+# (:9000) that the load balancers' `outpost_backend` points at.
 services:
-  postgresql:
-    image: {{ authentik_postgres_image }}:{{ authentik_postgres_tag }}
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
-      start_period: 20s
-      interval: 30s
-      retries: 5
-      timeout: 5s
-    volumes:
-      - database:/var/lib/postgresql/data
-    environment:
-      POSTGRES_PASSWORD: {{ authentik_pg_password }}
-      POSTGRES_USER: {{ authentik_pg_user | default('authentik') }}
-      POSTGRES_DB: {{ authentik_pg_db | default('authentik') }}
-    env_file:
-      - .env
-
-  redis:
-    image: {{ authentik_redis_image }}:{{ authentik_redis_tag }}
-    command: --save 60 1 --loglevel warning
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
-      start_period: 20s
-      interval: 30s
-      retries: 5
-      timeout: 3s
-    volumes:
-      - redis:/data
-
   server:
     image: {{ authentik_image }}:{{ authentik_tag }}
     restart: unless-stopped
     command: server
     extra_hosts:
-      - "mail.chi.lab.amd-e.com:{{ ip_mail_server }}"
+      - "mail.chi.lab.amd-e.com:{{ authentik_mail_host }}"
     environment:
-      AUTHENTIK_REDIS__HOST: redis
-      AUTHENTIK_POSTGRESQL__HOST: postgresql
-      AUTHENTIK_POSTGRESQL__USER: {{ authentik_pg_user | default('authentik') }}
-      AUTHENTIK_POSTGRESQL__NAME: {{ authentik_pg_db | default('authentik') }}
-      AUTHENTIK_POSTGRESQL__PASSWORD: {{ authentik_pg_password }}
-      # More gunicorn workers/threads so concurrent auth_request validations (the
-      # gallery fires many) don't serialize behind a single worker and time out.
-      AUTHENTIK_WEB__WORKERS: "{{ authentik_web_workers | default(2) }}"
-      AUTHENTIK_WEB__THREADS: "{{ authentik_web_threads | default(4) }}"
-    volumes:
-      - media:/media
-      - custom-templates:/templates
+      PGCLIENTENCODING: "UTF8"
+      AUTHENTIK_POSTGRESQL__HOST: "{{ authentik_pg_host }}"
+      AUTHENTIK_POSTGRESQL__PORT: "{{ authentik_pg_port }}"
+      AUTHENTIK_POSTGRESQL__NAME: "{{ authentik_pg_db }}"
+      AUTHENTIK_POSTGRESQL__USER: "{{ authentik_pg_user }}"
+      AUTHENTIK_POSTGRESQL__PASSWORD: "{{ authentik_pg_password }}"
+      # More gunicorn workers/threads so concurrent auth_request validations (the gallery fires
+      # many) do not serialize behind a single worker and time out.
+      AUTHENTIK_WEB__WORKERS: "{{ authentik_web_workers }}"
+      AUTHENTIK_WEB__THREADS: "{{ authentik_web_threads }}"
     env_file:
       - .env
+    volumes:
+      - ./media:/media
+      - ./custom-templates:/templates
     ports:
-      - "${COMPOSE_PORT_HTTP:-9000}:9000"
-      - "${COMPOSE_PORT_HTTPS:-9443}:9443"
-    depends_on:
-      - postgresql
-      - redis
+      - "9000:9000"
+      - "9443:9443"
 
   worker:
     image: {{ authentik_image }}:{{ authentik_tag }}
     restart: unless-stopped
     command: worker
     extra_hosts:
-      - "mail.chi.lab.amd-e.com:{{ ip_mail_server }}"
+      - "mail.chi.lab.amd-e.com:{{ authentik_mail_host }}"
     environment:
-      AUTHENTIK_REDIS__HOST: redis
-      AUTHENTIK_POSTGRESQL__HOST: postgresql
-      AUTHENTIK_POSTGRESQL__USER: {{ authentik_pg_user | default('authentik') }}
-      AUTHENTIK_POSTGRESQL__NAME: {{ authentik_pg_db | default('authentik') }}
-      AUTHENTIK_POSTGRESQL__PASSWORD: {{ authentik_pg_password }}
-    # `user: root` is often needed for Docker in LXC due to permission mapping issues with mounted volumes?
-    # Usually strictly confined LXC needs this, but unprivileged with nesting might be fine.
-    # We'll try without root first.
-    volumes:
-      - media:/media
-      - certs:/certs
-      - custom-templates:/templates
+      PGCLIENTENCODING: "UTF8"
+      AUTHENTIK_POSTGRESQL__HOST: "{{ authentik_pg_host }}"
+      AUTHENTIK_POSTGRESQL__PORT: "{{ authentik_pg_port }}"
+      AUTHENTIK_POSTGRESQL__NAME: "{{ authentik_pg_db }}"
+      AUTHENTIK_POSTGRESQL__USER: "{{ authentik_pg_user }}"
+      AUTHENTIK_POSTGRESQL__PASSWORD: "{{ authentik_pg_password }}"
     env_file:
       - .env
-    depends_on:
-      - postgresql
-      - redis
-
-volumes:
-  database:
-    driver: local
-  redis:
-    driver: local
-  media:
-  certs:
-  custom-templates:
+    volumes:
+      - ./media:/media
+      - ./custom-templates:/templates

@@ -1,204 +1,176 @@
 ---
-- name: Remove legacy Docker source list
-  ansible.builtin.file:
-    path: /etc/apt/sources.list.d/docker.list
-    state: absent
+# One authentik node of a highly-available pair. See defaults/main.yml for the topology.
 
-- name: Install dependencies (Nginx, Certs)
+- name: Check for the docker compose plugin
+  ansible.builtin.command: docker compose version
+  register: authentik_service_compose_check
+  changed_when: false
+  failed_when: false
+
+- name: Install docker + compose plugin (only when compose is missing)
   ansible.builtin.apt:
-    name:
-      - curl
-      - git
-      - ca-certificates
-      - gnupg
-      - nginx
-      - socat
+    name: "{{ authentik_docker_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: authentik_service_compose_check.rc != 0
+
+# ---- database access: this node's own haproxy in front of the Patroni pair -----------------------
+- name: Install haproxy
+  ansible.builtin.apt:
+    name: haproxy
     state: present
     update_cache: true
     cache_valid_time: 3600
 
-- name: Add Docker GPG apt Key
-  ansible.builtin.apt_key:
-    url: https://download.docker.com/linux/ubuntu/gpg
-    state: present
-
-- name: Add Docker Repository
-  ansible.builtin.apt_repository:
-    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_facts['distribution_release'] }} stable"
-    state: present
-
-- name: Install Docker
-  ansible.builtin.apt:
-    name:
-      - docker-ce
-      - docker-ce-cli
-      - containerd.io
-      - docker-buildx-plugin
-      - docker-compose-plugin
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
-
-- name: Install acme.sh (Clone Repo)
-  ansible.builtin.git:
-    repo: https://github.com/acmesh-official/acme.sh.git
-    dest: /opt/acme.sh
-    version: master
-    depth: 1
-
-- name: Install acme.sh (Run Installer)
-  ansible.builtin.command:
-    cmd: ./acme.sh --install -m admin@lab.amd-e.com
-    chdir: /opt/acme.sh
-  args:
-    creates: /root/.acme.sh/acme.sh
-
-- name: Create SSL Directory
-  ansible.builtin.file:
-    path: /etc/nginx/ssl
-    state: directory
-    mode: '0755'
-    owner: root
-    group: root
-
-- name: Issue Certificate (DNS-01)
-  ansible.builtin.shell: |
-    export DEDYN_TOKEN="{{ acme_dedyn_token }}"
-    /root/.acme.sh/acme.sh --issue \
-      --dns dns_desec \
-      -d auth.chi.lab.amd-e.com
-  args:
-    creates: /root/.acme.sh/auth.chi.lab.amd-e.com_ecc/auth.chi.lab.amd-e.com.key
-  environment:
-    DEDYN_TOKEN: "{{ acme_dedyn_token }}"
-  no_log: true
-
-- name: Install Certificate to Nginx
-  ansible.builtin.shell: |
-    /root/.acme.sh/acme.sh --install-cert -d auth.chi.lab.amd-e.com \
-      --key-file       /etc/nginx/ssl/auth.key  \
-      --fullchain-file /etc/nginx/ssl/fullchain.cer \
-      --reloadcmd     "systemctl force-reload nginx"
-  args:
-    creates: /etc/nginx/ssl/auth.key
-
-- name: Deploy Nginx Configuration
+- name: Render haproxy config (validated before it is installed)
   ansible.builtin.template:
-    src: nginx.conf.j2
-    dest: /etc/nginx/sites-available/authentik
-    mode: '0644'
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    mode: "0644"
     owner: root
     group: root
-  notify: Restart Nginx
+    validate: haproxy -c -f %s
+  notify: Reload haproxy
 
-- name: Enable Nginx Site
-  ansible.builtin.file:
-    src: /etc/nginx/sites-available/authentik
-    dest: /etc/nginx/sites-enabled/authentik
-    state: link
-  notify: Restart Nginx
+- name: Enable and start haproxy
+  ansible.builtin.service:
+    name: haproxy
+    state: started
+    enabled: true
 
-- name: Remove Default Nginx Site
-  ansible.builtin.file:
-    path: /etc/nginx/sites-enabled/default
-    state: absent
-  notify: Restart Nginx
+# apt starts haproxy with the stock config before ours is rendered; apply ours NOW, not at play end,
+# or the database listener does not exist when authentik first starts below.
+- name: Apply the haproxy config before authentik starts
+  ansible.builtin.meta: flush_handlers
 
-- name: Create Authentik Directory
+# A handler is lost when an earlier run failed after rendering the file, so a re-run sees "no change"
+# and never reloads. Trust the listener, not the notification.
+- name: Check haproxy is actually listening for the database
+  ansible.builtin.shell: "ss -ltnH 'sport = :{{ authentik_pg_port }}' | grep -q ."
+  args:
+    executable: /bin/bash
+  register: authentik_service_pg_listen
+  changed_when: false
+  failed_when: false
+
+- name: Restart haproxy when the database listener is missing
+  ansible.builtin.service:
+    name: haproxy
+    state: restarted
+  when: authentik_service_pg_listen.rc != 0
+
+# ---- application files ---------------------------------------------------------------------------
+- name: Create the authentik directory tree
   ansible.builtin.file:
-    path: /opt/authentik
+    path: "{{ item.path }}"
     state: directory
-    mode: '0755'
-    owner: root
-    group: root
+    mode: "0755"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.owner | default('root') }}"
+  loop:
+    - { path: "{{ authentik_dir }}" }
+    # The containers run as uid 1000 and write uploads here.
+    - { path: "{{ authentik_dir }}/media", owner: "1000" }
+    - { path: "{{ authentik_dir }}/media/public", owner: "1000" }
+    - { path: "{{ authentik_dir }}/media/public/brand", owner: "1000" }
+    - { path: "{{ authentik_dir }}/custom-templates", owner: "1000" }
 
-- name: Deploy Docker Compose file
+# Media is configuration-as-code: icons and branding live in the repo and are identical on every
+# node. (Uploading an icon through the UI lands on ONE node only - add the file to the repo instead.)
+- name: Deploy application icons
+  ansible.builtin.copy:
+    src: media/public/application-icons/
+    dest: "{{ authentik_dir }}/media/public/application-icons/"
+    mode: "0644"
+    directory_mode: "0755"
+    owner: "1000"
+    group: "1000"
+
+- name: Deploy brand assets (the same files authentik_provider points the brand at)
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../authentik_provider/files/{{ item.src }}"
+    dest: "{{ authentik_dir }}/media/public/brand/{{ item.dest }}"
+    mode: "0644"
+    owner: "1000"
+    group: "1000"
+  loop:
+    - { src: amd_enterprises_logo.svg, dest: logo.svg }
+    - { src: amd_enterprises_favicon.svg, dest: favicon.svg }
+    - { src: amd_enterprises_flow_bg.svg, dest: flow_bg.svg }
+
+- name: Deploy docker-compose.yml
   ansible.builtin.template:
     src: docker-compose.yml.j2
-    dest: /opt/authentik/docker-compose.yml
-    mode: '0640'
+    dest: "{{ authentik_dir }}/docker-compose.yml"
+    mode: "0600"
     owner: root
     group: root
   no_log: true
+  register: authentik_service_compose_file
 
-- name: Deploy .env file
+- name: Deploy .env
   ansible.builtin.template:
     src: .env.j2
-    dest: /opt/authentik/.env
-    mode: '0600'
+    dest: "{{ authentik_dir }}/.env"
+    mode: "0600"
     owner: root
     group: root
   no_log: true
+  register: authentik_service_env_file
 
-- name: Start Authentik Configuration
-  community.docker.docker_compose_v2:
-    project_src: /opt/authentik
-    state: present
-  register: authentik_service_compose_result
-
-# -------------------------------------------------------------------------
-# Branding image files (2026-09-12 fix)
-#
-# Previously the AMD-Enterprises logo/favicon/flow-background were pushed
-# via manage_authentik.yml (authentik_provider role) as raw data: URIs
-# PATCHed straight onto the brand's branding_logo/branding_favicon/
-# branding_default_flow_background fields — Authentik's own docs confirmed
-# at the time (2026-08-04) that no separate file-upload API endpoint
-# existed, so this was the only API-only way to set an image value.
-#
-# That broke silently after this session's 2025.8.1->2026.8.0 upgrade:
-# upstream changed how those fields resolve to URLs, and now ALWAYS
-# prepends /files/media/public/ to whatever string is stored, even when
-# that string is a full data: URI, producing a garbage URL like
-# /files/media/public/data:image/svg+xml;base64,....  (matches upstream
-# goauthentik/authentik#19541 and #19573 — known regression, not our
-# config's fault). Real user impact: broken "authentik Logo" box on the
-# login page.
-#
-# Root-cause fix: stop using data: URIs entirely. Copy the actual SVG
-# files into Authentik's own /media/public/brand/ directory (the file
-# picker's real, supported storage location per docs.goauthentik.io/
-# customize/files/), then have authentik_provider/tasks/branding.yml
-# PATCH the brand with plain relative paths (brand/logo.svg etc) instead
-# of data URIs. Relative paths under /media/public/ correctly resolve via
-# /files/media/public/<path>?token=... regardless of this upstream bug,
-# because the bug is specifically in the data:-URI branch of that
-# resolution logic, not the plain-relative-path branch. Verified live
-# 2026-09-12: this exact pattern returns a real 200 image/svg+xml.
-# -------------------------------------------------------------------------
-
-- name: Ensure branding media directory exists inside the container
-  ansible.builtin.command:
-    cmd: >-
-      docker compose exec -T server
-      mkdir -p /media/public/brand
-    chdir: /opt/authentik
-  changed_when: false
-
-- name: Copy AMD-Enterprises branding SVGs into the container
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/roles/authentik_provider/files/{{ item.src }}"
-    dest: "/tmp/authentik_branding_{{ item.dest }}"
-    mode: '0644'
-  loop:
-    - { src: "amd_enterprises_logo.svg", dest: "logo.svg" }
-    - { src: "amd_enterprises_favicon.svg", dest: "favicon.svg" }
-    - { src: "amd_enterprises_flow_bg.svg", dest: "flow_bg.svg" }
-  # Registered (not notify'd): Ansible handlers do NOT get the notifying loop item bound,
-  # so the old `notify:` + handler using `item.item.dest` failed with "'item' is undefined"
-  # and left the play red whenever a branding file changed (hit during the 2026.8.4 upgrade).
-  # The task below loops over these results and only re-pushes files that actually changed.
-  register: authentik_branding_copy
-
-- name: Push changed branding SVGs into the running container's media volume  # noqa: no-handler
+- name: Remove single-node leftovers (override file, stale backups)
   ansible.builtin.shell: |
     set -e
-    CID=$(docker compose ps -q server)
-    docker cp /tmp/authentik_branding_{{ item.item.dest }} "$CID":/media/public/brand/{{ item.item.dest }}
+    cd {{ authentik_dir }}
+    rm -f docker-compose.ha.yml docker-compose.yml.bak* docker-compose.yml.pre-* docker-compose.override.yml
   args:
-    chdir: /opt/authentik
-  loop: "{{ authentik_branding_copy.results }}"
-  loop_control:
-    label: "{{ item.item.dest }}"
-  when: item.changed
-  changed_when: true
+    executable: /bin/bash
+    removes: "{{ authentik_dir }}/docker-compose.ha.yml"
+  when: authentik_service_retire_legacy | bool
+
+- name: Start authentik (and remove containers the new definition no longer has)
+  community.docker.docker_compose_v2:
+    project_src: "{{ authentik_dir }}"
+    state: present
+    remove_orphans: true
+    recreate: "{{ 'always' if (authentik_service_compose_file.changed or authentik_service_env_file.changed) else 'auto' }}"
+  register: authentik_service_compose_result
+
+- name: Wait until this node answers ready
+  ansible.builtin.uri:
+    url: http://127.0.0.1:9000/-/health/ready/
+    status_code: 200
+  register: authentik_service_ready
+  retries: 60
+  delay: 3
+  until: authentik_service_ready.status == 200
+
+# ---- retire the old single-node front end ---------------------------------------------------------
+# TLS is terminated on the load balancers (their own ACME). A per-node nginx + acme.sh only held a
+# second copy of the DNS-API token and served nothing.
+- name: Stop and disable the per-node nginx
+  ansible.builtin.service:
+    name: nginx
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: authentik_service_retire_legacy | bool
+
+- name: Remove the per-node acme.sh install (it carried a DNS-API token)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /root/.acme.sh
+    - /opt/acme.sh
+    - /etc/nginx/sites-enabled/authentik
+    - /etc/nginx/sites-available/authentik
+    - /etc/nginx/ssl
+  when: authentik_service_retire_legacy | bool
+
+- name: Drop the acme.sh cron entry
+  ansible.builtin.cron:
+    name: "acme.sh"
+    state: absent
+  when: authentik_service_retire_legacy | bool

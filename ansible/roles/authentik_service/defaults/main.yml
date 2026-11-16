@@ -1,30 +1,44 @@
 ---
-# Container image pins. Each is a separate var so Renovate's custom-regex
-# managers can track them independently against their respective registries.
-# See `.github/renovate.json`.
+# authentik, highly available: every node in the `authentik_server` group runs the SAME stack
+# (server + worker + its own haproxy in front of the Patroni pair) and the load balancers
+# (lb-01/lb-02 `auth_backend` / `outpost_backend`) spread requests across all of them.
+# There is no per-node database, no redis (authentik 2026.8 keeps sessions/cache/tasks in
+# Postgres), and no per-node nginx/ACME: TLS terminates on the load balancers.
 
+# Container image pin. Separate var so Renovate's custom-regex manager can track it.
+# See `.github/renovate.json`.
 authentik_image: "ghcr.io/goauthentik/server"
-# 2026-09-12: this default was stale at 2025.8.1 (vulnerable to a critical
-# RCE CVE) despite the live host having been manually upgraded to 2026.8.0
-# via 6 sequential hops on 2026-09-10. Ansible's own AUTHENTIK_TAG had
-# never been updated to match, so the very next deploy_authentik.yml /
-# manage_authentik.yml run silently downgraded the live container back to
-# 2025.8.1 and broke redis in the process (RDB format v15, written by the
-# newer redis paired with 2026.8.0, is incompatible with the older redis
-# image implicitly paired with this stale tag's original deploy — see
-# authentik_redis_tag below, which was NOT the actual cause since it was
-# never bumped either; the real trigger was AUTHENTIK_TAG regressing).
-# This var is now the single source of truth for the deployed version —
-# bump it here (and re-run deploy_authentik.yml) for every future
-# Authentik upgrade, sequential-hop or otherwise, so the live version and
-# this repo can never silently diverge again.
+# Single source of truth for the deployed version (2026-09-12: a stale default here once
+# silently downgraded a live node). authentik does NOT support two versions against one
+# database: when bumping, change this and deploy ONE node at a time
+# (`--limit authentik`, wait healthy, then `--limit authentik_02`) so the schema migration
+# runs once and the other node keeps serving the old version until it is next.
 authentik_tag: "2026.8.4"
 
-# Postgres major version is coupled to Authentik's supported range; bump
-# the major only after confirming Authentik release notes support it.
-authentik_postgres_image: "docker.io/library/postgres"
-authentik_postgres_tag: "16.11-alpine"
+authentik_dir: /opt/authentik
 
-# Redis is more loosely coupled (Authentik uses it as a cache/queue).
-authentik_redis_image: "docker.io/library/redis"
-authentik_redis_tag: "8.4.0-alpine"
+# Database: the Patroni pair, reached through a haproxy that EVERY authentik node runs for itself
+# (`GET /primary` on the Patroni REST port picks the leader), so no node's database access depends
+# on another node being up.
+authentik_pg_backends:
+  - { name: pg-01, address: 172.16.0.44 }
+  - { name: pg-02, address: 172.16.0.48 }
+authentik_pg_rest_port: 8008
+authentik_pg_user: authentik
+authentik_pg_db: authentik_utf8
+authentik_pg_bind: "0.0.0.0"
+authentik_pg_port: 5432
+# The server/worker containers reach this node's own haproxy through the node's address.
+authentik_pg_host: "{{ ansible_host }}"
+
+authentik_web_workers: 2
+authentik_web_threads: 4
+authentik_mail_host: "{{ ip_mail_server }}"
+
+# Apt names used only when a node has no `docker compose` yet (Ubuntu 24.04).
+authentik_docker_packages:
+  - docker.io
+  - docker-compose-v2
+
+# Retire the single-node leftovers (local nginx + acme.sh + override files) on nodes that had them.
+authentik_service_retire_legacy: true

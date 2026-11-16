@@ -190,6 +190,10 @@ all:
           ansible_host: "{{ ip_authentik }}"
           vmid: 100
           target_node: pve01
+        authentik_02:
+          ansible_host: "{{ ip_authentik_02 }}"
+          vmid: 150
+          target_node: pve02
       vars:
         ansible_user: amd
         ansible_become: true

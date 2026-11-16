@@ -1,0 +1,26 @@
+# Managed by Ansible (roles/authentik_service). Each authentik node runs its own copy so that
+# no node's database access depends on another node being up.
+global
+    daemon
+    maxconn 200
+
+defaults
+    mode tcp
+    timeout connect 5s
+    # authentik holds long-lived Postgres connections (LISTEN/NOTIFY); do not cut idle ones early.
+    timeout client 30m
+    timeout server 30m
+    option clitcpka
+    option srvtcpka
+
+frontend pg
+    bind {{ authentik_pg_bind }}:{{ authentik_pg_port }}
+    default_backend pg_nodes
+
+backend pg_nodes
+    option httpchk GET /primary
+    http-check expect status 200
+    default-server inter 2s fall 3 rise 2 on-marked-down shutdown-sessions
+{% for b in authentik_pg_backends %}
+    server {{ b.name }} {{ b.address }}:5432 check port {{ authentik_pg_rest_port }}
+{% endfor %}
