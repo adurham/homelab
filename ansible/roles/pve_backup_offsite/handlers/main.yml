@@ -5,3 +5,10 @@
     name: pve-backup-push.timer
     enabled: true
     state: started
+
+- name: Reload systemd and enable Tanium push timer
+  ansible.builtin.systemd:
+    daemon_reload: true
+    name: pve-tanium-offsite.timer
+    enabled: true
+    state: started

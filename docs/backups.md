@@ -118,20 +118,38 @@ A restored Patroni member is a replica: its data dir carries `standby.signal`, w
 removed to start it standalone, and the restored CT config still carries the LIVE static IP and
 MAC, so delete every `net*` before the first start or it collides with the real one.
 
-**Gaps the drill exposed**
+**What the drill got wrong, and what it really showed (corrected the same evening)**
 
-- The Drive crypt keys (`password`, `password2`) existed only in `/root/.config/rclone/rclone.conf`
-  on pve01. Lose that disk and every Drive archive is unreadable. A copy is now in 1Password,
-  Hermes vault, item "rclone.conf (pve backup Drive + crypt keys)" (base64 field, byte-for-byte
-  round-trip checked). The Drive OAuth token inside may need re-authorising; the crypt keys are
-  the permanent part.
-- **24 of 58 guests have no archive on Drive**, among them pg-02, graf-db-01, graf-02, lan-dns-01,
-  loki-03, the garage trio, tms-01 and tzs-01. Saturday's run started 11-14 05:06 and pve01 was
-  fenced 11-15 06:37, about 25 h in, on a run that needs ~40 h: consistent with the push having
-  been killed mid-way. The new flock + start-of-run cleanup handle the debris, but a 40 h run
-  that a fence can interrupt will never finish on a node that hangs.
-- **tms-01 (202) and tzs-01 (204) are in no vzdump job** (the jobs list 201, 203, 205), so they
-  have no archive anywhere; their only copies are same-pool ZFS weeklies. Until that is decided,
-  do not run the 2026-11-23 cleanup of `moved-20261115-vm-202-disk-*` on pve02: it is the only
-  copy of tms-01 that does not live on pve01's pool.
-
+- It first looked as if the Drive crypt keys lived only on pve01. They do not: `rclone.conf` is
+  rendered by Ansible from vaulted variables (`vault_vm_backup_gdrive_*`; the plaintext crypt
+  passwords are also in the vault and the macOS keychain, per the template header), and the vault
+  password is in 1Password. The rendered file was copied to 1Password anyway (Hermes vault,
+  "rclone.conf (pve backup Drive + crypt keys)"): redundant, and it also holds a live full-Drive
+  OAuth token, so delete the item if you would rather not have that there.
+- **The "~16 Mbit/s, ~40 h per weekly push" figure was wrong.** The line is 1 Gbit symmetric and a
+  1 GiB test upload from pve01 measured 21-27 MiB/s (single rclone stream; chunk size and stream
+  count barely matter). The full weekly push is about 100 GiB, so ~1.2 h, not 40 h. The "fence
+  killed a 40 h run" explanation for the missing Drive copies is therefore unsupported. Why 24
+  guests had no Drive copy is not established; the reworked push covers all of them (31 archives,
+  103 GiB planned).
+- The owner decided only the **active** Tanium VMs need off-site copies (ts-01 = 200, tms-01 =
+  202, assuming the -01 pair is active). So: the standby TanOS VMs (201/203/205, ~210 GiB of the
+  old weekly push) are excluded from the push (`pve_backup_offsite_exclude_vmids`; they keep their
+  nightly on-site vzdump), and ts-01/tms-01 go to Drive as **ZFS send streams**
+  (`pve-tanium-offsite`, Sun 05:00): no vzdump of them is possible (120-190 GiB of space nobody
+  has), and nothing is staged locally. Per VM: atomic snapshot of all zvols, `zfs send -c | rclone
+  rcat`, uploaded size compared with bytes sent, config + sha256 manifest alongside, 2 generations
+  kept, snapshot destroyed afterwards. Round-trip drilled with a 1 GiB scratch zvol (sha256 of the
+  restored zvol equal). **Not drilled:** a full-size restore of ts-01/tms-01 (restore command is in
+  the script header; expect ~1.6 h per 300 GiB at the 54 MiB/s measured download).
+- Everything that read `pve_backup_push_last_success_timestamp_seconds` was a no-op: the metric was
+  POSTed to an import endpoint nothing verified, and no rule used it. Both jobs now write
+  node_exporter textfiles and `pve_offsite_push_stale`, `pve_tanium_offsite_stale` and
+  `pve_tanium_offsite_missing` alert on them.
+- The dead man's switch does exist and is not lab-mail-only: Grafana's always-firing
+  `dead_mans_switch` pings healthchecks.io (contact point `healthchecks_dms`, policy repeat 5 m).
+  What is not verified from here is what healthchecks.io does when the pings stop (who it
+  notifies); that is configured on their side.
+- tms-01/tzs-01 (and ts-01) were in no vzdump job. tzs-01 (204) still is, by decision. The
+  2026-11-23 cleanup of `moved-20261115-vm-202-disk-*` on pve02 can wait for the first complete
+  tms-01 stream (check `rclone lsf vmbackup_crypt:pve-zfs/`), after which tms-01 has an off-site copy.

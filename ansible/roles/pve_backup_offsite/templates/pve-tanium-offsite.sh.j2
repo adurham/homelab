@@ -1,0 +1,134 @@
+#!/bin/bash
+# Managed by Ansible — roles/pve_backup_offsite.
+#
+# Weekly off-site copy of the ACTIVE Tanium VMs ({{ pve_tanium_offsite_vmids | join(', ') }}) as ZFS send
+# streams, encrypted by the rclone crypt remote, straight to Google Drive. Nothing is staged locally:
+# a vzdump of these VMs would need 120-190 GiB of free space on a node that does not have it, and the
+# only on-site copies of them are same-pool ZFS snapshots.
+#
+# Per VM: one atomic snapshot of all its zvols (crash-consistent, like a vzdump snapshot-mode backup
+# without the guest agent), `zfs send -c` of each (blocks stay compressed as stored), piped through
+# rclone rcat. The snapshot lives only for the duration of the run, so it holds no space afterwards.
+# Uploaded size is checked against the bytes that left zfs send. The VM config, a manifest with the
+# sha256 of every stream, and the streams share one timestamp; the newest {{ pve_tanium_offsite_keep }} generations are kept.
+#
+# RESTORE (one disk; do the same for each disk named in the manifest):
+#   rclone cat "vmbackup_crypt:{{ pve_tanium_offsite_gdrive_subdir }}/<vmid>_<disk>_<stamp>.zfs" | zfs recv -F <pool>/<disk>
+#   rclone cat "vmbackup_crypt:{{ pve_tanium_offsite_gdrive_subdir }}/<vmid>_config_<stamp>.conf" > /etc/pve/qemu-server/<vmid>.conf
+# (config references the storage id `nvme-data`; recreate the zvols under the same names.)
+#
+# usage: pve-tanium-offsite.sh [push|drill]
+#   drill: round-trips a 1 GiB test zvol through Drive and compares it; touches no VM.
+set -euo pipefail
+MODE="${1:-push}"
+REMOTE="vmbackup_crypt:{{ pve_tanium_offsite_gdrive_subdir }}"
+VMIDS="{{ pve_tanium_offsite_vmids | join(' ') }}"
+KEEP={{ pve_tanium_offsite_keep }}
+BWLIMIT="{{ pve_tanium_offsite_bwlimit }}"
+SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10"
+TF=/var/lib/node_exporter/textfile_collector
+STATE=/var/lib/pve-tanium-offsite
+STAMP=$(date +%Y%m%d-%H%M)
+SNAP="offsite-$STAMP"
+SELF=$(hostname)
+mkdir -p "$STATE"
+
+exec 9>/run/pve-tanium-offsite.lock
+flock -n 9 || { echo "pve-tanium-offsite: another run is in progress, exiting"; exit 0; }
+
+on() { # on <node> <command...>
+  local node="$1"; shift
+  if [ "$node" = "$SELF" ]; then bash -c "$*"; else ssh $SSH_OPTS "root@$node" "$*"; fi
+}
+
+# stream <node> <dataset@snap> <remote name>  -> prints "bytes sha256" on success
+stream() {
+  local node="$1" ds="$2" name="$3" cnt sum got
+  cnt=$(mktemp); sum=$(mktemp)
+  if ! on "$node" "zfs send -c $ds" | tee >(wc -c >"$cnt") >(sha256sum >"$sum") \
+        | rclone rcat "$REMOTE/$name" --bwlimit "$BWLIMIT" --drive-chunk-size 128M; then
+    echo "pve-tanium-offsite: stream failed: $ds" >&2; rclone deletefile "$REMOTE/$name" >/dev/null 2>&1 || true
+    rm -f "$cnt" "$sum"; return 1
+  fi
+  sleep 2
+  got=$(rclone lsf --format s "$REMOTE/$name" 2>/dev/null | head -1)
+  if [ -z "$got" ] || [ "$got" != "$(tr -d ' \n' <"$cnt")" ]; then
+    echo "pve-tanium-offsite: SIZE MISMATCH for $name: sent $(cat "$cnt") Drive has '${got:-nothing}'" >&2
+    rclone deletefile "$REMOTE/$name" >/dev/null 2>&1 || true
+    rm -f "$cnt" "$sum"; return 1
+  fi
+  echo "$got $(cut -d' ' -f1 "$sum")"; rm -f "$cnt" "$sum"
+}
+
+write_metrics() {
+  [ -d "$TF" ] || return 0
+  {
+    echo "# TYPE pve_tanium_offsite_last_success_timestamp_seconds gauge"
+    for f in "$STATE"/*.last; do [ -e "$f" ] || continue; v=$(basename "$f" .last)
+      echo "pve_tanium_offsite_last_success_timestamp_seconds{vmid=\"$v\"} $(cat "$f")"; done
+    echo "# TYPE pve_tanium_offsite_last_bytes gauge"
+    for f in "$STATE"/*.bytes; do [ -e "$f" ] || continue; v=$(basename "$f" .bytes)
+      echo "pve_tanium_offsite_last_bytes{vmid=\"$v\"} $(cat "$f")"; done
+  } > "$TF/.pve_tanium_offsite.tmp" && mv -f "$TF/.pve_tanium_offsite.tmp" "$TF/pve_tanium_offsite.prom"
+}
+
+if [ "$MODE" = drill ]; then
+  Z="{{ pve_tanium_offsite_pool }}"
+  SRC="$Z/dr-drill-src"; DST="$Z/dr-drill-dst"
+  cleanup() { zfs destroy -r "$SRC" 2>/dev/null || true; zfs destroy -r "$DST" 2>/dev/null || true
+              rclone deletefile "$REMOTE/drill_$STAMP.zfs" >/dev/null 2>&1 || true; }
+  trap cleanup EXIT
+  zfs create -s -V 2G "$SRC"; sleep 1
+  dd if=/dev/urandom of="/dev/zvol/$SRC" bs=1M count=1024 status=none
+  zfs snapshot "$SRC@drill"
+  out=$(stream "$SELF" "$SRC@drill" "drill_$STAMP.zfs"); echo "uploaded: $out"
+  rclone cat "$REMOTE/drill_$STAMP.zfs" | zfs recv -F "$DST"; sleep 1
+  a=$(head -c 1G "/dev/zvol/$SRC" | sha256sum | cut -c1-16); b=$(head -c 1G "/dev/zvol/$DST" | sha256sum | cut -c1-16)
+  echo "source sha $a  restored sha $b"; [ "$a" = "$b" ] && echo "DRILL OK" || { echo "DRILL FAILED"; exit 1; }
+  exit 0
+fi
+
+failed=0
+for vmid in $VMIDS; do
+  cfg=$(ls /etc/pve/nodes/*/qemu-server/"$vmid".conf 2>/dev/null | head -1 || true)
+  if [ -z "$cfg" ]; then echo "pve-tanium-offsite: VM $vmid not found in the cluster" >&2; failed=$((failed+1)); continue; fi
+  node=$(echo "$cfg" | awk -F/ '{print $5}')
+  # zvols = every storage:vm-N-disk-M volume in the config, except CD-ROMs
+  vols=$(grep -vE 'media=cdrom|^\[|^#' "$cfg" | grep -oE '[a-z0-9_-]+:vm-'"$vmid"'-disk-[0-9]+' | sort -u)
+  dss=""
+  for v in $vols; do
+    p=$(on "$node" "pvesm path $v" 2>/dev/null) || { echo "pve-tanium-offsite: cannot resolve $v" >&2; continue; }
+    dss="$dss ${p#/dev/zvol/}"
+  done
+  if [ -z "$dss" ]; then echo "pve-tanium-offsite: no zvols found for VM $vmid" >&2; failed=$((failed+1)); continue; fi
+  echo "pve-tanium-offsite: VM $vmid on $node, zvols:$dss"
+  snaps=""; for ds in $dss; do snaps="$snaps $ds@$SNAP"; done
+  t0=$(date +%s); vm_ok=1; total=0; manifest="$(mktemp)"
+  on "$node" "zfs snapshot $snaps"
+  for ds in $dss; do
+    disk=$(basename "$ds")
+    if out=$(stream "$node" "$ds@$SNAP" "${vmid}_${disk}_${STAMP}.zfs"); then
+      echo "${disk} bytes=${out% *} sha256=${out#* }" >> "$manifest"; total=$((total + ${out% *}))
+      echo "pve-tanium-offsite:   $disk -> ${out% *} bytes"
+    else vm_ok=0; break; fi
+  done
+  on "$node" "zfs destroy $snaps" || echo "pve-tanium-offsite: WARN could not destroy $snaps on $node" >&2
+  if [ "$vm_ok" = 1 ]; then
+    cat "$cfg" | rclone rcat "$REMOTE/${vmid}_config_${STAMP}.conf"
+    { echo "vmid=$vmid node=$node stamp=$STAMP duration_s=$(( $(date +%s) - t0 ))"; cat "$manifest"; } | rclone rcat "$REMOTE/${vmid}_manifest_${STAMP}.txt"
+    date +%s > "$STATE/$vmid.last"; echo "$total" > "$STATE/$vmid.bytes"
+    # retention: newest KEEP stamps of this VM stay (stamp = the config file's suffix)
+    rclone lsf "$REMOTE/" --files-only 2>/dev/null | sed -nE "s/^${vmid}_config_([0-9]{8}-[0-9]{4})\.conf$/\1/p" | sort -r \
+      | tail -n +$((KEEP+1)) | while read -r old; do
+          rclone lsf "$REMOTE/" --files-only | grep -E "^${vmid}_.*_${old}\.(zfs|conf|txt)$" | while read -r f; do
+            rclone deletefile "$REMOTE/$f" && echo "pve-tanium-offsite: pruned $f"; done
+        done
+    echo "pve-tanium-offsite: VM $vmid done, $((total/1073741824)) GiB in $(( $(date +%s) - t0 )) s"
+  else
+    failed=$((failed+1)); echo "pve-tanium-offsite: VM $vmid FAILED; previous generation untouched" >&2
+  fi
+  rm -f "$manifest"
+done
+write_metrics
+echo "pve-tanium-offsite: finished $(date -Is) failed=$failed"
+[ "$failed" -eq 0 ]

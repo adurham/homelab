@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly push of the active Tanium VMs off-site
+
+[Timer]
+OnCalendar={{ pve_tanium_offsite_schedule }}
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

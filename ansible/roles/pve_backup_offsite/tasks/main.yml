@@ -81,3 +81,29 @@
     group: root
     mode: "0644"
   notify: Reload systemd and enable PVE push timer
+
+# --- active Tanium VMs: ZFS send streams straight to Drive (no local staging) ---
+- name: Install Tanium ZFS-stream push script
+  ansible.builtin.template:
+    src: pve-tanium-offsite.sh.j2
+    dest: /usr/local/sbin/pve-tanium-offsite.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Tanium push systemd unit
+  ansible.builtin.template:
+    src: pve-tanium-offsite.service
+    dest: /etc/systemd/system/pve-tanium-offsite.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install Tanium push systemd timer
+  ansible.builtin.template:
+    src: pve-tanium-offsite.timer.j2
+    dest: /etc/systemd/system/pve-tanium-offsite.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd and enable Tanium push timer

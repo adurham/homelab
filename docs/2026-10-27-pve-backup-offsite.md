@@ -71,3 +71,5 @@ monthly, would cut it to ~90 GiB. That is a decision, not a change made here.
 - 43 GB/week of upstream is a real cost at ~16 Mbit/s. If that hurts, options are
   fortnightly cadence, or excluding the largest guests (frigate-01 8.1 GB and the
   TanOS appliance VMs) and keeping only config-level guests off-site.
+
+> **Correction 2026-11-15:** the ~16 Mbit/s / ~40 h figures above are stale. The line is 1 Gbit symmetric and a measured upload from pve01 runs 21-27 MiB/s (about 1.2 h for the ~100 GiB weekly push). See docs/backups.md.

@@ -30,3 +30,23 @@ pve_backup_offsite_keep_copies: 4
 pve_backup_offsite_keep_days: 28
 pve_backup_offsite_schedule: "Sat *-*-* 05:00:00 America/Chicago"
 pve_backup_offsite_rclone_conf: "/root/.config/rclone/rclone.conf"
+
+# Guests whose weekly vzdump archive is NOT pushed to Drive. 201/203/205 are the standby
+# Tanium VMs (ts-02/tms-02/tzs-02): ~210 GiB of the weekly push for copies the owner does not
+# need off-site (2026-11-15). They still get their normal nightly on-site vzdump.
+pve_backup_offsite_exclude_vmids: [201, 203, 205]
+
+# The ACTIVE Tanium VMs (ts-01=200, tms-01=202) are in no vzdump job, and a vzdump of them would
+# need 120-190 GiB of local space per node that does not exist. They go to Drive as ZFS send
+# streams instead (roles/pve_backup_offsite/templates/pve-tanium-offsite.sh.j2): nothing is staged
+# locally. Assumes the -01 pair is the active one; change this list if that flips.
+pve_tanium_offsite_vmids: [200, 202]
+pve_tanium_offsite_gdrive_subdir: "pve-zfs"
+# ZFS pool behind the `nvme-data` storage; only the drill uses it (it creates a scratch zvol here).
+pve_tanium_offsite_pool: "nvme-pool"
+pve_tanium_offsite_schedule: "Sun *-*-* 05:00:00 America/Chicago"
+# Generations kept on Drive per VM (each ~125 GiB for ts-01, ~185 GiB for tms-01).
+pve_tanium_offsite_keep: 2
+# Measured 2026-11-15: one rclone stream to Drive does 21-27 MiB/s on this 1 Gbit line, so this cap
+# never binds in practice; it exists so a faster day cannot starve corosync on the single 1 GbE NIC.
+pve_tanium_offsite_bwlimit: "30M"

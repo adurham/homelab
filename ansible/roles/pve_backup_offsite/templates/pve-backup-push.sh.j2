@@ -65,6 +65,10 @@ list_newest() {
 # Newest archive per guest across all nodes (the timestamp in the name sorts it).
 picks=$(for n in $NODES; do list_newest "$n"; done |
         sort -t'|' -k2,2 -k3,3 | awk -F'|' '{last[$2]=$0} END{for (k in last) print last[k]}')
+{% if pve_backup_offsite_exclude_vmids | length > 0 %}
+# Guests that are deliberately not sent off-site (see pve_backup_offsite_exclude_vmids).
+picks=$(printf '%s\n' "$picks" | grep -vE '\|vzdump-(qemu|lxc)-({{ pve_backup_offsite_exclude_vmids | join("|") }})\|' || true)
+{% endif %}
 
 # What Drive already holds, as "size name". If the listing fails, stop: guessing an
 # empty Drive would re-upload everything.
@@ -120,7 +124,10 @@ echo "pve-backup-push: done $(date -Is) staged_now=$(find "$STAGE" -maxdepth 1 -
 [ "$DRY" = 1 ] && exit 0
 [ "$push_ok" = 1 ] || exit 1
 
-# Liveness for alerting: record that this run finished, so a dead timer or a
-# silent failure is visible instead of assumed. (Grafana: see "backup push" rules.)
-curl -fsS -m 10 -X POST "http://172.16.0.30:8428/api/v1/import/prometheus" \
-  --data-binary "pve_backup_push_last_success_timestamp_seconds $(date +%s)"$'\n' >/dev/null 2>&1 || echo "warn: metric push failed" >&2
+# Liveness for alerting. A node_exporter textfile, not a push to the VM import API: the textfile
+# path is the one already proven here (pve_vzdump.prom), and the import call had no receiver rule.
+TF=/var/lib/node_exporter/textfile_collector
+if [ -d "$TF" ]; then
+  printf '# TYPE pve_backup_push_last_success_timestamp_seconds gauge\npve_backup_push_last_success_timestamp_seconds %s\n# TYPE pve_backup_push_last_bytes gauge\npve_backup_push_last_bytes %s\n' "$(date +%s)" "$bytes" > "$TF/.pve_backup_push.tmp" \
+    && mv -f "$TF/.pve_backup_push.tmp" "$TF/pve_backup_push.prom"
+fi

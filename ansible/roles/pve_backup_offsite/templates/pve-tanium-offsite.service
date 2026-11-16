@@ -1,0 +1,12 @@
+[Unit]
+Description=Push the active Tanium VMs to encrypted Google Drive as ZFS streams
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pve-tanium-offsite.sh push
+TimeoutStartSec=infinity
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
