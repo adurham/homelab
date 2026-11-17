@@ -703,6 +703,16 @@ class Handler(BaseHTTPRequestHandler):
         if ".." in chat or ".." in stem or "/" in stem:
             self.send_error(400)
             return
+        # Fast path: a thumbnail that is already on the tmpfs is a 15 KB file
+        # read. Serve it here, without the single-flight bookkeeping and without
+        # taking a generation slot — those slots exist to bound Drive fetches and
+        # ffmpeg, and making a cache hit queue behind them is what turned a few
+        # slow items in a grid into hundreds of 504/499s (a page load that was
+        # 90% cached timed out at nginx while all four slots were busy).
+        cached = _cached_thumb(chat, stem)
+        if cached is not None:
+            self._send_thumb(cached)
+            return
         _gen_reason.value = None  # clear before ensure_thumb classifies the outcome
         key = f"{chat}/{stem}"
         # Single-flight: whoever gets here first generates; everyone else waits
@@ -761,6 +771,10 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        self._send_thumb(thumb)
+
+    def _send_thumb(self, thumb):
+        """Write a thumbnail file to the client, honouring If-None-Match."""
         data = thumb.read_bytes()
         # 2026-11-05: ETag so a revalidating client can 304 instead of
         # re-downloading; the URL carries no version, so max-age stays modest
