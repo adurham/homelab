@@ -168,6 +168,16 @@ upstream tanium_servers {
 proxy_cache_path /var/cache/nginx/auth levels=1:2 keys_zone=auth_cache:10m
                  max_size=64m inactive=60s use_temp_path=off;
 
+# An auth check is cached by SESSION COOKIE, so a cookie-less request would key
+# on the empty string and share one bucket with every other anonymous client —
+# including whatever status was cached there last. Never cache or read the
+# cache for those: an anonymous check always goes to the outpost and always
+# gets its own answer.
+map $cookie_authentik_proxy_73f99faf $gallery_auth_anon {
+    default 0;
+    ""      1;
+}
+
 # Catch-all servers. nginx 1.18 has no ssl_reject_handshake, so the TLS default uses a
 # throwaway self-signed cert with a non-identifying CN and then drops the connection
 # (444). Before this, any unknown Host/SNI or bare-IP request fell through to the FIRST
@@ -682,9 +692,21 @@ server {
     # On-the-fly thumbnails: routed to the dedicated thumb service (port 8090),
     # which generates+caches (encrypted, to Drive) on first request. Kept as a
     # separate upstream so a slow thumb generation never blocks the main app.
+    # A thumbnail request must never start an SSO login flow. A grid fires
+    # hundreds of /thumb/ requests at once; redirecting each one to /start made
+    # the browser run a separate authorize+callback handshake per image, churn
+    # the outpost session cookie, and leave most tiles blank even after the
+    # session came back. Answer 401 instead (no body, no redirect) so the
+    # page's own gated request drives the login and the grid can retry images.
+    location @gallery_thumb_unauth {
+        internal;
+        add_header Cache-Control "no-store" always;
+        return 401;
+    }
+
     location /thumb/ {
         auth_request /outpost.goauthentik.io/auth/nginx;
-        error_page 401 = @goauthentik_proxy_signin;
+        error_page 401 = @gallery_thumb_unauth;
         auth_request_set $auth_cookie $upstream_http_set_cookie;
         add_header Set-Cookie $auth_cookie;
 
@@ -904,6 +926,11 @@ server {
         # Cookie-only key => a whole page-load's auth checks collapse to ONE.
         proxy_cache auth_cache;
         proxy_cache_key "$cookie_authentik_proxy_73f99faf";
+        # Anonymous checks neither read nor populate that cache (see the
+        # $gallery_auth_anon map): a cookie-less visitor must never be answered
+        # from another client's cached session.
+        proxy_cache_bypass $gallery_auth_anon;
+        proxy_no_cache    $gallery_auth_anon;
         proxy_cache_valid 200 30s;
         proxy_cache_valid 401 403 5s;
         proxy_cache_lock on;            # de-dupe concurrent identical lookups
