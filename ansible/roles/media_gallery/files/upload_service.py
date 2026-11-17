@@ -234,16 +234,36 @@ _groups_lock = threading.Lock()
 
 
 def load_groups() -> dict:
-    """{user: [group, ...]}; tolerates a bare list from a hand-written file."""
+    """{user: {"auto": bool, "groups": [group, ...]}}.
+
+    Tolerates every shape this file has had: a bare list (hand-written), the
+    first deployed form ({user: [group, ...]}), and the current form which also
+    carries the auto-merge switch. One reader for all of them, so a rollback of
+    the SPA cannot corrupt the ledger.
+    """
     try:
         d = json.loads(GROUPS_FILE.read_text())
     except (OSError, ValueError):
         return {}
+
+    def norm(v):
+        if isinstance(v, list):
+            return {"auto": True, "groups": [g for g in v if isinstance(g, dict)]}
+        if isinstance(v, dict):
+            gs = v.get("groups")
+            return {"auto": bool(v.get("auto", True)),
+                    "groups": [g for g in gs if isinstance(g, dict)] if isinstance(gs, list) else []}
+        return None
+
     if isinstance(d, list):
-        return {"shared": [g for g in d if isinstance(g, dict)]}
+        return {"shared": {"auto": True, "groups": [g for g in d if isinstance(g, dict)]}}
     if isinstance(d, dict):
-        return {str(k): [g for g in v if isinstance(g, dict)]
-                for k, v in d.items() if isinstance(v, list)}
+        out = {}
+        for k, v in d.items():
+            n = norm(v)
+            if n is not None:
+                out[str(k)] = n
+        return out
     return {}
 
 
@@ -747,8 +767,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"folders": load_favs().get(self._fav_user(), []),
                                     "user": self._fav_user()})
         if p == "/merges":
-            # merged folders (a view-level grouping) — same reason as /favs
-            return self._json(200, {"groups": load_groups().get(self._fav_user(), []),
+            # merged folders (a view-level grouping) — same reason as /favs.
+            # `auto` is the free/VIP auto-merge switch: a setting, but it rides
+            # this ledger so one device's change reaches the other.
+            st = load_groups().get(self._fav_user(), {"auto": True, "groups": []})
+            return self._json(200, {"groups": st["groups"], "auto": st["auto"],
                                     "user": self._fav_user()})
         self._json(404, {"error": "not found"})
 
@@ -1304,13 +1327,14 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "count": len(clean), "user": user})
 
     def _merges(self):
-        """POST /merges  body {"groups": [{id,name,folders,ts,del}, ...]}
+        """POST /merges  body {"groups": [{id,name,folders,ts,del}, ...], "auto": bool}
 
         Replaces this user's whole group list (the SPA sends the merged set; it
         reconciles per id on `ts` itself, so a partial write would make the next
-        load re-add what it just removed). Names/ids/folders are validated as
-        plain values — no separators, no traversal — because a member name is
-        used as a folder key in the SPA's fetch paths.
+        load re-add what it just removed). `auto` is the free/VIP auto-merge
+        switch, optional so an older client cannot fail here. Names/ids/folders
+        are validated as plain values — no separators, no traversal — because a
+        member name is used as a folder key in the SPA's fetch paths.
         """
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -1320,6 +1344,9 @@ class Handler(BaseHTTPRequestHandler):
         gs = body.get("groups")
         if not isinstance(gs, list):
             return self._json(400, {"error": "want 'groups' list"})
+        auto = body.get("auto")
+        if auto is not None and not isinstance(auto, bool):
+            return self._json(400, {"error": "want bool 'auto'"})
         if len(gs) > 500:
             return self._json(400, {"error": "too many groups"})
         clean = []
@@ -1355,9 +1382,11 @@ class Handler(BaseHTTPRequestHandler):
         user = self._fav_user()
         with _groups_lock:
             data = load_groups()
-            data[user] = clean
+            prev = data.get(user) or {"auto": True, "groups": []}
+            data[user] = {"auto": prev["auto"] if auto is None else bool(auto), "groups": clean}
             save_groups(data)
-        return self._json(200, {"ok": True, "count": len(clean), "user": user})
+        return self._json(200, {"ok": True, "count": len(clean),
+                                "auto": data[user]["auto"], "user": user})
 
     def _notdup(self):
         """POST /notdup  body {"sig": "<group signature>", "undo": bool}

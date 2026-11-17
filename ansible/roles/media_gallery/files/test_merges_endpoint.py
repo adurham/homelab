@@ -73,10 +73,35 @@ check("POST /merges -> 200 ok", st == 200 and d.get("ok") is True, d)
 check("file written", os.path.exists(os.environ["TG_GROUPS_FILE"]))
 on_disk = json.load(open(os.environ["TG_GROUPS_FILE"]))
 check("stored under 'shared'", list(on_disk) == ["shared"], on_disk)
-check("group round-trips", on_disk["shared"][0]["folders"] == ["folder one", "folder two"], on_disk)
+check("group round-trips",
+      on_disk["shared"]["groups"][0]["folders"] == ["folder one", "folder two"], on_disk)
+check("auto defaults on", on_disk["shared"]["auto"] is True, on_disk)
 
 st, d = get("/merges")
-check("GET returns the group", st == 200 and len(d["groups"]) == 1 and d["groups"][0]["name"] == "Merged A", d)
+check("GET returns the group",
+      st == 200 and len(d["groups"]) == 1 and d["groups"][0]["name"] == "Merged A", d)
+check("GET returns auto", d.get("auto") is True, d)
+
+# 2b. the auto-merge switch round-trips and survives a groups-only write
+st, d = post("/merges", {"groups": [g], "auto": False})
+check("POST auto=false -> 200", st == 200 and d.get("auto") is False, d)
+st, d = get("/merges")
+check("auto=false persisted", d.get("auto") is False, d)
+st, d = post("/merges", {"groups": [g]})
+check("groups-only POST keeps auto=false", st == 200 and d.get("auto") is False, d)
+st, d = post("/merges", {"groups": [g], "auto": "yes"})
+check("rejects non-bool auto -> 400", st == 400, d)
+st, d = post("/merges", {"groups": [g], "auto": True})
+check("auto back on", st == 200 and d.get("auto") is True, d)
+
+# 2c. the older on-disk shapes still load
+json.dump({"shared": [g]}, open(os.environ["TG_GROUPS_FILE"], "w"))
+st, d = get("/merges")
+check("legacy list-of-groups file reads", st == 200 and len(d["groups"]) == 1, d)
+json.dump([g], open(os.environ["TG_GROUPS_FILE"], "w"))
+st, d = get("/merges")
+check("legacy bare list file reads", st == 200 and len(d["groups"]) == 1, d)
+post("/merges", {"groups": [g]})
 
 # 3. tombstone survives
 st, d = post("/merges", {"groups": [{"id": "gabc123", "name": "Merged A", "folders": [], "ts": 1700000001000, "del": 1}]})
@@ -100,7 +125,8 @@ for body, label in bad:
 
 # 5. empty list clears
 st, d = post("/merges", {"groups": []})
-check("POST [] clears", st == 200 and json.load(open(os.environ["TG_GROUPS_FILE"]))["shared"] == [], d)
+check("POST [] clears", st == 200 and
+      json.load(open(os.environ["TG_GROUPS_FILE"]))["shared"]["groups"] == [], d)
 
 # 6. favs still work (regression: shared _fav_user path)
 st, d = post("/favs", {"folders": ["one"]})
