@@ -1,0 +1,3 @@
+---
+# VictoriaMetrics cluster VIP (vminsert behind the load balancer).
+vm_relay_target: "172.16.0.30:8428"

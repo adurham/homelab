@@ -1,0 +1,11 @@
+---
+# The :8428 -> cluster VIP relay and its canary on vm-01 (see roles/vm_relay).
+#
+#   cd ansible
+#   ansible-playbook -i inventory/proxmox.yml deploy_vm_relay.yml
+- name: Deploy the vm-01 metrics relay
+  hosts: vm-01
+  become: true
+  gather_facts: false
+  roles:
+    - vm_relay

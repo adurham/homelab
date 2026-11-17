@@ -1,0 +1,86 @@
+---
+# The :8428 relay on vm-01 (172.16.0.42).
+#
+# Pushers still write to the old single-node address 172.16.0.42:8428 (Home Assistant exporters,
+# the PVE nodes' textfile pushes, ...). The single VictoriaMetrics process is retired, so socat
+# forwards :8428 to the cluster VIP, and relay-canary writes a sample through it every minute (the
+# Grafana rule on its failure is "VictoriaMetrics :8428 relay is not forwarding").
+#
+# These units were installed by hand and left DISABLED, so the first reboot of vm-01 (the pve02
+# reboot on 2026-11-17) left :8428 dead, every pusher got connection refused and the canary alert
+# fired. They are enabled here so a restart brings the relay back by itself.
+- name: Relay unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/vm-relay.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Relay :8428 to the VictoriaMetrics cluster VIP
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      ExecStart=/usr/bin/socat -d TCP-LISTEN:8428,fork,reuseaddr TCP:{{ vm_relay_target }}
+      Restart=always
+      RestartSec=3
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Reload systemd (vm_relay)
+
+- name: Canary script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/relay_canary.sh
+    owner: root
+    group: root
+    mode: '0755'
+    content: |
+      #!/bin/sh
+      curl -s -o /dev/null -m 5 -X POST --data-binary "relay_canary 1" http://127.0.0.1:8428/api/v1/import/prometheus || exit 1
+
+- name: Canary service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/relay-canary.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Canary write through the :8428 relay
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/relay_canary.sh
+  notify: Reload systemd (vm_relay)
+
+- name: Canary timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/relay-canary.timer
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Run relay canary every minute
+
+      [Timer]
+      OnBootSec=30s
+      OnUnitActiveSec=60s
+
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd (vm_relay)
+
+- name: Flush handlers so the units are loaded before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the relay and the canary timer
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - vm-relay.service
+    - relay-canary.timer

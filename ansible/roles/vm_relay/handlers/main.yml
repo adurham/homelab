@@ -1,0 +1,4 @@
+---
+- name: Reload systemd (vm_relay)
+  ansible.builtin.systemd:
+    daemon_reload: true
