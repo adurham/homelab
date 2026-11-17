@@ -103,6 +103,18 @@ st, d = get("/merges")
 check("legacy bare list file reads", st == 200 and len(d["groups"]) == 1, d)
 post("/merges", {"groups": [g]})
 
+# 2d. the SPA's derived ids carry a colon (auto:<base>) and must be accepted;
+# separators and traversal must still be refused
+st, d = post("/merges", {"groups": [{"id": "auto:gemmajae", "name": "gemmajae",
+                                     "folders": ["gemmajae", "gemmajaevip"],
+                                     "ts": 1700000002000, "auto": 1}]})
+check("POST auto:<base> id -> 200", st == 200, d)
+st, d = get("/merges")
+check("auto id round-trips", st == 200 and d["groups"][0]["id"] == "auto:gemmajae", d)
+for bad_id in ("auto:/etc", "a:b:c/../x", "g 1", "g" * 65):
+    st, d = post("/merges", {"groups": [{"id": bad_id, "name": "n", "folders": [], "ts": 1}]})
+    check("rejects id %r" % bad_id[:14], st == 400, d)
+
 # 3. tombstone survives
 st, d = post("/merges", {"groups": [{"id": "gabc123", "name": "Merged A", "folders": [], "ts": 1700000001000, "del": 1}]})
 check("POST tombstone -> 200", st == 200, d)

@@ -1470,12 +1470,25 @@
     return null;
   }
   function grpFromKey(k){ return isGrpKey(k)?grpById(grpIdOf(k)):null; }
+  // Derived (free/VIP) or hand-made? The ID is the provenance: the server keeps
+  // only id/name/folders/ts, so a per-group flag would not survive the round
+  // trip. Anything under `auto:` came from the derivation; a hand edit RE-KEYS
+  // the group to a fresh manual id, which also stops the derivation owning it.
+  function isAutoGroup(g){
+    return !!(g && (g.auto || String(g.id||'').indexOf(VIP_ID_PREFIX)===0));
+  }
+  function adoptGroup(g){
+    if(!g) return g;
+    if(isAutoGroup(g)) g.id=grpId();
+    g.auto=0;
+    return g;
+  }
   function grpList(){
     return groups.filter(function(g){
       if(!(g && !g.del && g.id && Array.isArray(g.folders) && g.folders.length>1)) return false;
       // a derived free/VIP merge exists only while auto-merge is on; turning the
       // switch off hides it without destroying it (flip back on and it returns)
-      return vipsOn || !g.auto;
+      return vipsOn || !isAutoGroup(g);
     });
   }
   function grpForFolder(n){
@@ -1503,7 +1516,7 @@
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({groups:out, auto:vipsOn})})
         .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); })
-        .catch(function(){ toast('Could not save merged folders (network)','err'); });
+        .catch(function(e){ toast('Could not save merged folders ('+(e&&e.message?e.message:'network')+')','err'); });
     },250);
   }
   function grpApplyFrom(list, autoFlag){
@@ -1597,7 +1610,7 @@
       // extending an existing merge: pull the other picked folders out of
       // whatever merge they were in first, then add them here. Extending an
       // AUTO pair adopts it: a hand-named merge must never be re-derived.
-      target.auto=0;
+      adoptGroup(target);
       names.forEach(function(n){
         var og=grpForFolder(n);
         if(og && og!==target){
@@ -1645,25 +1658,28 @@
   }
   function grpRemoveMember(id, name){
     var g=grpById(id); if(!g||g.del) return;
-    g.auto=0;              // a hand edit takes the member list away from the derivation
+    adoptGroup(g);         // a hand edit takes the member list away from the derivation
     g.folders=(g.folders||[]).filter(function(n){ return n!==name; });
     g.ts=Date.now();
-    if(g.folders.length<2) grpDissolve(id);      // one folder left: back to the grid
+    if(g.folders.length<2) grpDissolve(g.id);      // one folder left: back to the grid
     else { grpSave(); grpPush(); }
-    if(current===grpKey(id)){ if(grpById(id) && !grpById(id).del) openFolder(grpKey(id)); else renderFolders(); }
+    if(current===grpKey(id)||current===grpKey(g.id)){
+      var gg=grpById(g.id);
+      if(gg && !gg.del) openFolder(grpKey(g.id)); else renderFolders();
+    }
   }
   function grpAddMember(id, name){
     var g=grpById(id); if(!g||g.del) return;
-    g.auto=0;              // a hand edit takes the member list away from the derivation
+    adoptGroup(g);         // a hand edit takes the member list away from the derivation
     var og=grpForFolder(name);
-    if(og && og.id!==id){
+    if(og && og.id!==g.id){
       og.folders=og.folders.filter(function(n){ return n!==name; });
       og.ts=Date.now();
       if(og.folders.length<2){ og.del=1; og.ts=Date.now(); }
     }
     if(g.folders.indexOf(name)<0) g.folders.push(name);
     g.ts=Date.now(); grpSave(); grpPush();
-    if(current===grpKey(id)) openFolder(grpKey(id)); else renderFolders();
+    if(current===grpKey(id)||current===grpKey(g.id)) openFolder(grpKey(g.id)); else renderFolders();
   }
   // a real folder renamed/deleted: keep the merge pointing at something real
   function grpFolderRenamed(oldN, newN){
@@ -1721,7 +1737,7 @@
     groups.forEach(function(g){
       if(!g||!g.id) return;
       if(g.del){ tomb[g.id]=1; return; }
-      if(!g.auto){ (g.folders||[]).forEach(function(n){ claimed[n]=1; }); }
+      if(!g.del && !isAutoGroup(g)){ (g.folders||[]).forEach(function(n){ claimed[n]=1; }); }
     });
     uni.forEach(function(n){
       var r=autoBase(n);
@@ -1753,7 +1769,7 @@
       var id=VIP_ID_PREFIX+b;
       if(tomb[id]) return;                       // dismissed: stays dismissed
       var existing=grpById(id);
-      if(existing && !existing.del && !existing.auto) return;    // adopted by hand
+      if(existing && !existing.del && !isAutoGroup(existing)) return;    // adopted by hand
       var members=byBase[b].filter(function(n){ return !claimed[n]; }).sort();
       if(members.length<2){
         if(existing && !existing.del){ existing.del=1; existing.ts=Date.now(); changed=true; }
@@ -2024,13 +2040,13 @@
       m.querySelector('.fcount').textContent=items+' item'+(items===1?'':'s');
       if(grp){
         var fm=document.createElement('div'); fm.className='fmembers';
-        fm.textContent=(grp.auto?'auto free/VIP · ':'')+grp.folders.length+' folders merged · '+grp.folders.join(' · ');
+        fm.textContent=(isAutoGroup(grp)?'auto free/VIP · ':'')+grp.folders.length+' folders merged · '+grp.folders.join(' · ');
         m.appendChild(fm);
       }
       f.appendChild(m);
       // rename pencil + delete + select (not on the "All items" aggregate)
       if(name!=='All items'){
-        if(!(grp && grp.auto)){
+        if(!(grp && isAutoGroup(grp))){
           // a derived free/VIP merge has no hand-set name to edit — ungroup it,
           // re-merge by hand if you want a different label
           var rb=document.createElement('button'); rb.className='frename';

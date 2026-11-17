@@ -1354,7 +1354,10 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(g, dict):
                 return self._json(400, {"error": "group must be an object"})
             gid = g.get("id")
-            if not isinstance(gid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", gid):
+            # ':' is part of the SPA's derived ids (`auto:<base>` for a free/VIP
+            # pair); an id is an opaque string inside this JSON, never a path, so
+            # the charset only has to exclude separators and traversal.
+            if not isinstance(gid, str) or not re.fullmatch(r"[A-Za-z0-9_:-]{1,64}", gid):
                 return self._json(400, {"error": "bad group id"})
             name = g.get("name")
             if not isinstance(name, str) or not name.strip() or len(name) > 120:
