@@ -28,6 +28,7 @@ import datetime as dt
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -218,6 +219,39 @@ def save_favs(data: dict) -> None:
     tmp = str(FAVS_FILE) + ".tmp"
     Path(tmp).write_text(json.dumps(data, separators=(",", ":"), sort_keys=True))
     os.replace(tmp, FAVS_FILE)
+
+# ---- merged folders / groups (a VIEW, never storage) ----------------------
+# Merging two folders in the app must not move a byte: the collector keeps
+# pushing to each source's real folder name, so the group card simply lists the
+# members' items together. That means this file is the ONLY record of a merge —
+# no rclone move, no folder_meta redirect, nothing the ingest path reads.
+# Server-side for the same reason as favorites (phone and desktop must agree),
+# and reconciled per group id on a last-writer-wins `ts` so two devices that
+# edited offline converge whichever one loads first. `del` is a tombstone:
+# without it an ungroup on one device comes back from the other's stale copy.
+GROUPS_FILE = Path(os.environ.get("TG_GROUPS_FILE", "/var/lib/media-gallery/folder_groups.json"))
+_groups_lock = threading.Lock()
+
+
+def load_groups() -> dict:
+    """{user: [group, ...]}; tolerates a bare list from a hand-written file."""
+    try:
+        d = json.loads(GROUPS_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+    if isinstance(d, list):
+        return {"shared": [g for g in d if isinstance(g, dict)]}
+    if isinstance(d, dict):
+        return {str(k): [g for g in v if isinstance(g, dict)]
+                for k, v in d.items() if isinstance(v, list)}
+    return {}
+
+
+def save_groups(data: dict) -> None:
+    GROUPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(GROUPS_FILE) + ".tmp"
+    Path(tmp).write_text(json.dumps(data, separators=(",", ":"), sort_keys=True))
+    os.replace(tmp, GROUPS_FILE)
 
 # JWKS client (cached; refreshes keys automatically on unknown kid)
 _jwk_client = None
@@ -712,6 +746,10 @@ class Handler(BaseHTTPRequestHandler):
             # starred folders — server-side so mobile and desktop agree
             return self._json(200, {"folders": load_favs().get(self._fav_user(), []),
                                     "user": self._fav_user()})
+        if p == "/merges":
+            # merged folders (a view-level grouping) — same reason as /favs
+            return self._json(200, {"groups": load_groups().get(self._fav_user(), []),
+                                    "user": self._fav_user()})
         self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -760,6 +798,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._notdup()
             if p == "/favs":
                 return self._favs()
+            if p == "/merges":
+                return self._merges()
             self._json(404, {"error": "not found"})
         except Exception as e:  # noqa: BLE001 — surface the real error, don't bare-500
             import traceback
@@ -1261,6 +1301,62 @@ class Handler(BaseHTTPRequestHandler):
             data = load_favs()
             data[user] = clean
             save_favs(data)
+        return self._json(200, {"ok": True, "count": len(clean), "user": user})
+
+    def _merges(self):
+        """POST /merges  body {"groups": [{id,name,folders,ts,del}, ...]}
+
+        Replaces this user's whole group list (the SPA sends the merged set; it
+        reconciles per id on `ts` itself, so a partial write would make the next
+        load re-add what it just removed). Names/ids/folders are validated as
+        plain values — no separators, no traversal — because a member name is
+        used as a folder key in the SPA's fetch paths.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, OSError) as e:
+            return self._json(400, {"error": f"bad json body: {e}"})
+        gs = body.get("groups")
+        if not isinstance(gs, list):
+            return self._json(400, {"error": "want 'groups' list"})
+        if len(gs) > 500:
+            return self._json(400, {"error": "too many groups"})
+        clean = []
+        for g in gs:
+            if not isinstance(g, dict):
+                return self._json(400, {"error": "group must be an object"})
+            gid = g.get("id")
+            if not isinstance(gid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", gid):
+                return self._json(400, {"error": "bad group id"})
+            name = g.get("name")
+            if not isinstance(name, str) or not name.strip() or len(name) > 120:
+                return self._json(400, {"error": "bad group name"})
+            folders = g.get("folders")
+            if folders is None:
+                folders = []
+            if not isinstance(folders, list) or len(folders) > 200:
+                return self._json(400, {"error": "bad group folders"})
+            fclean = []
+            for n in folders:
+                if not isinstance(n, str) or not n or len(n) > 200:
+                    return self._json(400, {"error": "invalid folder name in group"})
+                if "/" in n or ".." in n or "\x00" in n:
+                    return self._json(400, {"error": "invalid folder name in group"})
+                fclean.append(n)
+            try:
+                ts = int(g.get("ts") or 0)
+            except (TypeError, ValueError):
+                return self._json(400, {"error": "bad group ts"})
+            out = {"id": gid, "name": name.strip()[:120], "folders": fclean, "ts": ts}
+            if g.get("del"):
+                out["del"] = 1
+            clean.append(out)
+        user = self._fav_user()
+        with _groups_lock:
+            data = load_groups()
+            data[user] = clean
+            save_groups(data)
         return self._json(200, {"ok": True, "count": len(clean), "user": user})
 
     def _notdup(self):

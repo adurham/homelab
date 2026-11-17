@@ -118,8 +118,10 @@
     .tile .selbox,.tile .trash{width:44px;height:44px;font-size:20px;opacity:.92;top:4px;}
     .tile .selbox{left:4px;} .tile .trash{right:4px;}
     .folder .frename,.folder .fdelete,.folder .fselbox,.folder .ffav{width:44px;height:44px;font-size:18px;opacity:.92;}
-    .folder .fdelete{right:58px;}
-    .folder .ffav{right:110px;}
+    .folder .ffav{right:4px;}
+    .folder .frename{right:52px;}
+    .folder .fdelete{right:100px;}
+    .folder .gunmerge{width:44px;height:44px;font-size:18px;opacity:.92;right:100px;}
     #searchBox{font-size:16px;padding:10px 14px;}
     #filterBar select,#filterBar button{min-height:44px;font-size:14px;}
     #lb .nav{font-size:34px;padding:16px 20px;}
@@ -234,24 +236,60 @@
     background:#222831;border-color:#2a313b;}
   #lb .lbmovemenu button:hover{background:var(--accent);border-color:var(--accent);}
   /* folder rename pencil */
-  .folder .frename{position:absolute;top:6px;right:6px;z-index:4;width:26px;height:26px;
+  .folder .frename{position:absolute;top:6px;right:38px;z-index:4;width:26px;height:26px;
     padding:0;font-size:13px;border-radius:6px;opacity:0;transition:opacity .12s;
     background:rgba(20,24,30,.8);}
-  .folder .fdelete{position:absolute;top:6px;right:38px;z-index:4;width:26px;height:26px;
+  .folder .fdelete{position:absolute;top:6px;right:70px;z-index:4;width:26px;height:26px;
     padding:0;font-size:13px;border-radius:6px;opacity:0;transition:opacity .12s;
     background:rgba(20,24,30,.8);}
   .folder:hover .frename,.folder:hover .fdelete{opacity:1;}
   .folder .frename:hover{background:var(--accent);border-color:var(--accent);}
   .folder .fdelete:hover{background:#d23b3b;border-color:#d23b3b;}
-  /* favorite star (sits left of delete, always visible once starred) */
-  .folder .ffav{position:absolute;top:6px;right:70px;z-index:4;width:26px;height:26px;
+  /* favorite star: the card's top-right CORNER. It is the only one of these
+     controls that stays visible once the folder is starred, so it must own the
+     corner; sitting 70px in (left of two hover-only buttons that aren't drawn)
+     read as a star floating in the middle of the cover. The pencil/trash shift
+     one slot left and still appear in a row on hover. */
+  .folder .ffav{position:absolute;top:6px;right:6px;z-index:4;width:26px;height:26px;
     padding:0;font-size:14px;line-height:1;border-radius:6px;opacity:0;
     transition:opacity .12s,color .12s,border-color .12s;
     background:rgba(20,24,30,.8);color:var(--muted);}
   .folder:hover .ffav{opacity:1;}
   .folder .ffav.on{opacity:1;color:var(--accent);border-color:var(--accent);}
   .folder .ffav:hover{color:var(--accent);border-color:var(--accent);}
-  @media(hover:none){.folder .frename,.folder .fdelete{opacity:.85;}.folder .ffav{opacity:.85;}}
+  @media(hover:none){.folder .frename,.folder .fdelete{opacity:.85;}.folder .ffav{opacity:.85;}.folder .gunmerge{opacity:.85;}}
+  /* merged (grouped) folder card: one card for several real folders. The
+     folders keep receiving ingest; this is only how they are presented. */
+  .folder.isgroup{border-color:#3d5c8f;}
+  .folder .gunmerge{position:absolute;top:6px;right:70px;z-index:4;width:26px;height:26px;
+    padding:0;font-size:13px;line-height:1;border-radius:6px;opacity:0;transition:opacity .12s;
+    background:rgba(20,24,30,.8);}
+  .folder:hover .gunmerge{opacity:1;}
+  .folder .gunmerge:hover{background:#d23b3b;border-color:#d23b3b;}
+  .folder .fmembers{font-size:11px;color:#9fb4d8;margin-top:2px;
+    text-shadow:0 1px 4px rgba(0,0,0,.8);}
+  /* member chips (inside a merged folder) + the add-folder menu */
+  #grpRow{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;}
+  #grpRow.show{display:flex;}
+  #grpChips{display:flex;gap:6px;flex-wrap:wrap;}
+  .gchip{display:inline-flex;align-items:center;gap:2px;font-size:12px;
+    padding:4px 5px 4px 10px;border-radius:999px;border:1px solid var(--border);
+    background:var(--panel);color:#c3c9d4;}
+  .gchip .gx{font:inherit;font-size:15px;line-height:1;padding:0 5px;border:none;
+    background:none;color:var(--muted);cursor:pointer;border-radius:50%;}
+  .gchip .gx:hover{color:#e85050;border:none;}
+  #grpRow .gact{font-size:12.5px;padding:6px 10px;}
+  #grpAddMenu{display:none;position:fixed;z-index:120;width:270px;
+    background:#1a1f27;border:1px solid var(--border);border-radius:10px;padding:8px;
+    box-shadow:0 8px 30px rgba(0,0,0,.5);flex-direction:column;gap:6px;}
+  #grpAddMenu.show{display:flex;}
+  #grpAddMenu input{font:inherit;font-size:13px;padding:7px 9px;border-radius:8px;
+    background:var(--bg);color:var(--text);border:1px solid var(--border);}
+  #grpAddMenu .gam-list{display:flex;flex-direction:column;gap:3px;max-height:44vh;overflow:auto;}
+  #grpAddMenu .gam-list button{text-align:left;font:inherit;font-size:13px;padding:7px 9px;
+    border-radius:7px;border:1px solid #2a313b;background:#222831;color:inherit;cursor:pointer;}
+  #grpAddMenu .gam-list button:hover{background:var(--accent);border-color:var(--accent);}
+  #grpAddMenu .gam-empty{font-size:12.5px;color:var(--muted);padding:6px 4px;}
   #favBtn.on{background:var(--accent);border-color:var(--accent);color:#0d0f12;}
   /* folder selection checkbox (top-left, mirror of photo selbox) */
   .folder .fselbox{position:absolute;top:6px;left:6px;z-index:5;width:26px;height:26px;
@@ -291,7 +329,8 @@
     border-radius:10px;padding:10px 14px;margin:10px 16px;backdrop-filter:blur(8px);}
   #bulkBar.show,#fbulkBar.show{display:flex;}
   #bulkBar #bulkCount,#fbulkBar #fbulkCount{font-weight:600;font-size:14px;min-width:90px;}
-  #bulkBar button,#fbulkBar button{font-size:13px;padding:7px 12px;}
+  #bulkBar button,#fbulkBar button,#fbulkBar button.danger{font-size:13px;padding:7px 12px;}
+  #fbulkBar #fbulkMerge[disabled]{opacity:.45;cursor:not-allowed;}
   #bulkBar button.danger,#fbulkBar button.danger{border-color:#5a3030;}
   #bulkBar button.danger:hover,#fbulkBar button.danger:hover{background:#d23b3b;border-color:#d23b3b;}
   #bulkBar #bulkMove:hover{background:var(--accent);border-color:var(--accent);}
@@ -562,11 +601,18 @@
   <!-- folder bulk bar: shows on the landing when ≥1 folder is selected -->
   <div id="fbulkBar">
     <span id="fbulkCount">0 folders selected</span>
+    <button id="fbulkMerge" title="Show these folders as one folder — nothing is moved and ingest keeps writing to each original folder">&#8853; Merge</button>
     <button id="fbulkDelete" class="danger">&#128465; Delete folders</button>
     <button id="fbulkClear">Clear</button>
   </div>
   <div id="folderGrid"></div>
   <div id="gsRow"></div>
+  <!-- member folders of a merged folder (only shown inside one) -->
+  <div id="grpRow">
+    <span id="grpChips"></span>
+    <button id="grpAdd" class="gact">&#43; Add folder</button>
+    <button id="grpUngroup" class="gact" title="Stop showing these as one folder. Folders and items stay exactly where they are.">Ungroup</button>
+  </div>
   <div id="photoGrid" style="display:none"></div>
   <div id="filterBar" style="display:none"></div>
   <div id="dateRail" style="display:none"></div>
@@ -576,6 +622,7 @@
 </main>
 <div id="rubber"></div>
 <div id="toast"></div>
+<div id="grpAddMenu"></div>
 <div id="bgTasks" title="Background tasks — click for activity log"><span class="spin"></span><span id="bgTasksText"></span></div>
 <div id="helpScrim">
   <div id="helpDlg">
@@ -1378,13 +1425,280 @@
     // Count against the folder LIST (chats/emptyFolders, from folders_meta), not
     // chatMap: chatMap is filled per-folder only when a shard loads, so on the
     // landing page it is empty and every favorite would count as gone.
-    for(var k in favSet){ if(favSet[k] && (chats.indexOf(k)>=0 || emptyFolders.indexOf(k)>=0)) n++; }
+    for(var k in favSet){
+      if(!favSet[k]) continue;
+      var g=isGrpKey(k)?grpById(grpIdOf(k)):null;
+      if(chats.indexOf(k)>=0 || emptyFolders.indexOf(k)>=0 || (g && !g.del)) n++;
+    }
     return n;
   }
   function setFavOnly(on){
     favOnly=!!on;
     if(elFavBtn) elFavBtn.classList.toggle('on',favOnly);
     if(current==null) renderFolders();
+  }
+
+  // ---- MERGED FOLDERS (a view; ingest is never touched) -------------------
+  // Merging folders here groups their ITEMS for browsing. It deliberately does
+  // NOT call /merge (which moves originals and writes ingest redirects): the
+  // collector keeps pushing every new item to its own source folder name, so a
+  // merge can be undone for free and no ingest path ever sees this state.
+  // Server-side (GET/POST /merges -> /var/lib/media-gallery/folder_groups.json)
+  // for the same reason as favorites — the phone and the desktop must agree —
+  // and reconciled per group id on a last-writer-wins `ts`, with a `del`
+  // tombstone, so two devices that edited offline converge whichever loads
+  // first. A plain union would resurrect an ungroup; "server wins" would lose
+  // an offline merge.
+  var GRP_KEY='gal.groups.v1';
+  var GRP_PREFIX='__grp__:';
+  var groups=[];                       // includes tombstones ({del:1})
+  function grpId(){ return 'g'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+  function grpKey(id){ return GRP_PREFIX+id; }
+  function isGrpKey(k){ return typeof k==='string' && k.indexOf(GRP_PREFIX)===0; }
+  function grpIdOf(k){ return isGrpKey(k)?k.slice(GRP_PREFIX.length):''; }
+  function grpById(id){
+    if(!id) return null;
+    for(var i=0;i<groups.length;i++){ if(groups[i] && groups[i].id===id) return groups[i]; }
+    return null;
+  }
+  function grpFromKey(k){ return isGrpKey(k)?grpById(grpIdOf(k)):null; }
+  function grpList(){
+    return groups.filter(function(g){
+      return g && !g.del && g.id && Array.isArray(g.folders) && g.folders.length>1;
+    });
+  }
+  function grpForFolder(n){
+    var L=grpList();
+    for(var i=0;i<L.length;i++){ if(L[i].folders.indexOf(n)>=0) return L[i]; }
+    return null;
+  }
+  function grpSave(){ try{ localStorage.setItem(GRP_KEY, JSON.stringify(groups)); }catch(_){} }
+  function grpLoadLocal(){
+    try{
+      var a=JSON.parse(localStorage.getItem(GRP_KEY)||'[]');
+      if(Array.isArray(a)) groups=a.filter(function(g){ return g&&typeof g==='object'&&g.id; });
+    }catch(_){ groups=[]; }
+  }
+  var _grpTimer=null;
+  function grpPush(){
+    if(_grpTimer) clearTimeout(_grpTimer);
+    _grpTimer=setTimeout(function(){
+      _grpTimer=null;
+      // tombstones are kept a week: a device that was offline for days must
+      // still learn about the ungroup instead of resurrecting the group.
+      var cutoff=Date.now()-7*864e5;
+      var out=groups.filter(function(g){ return g && g.id && (!g.del || (g.ts||0)>=cutoff); });
+      fetch('/merges',{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({groups:out})})
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); })
+        .catch(function(){ toast('Could not save merged folders (network)','err'); });
+    },250);
+  }
+  function grpApplyFrom(list){
+    var byId={};
+    function take(g){ if(!g||!g.id) return;
+      var cur=byId[g.id];
+      if(!cur || (Number(g.ts)||0)>(Number(cur.ts)||0)) byId[g.id]=g; }
+    (list||[]).forEach(take);
+    groups.slice().forEach(take);       // this device's copy: offline edits survive
+    var out=[]; for(var k in byId) out.push(byId[k]);
+    out.sort(function(a,b){ return (Number(a.ts)||0)-(Number(b.ts)||0); });
+    groups=out; grpSave();
+    var sig=function(L){ return (L||[]).filter(function(g){return g&&!g.del;})
+      .map(function(g){return g.id+'@'+(Number(g.ts)||0);}).sort().join(','); };
+    if(sig(groups)!==sig(list)) grpPush();    // server is behind this device
+  }
+  // The folder universe a group member must exist in. pendingRename is included
+  // on BOTH sides: the server's folder list lags a rename by a rebuild, and a
+  // prune against the stale name would quietly drop the member and dissolve
+  // the group.
+  function grpUniverse(){
+    var u={};
+    chats.forEach(function(c){ u[c]=1; });
+    emptyFolders.forEach(function(n){ u[n]=1; });
+    for(var k in folderCount){ u[k]=1; }
+    Object.keys(pendingRename||{}).forEach(function(o){ u[o]=1; u[pendingRename[o]]=1; });
+    return u;
+  }
+  // Drop members that are gone (deleted / renamed away) and dissolve a group
+  // that fell below two members — a one-folder "merge" is clutter, and a card
+  // naming a folder that no longer exists is the dead row he does not want.
+  // Runs only once the folder list is authoritative, so a half-loaded page can
+  // never eat a group.
+  function grpPrune(){
+    if(!metaReady) return false;
+    var u=grpUniverse(), changed=false, cutoff=Date.now()-7*864e5;
+    groups=groups.filter(function(g){ return g && g.id && (!g.del || (Number(g.ts)||0)>=cutoff); });
+    groups.forEach(function(g){
+      if(g.del) return;
+      var cur=Array.isArray(g.folders)?g.folders:[];
+      var keep=cur.filter(function(n){ return !!u[n]; });
+      if(keep.length!==cur.length){ g.folders=keep; g.ts=Date.now(); changed=true; }
+      if(keep.length<2 && chats.length){ g.del=1; g.folders=keep; g.ts=Date.now(); changed=true; }
+    });
+    if(changed){ grpSave(); grpPush(); }
+    return changed;
+  }
+  function grpItems(g){
+    var out=[];
+    ((g&&g.folders)||[]).forEach(function(n){
+      var arr=chatMap[n]||[];
+      for(var i=0;i<arr.length;i++){ if(!arr[i].hidden) out.push(arr[i]); }
+    });
+    return out;
+  }
+  function grpCount(g){
+    var n=0;
+    ((g&&g.folders)||[]).forEach(function(f){ n+=(chatMap[f]?chatMap[f].length:(folderCount[f]||0)); });
+    return n;
+  }
+  // default label for a merge: two names, then "+N"
+  function grpLabel(names){
+    if(!names.length) return 'Merged';
+    if(names.length===1) return names[0];
+    return names[0]+' + '+names[1]+(names.length>2?' +'+(names.length-2):'');
+  }
+  function grpCreate(names, label){
+    names=(names||[]).filter(Boolean);
+    if(names.length<2) return null;
+    var target=null;
+    names.forEach(function(n){ var g=grpForFolder(n); if(g && !target) target=g; });
+    if(target){
+      // extending an existing merge: pull the other picked folders out of
+      // whatever merge they were in first, then add them here
+      names.forEach(function(n){
+        var og=grpForFolder(n);
+        if(og && og!==target){
+          og.folders=og.folders.filter(function(x){ return x!==n; });
+          og.ts=Date.now();
+          if(og.folders.length<2){ og.del=1; og.ts=Date.now(); }
+        }
+      });
+      names.forEach(function(n){ if(target.folders.indexOf(n)<0) target.folders.push(n); });
+      target.ts=Date.now();
+      if(label) target.name=label;
+    }else{
+      target={id:grpId(), name:(label||grpLabel(names)), folders:names.slice(), ts:Date.now()};
+      groups.push(target);
+    }
+    grpSave(); grpPush();
+    return target;
+  }
+  function grpDissolve(id){
+    var g=grpById(id); if(!g||g.del) return;
+    g.del=1; g.ts=Date.now(); grpSave(); grpPush();
+    // its star must go too, or the favorites count keeps a dead key
+    var k=grpKey(id);
+    if(favSet[k]){ delete favSet[k]; favSave(); favPush(); }
+  }
+  function grpRename(id){
+    var g=grpById(id); if(!g||g.del) return;
+    var nn=window.prompt('Name for the merged folder:', g.name);
+    if(nn==null) return; nn=nn.trim(); if(!nn||nn===g.name) return;
+    g.name=nn; g.ts=Date.now(); grpSave(); grpPush(); renderFolders();
+  }
+  function grpRemoveMember(id, name){
+    var g=grpById(id); if(!g||g.del) return;
+    g.folders=(g.folders||[]).filter(function(n){ return n!==name; });
+    g.ts=Date.now();
+    if(g.folders.length<2) grpDissolve(id);      // one folder left: back to the grid
+    else { grpSave(); grpPush(); }
+    if(current===grpKey(id)){ if(grpById(id) && !grpById(id).del) openFolder(grpKey(id)); else renderFolders(); }
+  }
+  function grpAddMember(id, name){
+    var g=grpById(id); if(!g||g.del) return;
+    var og=grpForFolder(name);
+    if(og && og.id!==id){
+      og.folders=og.folders.filter(function(n){ return n!==name; });
+      og.ts=Date.now();
+      if(og.folders.length<2){ og.del=1; og.ts=Date.now(); }
+    }
+    if(g.folders.indexOf(name)<0) g.folders.push(name);
+    g.ts=Date.now(); grpSave(); grpPush();
+    if(current===grpKey(id)) openFolder(grpKey(id)); else renderFolders();
+  }
+  // a real folder renamed/deleted: keep the merge pointing at something real
+  function grpFolderRenamed(oldN, newN){
+    var g=grpForFolder(oldN); if(!g) return;
+    g.folders=g.folders.map(function(n){ return n===oldN?newN:n; });
+    g.ts=Date.now(); grpSave(); grpPush();
+  }
+  function grpFolderDeleted(name){
+    var g=grpForFolder(name); if(!g) return;
+    g.folders=g.folders.filter(function(n){ return n!==name; });
+    g.ts=Date.now();
+    if(g.folders.length<2) grpDissolve(g.id);
+    else { grpSave(); grpPush(); }
+  }
+  function grpChips(g){
+    var row=document.getElementById('grpRow');
+    if(!row) return;
+    row.innerHTML='';
+    if(!g){ row.classList.remove('show'); return; }
+    var wrap=document.createElement('span'); wrap.id='grpChips'; row.appendChild(wrap);
+    (g.folders||[]).forEach(function(n){
+      var chip=document.createElement('span'); chip.className='gchip';
+      var lab=document.createElement('span'); lab.textContent=n; chip.appendChild(lab);
+      var x=document.createElement('button'); x.type='button'; x.className='gx';
+      x.title='Remove '+n+' from this merge (the folder and its items stay as they are)';
+      x.innerHTML='&times;';
+      x.addEventListener('click',function(e){ e.stopPropagation(); grpRemoveMember(g.id,n); });
+      chip.appendChild(x);
+      wrap.appendChild(chip);
+    });
+    var add=document.createElement('button'); add.className='gact'; add.innerHTML='&#43; Add folder';
+    add.addEventListener('click',function(e){ e.stopPropagation(); grpAddMenuOpen(g.id,add); });
+    row.appendChild(add);
+    var un=document.createElement('button'); un.className='gact';
+    un.title='Stop showing these as one folder — nothing is moved';
+    un.textContent='Ungroup';
+    un.addEventListener('click',function(e){
+      e.stopPropagation();
+      if(!confirm('Ungroup “'+g.name+'”?\n\nThe folders and their items stay exactly where they are.')) return;
+      grpDissolve(g.id); renderFolders();
+    });
+    row.appendChild(un);
+    row.classList.add('show');
+  }
+  function grpAddMenuOpen(id, anchor){
+    var g=grpById(id); if(!g||g.del) return;
+    var m=document.getElementById('grpAddMenu'); if(!m) return;
+    if(m.classList.contains('show')){ m.classList.remove('show'); m.innerHTML=''; return; }
+    var r=anchor.getBoundingClientRect();
+    m.style.top=(r.bottom+6)+'px';
+    m.style.left=Math.max(8,Math.min(r.left, window.innerWidth-286))+'px';
+    m.innerHTML='';
+    var inp=document.createElement('input'); inp.type='search'; inp.placeholder='Filter folders…';
+    var list=document.createElement('div'); list.className='gam-list';
+    m.appendChild(inp); m.appendChild(list);
+    function paint(q){
+      list.innerHTML='';
+      var cands=chats.concat(emptyFolders.filter(function(n){ return chats.indexOf(n)<0; }))
+        .filter(function(n){ return (g.folders||[]).indexOf(n)<0 && (!q||n.toLowerCase().indexOf(q)>=0); });
+      if(!cands.length){
+        var d=document.createElement('div'); d.className='gam-empty';
+        d.textContent=(q?'No folders match':'No other folders'); list.appendChild(d);
+      }
+      cands.slice(0,300).forEach(function(n){
+        var b=document.createElement('button'); b.type='button';
+        var og=grpForFolder(n);
+        b.textContent=n+(og?'  (in “'+og.name+'”)':'');
+        b.addEventListener('click',function(){ grpAddMember(id,n); m.classList.remove('show'); m.innerHTML=''; });
+        list.appendChild(b);
+      });
+    }
+    inp.addEventListener('input',function(){ paint(inp.value.trim().toLowerCase()); });
+    paint('');
+    m.classList.add('show');
+    setTimeout(function(){ try{ inp.focus(); }catch(_){} },30);
+    setTimeout(function(){
+      document.addEventListener('click',function close(ev){
+        if(m.contains(ev.target)||ev.target===anchor) return;
+        m.classList.remove('show'); m.innerHTML='';
+        document.removeEventListener('click',close);
+      });
+    },0);
   }
 
   function renderFolders(){
@@ -1402,6 +1716,7 @@
     current=null;
     elPhoto.style.display='none'; elPhoto.innerHTML='';
     var dv=document.getElementById('dupView'); if(dv) dv.style.display='none';
+    grpChips(null);            // member chips belong to a merged folder only
     elFolder.style.display='grid';
     elBack.style.display='none';
     elSort.style.display='none';
@@ -1418,11 +1733,57 @@
     var q=(searchQuery||'').trim().toLowerCase();
     // keep the RAW text for the box (casing the user typed), compare lowercased
     landingFilter=q?((elSearch&&elSearch.value.trim())||searchQuery):'';
-    var baseChats=favOnly?chats.filter(favHas):chats;
-    var baseEmpty=favOnly?emptyFolders.filter(favHas):emptyFolders;
-    var shownChats=sortFolders(q?baseChats.filter(function(c){return c.toLowerCase().indexOf(q)>=0;}):baseChats);
-    var shownEmpty=q?baseEmpty.filter(function(n){return n.toLowerCase().indexOf(q)>=0;}):baseEmpty;
-    var nMatch=shownChats.length+shownEmpty.length;
+    // One card per thing you can open: a real folder, or a MERGED folder that
+    // stands in for several of them. A folder claimed by a merge is never drawn
+    // on its own (that is the point of merging), and the group card carries its
+    // members' summed count and newest date so the usual sorts still work.
+    var gL=grpList(), owner={};
+    gL.forEach(function(g){ g.folders.forEach(function(n){ if(!owner[n]) owner[n]=g; }); });
+    var entries=[];
+    chats.forEach(function(c){
+      if(owner[c]) return;
+      var items=chatMap[c];
+      entries.push({kind:'folder',key:c,name:c,
+        count:(items?items.length:(folderCount[c]||0)),
+        cover:(items?folderCover(c,items):coverPathFor(c))||'',
+        newest:folderNewest[c]||''});
+    });
+    emptyFolders.forEach(function(n){
+      if(chatMap[n]||folderCount[n]||owner[n]) return;
+      entries.push({kind:'folder',key:n,name:n,count:0,cover:'',newest:''});
+    });
+    gL.forEach(function(g){
+      var count=0,cover='',newest='',best='';
+      g.folders.forEach(function(n){
+        count+=(chatMap[n]?chatMap[n].length:(folderCount[n]||0));
+        var nw=String(folderNewest[n]||'');
+        if(nw>String(newest)) newest=folderNewest[n]||'';
+        var cv=(chatMap[n]?folderCover(n,chatMap[n]):coverPathFor(n))||'';
+        if(cv && nw>=String(best)){ best=nw; cover=cv; }
+      });
+      entries.push({kind:'group',key:grpKey(g.id),group:g,name:g.name,
+        count:count,cover:cover,newest:newest});
+    });
+    function entMatch(e){
+      if(!q) return true;
+      if(String(e.name).toLowerCase().indexOf(q)>=0) return true;
+      if(e.kind==='group') return e.group.folders.some(function(n){ return String(n).toLowerCase().indexOf(q)>=0; });
+      return false;
+    }
+    var baseEnt=entries.filter(function(e){
+      if(favOnly && !favHas(e.key)) return false;
+      return entMatch(e);
+    });
+    baseEnt.sort(function(a,b){
+      if(folderSortMode==='recent'){
+        var A=String(a.newest||''),B=String(b.newest||'');
+        if(A===B) return b.count-a.count;
+        return A<B?1:-1;
+      }
+      if(folderSortMode==='name') return String(a.name).localeCompare(String(b.name),undefined,{sensitivity:'base'});
+      return b.count-a.count;
+    });
+    var nMatch=baseEnt.length;
     if(elFavBtn){ elFavBtn.innerHTML='\u2605 Favorites'+(favCount()?' ('+favCount()+')':''); }
     elSearch.placeholder='Search folders…';
     var fb=document.getElementById('filterBar'); if(fb){ fb.style.display='none'; fb.innerHTML=''; }
@@ -1431,7 +1792,9 @@
       ? nMatch+' folder'+(nMatch===1?'':'s')+' match “'+searchQuery+'”'
       : (favOnly
           ? (nMatch?nMatch+' favorite'+(nMatch===1?'':'s') : 'No favorites yet')
-          : chats.length+' folders · '+visibleCount+' items total');
+          : (entries.length+' folder'+(entries.length===1?'':'s')+
+             (gL.length?(' in '+gL.length+' merge'+(gL.length===1?'':'s')):'')+
+             ' · '+visibleCount+' items total'));
     if(q && !nMatch){ elState.style.display='block'; elState.textContent='No folders match “'+searchQuery+'”.'; }
     else if(favOnly && !nMatch){
       elState.style.display='block';
@@ -1441,9 +1804,10 @@
 
     var frag=document.createDocumentFragment();
 
-    function makeFolder(name,items,cover){
+    function makeFolder(name,items,cover,grp){
       var f=document.createElement('div');
-      f.className='folder'+(items===0?' empty':''); f.dataset.chat=name;
+      f.className='folder'+(items===0?' empty':'')+(grp?' isgroup':'');
+      f.dataset.chat=grp?grpKey(grp.id):name;
       var tab=document.createElement('div'); tab.className='ftab'; f.appendChild(tab);
       if(cover){
         var img=document.createElement('img'); img.className='cover';
@@ -1456,37 +1820,58 @@
       m.innerHTML='<div class="fname"></div><div class="fcount"></div>';
       m.querySelector('.fname').textContent=name;
       m.querySelector('.fcount').textContent=items+' item'+(items===1?'':'s');
+      if(grp){
+        var fm=document.createElement('div'); fm.className='fmembers';
+        fm.textContent=grp.folders.length+' folders merged · '+grp.folders.join(' · ');
+        m.appendChild(fm);
+      }
       f.appendChild(m);
       // rename pencil + delete + select (not on the "All items" aggregate)
       if(name!=='All items'){
         var rb=document.createElement('button'); rb.className='frename';
-        rb.title='Rename folder'; rb.innerHTML='&#9998;';
+        rb.title=grp?'Rename this merge':'Rename folder'; rb.innerHTML='&#9998;';
         f.appendChild(rb);
-        var db=document.createElement('button'); db.className='fdelete';
-        db.title='Delete folder'; db.innerHTML='&#128465;';
-        f.appendChild(db);
-        var fb2=document.createElement('button'); fb2.className='ffav'+(favHas(name)?' on':'');
+        if(grp){
+          // a merge's trash is UNGROUP, never delete: the folders behind it are
+          // real and must survive a click that looks like "remove this card"
+          var ub=document.createElement('button'); ub.className='gunmerge';
+          ub.title='Ungroup — the folders and their items stay where they are';
+          ub.innerHTML='&#10005;';
+          f.appendChild(ub);
+        }else{
+          var db=document.createElement('button'); db.className='fdelete';
+          db.title='Delete folder'; db.innerHTML='&#128465;';
+          f.appendChild(db);
+        }
+        var favK=grp?grpKey(grp.id):name;
+        var fb2=document.createElement('button'); fb2.className='ffav'+(favHas(favK)?' on':'');
         fb2.type='button';
-        fb2.title=favHas(name)?'Remove from favorites':'Add to favorites';
-        fb2.innerHTML=favHas(name)?'\u2605':'\u2606';
+        fb2.title=favHas(favK)?'Remove from favorites':'Add to favorites';
+        fb2.innerHTML=favHas(favK)?'\u2605':'\u2606';
         fb2.addEventListener('click',function(e){
           e.stopPropagation(); e.preventDefault();
-          favToggle(name);
-          fb2.title=favHas(name)?'Remove from favorites':'Add to favorites';
+          favToggle(favK);
+          fb2.title=favHas(favK)?'Remove from favorites':'Add to favorites';
         });
         f.appendChild(fb2);
-        // selection checkbox (top-left) for multi-folder delete
-        var fsb=document.createElement('div'); fsb.className='fselbox';
-        fsb.title='Select folder';
-        if(typeof selectedFolders!=='undefined' && selectedFolders.has(name)){ f.classList.add('selected'); fsb.innerHTML='&#10003;'; }
-        fsb.addEventListener('click',function(e){ e.stopPropagation(); toggleFolderSelect(name,f); });
-        f.appendChild(fsb);
-        // folder is a drop target for drag-to-move from inside another folder
+        if(!grp){
+          // selection checkbox (top-left) for multi-folder delete; a merge card
+          // is NOT selectable — delete acts on real folders, never on a view
+          var fsb=document.createElement('div'); fsb.className='fselbox';
+          fsb.title='Select folder';
+          if(typeof selectedFolders!=='undefined' && selectedFolders.has(name)){ f.classList.add('selected'); fsb.innerHTML='&#10003;'; }
+          fsb.addEventListener('click',function(e){ e.stopPropagation(); toggleFolderSelect(name,f); });
+          f.appendChild(fsb);
+        }
+        // folder is a drop target for drag-to-move from inside another folder.
+        // For a merge card the destination is ambiguous, so it is refused with
+        // an explanation instead of silently picking a member.
         f.addEventListener('dragover',function(e){ if(dragStems.length){ e.preventDefault(); f.classList.add('dragover'); e.dataTransfer.dropEffect='move'; } });
         f.addEventListener('dragleave',function(){ f.classList.remove('dragover'); });
         f.addEventListener('drop',function(e){
           e.preventDefault(); f.classList.remove('dragover');
           if(!dragStems.length) return;
+          if(grp){ dragStems=[]; toast('Open the merged folder and drop onto a folder chip instead.','err'); return; }
           var stems=dragStems.slice(); dragStems=[];
           bulkMove(name, stems);
         });
@@ -1494,14 +1879,8 @@
       return f;
     }
 
-    shownChats.forEach(function(c){
-      var items=chatMap[c];
-      var n=(items?items.length:(folderCount[c]||0));
-      frag.appendChild(makeFolder(c,n, items?folderCover(c,items):coverPathFor(c)));
-    });
-    // user-created empty folders (no items yet)
-    shownEmpty.forEach(function(n){
-      frag.appendChild(makeFolder(n,0,''));
+    baseEnt.forEach(function(e){
+      frag.appendChild(makeFolder(e.name,e.count,e.cover,e.group||null));
     });
     elFolder.innerHTML=''; elFolder.appendChild(frag);
     // explicit cross-folder search affordance — the landing box filters folders
@@ -1648,12 +2027,28 @@
   }
 
   // ---------- FOLDER VIEW ----------
+  // Load one folder's item shard (items/<key>.json) once, then re-enter whatever
+  // view is on screen: the folder itself, or a merged folder that contains it.
+  function loadFolderShard(name){
+    if(!folderKey[name]||folderLoading[name]) return;
+    folderLoading[name]=true;
+    fetch('/gallery/items/'+folderKey[name]+'.json',{credentials:'same-origin',cache:'no-cache'})
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(j){
+        folderLoading[name]=false;
+        if(j && Array.isArray(j.items)){ chatMap[name]=j.items; folderCount[name]=j.items.length; }
+        var cur=grpFromKey(current);
+        if(current===name || (cur && cur.folders.indexOf(name)>=0)) openFolder(current);
+      })
+      .catch(function(){ folderLoading[name]=false; toast('Could not load '+name,'err'); });
+  }
   function openFolder(chat){
     // Only reset the selection when NAVIGATING to a different folder — NOT on a
     // same-folder re-render (e.g. the background reloadManifest timer calls
     // openFolder(current) to refresh, and must not wipe an in-progress selection).
     var navigating = (chat !== current);
     if(navigating) saveResumeNow();          // bookmark the folder we are leaving
+    var grp=grpFromKey(chat);                // a MERGED folder, or null
     var rs=navigating?resumeFor(chat):null;  // restore its sort before laying it out
     if(rs && rs.sort) elSort.value=rs.sort;
     current=chat;
@@ -1661,25 +2056,20 @@
     // same hidden-flag filter here that buildChats() applies to real folders.
     var items=(chat==='*')
       ? manifest.filter(function(it){ return !it.hidden; })
-      : (chatMap[chat]?chatMap[chat].slice():[]);
+      : (grp ? grpItems(grp) : (chatMap[chat]?chatMap[chat].slice():[]));
     // Lazy shard load: on the folders-from-metadata path chatMap holds nothing
     // until this folder is opened. Fetch its shard once, then re-enter.
-    if(chat!=='*' && !chatMap[chat] && !folderLoading[chat] && folderKey[chat]){
-      folderLoading[chat]=true;
-      (function(name,key){
-        fetch('/gallery/items/'+key+'.json',{credentials:'same-origin',cache:'no-cache'})
-          .then(function(r){ return r.ok?r.json():null; })
-          .then(function(j){
-            folderLoading[name]=false;
-            if(j && Array.isArray(j.items)){ chatMap[name]=j.items; folderCount[name]=j.items.length; }
-            if(current===name) openFolder(name);
-          })
-          .catch(function(){ folderLoading[name]=false; toast('Could not load '+name,'err'); });
-      })(chat, folderKey[chat]);
+    if(chat!=='*' && grp){
+      (grp.folders||[]).forEach(function(n){
+        if(!chatMap[n] && folderKey[n]) loadFolderShard(n);
+      });
+    }else if(chat!=='*' && !chatMap[chat] && !folderLoading[chat] && folderKey[chat]){
+      loadFolderShard(chat);
     }
-    var name=(chat==='*')?'All items':chat;
+    var name=(chat==='*')?'All items':(grp?grp.name:chat);
     var _gsRow=document.getElementById('gsRow'); if(_gsRow) _gsRow.innerHTML='';
     var _fsSel=document.getElementById('folderSort'); if(_fsSel) _fsSel.style.display='none';
+    grpChips(grp || null);
     applySort(items);
     view=items;
 
@@ -1690,14 +2080,17 @@
     elBack.style.display='inline-block';
     elSort.style.display='inline-block';
     document.getElementById('zoom').style.display=listView?'none':'';
-    // "All items" is a virtual aggregate; can't upload into it
-    elUploadBtn.style.display=(chat==='*')?'none':'inline-block';
+    // "All items" is a virtual aggregate, and so is a merged folder: neither has
+    // one destination folder to upload into
+    elUploadBtn.style.display=(chat==='*'||grp)?'none':'inline-block';
     if(navigating){ clearSelection(); searchQuery=''; ff={type:'',year:'',size:'',unseen:false}; if(elSearch) elSearch.value=''; }
     else { pruneSelection(); refreshBulkBar(); }  // same-folder refresh: keep valid selections
     hideUploadBar();
     setCrumb(name);
     elSearch.placeholder='Search this folder…';
-    elSub.textContent=(folderLoading[chat]&&!items.length)?'Loading…':(items.length+' item'+(items.length===1?'':'s'));
+    elSub.textContent=(folderLoading[chat]&&!items.length)?'Loading…'
+      :(items.length+' item'+(items.length===1?'':'s')+
+        (grp?(' · '+grp.folders.length+' folders merged'):''));
 
     renderPhotos();
     renderFilterBar();
@@ -2254,8 +2647,9 @@
           if(pendingRmdir[nm]) return;
           if(!chatMap[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
         });
+        grpPrune();     // folder list just changed: drop dead merge members
         if(current===null){ renderFolders(); }
-        else if(stayFolder!=null && (chatMap[stayFolder]||emptyFolders.indexOf(stayFolder)>=0)){
+        else if(stayFolder!=null && (chatMap[stayFolder]||emptyFolders.indexOf(stayFolder)>=0||grpFromKey(stayFolder))){
           openFolder(stayFolder);
           if(!uploading){
             elUploadBar.classList.add('show','done');
@@ -2273,16 +2667,16 @@
 
   // ---------- EVENTS ----------
   elUploadBtn.addEventListener('click',function(){
-    if(current==null||current==='*'||uploading) return;
+    if(current==null||current==='*'||isGrpKey(current)||uploading) return;
     elFileInput.click();
   });
   elFileInput.addEventListener('change',function(){
-    if(current!=null) uploadFiles(current,elFileInput.files);
+    if(current!=null&&!isGrpKey(current)) uploadFiles(current,elFileInput.files);
   });
   // drag-and-drop onto the photo grid
   ['dragenter','dragover'].forEach(function(ev){
     elPhoto.addEventListener(ev,function(e){
-      if(current==null||current==='*') return;
+      if(current==null||current==='*'||isGrpKey(current)) return;
       e.preventDefault(); e.stopPropagation();
       elPhoto.classList.add('dragover');
     });
@@ -2293,7 +2687,7 @@
     });
   });
   elPhoto.addEventListener('drop',function(e){
-    if(current==null||current==='*') return;
+    if(current==null||current==='*'||isGrpKey(current)) return;
     e.preventDefault(); e.stopPropagation();
     elPhoto.classList.remove('dragover');
     var dt=e.dataTransfer; if(!dt||!dt.files||!dt.files.length) return;
@@ -2302,7 +2696,20 @@
 
   elFolder.addEventListener('click',function(e){
     var f=e.target.closest('.folder'); if(!f) return;
-    if(e.target.closest('.frename')){ e.stopPropagation(); renameFolder(f.dataset.chat); return; }
+    if(e.target.closest('.frename')){
+      e.stopPropagation();
+      if(isGrpKey(f.dataset.chat)) grpRename(grpIdOf(f.dataset.chat));
+      else renameFolder(f.dataset.chat);
+      return;
+    }
+    if(e.target.closest('.gunmerge')){
+      e.stopPropagation();
+      var gid=grpIdOf(f.dataset.chat), gg=grpById(gid);
+      if(gg && confirm('Ungroup “'+gg.name+'”?\n\nThe folders and their items stay exactly where they are.')){
+        grpDissolve(gid); renderFolders();
+      }
+      return;
+    }
     if(e.target.closest('.fdelete')){ e.stopPropagation(); deleteFolder(f.dataset.chat); return; }
     openFolder(f.dataset.chat);
   });
@@ -2319,6 +2726,7 @@
     return fetch('/rmdir/'+encodeURIComponent(name),{method:'POST',credentials:'same-origin'})
       .then(function(r){
         if(r.status!==200){ delete pendingRmdir[name]; savePendingRmdir(); }  // roll back on failure
+        else grpFolderDeleted(name);   // a merge must not keep naming a dead folder
         return {ok:r.status===200, status:r.status};
       },
             function(){ delete pendingRmdir[name]; savePendingRmdir(); return {ok:false, status:0}; });
@@ -2345,8 +2753,28 @@
   function refreshFbulkBar(){
     document.getElementById('fbulkCount').textContent=
       selectedFolders.size+' folder'+(selectedFolders.size===1?'':'s')+' selected';
+    var mb=document.getElementById('fbulkMerge');
+    if(mb) mb.disabled=selectedFolders.size<2;
     elFbulkBar.classList.toggle('show', selectedFolders.size>0 && current===null);
   }
+  document.getElementById('fbulkMerge').addEventListener('click',function(){
+    var names=Array.from(selectedFolders).filter(function(n){
+      return chats.indexOf(n)>=0 || emptyFolders.indexOf(n)>=0;
+    });
+    if(names.length<2){ toast('Select at least two folders to merge.','err'); return; }
+    // if a picked folder is already merged, Merge extends that merge (that is
+    // also how you add a folder to an existing one: pick it + a member)
+    var target=null;
+    names.forEach(function(n){ var g=grpForFolder(n); if(g && !target) target=g; });
+    var defName=target?target.name:grpLabel(names);
+    var label=window.prompt('Name for the merged folder:', defName);
+    if(label==null) return;
+    label=(label||'').trim()||defName;
+    var g=grpCreate(names,label);
+    clearFolderSelection();
+    renderFolders();
+    if(g) toast('✓ Merged '+names.length+' folders into “'+g.name+'” — nothing moved; ingest still writes to each original folder.','ok');
+  });
   function clearFolderSelection(){
     selectedFolders.clear(); refreshFbulkBar();
     Array.prototype.forEach.call(document.querySelectorAll('.folder.selected'),function(f){
@@ -2479,6 +2907,9 @@
           // retire-check would immediately think the server already caught up.
           pendingRename[oldName]=nn; savePendingRenames();
           var ei=emptyFolders.indexOf(oldName); if(ei>=0) emptyFolders[ei]=nn;
+          // a merged folder follows a renamed member (else the chip and the
+          // prune both point at a folder name that no longer exists)
+          grpFolderRenamed(oldName,nn);
           // carry folder cover/meta to the new name locally too
           if(folderMeta[oldName]){ folderMeta[nn]=folderMeta[oldName]; delete folderMeta[oldName]; }
           buildChats(); renderFolders();
@@ -3561,6 +3992,10 @@
   // this explicit reset is belt-and-suspenders in case any browser/version
   // restores the value before scripts run regardless.
   elSort.value='new';
+  // Merged folders: paint from this device's mirror first (instant, works
+  // offline), then reconcile with the server below — per-group ts, so whichever
+  // device loads first, both end up with the same answer.
+  grpLoadLocal();
   // ---- two-stage boot (2026-11-05) --------------------------------------
   // Stage 1 paints the folders page from folders_meta.json (75KB): names,
   // counts, covers, shard keys. Stage 2 fetches the full manifest (~76MB) in
@@ -3585,12 +4020,13 @@
       if(pendingRmdir[nm]) return;
       if(!chatMap[nm] && !folderCount[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
     });
+    grpPrune();        // drop dead merge members before the first paint
     renderFolders();   // always render landing (so "+ New folder" is available)
     bgPoll();
   }
   function bootRoute(rt){
     if(!rt) return;
-    if(rt.folder && (chatMap[rt.folder]||emptyFolders.indexOf(rt.folder)>=0||folderKey[rt.folder])){
+    if(rt.folder && (chatMap[rt.folder]||emptyFolders.indexOf(rt.folder)>=0||folderKey[rt.folder]||grpFromKey(rt.folder))){
       openFolder(rt.folder);
       // restore the linkable UI state AFTER openFolder (it resets filters when
       // navigating to a different folder)
@@ -3614,7 +4050,8 @@
     fetch('/gallery/folders_meta.json').then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
     fetch('/gallery/folders.json').then(function(r){return r.ok?r.json():[];}).catch(function(){return [];}),
     fetch('/foldermeta?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():{};}).catch(function(){return {};}),
-    fetch('/favs?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
+    fetch('/favs?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
+    fetch('/merges?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
   ]).then(function(res){
       var meta=res[0];
       if(res[3] && Array.isArray(res[3].folders)){
@@ -3624,6 +4061,9 @@
         if(!res[3].folders.length && Object.keys(favSet).length) favPush();
         else favApplyFrom(res[3].folders);
       }
+      // merged folders: reconcile (max-ts per group id) with whatever this
+      // device has offline, then push if the server is behind
+      if(res[4] && Array.isArray(res[4].groups)) grpApplyFrom(res[4].groups);
       var allFolders=Array.isArray(res[1])?res[1]:[];
       var fmeta=res[2];
       var haveMeta=!!(meta&&meta.folders&&meta.folders.length);
