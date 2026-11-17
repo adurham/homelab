@@ -310,6 +310,26 @@
     group: root
     mode: '0750'
 
+# The four maintenance units share /dev/shm/media-gallery-jobs.lock through flock. /dev/shm is a
+# sticky world-writable dir and fs.protected_regular=2 forbids opening a file there that another
+# user owns -- even for root -- unless the DIRECTORY's owner owns it. The lock was created by
+# whichever unit ran first (mediagallery), so the one root unit (heavy-jobs) failed every run with
+# "flock: cannot open lock file ... Permission denied" (2026-11-17, exit 66 NOINPUT). A root-owned
+# 0666 lock opens for everyone; tmpfiles recreates it after a reboot wipes /dev/shm.
+- name: Pre-create the shared job lock root-owned so every unit can open it
+  ansible.builtin.copy:
+    content: "f /dev/shm/media-gallery-jobs.lock 0666 root root -\n"
+    dest: /etc/tmpfiles.d/media-gallery-jobs-lock.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: media_gallery_lock_tmpfiles
+
+- name: Apply the lock ownership now (in place, so a unit holding the lock keeps it)
+  ansible.builtin.command: systemd-tmpfiles --create /etc/tmpfiles.d/media-gallery-jobs-lock.conf
+  when: media_gallery_lock_tmpfiles is changed
+  changed_when: true
+
 - name: Render Heavy Jobs Service Unit
   ansible.builtin.template:
     src: heavy-jobs.service.j2
