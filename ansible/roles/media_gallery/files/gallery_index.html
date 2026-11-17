@@ -117,8 +117,9 @@
   @media (pointer:coarse){
     .tile .selbox,.tile .trash{width:44px;height:44px;font-size:20px;opacity:.92;top:4px;}
     .tile .selbox{left:4px;} .tile .trash{right:4px;}
-    .folder .frename,.folder .fdelete,.folder .fselbox{width:44px;height:44px;font-size:18px;opacity:.92;}
+    .folder .frename,.folder .fdelete,.folder .fselbox,.folder .ffav{width:44px;height:44px;font-size:18px;opacity:.92;}
     .folder .fdelete{right:58px;}
+    .folder .ffav{right:110px;}
     #searchBox{font-size:16px;padding:10px 14px;}
     #filterBar select,#filterBar button{min-height:44px;font-size:14px;}
     #lb .nav{font-size:34px;padding:16px 20px;}
@@ -242,7 +243,16 @@
   .folder:hover .frename,.folder:hover .fdelete{opacity:1;}
   .folder .frename:hover{background:var(--accent);border-color:var(--accent);}
   .folder .fdelete:hover{background:#d23b3b;border-color:#d23b3b;}
-  @media(hover:none){.folder .frename,.folder .fdelete{opacity:.85;}}
+  /* favorite star (sits left of delete, always visible once starred) */
+  .folder .ffav{position:absolute;top:6px;right:70px;z-index:4;width:26px;height:26px;
+    padding:0;font-size:14px;line-height:1;border-radius:6px;opacity:0;
+    transition:opacity .12s,color .12s,border-color .12s;
+    background:rgba(20,24,30,.8);color:var(--muted);}
+  .folder:hover .ffav{opacity:1;}
+  .folder .ffav.on{opacity:1;color:var(--accent);border-color:var(--accent);}
+  .folder .ffav:hover{color:var(--accent);border-color:var(--accent);}
+  @media(hover:none){.folder .frename,.folder .fdelete{opacity:.85;}.folder .ffav{opacity:.85;}}
+  #favBtn.on{background:var(--accent);border-color:var(--accent);color:#0d0f12;}
   /* folder selection checkbox (top-left, mirror of photo selbox) */
   .folder .fselbox{position:absolute;top:6px;left:6px;z-index:5;width:26px;height:26px;
     border-radius:6px;border:2px solid rgba(255,255,255,.85);background:rgba(20,24,30,.6);
@@ -527,6 +537,7 @@
     <option value="size">Largest first</option>
     <option value="type">Type</option>
   </select>
+  <button id="favBtn" title="Show only favorite folders">&#9733; Favorites</button>
   <select id="folderSort" autocomplete="off" title="Sort folders">
     <option value="count">Most items</option>
     <option value="recent">Recently updated</option>
@@ -894,6 +905,7 @@
   var elSub=document.getElementById('sub');
   var elSort=document.getElementById('sort');
   var elBack=document.getElementById('backBtn');
+  var elFavBtn=document.getElementById('favBtn');
   var elSearch=document.getElementById('searchBox');
   var elViewToggle=document.getElementById('viewToggle');
   var searchQuery='';      // active filter text (lowercased)
@@ -1279,6 +1291,44 @@
     });
   }
 
+  // ---- favorites ----------------------------------------------------------
+  // A folder marked with ★ is pinned to its own view (header button / #fav), so
+  // the folders you actually use are one click away instead of somewhere in a
+  // list of hundreds. Kept in localStorage: this is a per-browser convenience,
+  // deliberately not a server-side flag.
+  var FAV_KEY='gal.favs.v1';
+  var favSet=(function(){
+    try{ var o=JSON.parse(localStorage.getItem(FAV_KEY)||'{}');
+         return (o&&typeof o==='object')?o:{}; }catch(_){ return {}; }
+  })();
+  var favOnly=false;
+  function favHas(n){ return !!favSet[n]; }
+  function favSave(){ try{ localStorage.setItem(FAV_KEY, JSON.stringify(favSet)); }catch(_){} }
+  function favToggle(n){
+    if(favSet[n]) delete favSet[n]; else favSet[n]=1;
+    favSave();
+    if(elFavBtn){ var c=favCount(); elFavBtn.innerHTML='\u2605 Favorites'+(c?' ('+c+')':''); }
+    if(favOnly){ renderFolders(); }            // leaving the view when unstarred
+    else {
+      var card=elFolder.querySelector('.folder[data-chat="'+CSS.escape(n)+'"]');
+      var b=card&&card.querySelector('.ffav');
+      if(b){ b.classList.toggle('on',favHas(n)); b.innerHTML=favHas(n)?'\u2605':'\u2606'; }
+    }
+  }
+  function favCount(){
+    var n=0;
+    // Count against the folder LIST (chats/emptyFolders, from folders_meta), not
+    // chatMap: chatMap is filled per-folder only when a shard loads, so on the
+    // landing page it is empty and every favorite would count as gone.
+    for(var k in favSet){ if(favSet[k] && (chats.indexOf(k)>=0 || emptyFolders.indexOf(k)>=0)) n++; }
+    return n;
+  }
+  function setFavOnly(on){
+    favOnly=!!on;
+    if(elFavBtn) elFavBtn.classList.toggle('on',favOnly);
+    if(current==null) renderFolders();
+  }
+
   function renderFolders(){
     saveResumeNow();   // bookmark the folder we are leaving (no-op on landing)
     // Every return to the folders page passes through here: the Back button,
@@ -1310,16 +1360,25 @@
     var q=(searchQuery||'').trim().toLowerCase();
     // keep the RAW text for the box (casing the user typed), compare lowercased
     landingFilter=q?((elSearch&&elSearch.value.trim())||searchQuery):'';
-    var shownChats=sortFolders(q?chats.filter(function(c){return c.toLowerCase().indexOf(q)>=0;}):chats);
-    var shownEmpty=q?emptyFolders.filter(function(n){return n.toLowerCase().indexOf(q)>=0;}):emptyFolders;
+    var baseChats=favOnly?chats.filter(favHas):chats;
+    var baseEmpty=favOnly?emptyFolders.filter(favHas):emptyFolders;
+    var shownChats=sortFolders(q?baseChats.filter(function(c){return c.toLowerCase().indexOf(q)>=0;}):baseChats);
+    var shownEmpty=q?baseEmpty.filter(function(n){return n.toLowerCase().indexOf(q)>=0;}):baseEmpty;
     var nMatch=shownChats.length+shownEmpty.length;
+    if(elFavBtn){ elFavBtn.innerHTML='\u2605 Favorites'+(favCount()?' ('+favCount()+')':''); }
     elSearch.placeholder='Search folders…';
     var fb=document.getElementById('filterBar'); if(fb){ fb.style.display='none'; fb.innerHTML=''; }
     var dr=document.getElementById('dateRail'); if(dr){ dr.style.display='none'; dr.innerHTML=''; }
     elSub.textContent = q
       ? nMatch+' folder'+(nMatch===1?'':'s')+' match “'+searchQuery+'”'
-      : chats.length+' folders · '+visibleCount+' items total';
+      : (favOnly
+          ? (nMatch?nMatch+' favorite'+(nMatch===1?'':'s') : 'No favorites yet')
+          : chats.length+' folders · '+visibleCount+' items total');
     if(q && !nMatch){ elState.style.display='block'; elState.textContent='No folders match “'+searchQuery+'”.'; }
+    else if(favOnly && !nMatch){
+      elState.style.display='block';
+      elState.textContent='No favorites yet — hover a folder and click the ☆ to pin it here.';
+    }
     else elState.style.display='none';
 
     var frag=document.createDocumentFragment();
@@ -1348,6 +1407,16 @@
         var db=document.createElement('button'); db.className='fdelete';
         db.title='Delete folder'; db.innerHTML='&#128465;';
         f.appendChild(db);
+        var fb2=document.createElement('button'); fb2.className='ffav'+(favHas(name)?' on':'');
+        fb2.type='button';
+        fb2.title=favHas(name)?'Remove from favorites':'Add to favorites';
+        fb2.innerHTML=favHas(name)?'\u2605':'\u2606';
+        fb2.addEventListener('click',function(e){
+          e.stopPropagation(); e.preventDefault();
+          favToggle(name);
+          fb2.title=favHas(name)?'Remove from favorites':'Add to favorites';
+        });
+        f.appendChild(fb2);
         // selection checkbox (top-left) for multi-folder delete
         var fsb=document.createElement('div'); fsb.className='fselbox';
         fsb.title='Select folder';
@@ -1392,7 +1461,7 @@
     }
     var fsSel=document.getElementById('folderSort');
     if(fsSel){ fsSel.style.display=''; fsSel.value=folderSortMode; }
-    setRoute(q?('#s='+encodeURIComponent(searchQuery)):'');
+    setRoute(q?('#s='+encodeURIComponent(searchQuery)):(favOnly?'#fav':''));
     // prune folder-selection of folders that no longer exist, refresh the bar
     if(typeof selectedFolders!=='undefined'){
       Array.from(selectedFolders).forEach(function(n){
@@ -1440,6 +1509,7 @@
     var h=(location.hash||'').replace(/^#/,'');
     if(!h) return null;
     if(h==='dup') return {view:'dup'};
+    if(h==='fav') return {fav:true};
     // 2026-11-05: an open folder carries its whole UI state — query, type/year/
     // size/unseen filters and the open lightbox item — so a refresh, a bookmark
     // or a link restores exactly what you were looking at.
@@ -2712,6 +2782,7 @@
     document.documentElement.style.setProperty('--tilesize', elZoom.value+'px');
     if(!listView && vg.sizer) renderPhotos();   // virtual grid: re-flow at the new size
   });
+  if(elFavBtn){ elFavBtn.addEventListener('click',function(){ setFavOnly(!favOnly); }); }
   elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*')?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]); applySort(view); renderPhotos(); renderDateRail(); } });
   var fsEl=document.getElementById('folderSort');
   if(fsEl){
@@ -3478,6 +3549,7 @@
       elSearch.value=rt.search; searchQuery=rt.search.toLowerCase();
       renderFolders();
     } else if(rt.view==='dup'){ showDuplicates(); }
+    else if(rt.fav){ setFavOnly(true); }
     else if(rt.gsearch){ globalSearch(rt.gsearch); }
   }
   Promise.all([
