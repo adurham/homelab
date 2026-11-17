@@ -503,7 +503,9 @@ all:
           # target_node below is stale until the next inventory pass.
           ansible_host: "{{ ip_media_ingest_02 }}"
           vmid: 117
-          target_node: pve02
+          # Moved pve02 -> pve01 on 2026-11-15 (MAC and IP kept). Verified
+          # 2026-11-17 from pve01: `pct config 117` answers there.
+          target_node: pve01
       vars:
         ansible_user: amd
         ansible_become: true
