@@ -3107,6 +3107,61 @@ groups:
     labels:
       severity: warning
     isPaused: false
+  - uid: sata_boot_disk_crc_climbing
+    title: SATA boot disk link is still throwing CRC errors
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 90000
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: increase(smartctl_device_attribute{attribute="udma_crc_error_count"}[12h])
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: '{{ '{{' }} $labels.instance }} disk {{ '{{' }} $labels.disk }} had new SATA CRC errors in the last 12h'
+      description: 'UDMA_CRC_Error_Count on {{ '{{' }} $labels.instance }}''s {{ '{{' }} $labels.disk }} rose in the last 12h. CRC errors are the cable/connector/PHY, not the platters. pve03''s boot disk ran about 14 a day before 2026-11-17; link power management was turned off that day (roles/pve_sata_link_hardening) and a 3.0 Gbps cap is staged for the next reboot. This clears by itself after 12 quiet hours, so it is also the proof the fix held. If it keeps firing the link needs the cable/port reseated or replaced.'
+    labels:
+      severity: warning
+    isPaused: false
   - uid: sata_boot_disk_selftest_failed
     title: SATA boot disk self-test failed or interrupted
     condition: C

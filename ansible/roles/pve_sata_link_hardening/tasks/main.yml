@@ -1,0 +1,42 @@
+---
+# Keep a marginal SATA link to the boot disk alive (pve03, 2026-11-17).
+#
+# pve03's boot disk (Seagate ST500LM021, sda) sees "R_ERR response for device-to-host data FIS" and
+# ICRC errors: frames coming FROM the drive arrive corrupted, host-to-device is clean, and the
+# kernel logs "SError: { UnrecovData CommWake 10B8B BadCRC }" followed by "hard resetting link".
+# That is a signal-integrity problem on the cable/connector/PHY, not bad media (pending sectors 0).
+# The disk cannot be swapped right now, so make the link as forgiving as software allows:
+#
+#   1. Link power management off (max_performance). The default `med_power_with_dipm` puts the link
+#      into low-power states and CommWake is the wake-up from one; a marginal link fails on wake.
+#   2. Link speed capped at 3.0 Gbps (libata.force on the kernel command line). A marginal cable is
+#      far more reliable at SATA-II rates; a 7200 rpm 2.5" disk cannot use more than ~150 MB/s anyway.
+#
+# (1) is applied live and persisted via tmpfiles. (2) only exists on the kernel command line, so it
+# takes effect at the next reboot -- this role stages it and never reboots the node.
+- name: Install the link-power-management setting (persists across reboots)
+  ansible.builtin.copy:
+    content: "w /sys/class/scsi_host/host{{ pve_sata_scsi_host }}/link_power_management_policy - - - - max_performance\n"
+    dest: /etc/tmpfiles.d/pve-sata-link.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: pve_sata_lpm_file
+
+- name: Apply link power management now
+  ansible.builtin.command: systemd-tmpfiles --create /etc/tmpfiles.d/pve-sata-link.conf
+  when: pve_sata_lpm_file is changed
+  changed_when: true
+
+- name: Stage the SATA speed cap on the kernel command line (effective at next reboot)
+  ansible.builtin.replace:
+    path: /etc/default/grub
+    regexp: '^(GRUB_CMDLINE_LINUX_DEFAULT="(?!.*libata\.force)[^"]*)"'
+    replace: '\1 libata.force={{ pve_sata_ata_port }}:{{ pve_sata_speed }}"'
+    backup: true
+  register: pve_sata_grub
+
+- name: Regenerate grub.cfg
+  ansible.builtin.command: update-grub
+  when: pve_sata_grub is changed
+  changed_when: true

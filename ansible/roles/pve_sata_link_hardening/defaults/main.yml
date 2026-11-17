@@ -1,0 +1,6 @@
+---
+# /sys/class/scsi_host/host<N> of the AHCI port the boot disk hangs off, and its libata port number
+# (dmesg: "ata1.00: ATA-8: ST500LM021" -> ata port 1, scsi host 0 on pve03).
+pve_sata_scsi_host: 0
+pve_sata_ata_port: 1
+pve_sata_speed: "3.0Gbps"

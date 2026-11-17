@@ -1,0 +1,12 @@
+---
+# Make a marginal SATA link to a PVE node's boot disk more forgiving (see the role header).
+# Never reboots: the speed cap is staged on the kernel command line for the next planned reboot.
+#
+#   cd ansible
+#   ansible-playbook -i inventory/proxmox.yml deploy_pve_sata_link_hardening.yml --limit pve03
+- name: Harden the boot-disk SATA link
+  hosts: proxmox_nodes
+  gather_facts: false
+  roles:
+    - role: pve_sata_link_hardening
+      when: pve_sata_link_hardening | default(false) | bool

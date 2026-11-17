@@ -123,6 +123,9 @@ all:
             - /dev/nvme0n1
         pve03:
           ansible_host: 192.168.86.13
+          # Boot disk (sda) is on a marginal SATA link and cannot be replaced yet: roles/pve_sata_link_hardening
+          # turns link power management off and stages a 3.0 Gbps cap for the next reboot.
+          pve_sata_link_hardening: true
           # Hung 2026-11-17 01:02 UTC with TSO/GSO on (see pve02 above). Applied live + in /etc/network/interfaces.
           proxmox_network_tso_gso_off: true
           proxmox_network_nic_msglvl: "0x2087"
