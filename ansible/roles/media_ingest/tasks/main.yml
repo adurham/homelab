@@ -165,6 +165,14 @@
     group: "{{ media_ingest_user }}"
     mode: '0750'
 
+- name: Deploy Manual Re-fetch Script (retry named items by message id)
+  ansible.builtin.copy:
+    src: refetch_missing.py
+    dest: "{{ media_ingest_dir }}/refetch_missing.py"
+    owner: "{{ media_ingest_user }}"
+    group: "{{ media_ingest_user }}"
+    mode: '0750'
+
 - name: Deploy Interactive Login Helper (one-time session re-auth)
   ansible.builtin.copy:
     src: tg_login.py
