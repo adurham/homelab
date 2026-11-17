@@ -3588,7 +3588,13 @@
     fetch('/favs?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
   ]).then(function(res){
       var meta=res[0];
-      if(res[3] && Array.isArray(res[3].folders)) favApplyFrom(res[3].folders);   // stars from the server
+      if(res[3] && Array.isArray(res[3].folders)){
+        // First sync after the move off localStorage: a browser that already
+        // starred folders must not lose them to an empty server list — push the
+        // local stars up instead of adopting the empty set.
+        if(!res[3].folders.length && Object.keys(favSet).length) favPush();
+        else favApplyFrom(res[3].folders);
+      }
       var allFolders=Array.isArray(res[1])?res[1]:[];
       var fmeta=res[2];
       var haveMeta=!!(meta&&meta.folders&&meta.folders.length);
