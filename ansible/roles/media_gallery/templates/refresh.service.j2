@@ -16,6 +16,9 @@ SuccessExitStatus=75
 Type=oneshot
 User={{ media_gallery_user }}
 Group={{ media_gallery_user }}
+# auto_merge.py (step 3 of refresh_gallery.sh) posts the derived free/VIP groups
+# to the local upload service, which owns the merges ledger.
+Environment=TG_UPLOAD_URL=http://{{ ip_media_gallery }}:{{ media_gallery_upload_port }}
 ExecStart=/usr/bin/flock -w 900 -E 75 /dev/shm/media-gallery-jobs.lock {{ media_gallery_dir }}/refresh_gallery.sh
 # NO TimeoutStartSec: refresh itself (manifest rebuild + incremental dedup
 # scan) is minutes at most, and both steps are idempotent/resumable, so a

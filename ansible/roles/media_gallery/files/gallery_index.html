@@ -1497,6 +1497,10 @@
     }catch(_){ groups=[]; }
   }
   var _grpTimer=null;
+  // Folders the owner just ungrouped. Sent with the next save so the BACKEND can
+  // work out (with its own copy of the pairing rule) which derived pair that was
+  // and tombstone it — the browser must not guess the pair id.
+  var _unpair=[];
   function grpPush(){
     if(_grpTimer) clearTimeout(_grpTimer);
     _grpTimer=setTimeout(function(){
@@ -1505,10 +1509,15 @@
       // still learn about the ungroup instead of resurrecting the group.
       var cutoff=Date.now()-7*864e5;
       var out=groups.filter(function(g){ return g && g.id && (!g.del || (g.ts||0)>=cutoff); });
+      var sending=_unpair.slice(0,200), body={groups:out};
+      if(sending.length) body.unpair=sending;
       fetch('/merges',{method:'POST',credentials:'same-origin',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({groups:out})})
-        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); })
+        body:JSON.stringify(body)})
+        .then(function(r){
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          if(sending.length) _unpair=_unpair.slice(sending.length);
+        })
         .catch(function(e){ toast('Could not save merged folders ('+(e&&e.message?e.message:'network')+')','err'); });
     },250);
   }
@@ -1623,18 +1632,10 @@
   function grpDissolve(id){
     var g=grpById(id); if(!g||g.del) return;
     g.del=1; g.ts=Date.now();
-    // If these members are exactly a free/VIP pair, the DERIVED merge must be
-    // dismissed too — otherwise the next load's derivation recreates the group
-    // the owner just ungrouped.
-    var base='';
-    (g.folders||[]).forEach(function(n){
-      var r=autoBase(n);
-      base = base ? (base===r.base ? base : '-') : r.base;
-    });
-    if(base && base!=='-' && id!==VIP_ID_PREFIX+base){
-      var aid=VIP_ID_PREFIX+base, ex=grpById(aid);
-      if(ex && !ex.del){ ex.del=1; ex.ts=Date.now(); }
-      else if(!ex){ groups.push({id:aid, name:base, folders:[], ts:Date.now(), auto:1, del:1}); }
+    // If this was a free/VIP pair, the folders must also stop the BACKEND from
+    // deriving it again — the server owns that rule, so just name the folders.
+    if(g.folders && g.folders.length===2){
+      _unpair=_unpair.concat(g.folders);
     }
     grpSave(); grpPush();
     // its star must go too, or the favorites count keeps a dead key
@@ -1685,99 +1686,22 @@
     if(g.folders.length<2) grpDissolve(g.id);
     else { grpSave(); grpPush(); }
   }
-  // ---- AUTO-MERGE free/VIP pairs -----------------------------------------
-  // The same person is often ingested twice: a public feed and a paid one, with
-  // the SPA seeing two folders ("gemmajae" / "gemmajaevip", "vip_emily…" /
-  // "emily…", "-free" / plain). The derivation looks ONLY at the folder names —
-  // no chat ids, no storage — and materializes a normal merge group with a
-  // stable id `auto:<base>`, so every existing behaviour (card, chips, dedupe,
-  // prune, star, ungroup) applies unchanged.
-  // There is deliberately NO global switch: it is meant to be invisible, and the
-  // one control that matters is per pair — Ungroup tombstones that pair so the
-  // next load cannot recreate what the owner just dismissed. A folder already in
-  // a hand-made merge is never taken, and any hand edit re-keys the group.
-  function autoBase(n){
-    var s=String(n||'').toLowerCase().trim();
-    var hit=false, m;
-    // trailing marker, with or without a separator: gemmajaevip, oooopsfree, x-free
-    m=s.match(/^(.*?)[-_.\s]*(freepage|freeonly|free|viponly|vipp|vip)$/);
-    if(m && m[1] && m[1].length>1){ s=m[1]; hit=true; }
-    else {
-      // leading marker: vip_emilyryder69, free/model
-      m=s.match(/^(freepage|freeonly|free|viponly|vipp|vip)[-_.\s]+(.+)$/);
-      if(m && m[2]){ s=m[2]; hit=true; }
-    }
-    return {base:s.replace(/[-_.\s]+$/,''), hit:hit};
+  // ---- MERGED free/VIP folders (materialized by the BACKEND) --------------
+  // Pairing a model's public and paid folders is state about the library, so it
+  // is derived server-side (auto_merge.py, step 3 of the hourly refresh) and
+  // stored in the merges ledger. The SPA only renders what the ledger holds —
+  // it must never compute the grouping itself: a client with a stale folder list
+  // would disagree with the ledger, and nothing would exist while no page is
+  // open. The one client-side rule left is the OPT-OUT: Ungroup writes a
+  // tombstone with the derived id, and the backend will not recreate it.
+  function isAutoGroup(g){
+    return !!(g && String(g.id||'').indexOf(VIP_ID_PREFIX)===0);
   }
-  function autoName(base, members){
-    // name a derived merge after a PLAIN folder in it if there is one (the near
-    // match case: bucket 'chanxoxo' holds 'chanxoxo-free' + 'chanxoxos'), else
-    // the folder literally named like the base, else the base itself
-    for(var i=0;i<(members||[]).length;i++){
-      if(!autoBase(members[i]).hit) return members[i];
-    }
-    for(var j=0;j<chats.length;j++){ if(chats[j].toLowerCase()===base) return chats[j]; }
-    return base;
-  }
-  function grpAutoSync(){
-    if(!metaReady) return false;
-    var uni=[], seen={};
-    chats.forEach(function(c){ if(!seen[c]){ seen[c]=1; uni.push(c); } });
-    emptyFolders.forEach(function(c){ if(!seen[c]){ seen[c]=1; uni.push(c); } });
-    var byBase={}, claimed={}, tomb={};
-    groups.forEach(function(g){
-      if(!g||!g.id) return;
-      if(g.del){ tomb[g.id]=1; return; }
-      if(!g.del && !isAutoGroup(g)){ (g.folders||[]).forEach(function(n){ claimed[n]=1; }); }
-    });
-    uni.forEach(function(n){
-      var r=autoBase(n);
-      if(!r.hit || !r.base) return;
-      (byBase[r.base]=byBase[r.base]||[]).push(n);
-    });
-    Object.keys(byBase).forEach(function(b){
-      if(seen[b] && byBase[b].indexOf(b)<0) byBase[b].push(b);   // the plain folder itself
-    });
-    // Near-miss pairs: the plain folder's name can differ from the marked one by
-    // a couple of characters and still be the same person ("chanxoxo-free" vs
-    // "chanxoxos", "kyokocosplaysfree" vs "kyokocosplay") — the owner merged
-    // both of those by hand. Only a PREFIX relation, at most 2 characters, and
-    // only against a folder that carries no marker of its own.
-    var plainNames={};
-    uni.forEach(function(n){ if(!autoBase(n).hit) plainNames[n]=1; });
-    Object.keys(byBase).forEach(function(b){
-      if(byBase[b].length>=2) return;
-      var best='';
-      Object.keys(plainNames).forEach(function(p){
-        if(p===b || Math.abs(p.length-b.length)>2) return;
-        if(p.indexOf(b)!==0 && b.indexOf(p)!==0) return;
-        if(!best || Math.abs(p.length-b.length)<Math.abs(best.length-b.length)) best=p;
-      });
-      if(best){ byBase[b].push(best); delete plainNames[best]; }
-    });
-    var changed=false;
-    Object.keys(byBase).sort().forEach(function(b){
-      var id=VIP_ID_PREFIX+b;
-      if(tomb[id]) return;                       // dismissed: stays dismissed
-      var existing=grpById(id);
-      if(existing && !existing.del && !isAutoGroup(existing)) return;    // adopted by hand
-      var members=byBase[b].filter(function(n){ return !claimed[n]; }).sort();
-      if(members.length<2){
-        if(existing && !existing.del){ existing.del=1; existing.ts=Date.now(); changed=true; }
-        return;
-      }
-      if(!existing || existing.del){
-        groups.push({id:id, name:autoName(b, members), folders:members, ts:Date.now(), auto:1});
-        changed=true;
-        return;
-      }
-      var cur=(existing.folders||[]).slice().sort();
-      if(cur.join('\u0000')!==members.join('\u0000')){
-        existing.folders=members; existing.ts=Date.now(); changed=true;
-      }
-    });
-    if(changed){ grpSave(); grpPush(); }
-    return changed;
+  function adoptGroup(g){
+    if(!g) return g;
+    if(isAutoGroup(g)) g.id=grpId();   // hand edit -> normal merge, fresh id
+    g.auto=0;
+    return g;
   }
 
   // ---- DEDUPE inside a merged folder --------------------------------------
@@ -2850,7 +2774,6 @@
           if(pendingRmdir[nm]) return;
           if(!chatMap[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
         });
-        grpAutoSync();  // folder list changed: pick up new/renamed free/VIP pairs
         grpPrune();     // folder list just changed: drop dead merge members
         if(current===null){ renderFolders(); }
         else if(stayFolder!=null && (chatMap[stayFolder]||emptyFolders.indexOf(stayFolder)>=0||grpFromKey(stayFolder))){
@@ -3114,7 +3037,6 @@
           // a merged folder follows a renamed member (else the chip and the
           // prune both point at a folder name that no longer exists)
           grpFolderRenamed(oldName,nn);
-          grpAutoSync();   // a rename can create or break a free/VIP pair
           // carry folder cover/meta to the new name locally too
           if(folderMeta[oldName]){ folderMeta[nn]=folderMeta[oldName]; delete folderMeta[oldName]; }
           buildChats(); renderFolders();
@@ -4225,7 +4147,6 @@
       if(pendingRmdir[nm]) return;
       if(!chatMap[nm] && !folderCount[nm] && emptyFolders.indexOf(nm)<0) emptyFolders.push(nm);
     });
-    grpAutoSync();     // derive free/VIP pairs from the folder list we now have
     grpPrune();        // drop dead merge members before the first paint
     renderFolders();   // always render landing (so "+ New folder" is available)
     bgPoll();

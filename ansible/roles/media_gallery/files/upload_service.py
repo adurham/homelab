@@ -232,6 +232,15 @@ def save_favs(data: dict) -> None:
 GROUPS_FILE = Path(os.environ.get("TG_GROUPS_FILE", "/var/lib/media-gallery/folder_groups.json"))
 _groups_lock = threading.Lock()
 
+# The free/VIP pairing rules live in auto_merge.py (the refresh step that
+# materializes them). Imported here so an ungroup can ask the SAME rule which
+# derived pair a set of folders would form, instead of the browser keeping a
+# second copy of it that can drift.
+try:
+    from auto_merge import pair_bases as _pair_bases
+except Exception:  # noqa: BLE001 — a missing/rebuilt neighbour must not stop the service
+    _pair_bases = None
+
 
 def load_groups() -> dict:
     """{user: {"auto": bool, "groups": [group, ...]}}.
@@ -1347,6 +1356,19 @@ class Handler(BaseHTTPRequestHandler):
         auto = body.get("auto")
         if auto is not None and not isinstance(auto, bool):
             return self._json(400, {"error": "want bool 'auto'"})
+        # Ungrouping a free/VIP pair must stop the BACKEND deriving it again. The
+        # browser sends the folders it just ungrouped; the pairing rule (shared
+        # with auto_merge.py) says which derived id that pair would have, and a
+        # tombstone for it is written with the same write as the group list.
+        unpair = body.get("unpair")
+        if unpair is not None:
+            if not isinstance(unpair, list) or len(unpair) > 200:
+                return self._json(400, {"error": "want 'unpair' list"})
+            for n in unpair:
+                if not isinstance(n, str) or not n or len(n) > 200:
+                    return self._json(400, {"error": "invalid folder in unpair"})
+                if "/" in n or ".." in n or "\x00" in n:
+                    return self._json(400, {"error": "invalid folder in unpair"})
         if len(gs) > 500:
             return self._json(400, {"error": "too many groups"})
         clean = []
@@ -1386,9 +1408,22 @@ class Handler(BaseHTTPRequestHandler):
         with _groups_lock:
             data = load_groups()
             prev = data.get(user) or {"auto": True, "groups": []}
-            data[user] = {"auto": prev["auto"] if auto is None else bool(auto), "groups": clean}
+            merged_groups = clean
+            if unpair and _pair_bases:
+                now = int(time.time() * 1000)
+                by_id = {g["id"]: g for g in merged_groups}
+                for base in _pair_bases(unpair):
+                    aid = "auto:" + base
+                    if aid in by_id:
+                        by_id[aid]["del"] = 1
+                        by_id[aid]["ts"] = now
+                    else:
+                        merged_groups.append({"id": aid, "name": base, "folders": [],
+                                              "ts": now, "del": 1})
+            data[user] = {"auto": prev["auto"] if auto is None else bool(auto),
+                          "groups": merged_groups}
             save_groups(data)
-        return self._json(200, {"ok": True, "count": len(clean),
+        return self._json(200, {"ok": True, "count": len(merged_groups),
                                 "auto": data[user]["auto"], "user": user})
 
     def _notdup(self):

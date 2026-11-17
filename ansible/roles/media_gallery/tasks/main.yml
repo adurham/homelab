@@ -363,6 +363,14 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+- name: Deploy Free/VIP Auto-Merger (server-side folder pairing)
+  ansible.builtin.copy:
+    src: auto_merge.py
+    dest: "{{ media_gallery_dir }}/auto_merge.py"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
 # Deployed but deliberately NOT wired into any timer/service — a one-shot
 # READ-ONLY audit tool (see its own module docstring), run by hand or via
 # the systemd oneshot unit below when convenient. Never merges/hides/moves

@@ -115,6 +115,36 @@ for bad_id in ("auto:/etc", "a:b:c/../x", "g 1", "g" * 65):
     st, d = post("/merges", {"groups": [{"id": bad_id, "name": "n", "folders": [], "ts": 1}]})
     check("rejects id %r" % bad_id[:14], st == 400, d)
 
+# 2e. ungrouping a free/VIP pair asks the SERVER which derived id that pair would
+# have (the pairing rule lives in auto_merge.py) and tombstones it in one write
+st, d = get("/merges")
+before = list(d["groups"])
+st, d = post("/merges", {"groups": before, "unpair": ["gemmajae", "gemmajaevip"]})
+check("POST unpair exact pair -> 200", st == 200, d)
+st, d = get("/merges")
+check("unpair wrote an auto tombstone",
+      any(g["id"] == "auto:gemmajae" and g.get("del") for g in d["groups"]), d["groups"])
+st, d = post("/merges", {"groups": [g for g in d["groups"] if g["id"] != "auto:gemmajae"],
+                         "unpair": ["chanxoxo-free", "chanxoxos"]})
+st, d = get("/merges")
+check("unpair near-miss pair -> auto:chanxoxo",
+      any(g["id"] == "auto:chanxoxo" and g.get("del") for g in d["groups"]), d["groups"])
+n_before = len(get("/merges")[1]["groups"])
+st, d = post("/merges", {"groups": get("/merges")[1]["groups"], "unpair": ["alpha", "zeta"]})
+check("unpair a non-pair adds nothing",
+      len(get("/merges")[1]["groups"]) == n_before, d)
+st, d = post("/merges", {"groups": [], "unpair": "nope"})
+check("rejects unpair not a list -> 400", st == 400, d)
+st, d = post("/merges", {"groups": [], "unpair": ["a/b"]})
+check("rejects slash in unpair -> 400", st == 400, d)
+# a live derived group submitted together with the unpair is retired in the same write
+st, d = post("/merges", {"groups": [{"id": "auto:gemmajae", "name": "g",
+                                     "folders": ["gemmajae", "gemmajaevip"], "ts": 1}],
+                         "unpair": ["gemmajae", "gemmajaevip"]})
+st, d = get("/merges")
+check("live group + unpair -> stored as tombstone",
+      all(not (g["id"] == "auto:gemmajae" and not g.get("del")) for g in d["groups"]), d["groups"])
+
 # 3. tombstone survives
 st, d = post("/merges", {"groups": [{"id": "gabc123", "name": "Merged A", "folders": [], "ts": 1700000001000, "del": 1}]})
 check("POST tombstone -> 200", st == 200, d)
