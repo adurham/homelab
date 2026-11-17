@@ -21,6 +21,15 @@ SAFETY RULES (read before changing anything here):
   5. DRY RUN by default. Pass --apply to actually delete. Re-running is safe:
      already-deleted stems simply fail to resolve and are skipped.
 
+RELATION TO THE MERGED-FOLDER DEDUPE (decided 2026-11-17): a merged folder
+folds duplicate pictures in the VIEW (newest wins, `Show duplicates` reveals
+them); this driver deletes the older copies outright. Both keep the SAME member
+— the newest — so they never disagree about which copy is "the photo", and the
+view folding is simply what the owner sees in the window before a reclaim run.
+Deleting stays the policy: the gallery rootfs is the constraint (≈25.6 of 32 GB)
+and the merge already gives one-picture-per-photo. Do not add a keep-everything
+mode without a storage plan.
+
 Usage:
   # see what it WOULD delete (safe)
   python3 reclaim_hidden.py

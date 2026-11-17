@@ -185,6 +185,33 @@ def identity_bases(folders, profiles):
     return out
 
 
+def explain(folders, profiles):
+    """Why these folders were paired — short labels for the review list.
+
+    Empty list means "no identity signal" (a name-based pair, or nothing).
+    """
+    reasons = []
+    low = {f.lower(): f for f in folders}
+    for f in folders:
+        pf = profiles.get(f) or {}
+        for m in pf.get("mentions") or []:
+            if str(m).lower() in low and str(m).lower() != f.lower():
+                if "bio names the other feed" not in reasons:
+                    reasons.append("bio names the other feed")
+    names = {(profiles.get(f) or {}).get("name") for f in folders} - {None, ""}
+    if len(folders) > 1 and len(names) == 1:
+        reasons.append("same display name")
+    prices = []
+    for f in folders:
+        try:
+            prices.append(float((profiles.get(f) or {}).get("price") or 0))
+        except (TypeError, ValueError):
+            prices.append(0.0)
+    if prices and any(p == 0 for p in prices) and any(p > 0 for p in prices):
+        reasons.append("free + paid")
+    return reasons
+
+
 def derive(groups, folders, profiles=None):
     """Return the merged ledger list. Pure: no I/O, easy to test."""
     groups = [g for g in (groups or []) if isinstance(g, dict) and g.get("id")]

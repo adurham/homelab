@@ -804,8 +804,23 @@ class Handler(BaseHTTPRequestHandler):
             # `auto` is the free/VIP auto-merge switch: a setting, but it rides
             # this ledger so one device's change reaches the other.
             st = load_groups().get(self._fav_user(), {"auto": True, "groups": []})
+            why = {}
+            try:
+                import auto_merge as _am
+                _prof = load_profiles()
+                for g in st["groups"]:
+                    gid = g.get("id") or ""
+                    if g.get("del") or not gid.startswith("auto:"):
+                        continue
+                    fs = g.get("folders") or []
+                    if gid.startswith("auto:" + "id:"):
+                        why[gid] = _am.explain(fs, _prof) or ["identity match"]
+                    else:
+                        why[gid] = ["folder names"]
+            except Exception:  # noqa: BLE001 — the list must render without reasons
+                why = {}
             return self._json(200, {"groups": st["groups"], "auto": st["auto"],
-                                    "user": self._fav_user()})
+                                    "why": why, "user": self._fav_user()})
         self._json(404, {"error": "not found"})
 
     def do_POST(self):

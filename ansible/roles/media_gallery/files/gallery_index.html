@@ -417,17 +417,26 @@
   #tkBody .tk-row.err .tk-op{color:#ff8c8c;}
   #tkBody .tk-empty{padding:18px;color:var(--muted);text-align:center;}
   /* keyboard help overlay */
-  #helpScrim{position:fixed;inset:0;z-index:175;background:rgba(0,0,0,.5);display:none;
+  #helpScrim,#mergesScrim{position:fixed;inset:0;z-index:175;background:rgba(0,0,0,.5);display:none;
     align-items:center;justify-content:center;}
-  #helpScrim.show{display:flex;}
-  #helpDlg{width:520px;max-width:94vw;max-height:84vh;display:flex;flex-direction:column;
+  #helpScrim.show,#mergesScrim.show{display:flex;}
+  #helpDlg,#mergesDlg{width:620px;max-width:94vw;max-height:84vh;display:flex;flex-direction:column;
     background:#1b2129;border:1px solid var(--border);border-radius:14px;overflow:hidden;
     box-shadow:0 20px 60px rgba(0,0,0,.6);}
-  #helpDlg .hp-head{display:flex;align-items:center;gap:10px;padding:14px 18px;
+  #helpDlg .hp-head,#mergesDlg .hp-head{display:flex;align-items:center;gap:10px;padding:14px 18px;
     border-bottom:1px solid var(--border);}
-  #helpDlg .hp-head .grow{flex:1;}
-  #helpDlg .hp-head button{font-size:12px;padding:6px 12px;}
-  #helpDlg .hp-body{padding:10px 18px 18px;overflow-y:auto;}
+  #helpDlg .hp-head .grow,#mergesDlg .hp-head .grow{flex:1;}
+  #helpDlg .hp-head button,#mergesDlg .hp-head button{font-size:12px;padding:6px 12px;}
+  #helpDlg .hp-body,#mergesDlg .hp-body{padding:10px 18px 18px;overflow-y:auto;}
+  #mergesDlg .mg-row{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);}
+  #mergesDlg .mg-row:last-child{border-bottom:none;}
+  #mergesDlg .mg-main{flex:1;min-width:0;}
+  #mergesDlg .mg-name{font-size:14px;font-weight:600;}
+  #mergesDlg .mg-members{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #mergesDlg .mg-why{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px;}
+  #mergesDlg .mg-chip{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--border);color:#9fb4d8;}
+  #mergesDlg .mg-row button{font-size:12px;padding:5px 10px;flex:0 0 auto;}
+  #mergesDlg .mg-empty{color:var(--muted);font-size:13px;padding:12px 0;}
   #helpDlg .hp-sec{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
     margin:14px 0 8px;}
   #helpDlg .hp-row{display:flex;align-items:center;gap:6px;padding:5px 0;font-size:13.5px;}
@@ -568,6 +577,7 @@
   <button id="newFolderBtn" title="Create a new folder">&#43; New folder</button>
   <button id="helpBtn" title="Keyboard shortcuts (?)">?</button>
   <button id="dedupBtn" title="Find duplicate photos">&#9783; Duplicates</button>
+  <button id="mergesBtn" title="Review folders merged automatically, and why">&#8646; Merges</button>
   <button id="uploadBtn">&#8593; Upload</button>
   <select id="sort" autocomplete="off" style="display:none">
     <option value="new">Newest first</option>
@@ -625,6 +635,12 @@
 <div id="toast"></div>
 <div id="grpAddMenu"></div>
 <div id="bgTasks" title="Background tasks — click for activity log"><span class="spin"></span><span id="bgTasksText"></span></div>
+<div id="mergesScrim">
+  <div id="mergesDlg">
+    <div class="hp-head"><b>Merged folders</b><span class="grow"></span><button id="mergesClose">Close</button></div>
+    <div class="hp-body" id="mergesBody"></div>
+  </div>
+</div>
 <div id="helpScrim">
   <div id="helpDlg">
     <div class="hp-head"><b>Keyboard &amp; mouse</b><span class="grow"></span><button id="hpClose">Close</button></div>
@@ -1457,6 +1473,7 @@
   var GRP_PREFIX='__grp__:';
   var VIP_ID_PREFIX='auto:';            // derived free/VIP groups get id 'auto:<base>'
   var groups=[];                       // includes tombstones ({del:1})
+  var grpWhy={};                       // group id -> [reason, ...] from the server
   function grpId(){ return 'g'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
   function grpKey(id){ return GRP_PREFIX+id; }
   function isGrpKey(k){ return typeof k==='string' && k.indexOf(GRP_PREFIX)===0; }
@@ -3648,6 +3665,9 @@
     if(e.key==='?' && atag!=='INPUT' && atag!=='TEXTAREA'){
       e.preventDefault(); toggleHelp(); return;
     }
+    if(e.key==='Escape' && document.getElementById('mergesScrim').classList.contains('show')){
+      document.getElementById('mergesScrim').classList.remove('show'); return;
+    }
     if(e.key==='Escape' && document.getElementById('helpScrim').classList.contains('show')){
       document.getElementById('helpScrim').classList.remove('show'); return;
     }
@@ -4106,6 +4126,51 @@
   document.getElementById('dedupBtn').addEventListener('click',showDuplicates);
   document.getElementById('newFolderBtn').addEventListener('click',promptNewFolder);
   function toggleHelp(){ document.getElementById('helpScrim').classList.toggle('show'); }
+
+  // ---- "Merges" review list ------------------------------------------------
+  // Auto-merging happens on the server, so the owner needs to SEE what it did and
+  // why — otherwise a wrong pair is only noticeable as a strange card on the
+  // landing page. Each row is a derived merge with its reasons and an Ungroup
+  // that sticks (the server writes a tombstone the derivation respects).
+  function renderMerges(){
+    var body=document.getElementById('mergesBody'); if(!body) return;
+    var auto=grpList().filter(isAutoGroup);
+    body.innerHTML='';
+    if(!auto.length){
+      var e=document.createElement('div'); e.className='mg-empty';
+      e.textContent='Nothing is merged automatically right now.';
+      body.appendChild(e); return;
+    }
+    auto.sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); });
+    auto.forEach(function(g){
+      var row=document.createElement('div'); row.className='mg-row';
+      var main=document.createElement('div'); main.className='mg-main';
+      var nm=document.createElement('div'); nm.className='mg-name'; nm.textContent=g.name;
+      var mem=document.createElement('div'); mem.className='mg-members';
+      mem.textContent=g.folders.join('  +  ');
+      var why=document.createElement('div'); why.className='mg-why';
+      (grpWhy[g.id]||['auto']).forEach(function(w){
+        var c=document.createElement('span'); c.className='mg-chip'; c.textContent=w; why.appendChild(c);
+      });
+      main.appendChild(nm); main.appendChild(mem); main.appendChild(why);
+      var b=document.createElement('button'); b.textContent='Ungroup';
+      b.title='Stop merging these (the folders and items stay as they are)';
+      b.addEventListener('click',function(){
+        if(!confirm('Ungroup “'+g.name+'”?\n\nThe folders and their items stay exactly where they are.')) return;
+        grpDissolve(g.id); renderFolders(); renderMerges();
+      });
+      row.appendChild(main); row.appendChild(b);
+      body.appendChild(row);
+    });
+  }
+  function openMerges(){ renderMerges(); document.getElementById('mergesScrim').classList.add('show'); }
+  document.getElementById('mergesBtn').addEventListener('click',openMerges);
+  document.getElementById('mergesClose').addEventListener('click',function(){
+    document.getElementById('mergesScrim').classList.remove('show');
+  });
+  document.getElementById('mergesScrim').addEventListener('click',function(e){
+    if(e.target===this) this.classList.remove('show');
+  });
   document.getElementById('helpBtn').addEventListener('click',toggleHelp);
   document.getElementById('hpClose').addEventListener('click',function(){ document.getElementById('helpScrim').classList.remove('show'); });
   document.getElementById('helpScrim').addEventListener('click',function(e){ if(e.target===this) this.classList.remove('show'); });
@@ -4194,6 +4259,7 @@
       // merged folders: reconcile (max-ts per group id) with whatever this
       // device has offline, then push if the server is behind
       if(res[4] && Array.isArray(res[4].groups)) grpApplyFrom(res[4].groups);
+      if(res[4] && res[4].why && typeof res[4].why==='object') grpWhy=res[4].why;
       var allFolders=Array.isArray(res[1])?res[1]:[];
       var fmeta=res[2];
       var haveMeta=!!(meta&&meta.folders&&meta.folders.length);
