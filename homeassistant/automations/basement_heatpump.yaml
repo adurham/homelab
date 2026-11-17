@@ -89,6 +89,30 @@
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
                     hvac_mode: heat
+                # Never write a setpoint into the previous mode's frame. The
+                # head takes seconds to acknowledge a mode change, and a cool
+                # idle-park value (84F) landing while it is still in heat mode
+                # is a genuine max-heat call - it did exactly that on
+                # 2026-11-16 19:22 for ~70s.
+                - wait_template: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'heat') }}"
+                  timeout: "00:00:20"
+                  continue_on_timeout: false
+            # Boost/Turbo is latched on the unit, not in HA: it survives our
+            # setpoint writes and makes any call we do make run flat out.
+            - if: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'preset_mode') not in ['none', none] }}"
+              then:
+                - service: climate.set_preset_mode
+                  target:
+                    entity_id: climate.basement_heatpump_basement_office_ac
+                  data:
+                    preset_mode: none
+            - if: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'fan_mode') not in ['auto', none] }}"
+              then:
+                - service: climate.set_fan_mode
+                  target:
+                    entity_id: climate.basement_heatpump_basement_office_ac
+                  data:
+                    fan_mode: auto
             - if: "{{ (sp | float(0) - heat_target | float(0)) | abs >= 0.5 }}"
               then:
                 - service: climate.set_temperature
@@ -108,6 +132,25 @@
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
                     hvac_mode: cool
+                # Same guard as the heat branch, in reverse: an 84F park value
+                # is harmless in cool mode and a max-cool call in heat mode.
+                - wait_template: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'cool') }}"
+                  timeout: "00:00:20"
+                  continue_on_timeout: false
+            - if: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'preset_mode') not in ['none', none] }}"
+              then:
+                - service: climate.set_preset_mode
+                  target:
+                    entity_id: climate.basement_heatpump_basement_office_ac
+                  data:
+                    preset_mode: none
+            - if: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'fan_mode') not in ['auto', none] }}"
+              then:
+                - service: climate.set_fan_mode
+                  target:
+                    entity_id: climate.basement_heatpump_basement_office_ac
+                  data:
+                    fan_mode: auto
             - if: "{{ (sp | float(0) - cool_target | float(0)) | abs >= 0.5 }}"
               then:
                 - service: climate.set_temperature
