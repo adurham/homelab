@@ -394,7 +394,9 @@ async def _capture_to_park(client, msg, stem: str, folder, date_iso: str, tee=No
         stdin=asyncio.subprocess.PIPE,
     )
     n = 0
-    try:
+
+    async def _pump():
+        nonlocal n
         async for chunk in client.iter_download(msg.media):
             proc.stdin.write(chunk)
             await proc.stdin.drain()
@@ -406,6 +408,9 @@ async def _capture_to_park(client, msg, stem: str, folder, date_iso: str, tee=No
                               "ciphertext only", stem, type(e).__name__, e)
                     drop_tee()
             n += len(chunk)
+
+    try:
+        await asyncio.wait_for(_pump(), DOWNLOAD_TIMEOUT_S)
         proc.stdin.close()
         rc = await proc.wait()
         if out is not None:
@@ -476,6 +481,13 @@ def _drop_empty_staged(stem: str) -> None:
 
 _inflight = set()   # stems being captured right now (NewMessage + MessageEdited race)
 SLOW_CAPTURE_S = float(os.environ.get("TG_SLOW_CAPTURE_SECONDS", "60"))
+# A fetch from the source that never returns holds the item's lock and its
+# in-flight slot forever: no PUSHED, no failure line, no park, nothing that
+# alerts — the item is lost silently (hit 2026-11-17: three photos from one
+# album sat in download_media for hours, holding .lock-<stem> files, while the
+# gallery never saw them). Bound every fetch so a stalled stream fails loudly
+# and the normal failed-park/retry path takes over.
+DOWNLOAD_TIMEOUT_S = float(os.environ.get("TG_DOWNLOAD_TIMEOUT", "180"))
 
 
 def _write_sidecar(stem: str, folder, date_iso: str) -> None:
@@ -567,7 +579,8 @@ async def _capture(event, msg, cid, stem, kind):
             # of the item. Now it falls through to a capture that does not
             # use staging at all.
             try:
-                path = await msg.download_media(file=str(tmp))
+                path = await asyncio.wait_for(msg.download_media(file=str(tmp)),
+                                              DOWNLOAD_TIMEOUT_S)
             except OSError as e:
                 log.error("staging download failed %s: %s: %s — capturing without staging",
                           stem, type(e).__name__, e)
