@@ -189,6 +189,36 @@ def save_notdup(sigs: set) -> None:
     Path(tmp).write_text(json.dumps(sorted(sigs), separators=(",", ":")))
     os.replace(tmp, NOTDUP_FILE)
 
+# ---- folder favorites ------------------------------------------------------
+# Server-side, not localStorage: the same stars must show up on the phone and
+# the desktop. Stored per authentik user when the forward-auth header reaches
+# this service, otherwise under a single "shared" key (one owner on this
+# gallery). The file lives outside the tmpfs and is never rewritten by the
+# hourly refresh, so it survives rebuilds.
+FAVS_FILE = Path(os.environ.get("TG_FAVS_FILE", "/var/lib/media-gallery/favorites.json"))
+_favs_lock = threading.Lock()
+
+
+def load_favs() -> dict:
+    """{user: [folder, ...]}; tolerates a bare list from a hand-written file."""
+    try:
+        d = json.loads(FAVS_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+    if isinstance(d, list):
+        return {"shared": [str(x) for x in d if isinstance(x, str)]}
+    if isinstance(d, dict):
+        return {str(k): [str(x) for x in v if isinstance(x, str)]
+                for k, v in d.items() if isinstance(v, list)}
+    return {}
+
+
+def save_favs(data: dict) -> None:
+    FAVS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(FAVS_FILE) + ".tmp"
+    Path(tmp).write_text(json.dumps(data, separators=(",", ":"), sort_keys=True))
+    os.replace(tmp, FAVS_FILE)
+
 # JWKS client (cached; refreshes keys automatically on unknown kid)
 _jwk_client = None
 
@@ -678,6 +708,10 @@ class Handler(BaseHTTPRequestHandler):
             # "these are different files" verdicts — server-side so they follow
             # the owner between devices (they used to live in localStorage)
             return self._json(200, {"sigs": sorted(load_notdup())})
+        if p == "/favs":
+            # starred folders — server-side so mobile and desktop agree
+            return self._json(200, {"folders": load_favs().get(self._fav_user(), []),
+                                    "user": self._fav_user()})
         self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -724,6 +758,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._have()
             if p == "/notdup":
                 return self._notdup()
+            if p == "/favs":
+                return self._favs()
             self._json(404, {"error": "not found"})
         except Exception as e:  # noqa: BLE001 — surface the real error, don't bare-500
             import traceback
@@ -1183,6 +1219,49 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "invalid stem in list"})
         have = load_have_cached()
         return self._json(200, {"have": [s for s in stems if s in have]})
+
+    def _fav_user(self) -> str:
+        """Who owns this favorites list.
+
+        lb-01's forward-auth sets X-authentik-username on the upstream request;
+        if that ever stops being forwarded every client shares one list, which
+        is correct for a single-owner gallery and keeps favorites working
+        rather than silently dropping them.
+        """
+        u = (self.headers.get("X-authentik-username")
+             or self.headers.get("X-Forwarded-User") or "").strip()
+        return (u[:64] or "shared")
+
+    def _favs(self):
+        """POST /favs  body {"folders": ["name", ...]}
+
+        Replaces this user's whole favorites list (the SPA sends the full set;
+        merging per-folder would make removals ambiguous). Names are validated
+        as plain folder names — no separators, no traversal.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, OSError) as e:
+            return self._json(400, {"error": f"bad json body: {e}"})
+        folders = body.get("folders")
+        if not isinstance(folders, list):
+            return self._json(400, {"error": "want 'folders' list"})
+        if len(folders) > 5000:
+            return self._json(400, {"error": "too many folders"})
+        clean = []
+        for n in folders:
+            if not isinstance(n, str) or not n or len(n) > 200:
+                return self._json(400, {"error": "invalid folder name in list"})
+            if "/" in n or ".." in n or "\x00" in n:
+                return self._json(400, {"error": "invalid folder name in list"})
+            clean.append(n)
+        user = self._fav_user()
+        with _favs_lock:
+            data = load_favs()
+            data[user] = clean
+            save_favs(data)
+        return self._json(200, {"ok": True, "count": len(clean), "user": user})
 
     def _notdup(self):
         """POST /notdup  body {"sig": "<group signature>", "undo": bool}

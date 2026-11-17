@@ -1303,10 +1303,39 @@
   })();
   var favOnly=false;
   function favHas(n){ return !!favSet[n]; }
+  // localStorage stays as the instant-paint cache; the SERVER is the source of
+  // truth (GET/POST /favs), so the same stars show up on the phone and the
+  // desktop instead of only in the browser that created them.
   function favSave(){ try{ localStorage.setItem(FAV_KEY, JSON.stringify(favSet)); }catch(_){} }
+  var _favTimer=null;
+  function favPush(){
+    if(_favTimer) clearTimeout(_favTimer);
+    _favTimer=setTimeout(function(){
+      _favTimer=null;
+      var list=Object.keys(favSet).filter(function(k){ return favSet[k]; }).sort();
+      fetch('/favs',{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({folders:list})})
+        .then(function(r){ if(!r.ok) toast('Could not save favorites (HTTP '+r.status+')','err'); })
+        .catch(function(){ toast('Could not save favorites (network)','err'); });
+    },350);
+  }
+  function favApplyFrom(list){
+    var o={};
+    (list||[]).forEach(function(n){ if(typeof n==='string'&&n) o[n]=1; });
+    favSet=o; favSave();
+    if(elFavBtn){ var c=favCount(); elFavBtn.innerHTML='\u2605 Favorites'+(c?' ('+c+')':''); }
+  }
+  function favLoad(){
+    return fetch('/favs?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'})
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(d){ if(d&&Array.isArray(d.folders)) favApplyFrom(d.folders); return d; })
+      .catch(function(){ return null; });   // offline: keep the cached local set
+  }
   function favToggle(n){
     if(favSet[n]) delete favSet[n]; else favSet[n]=1;
     favSave();
+    favPush();
     if(elFavBtn){ var c=favCount(); elFavBtn.innerHTML='\u2605 Favorites'+(c?' ('+c+')':''); }
     if(favOnly){ renderFolders(); }            // leaving the view when unstarred
     else {
@@ -3555,9 +3584,11 @@
   Promise.all([
     fetch('/gallery/folders_meta.json').then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
     fetch('/gallery/folders.json').then(function(r){return r.ok?r.json():[];}).catch(function(){return [];}),
-    fetch('/foldermeta?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():{};}).catch(function(){return {};})
+    fetch('/foldermeta?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():{};}).catch(function(){return {};}),
+    fetch('/favs?ts='+Date.now(),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
   ]).then(function(res){
       var meta=res[0];
+      if(res[3] && Array.isArray(res[3].folders)) favApplyFrom(res[3].folders);   // stars from the server
       var allFolders=Array.isArray(res[1])?res[1]:[];
       var fmeta=res[2];
       var haveMeta=!!(meta&&meta.folders&&meta.folders.length);
