@@ -70,7 +70,7 @@ Vault vars (in `ansible/group_vars/all/vault.yml`):
 - `vault_vm_backup_gdrive_client_id` / `_client_secret` / `_token` — Google OAuth
   (reused from `media_gallery` GCP project "tg-harvester-03393"; full `drive` scope)
 - `vault_vm_backup_crypt_password` / `_password2` — rclone crypt passwords (plaintext)
-- `vault_vm_backup_crypt_password_obscured` / `_password2_obscured` — rclone-obscured forms
+- `vault_vm_backup_crypt_password_obscured_v2` / `_password2_obscured_v2` — rclone-obscured forms (the 2026-11 re-key; the un-suffixed names are the retired keys, kept only until the old `vm-backup` Drive tree is purged)
 
 macOS keychain (second copy for recovery):
 - `VMBackupGDriveToken`, `VMBackupGDriveClientId`, `VMBackupGDriveClientSecret`

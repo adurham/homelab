@@ -10,7 +10,7 @@
 # GDrive folder layout (under the OAuth user's Drive root):
 #   vm-backup/daily/<timestamp>      — daily snapshots, see retention below
 #   vm-backup/archive-yearly/<year>  — yearly full-dataset archives, kept indefinitely
-vm_backup_gdrive_folder: "vm-backup"
+vm_backup_gdrive_folder: "vm-backup-v2"   # 2026-11-16 re-key: new crypt keys live in this tree; the old "vm-backup" tree is kept only until the owner OKs the purge
 
 # Daily snapshot retention. REWRITTEN 2026-09-28: age-based -> generation +
 # hard-cap. See the header of vm-backup-daily.sh.j2 for the full model.

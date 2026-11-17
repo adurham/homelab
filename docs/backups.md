@@ -135,7 +135,7 @@ Restore to a **new** VMID first — never overwrite the running guest.
 Tier 2 (Google Drive): `rclone copy vmbackup_crypt:pve/<archive> /tmp/`,
 then restore as above. The remote is `vmbackup_crypt` in
 `/root/.config/rclone/rclone.conf` on pve01; the crypt passwords are
-vaulted in this repo (`vault_vm_backup_crypt_password`) and in the macOS
+vaulted in this repo (`vault_vm_backup_crypt_password_v2`, tree `vm-backup-v2`; the old `vault_vm_backup_crypt_password` / `vm-backup` pair is retired) and in the macOS
 keychain (`VMBackupCryptPassword`). Note: the push script's header says
 "Managed by Ansible — roles/pve_backup_offsite", but that role is not in
 this repo — the live unit + script are hand-maintained on pve01.
@@ -157,7 +157,7 @@ unzip -q rclone-current-linux-amd64.zip && install -m755 rclone-*/rclone $D/rclo
 cd $D/repo/ansible && umask 077 && mkdir -p $D/rc
 ansible localhost -i localhost, -c local -m template \
   -a "src=roles/pve_backup_offsite/templates/rclone.conf.j2 dest=$D/rc/rclone.conf mode=0600" \
-  -e @group_vars/all/vault.yml -e @inventory/group_vars/all.yml -e pve_backup_offsite_gdrive_folder=vm-backup
+  -e @group_vars/all/vault.yml -e @inventory/group_vars/all.yml -e pve_backup_offsite_gdrive_folder=vm-backup-v2
 
 # 3. list, fetch (crypt decrypts client-side), integrity-check
 $D/rclone --config $D/rc/rclone.conf lsf vmbackup_crypt:pve/ | tail

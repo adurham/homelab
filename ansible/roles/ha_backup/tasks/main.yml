@@ -3,7 +3,7 @@
 #
 # Requires the same vault vars as roles/vm_backup (the rclone crypt remote):
 #   vault_vm_backup_gdrive_client_id, _gdrive_client_secret, _gdrive_token,
-#   vault_vm_backup_crypt_password_obscured, vault_vm_backup_crypt_password2_obscured
+#   vault_vm_backup_crypt_password_obscured_v2, vault_vm_backup_crypt_password2_obscured_v2 (the 2026-11 re-key; the un-suffixed names are the retired keys)
 #
 # One-time prerequisite: the ed25519 key at {{ ha_backup_key }} must be in
 # HAOS's /root/.ssh/authorized_keys. Generate it with

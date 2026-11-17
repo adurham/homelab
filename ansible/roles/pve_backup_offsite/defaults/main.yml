@@ -22,7 +22,7 @@ pve_backup_offsite_nodes:
   - 192.168.86.13
 # Drive side: crypt remote rooted at the vm-backup tree -> drive:vm-backup/pve
 pve_backup_offsite_gdrive_subdir: "pve"
-pve_backup_offsite_gdrive_folder: "vm-backup"
+pve_backup_offsite_gdrive_folder: "vm-backup-v2"   # see roles/vm_backup/defaults: new keys, new tree
 # Keep the newest N archives per guest off-site (count-based: a missed week can
 # never prune the last surviving copy). Roughly 4x the 43 GB generation.
 pve_backup_offsite_keep_copies: 4
