@@ -32,6 +32,11 @@ services:
     restart: unless-stopped
     network_mode: host
     shm_size: "{{ frigate_shm_size }}"
+    # NOTE (2026-11-17): the kills this ceiling guards against are NOT a slow leak the weekly restart
+    # resets. CT 170 sat flat at ~2.2 GiB for a week, then one frigate.capture:<cam> went from ~0.2 GB to
+    # 10 GB in under 30 min while its camera delivered corrupt h264 at ~92 fps (Frigate logs "exceeded fps
+    # limit"). The kernel kills only that one process, so the container stays up, docker's restart policy
+    # never fires, and the camera stays frozen until camera_health.py notices the missing capture pid.
     # Container-level memory ceiling (2026-10-21). Without it, Frigate's known
     # capture/embeddings leak grows until the LXC's own cgroup OOMs and the
     # kernel picks an arbitrary victim inside the container — 7 kills in 14

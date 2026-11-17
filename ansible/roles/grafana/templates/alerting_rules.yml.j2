@@ -2338,7 +2338,11 @@ groups:
     annotations:
       summary: OOM killer ran on {{ '{{' }} $labels.host }}
       description: "Kernel OOM killer or systemd-oomd terminated a process on {{ '{{' }} $labels.host\
-        \ }} in the last 5 minutes \u2014 host is under memory pressure"
+        \ }} in the last 5 minutes. Read the kernel line before assuming the HOST is short of memory:\
+        \ `oom-kill:constraint=CONSTRAINT_MEMCG` with a `task_memcg=/lxc/<id>/...` path means a guest or\
+        \ container hit its OWN limit and the host is fine (2026-11-17: frigate.capture inside CT 170, host\
+        \ had 78 GB free); `CONSTRAINT_NONE` means the host itself ran out. `journalctl -k | grep -E\
+        \ 'oom-kill|Killed process'` on the node names the victim and its cgroup."
     labels:
       severity: critical
     isPaused: false

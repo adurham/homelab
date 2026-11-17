@@ -88,6 +88,32 @@ def restart_go2rtc():
     )
 
 
+def missing_capture_cams(cams):
+    """Cameras whose frigate.capture process no longer exists inside the container.
+
+    The kernel OOM killer takes out the biggest process in the container's cgroup, which on this
+    box is a single leaking `frigate.capture:<cam>` (2026-11-17: basement, 10 GB). The container
+    itself keeps running, so docker never restarts it, and Frigate keeps serving that camera's last
+    stats: camera_fps stays at a stale non-zero value (92 here) and latest.jpg stays frozen. The
+    0-fps test above can never see it. Stats expose the (container-namespace) capture_pid, so ask
+    the container whether that pid still exists.
+
+    Fails open: if the container cannot be queried at all, report nothing rather than every camera.
+    """
+    pids = {k: v.get("capture_pid") for k, v in cams.items() if v.get("capture_pid")}
+    if not pids:
+        return set()
+    try:
+        res = subprocess.run(["docker", "exec", "frigate", "ls", "/proc"],
+                             capture_output=True, text=True, timeout=20)
+    except Exception:  # noqa: BLE001
+        return set()
+    if res.returncode != 0:
+        return set()
+    alive = {int(x) for x in res.stdout.split() if x.isdigit()}
+    return {k for k, p in pids.items() if int(p) not in alive}
+
+
 def main():
     try:
         st = stats()
@@ -96,7 +122,10 @@ def main():
         sys.exit(1)
 
     cams = st.get("cameras") or {}
-    dead = sorted(k for k, v in cams.items() if not v.get("camera_fps"))
+    gone = missing_capture_cams(cams)
+    if gone:
+        log(f"capture process missing for {sorted(gone)} (killed - stale stats would hide it)")
+    dead = sorted(k for k, v in cams.items() if not v.get("camera_fps") or k in gone)
     state = load_state()
     streak = state.get("streak") or {}
     now = time.time()
@@ -123,8 +152,12 @@ def main():
         save_state(state)
         return
 
+    # A killed capture process is not a stream problem: re-dialling go2rtc cannot bring it back, so
+    # skip the cheap first line and go straight to the Frigate restart when that is all that is wrong.
+    only_gone = all(c in gone for c in ripe)
+
     # Cheap first line: bounce go2rtc (re-dials all six, Frigate untouched).
-    if now - last_go2rtc >= GO2RTC_COOLDOWN:
+    if not only_gone and now - last_go2rtc >= GO2RTC_COOLDOWN:
         log(f"{len(ripe)} camera(s) dead {ripe} - restarting go2rtc to re-dial")
         if DRY:
             return
