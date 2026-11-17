@@ -8,6 +8,10 @@ all:
           pve_sync_vlan_ip: "172.20.0.11"
           pve_migrate_vlan_ip: "172.21.0.11"
           zfs_scrub_day_of_month: 1
+          # Boot disk is a Kingston 2 TB SATA SSD with zero CRC errors: link power management off only,
+          # NO speed cap (it would throttle the SSD for no benefit). roles/pve_sata_link_hardening.
+          pve_sata_link_hardening: true
+          pve_sata_speed: ""
           # pve01's NIC is an I219-LM (8086:15f9); pve02/pve03 have a different
           # I219-LM (8086:0d4c). pve01 hit "e1000e: Detected Hardware Unit Hang"
           # (2026-11-09, 2026-11-15) and so did pve03 (2026-11-17, TSO on), so the
@@ -88,6 +92,9 @@ all:
           pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 130, 131, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 170, 171, 201, 203, 205, 240, 241]
         pve02:
           ansible_host: 192.168.86.12
+          # Boot disk is a 4.2-year-old ST500LM034 with 1022 lifetime UDMA CRC errors (climbing) and 42
+          # reallocated sectors: same class of fault as pve03's link. Hardened pre-emptively 2026-11-17.
+          pve_sata_link_hardening: true
           # e1000e Tx Unit Hang: pve03 hung 2026-11-17 01:02 UTC (HA fenced it) with TSO/GSO on, so the
           # "only pve01's silicon hangs" theory was wrong. TSO/GSO off + msglvl applied live and in
           # /etc/network/interfaces 2026-11-17, same as pve01 (disable-k1 deliberately NOT stacked).

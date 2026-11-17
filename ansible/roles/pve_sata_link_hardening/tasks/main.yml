@@ -28,7 +28,10 @@
   when: pve_sata_lpm_file is changed
   changed_when: true
 
+# Skipped when pve_sata_speed is empty: a healthy SATA SSD (pve01's Kingston, zero CRC errors) would
+# lose ~45% of its throughput to a cap that only helps a marginal cable.
 - name: Stage the SATA speed cap on the kernel command line (effective at next reboot)
+  when: pve_sata_speed | length > 0
   ansible.builtin.replace:
     path: /etc/default/grub
     regexp: '^(GRUB_CMDLINE_LINUX_DEFAULT="(?!.*libata\.force)[^"]*)"'
@@ -39,4 +42,5 @@
 - name: Regenerate grub.cfg
   ansible.builtin.command: update-grub
   when: pve_sata_grub is changed
+  # (pve_sata_grub is "skipped" -- not changed -- when the cap is disabled for the host)
   changed_when: true
