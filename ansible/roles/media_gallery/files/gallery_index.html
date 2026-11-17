@@ -1298,8 +1298,15 @@
   // deliberately not a server-side flag.
   var FAV_KEY='gal.favs.v1';
   var favSet=(function(){
-    try{ var o=JSON.parse(localStorage.getItem(FAV_KEY)||'{}');
-         return (o&&typeof o==='object')?o:{}; }catch(_){ return {}; }
+    try{
+      var o=JSON.parse(localStorage.getItem(FAV_KEY)||'{}');
+      // Stored as a map {name:1}; tolerate a bare array (an older writer, or a
+      // hand-edited value) — Object.keys on an array yields "0","1","2"…
+      if(Array.isArray(o)){
+        var m={}; o.forEach(function(n){ if(typeof n==='string'&&n) m[n]=1; }); return m;
+      }
+      return (o&&typeof o==='object')?o:{};
+    }catch(_){ return {}; }
   })();
   var favOnly=false;
   function favHas(n){ return !!favSet[n]; }
@@ -1316,14 +1323,36 @@
       fetch('/favs',{method:'POST',credentials:'same-origin',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({folders:list})})
-        .then(function(r){ if(!r.ok) toast('Could not save favorites (HTTP '+r.status+')','err'); })
+        .then(function(r){
+          if(!r.ok){ toast('Could not save favorites (HTTP '+r.status+')','err'); return; }
+          favSyncWrite(list);          // this is now what the server holds
+        })
         .catch(function(){ toast('Could not save favorites (network)','err'); });
     },350);
   }
+  // What the server held the last time this device synced. Merging against it
+  // is what makes the two devices converge regardless of which one loads first:
+  //    server state + my additions since last sync - my removals since last sync
+  // A plain "server wins" would drop stars made on another device, and a plain
+  // union would resurrect folders you deliberately unstarred.
+  var FAV_SYNC='gal.favs.sync.v1';
+  function favSyncRead(){
+    try{ var a=JSON.parse(localStorage.getItem(FAV_SYNC)||'[]'); return Array.isArray(a)?a:[]; }
+    catch(_){ return []; }
+  }
+  function favSyncWrite(list){ try{ localStorage.setItem(FAV_SYNC, JSON.stringify(list)); }catch(_){} }
+
   function favApplyFrom(list){
-    var o={};
-    (list||[]).forEach(function(n){ if(typeof n==='string'&&n) o[n]=1; });
-    favSet=o; favSave();
+    var server={}, base={}, merged={}, k;
+    (list||[]).forEach(function(n){ if(typeof n==='string'&&n) server[n]=1; });
+    favSyncRead().forEach(function(n){ base[n]=1; });
+    for(k in server) merged[k]=1;
+    for(k in favSet){ if(!base[k]) merged[k]=1; }        // added here since last sync
+    for(k in base){ if(!favSet[k]) delete merged[k]; }   // removed here since last sync
+    favSet=merged; favSave();
+    var list2=Object.keys(merged).sort();
+    if(list2.join('\u0000')!==Object.keys(server).sort().join('\u0000')) favPush();  // server is behind this device
+    else favSyncWrite(list2);
     if(elFavBtn){ var c=favCount(); elFavBtn.innerHTML='\u2605 Favorites'+(c?' ('+c+')':''); }
   }
   function favLoad(){
