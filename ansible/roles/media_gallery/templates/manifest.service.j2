@@ -1,0 +1,17 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+[Unit]
+Description=media-gallery manifest publish (new uploads visible + free/VIP merges)
+After=network-online.target media-gallery-serve.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+# auto_merge.py posts the derived free/VIP groups to the upload service, which
+# owns the merges ledger.
+Environment=TG_UPLOAD_URL=http://{{ ip_media_gallery }}:{{ media_gallery_upload_port }}
+# NOT under /dev/shm/media-gallery-jobs.lock on purpose: that lock is held for
+# whole heavy-job stages (and, worse, while they poll for headroom), and this is
+# the path new uploads depend on. See the script header.
+ExecStart={{ media_gallery_dir }}/manifest_publish.sh

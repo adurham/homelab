@@ -700,6 +700,43 @@
     group: "{{ media_gallery_user }}"
     mode: '0750'
 
+# Manifest publish is its own unit, OUTSIDE the shared maintenance lock: it is
+# the path new uploads depend on, and the lock is held for whole heavy-job
+# stages (including their headroom polling). It also materializes the free/VIP
+# merges right after publishing the folder list.
+- name: Deploy Manifest Publish Script
+  ansible.builtin.copy:
+    src: manifest_publish.sh
+    dest: "{{ media_gallery_dir }}/manifest_publish.sh"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Render Manifest Publish Service Unit
+  ansible.builtin.template:
+    src: manifest.service.j2
+    dest: /etc/systemd/system/media-gallery-manifest.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Manifest Publish Timer Unit
+  ansible.builtin.template:
+    src: manifest.timer.j2
+    dest: /etc/systemd/system/media-gallery-manifest.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Manifest Publish Timer
+  ansible.builtin.systemd:
+    name: media-gallery-manifest.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
 - name: Deploy Thumbnail Prewarm Script (own service+timer since 2026-09-30)
   ansible.builtin.copy:
     src: prewarm_thumbs.sh

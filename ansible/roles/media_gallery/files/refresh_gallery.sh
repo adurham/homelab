@@ -59,25 +59,22 @@ fi
 
 echo "=== gallery refresh $(date -Is) ==="
 
-# 1) rebuild manifest (no upstream source access; datemap + archive only).
-#    Publishes manifest.json + folders.json locally (tmpfs serve mirror) and
-#    to Drive.
-"$DIR/venv/bin/python" "$DIR/build_manifest.py" || echo "manifest build failed"
+# NOTE: the manifest rebuild and the free/VIP merge materialization moved OUT of
+# this chain (2026-11-17) into media-gallery-manifest.service/.timer. They are
+# the path new uploads depend on, and this chain runs under the shared
+# maintenance lock, which the heavy jobs hold for whole stages — including the
+# time they spend polling for load headroom. Keeping the manifest here meant a
+# long reclaim/video stage kept new media out of the gallery for its duration
+# (observed: an hour). What remains here is the expensive, genuinely
+# lock-worthy work.
 
-# 2) incremental duplicate-report refresh (only hashes new items; see
+# 1) incremental duplicate-report refresh (only hashes new items; see
 #    dedup_scan.py's module docstring for the incremental + LSH-banding design
 #    that makes this safe to run every hour instead of only on manual demand).
 #    Runs BEFORE anything thumbnail-related: it reads the local manifest and
 #    the prewarm cache and fetches only genuinely-missing thumbs, so it is
 #    never blocked behind a multi-hour cache refill.
 "$DIR/venv/bin/python" "$DIR/dedup_scan.py" || echo "dedup scan failed"
-
-# 3) free/VIP folder pairs -> the merges ledger (server-side; the SPA only
-#    renders what the ledger holds). Reads the folder list written by step 1 and
-#    POSTs to the upload service, which owns that ledger — this never writes the
-#    file itself. Idempotent: prints "no change" and writes nothing on a steady
-#    run, and it respects hand-made merges and dismissed pairs.
-"$DIR/venv/bin/python" "$DIR/auto_merge.py" || echo "auto merge failed"
 
 echo "=== refresh done $(date -Is) ==="
 
