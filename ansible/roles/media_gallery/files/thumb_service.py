@@ -787,9 +787,25 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+class _ThumbServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer with a browser-sized accept backlog.
+
+    socketserver's default listen backlog is 5. A gallery grid fires several
+    hundred /thumb/ requests inside a second, so with backlog=5 the kernel
+    drops the overflow SYNs and the tail of the grid either retransmits for
+    tens of seconds or never connects at all (measured on the 2 vCPU guest:
+    a 300-connection burst of CACHED thumbs served 218 with p50 1.65s/max 47s
+    and left 82 unable to connect in 65s, while the same files answer in
+    ~3ms one at a time). The backlog bounds only the pending-accept queue;
+    generation concurrency is still capped by the semaphores.
+    """
+
+    request_queue_size = 1024
+
+
 def main():
-    srv = ThreadingHTTPServer((BIND, PORT), Handler)
-    print(f"thumb service on {BIND}:{PORT}", flush=True)
+    srv = _ThumbServer((BIND, PORT), Handler)
+    print(f"thumb service on {BIND}:{PORT} (backlog {_ThumbServer.request_queue_size})", flush=True)
     srv.serve_forever()
 
 
