@@ -77,7 +77,17 @@ and it is not investigated here.
 **An alert must key on the hang lines, never on "gateway unreachable"**; the second
 would page about once an hour.
 
-## Why only pve01
+## Why only pve01 — SUPERSEDED 2026-11-17
+
+> **Correction:** pve03 (I219-LM (11) `8086:0d4c`) hit the same `e1000e ... Detected Hardware
+> Unit Hang` on 2026-11-17 at 01:02 UTC (burst of 4 reports 19:02:03-09 CST, with TSO/GSO **on**),
+> HA fenced it, `ct:101/102/103/104/105/107/108/118/148` and `vm:240/241` were recovered, and it
+> rebooted at 01:02:55. Evidence is in `/root/nic-hang/20261116T190106/` on pve03. The silicon
+> difference below therefore does not protect pve02/pve03; the theory that only pve01 is affected
+> was wrong. TSO/GSO off + `msglvl 0x2087` were applied to pve02 and pve03 the same day (live and
+> in `/etc/network/interfaces`); `disable-k1` was not stacked. pve02 had not hung yet.
+
+## Why only pve01 (original analysis, kept for the record)
 
 All three nodes run the `e1000e` driver at 1000 Mb/s with identical offload and
 EEE settings and the same kernel command line. The silicon differs:

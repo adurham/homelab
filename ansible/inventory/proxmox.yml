@@ -9,9 +9,10 @@ all:
           pve_migrate_vlan_ip: "172.21.0.11"
           zfs_scrub_day_of_month: 1
           # pve01's NIC is an I219-LM (8086:15f9); pve02/pve03 have a different
-          # I219-LM (8086:0d4c). Only pve01 has hit "e1000e: Detected Hardware
-          # Unit Hang" (2026-11-09, 2026-11-15), which wedges the NIC until the
-          # HA watchdog resets the node. TSO/GSO off is the usual workaround for
+          # I219-LM (8086:0d4c). pve01 hit "e1000e: Detected Hardware Unit Hang"
+          # (2026-11-09, 2026-11-15) and so did pve03 (2026-11-17, TSO on), so the
+          # silicon difference does not protect pve02/pve03. The hang wedges the NIC
+          # until the HA watchdog resets the node. TSO/GSO off is the usual workaround for
           # that hang; applied live and in /etc/network/interfaces 2026-11-15.
           # See docs/pve01-network-stall-2026-11-15.md.
           proxmox_network_tso_gso_off: true
@@ -87,6 +88,11 @@ all:
           pve_backup_vmids: [100, 101, 102, 103, 104, 105, 106, 107, 108, 114, 115, 116, 117, 118, 119, 130, 131, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 170, 171, 201, 203, 205, 240, 241]
         pve02:
           ansible_host: 192.168.86.12
+          # e1000e Tx Unit Hang: pve03 hung 2026-11-17 01:02 UTC (HA fenced it) with TSO/GSO on, so the
+          # "only pve01's silicon hangs" theory was wrong. TSO/GSO off + msglvl applied live and in
+          # /etc/network/interfaces 2026-11-17, same as pve01 (disable-k1 deliberately NOT stacked).
+          proxmox_network_tso_gso_off: true
+          proxmox_network_nic_msglvl: "0x2087"
           pve_backup_quota_gib: 130  # vzdump-backups ceiling; see roles/proxmox_storage
           pve_sync_vlan_ip: "172.20.0.12"
           pve_migrate_vlan_ip: "172.21.0.12"
@@ -117,6 +123,9 @@ all:
             - /dev/nvme0n1
         pve03:
           ansible_host: 192.168.86.13
+          # Hung 2026-11-17 01:02 UTC with TSO/GSO on (see pve02 above). Applied live + in /etc/network/interfaces.
+          proxmox_network_tso_gso_off: true
+          proxmox_network_nic_msglvl: "0x2087"
           pve_backup_quota_gib: 360  # vzdump-backups ceiling; see roles/proxmox_storage
           pve_sync_vlan_ip: "172.20.0.13"
           pve_migrate_vlan_ip: "172.21.0.13"

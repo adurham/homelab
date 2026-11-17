@@ -122,8 +122,8 @@ groups:
           summary: '{{ $labels.instance }}: e1000e Detected Hardware Unit Hang within the last 24h'
           description: 'The persistent kernel witness on {{ $labels.instance }} logged ''e1000e ... Detected Hardware
             Unit Hang'' in the last 24 hours. It is published from /root/kernel_witness.log, so it appears when
-            the node is back (the network is dead during the hang itself; pve_node_fenced is the live signal). pve01
-            runs TSO/GSO off as an UNPROVEN mitigation: a hang with TSO off means the mitigation did not work. Evidence
+            the node is back (the network is dead during the hang itself; pve_node_fenced is the live signal). All three
+            nodes run TSO/GSO off as an UNPROVEN mitigation (pve03 hung with it on, 2026-11-17): a hang with TSO off means the mitigation did not work. Evidence
             on the node: /root/kernel_witness.log (full kernel log) and /root/nic-hang/<stamp>/ (registers, ring
             state, interrupts, pcap, one pass every 2 s). If it recurs, try in this order: ethtool -A nic0 rx off
             tx off, then the disable-k1 private flag, then BIOS/ME update with AMT off, then TX checksum offload
@@ -132,7 +132,7 @@ groups:
           severity: critical
         isPaused: false
       - uid: pve_nic_mitigation_missing
-        title: pve01 NIC TSO is on again (hang mitigation not in effect)
+        title: PVE node NIC TSO is on again (hang mitigation not in effect)
         condition: C
         data:
           - refId: A
@@ -145,7 +145,7 @@ groups:
                 type: prometheus
                 uid: victoriametrics
               editorMode: code
-              expr: max by (instance) (pve_nic_offload_enabled{instance="pve01", feature="tso"})
+              expr: max by (instance) (pve_nic_offload_enabled{instance=~"pve0[123]", feature="tso"})
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -181,9 +181,9 @@ groups:
         execErrState: Error
         for: 10m
         annotations:
-          summary: pve01 nic0 has TCP segmentation offload enabled again
-          description: 'pve01''s e1000e hang mitigation is TSO/GSO off (post-up in /etc/network/interfaces, roles/proxmox_network).
-            TSO reads on, so the setting was lost: check `ethtool -k nic0 | grep segmentation` on pve01 and re-apply
+          summary: '{{ $labels.instance }} nic0 has TCP segmentation offload enabled again'
+          description: '{{ $labels.instance }}''s e1000e hang mitigation is TSO/GSO off (post-up in /etc/network/interfaces, roles/proxmox_network).
+            TSO reads on, so the setting was lost: check `ethtool -k nic0 | grep segmentation` on the node and re-apply
             `ethtool -K nic0 tso off gso off`.'
         labels:
           severity: warning
