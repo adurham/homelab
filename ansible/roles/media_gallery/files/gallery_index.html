@@ -1559,12 +1559,28 @@
       var arr=chatMap[n]||[];
       for(var i=0;i<arr.length;i++){ if(!arr[i].hidden) out.push(arr[i]); }
     });
+    // Concatenating members yields folder blocks, and applySort's default 'new'
+    // assumes newest-first (it relies on the shard order instead of sorting), so
+    // a merged view has to establish that order itself.
+    out.sort(function(a,b){
+      var A=String(a.date||''), B=String(b.date||'');
+      if(A!==B) return A<B?1:-1;
+      return String(a.stem||'').localeCompare(String(b.stem||''));
+    });
     return out;
   }
   function grpCount(g){
     var n=0;
     ((g&&g.folders)||[]).forEach(function(f){ n+=(chatMap[f]?chatMap[f].length:(folderCount[f]||0)); });
     return n;
+  }
+  // The item source for whatever view key is on screen — one place, so a sort
+  // change, a rerender or an open all agree about merged folders and "All items".
+  function folderItemsFor(k){
+    if(k==='*') return manifest.filter(function(it){ return !it.hidden; });
+    var g=grpFromKey(k);
+    if(g) return dupCollapse(grpItems(g), g);
+    return chatMap[k]?chatMap[k].slice():[];
   }
   // default label for a merge: two names, then "+N"
   function grpLabel(names){
@@ -2244,18 +2260,13 @@
     current=chat;
     // "All items" reads manifest directly (bypassing chatMap), so apply the
     // same hidden-flag filter here that buildChats() applies to real folders.
-    var items=(chat==='*')
-      ? manifest.filter(function(it){ return !it.hidden; })
-      : (grp ? grpItems(grp) : (chatMap[chat]?chatMap[chat].slice():[]));
     // A merged folder is ONE collection: fold away the second copy of a picture
     // the library's perceptual-hash report already calls a duplicate. The count
     // is shown in the sub line and the chips row can put them back.
-    if(grp){
-      if(dupGroups===null){
-        ensureDedup().then(function(){ if(current===chat) openFolder(chat); });
-      }
-      items=dupCollapse(items,grp);
+    if(grp && dupGroups===null){
+      ensureDedup().then(function(){ if(current===chat) openFolder(chat); });
     }
+    var items=folderItemsFor(chat);
     // Lazy shard load: on the folders-from-metadata path chatMap holds nothing
     // until this folder is opened. Fetch its shard once, then re-enter.
     if(chat!=='*' && grp){
@@ -3236,7 +3247,7 @@
 
   function rerenderCurrent(){
     if(current==null) return;
-    view=(current==='*'?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]));
+    view=folderItemsFor(current);
     applySort(view); renderPhotos(); renderFolderRail();
     elSub.textContent=view.length+' item'+(view.length===1?'':'s');
     elState.style.display=view.length?'none':'block';
@@ -3475,7 +3486,7 @@
   });
   if(elFavBtn){ elFavBtn.addEventListener('click',function(){ setFavOnly(!favOnly); }); }
   if(elAutoBtn){ elAutoBtn.addEventListener('click',function(){ setAutoMerge(!vipsOn); }); }
-  elSort.addEventListener('change',function(){ if(current!==null){ view=(current==='*')?manifest.filter(function(it){return !it.hidden;}):(chatMap[current]?chatMap[current].slice():[]); applySort(view); renderPhotos(); renderDateRail(); } });
+  elSort.addEventListener('change',function(){ if(current!==null){ view=folderItemsFor(current); applySort(view); renderPhotos(); renderDateRail(); } });
   var fsEl=document.getElementById('folderSort');
   if(fsEl){
     try{ fsEl.value=folderSortMode; }catch(_){}
