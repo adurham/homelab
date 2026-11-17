@@ -292,7 +292,6 @@
   #grpAddMenu .gam-list button:hover{background:var(--accent);border-color:var(--accent);}
   #grpAddMenu .gam-empty{font-size:12.5px;color:var(--muted);padding:6px 4px;}
   #favBtn.on{background:var(--accent);border-color:var(--accent);color:#0d0f12;}
-  #autoBtn.on{background:var(--accent);border-color:var(--accent);color:#0d0f12;}
   /* folder selection checkbox (top-left, mirror of photo selbox) */
   .folder .fselbox{position:absolute;top:6px;left:6px;z-index:5;width:26px;height:26px;
     border-radius:6px;border:2px solid rgba(255,255,255,.85);background:rgba(20,24,30,.6);
@@ -579,7 +578,6 @@
     <option value="type">Type</option>
   </select>
   <button id="favBtn" title="Show only favorite folders">&#9733; Favorites</button>
-  <button id="autoBtn" title="Free/VIP folders are merged automatically — click to stop (nothing is moved)">&#8646; Free/VIP</button>
   <select id="folderSort" autocomplete="off" title="Sort folders">
     <option value="count">Most items</option>
     <option value="recent">Recently updated</option>
@@ -956,7 +954,6 @@
   var elSort=document.getElementById('sort');
   var elBack=document.getElementById('backBtn');
   var elFavBtn=document.getElementById('favBtn');
-  var elAutoBtn=document.getElementById('autoBtn');
   var elSearch=document.getElementById('searchBox');
   var elViewToggle=document.getElementById('viewToggle');
   var searchQuery='';      // active filter text (lowercased)
@@ -1456,10 +1453,7 @@
   var GRP_KEY='gal.groups.v1';
   var GRP_PREFIX='__grp__:';
   var VIP_ID_PREFIX='auto:';            // derived free/VIP groups get id 'auto:<base>'
-  var AUTO_PREF='gal.auto.v1';     // this device's copy of the auto-merge switch
   var groups=[];                       // includes tombstones ({del:1})
-  var vipsOn=true;                     // free/VIP auto-merge (server-side truth)
-  try{ vipsOn=localStorage.getItem(AUTO_PREF)!=='0'; }catch(_){}
   function grpId(){ return 'g'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
   function grpKey(id){ return GRP_PREFIX+id; }
   function isGrpKey(k){ return typeof k==='string' && k.indexOf(GRP_PREFIX)===0; }
@@ -1485,10 +1479,9 @@
   }
   function grpList(){
     return groups.filter(function(g){
-      if(!(g && !g.del && g.id && Array.isArray(g.folders) && g.folders.length>1)) return false;
-      // a derived free/VIP merge exists only while auto-merge is on; turning the
-      // switch off hides it without destroying it (flip back on and it returns)
-      return vipsOn || !isAutoGroup(g);
+      // a derived free/VIP merge is never hidden behind a global switch: the only
+      // opt-out is Ungroup on the card, which tombstones that one pair
+      return !!(g && !g.del && g.id && Array.isArray(g.folders) && g.folders.length>1);
     });
   }
   function grpForFolder(n){
@@ -1514,14 +1507,12 @@
       var out=groups.filter(function(g){ return g && g.id && (!g.del || (g.ts||0)>=cutoff); });
       fetch('/merges',{method:'POST',credentials:'same-origin',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({groups:out, auto:vipsOn})})
+        body:JSON.stringify({groups:out})})
         .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); })
         .catch(function(e){ toast('Could not save merged folders ('+(e&&e.message?e.message:'network')+')','err'); });
     },250);
   }
-  function grpApplyFrom(list, autoFlag){
-    if(typeof autoFlag==='boolean') vipsOn=autoFlag;
-    try{ localStorage.setItem(AUTO_PREF, vipsOn?'1':'0'); }catch(_){}
+  function grpApplyFrom(list){
     var byId={};
     function take(g){ if(!g||!g.id) return;
       var cur=byId[g.id];
@@ -1701,10 +1692,10 @@
   // no chat ids, no storage — and materializes a normal merge group with a
   // stable id `auto:<base>`, so every existing behaviour (card, chips, dedupe,
   // prune, star, ungroup) applies unchanged.
-  // Deliberate rules: a base needs at least two folders, one of them must carry
-  // a free/VIP marker, a folder already in a hand-made merge is never stolen,
-  // and ungrouping a derived pair leaves a tombstone with the same id so the
-  // next load cannot recreate what the owner just dismissed.
+  // There is deliberately NO global switch: it is meant to be invisible, and the
+  // one control that matters is per pair — Ungroup tombstones that pair so the
+  // next load cannot recreate what the owner just dismissed. A folder already in
+  // a hand-made merge is never taken, and any hand edit re-keys the group.
   function autoBase(n){
     var s=String(n||'').toLowerCase().trim();
     var hit=false, m;
@@ -1729,7 +1720,7 @@
     return base;
   }
   function grpAutoSync(){
-    if(!metaReady || !vipsOn) return false;
+    if(!metaReady) return false;
     var uni=[], seen={};
     chats.forEach(function(c){ if(!seen[c]){ seen[c]=1; uni.push(c); } });
     emptyFolders.forEach(function(c){ if(!seen[c]){ seen[c]=1; uni.push(c); } });
@@ -1787,21 +1778,6 @@
     });
     if(changed){ grpSave(); grpPush(); }
     return changed;
-  }
-  function setAutoMerge(on){
-    vipsOn=!!on;
-    try{ localStorage.setItem(AUTO_PREF, vipsOn?'1':'0'); }catch(_){}
-    autoPaint();
-    grpAutoSync();
-    grpSave(); grpPush();
-    renderFolders();
-  }
-  function autoPaint(){
-    if(!elAutoBtn) return;
-    elAutoBtn.classList.toggle('on', vipsOn);
-    elAutoBtn.title=vipsOn
-      ? 'Free/VIP folders are merged automatically — click to stop (nothing is moved)'
-      : 'Auto-merge is off — click to merge free/VIP folder pairs (nothing is moved)';
   }
 
   // ---- DEDUPE inside a merged folder --------------------------------------
@@ -3501,7 +3477,6 @@
     if(!listView && vg.sizer) renderPhotos();   // virtual grid: re-flow at the new size
   });
   if(elFavBtn){ elFavBtn.addEventListener('click',function(){ setFavOnly(!favOnly); }); }
-  if(elAutoBtn){ elAutoBtn.addEventListener('click',function(){ setAutoMerge(!vipsOn); }); }
   elSort.addEventListener('change',function(){ if(current!==null){ view=folderItemsFor(current); applySort(view); renderPhotos(); renderDateRail(); } });
   var fsEl=document.getElementById('folderSort');
   if(fsEl){
@@ -4294,8 +4269,7 @@
       }
       // merged folders: reconcile (max-ts per group id) with whatever this
       // device has offline, then push if the server is behind
-      if(res[4] && Array.isArray(res[4].groups)) grpApplyFrom(res[4].groups, res[4].auto);
-      autoPaint();
+      if(res[4] && Array.isArray(res[4].groups)) grpApplyFrom(res[4].groups);
       var allFolders=Array.isArray(res[1])?res[1]:[];
       var fmeta=res[2];
       var haveMeta=!!(meta&&meta.folders&&meta.folders.length);
