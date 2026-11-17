@@ -495,6 +495,17 @@ all:
           # Outbound-only CT (no inbound services) — reached over the
           # private_subnet ProxyCommand (jump host = personal MacBook), same
           # as dns/proxy/mail. No tailnet membership needed.
+          #
+          # REACH IT BY IP ({{ ip_media_ingest_02 }}), not by name. The DNS
+          # name media-ingest-02.chi.lab.amd-e.com still answers 172.16.0.48,
+          # which is pg-02 (CT 144) — the zone template in
+          # roles/dns_server/templates/db.chi.lab.amd-e.com.j2 is already
+          # correct, but the LIVE zone on the legacy BIND at ip_dns_primary
+          # (172.16.0.10, the box this repo calls retired) was never reloaded,
+          # and Tailscale split-DNS still routes chi.lab.amd-e.com there.
+          # Reaching the name therefore hits a different host and ssh reports
+          # a changed host key. Also moved pve02 -> pve01 (2026-11-15) — the
+          # target_node below is stale until the next inventory pass.
           ansible_host: "{{ ip_media_ingest_02 }}"
           vmid: 117
           target_node: pve02
