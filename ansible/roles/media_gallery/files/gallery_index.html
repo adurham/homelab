@@ -658,6 +658,26 @@
 
 <script>
 (function(){
+  // A thumbnail can fail transiently: /thumb/ sits behind the forward-auth gate,
+  // so a request that races a session renewal comes back 401 with no image body,
+  // and grid tiles are plain <img> elements with no error handling of their own
+  // (only the folder view's wireImg retries). Without this a single 401 leaves
+  // that tile blank until the whole page is reloaded. Retry it with a backoff and
+  // let the failed-auth tile fill itself in once the session is back. Capture
+  // phase is required: error events on <img> do not bubble.
+  var IMG_RETRY_MAX=3;
+  document.addEventListener('error',function(e){
+    var img=e.target;
+    if(!img||img.tagName!=='IMG') return;
+    var src=img.getAttribute('src')||'';
+    if(src.indexOf('/thumb/')<0) return;
+    var n=parseInt(img.getAttribute('data-thumb-retry')||'0',10);
+    if(n>=IMG_RETRY_MAX) return;
+    img.setAttribute('data-thumb-retry',n+1);
+    setTimeout(function(){
+      img.src=src.split('?')[0]+'?r='+Date.now()+'&t='+(n+1);
+    },1200*(n+1));
+  },true);
   var manifest=[], chats=[], chatMap={};
   // 2026-11-05: the full manifest is now LAZY. It used to be fetched (75MB,
   // 253K objects) on every page load even though ordinary browsing never

@@ -5,10 +5,18 @@ After=network-online.target media-gallery-thumb.service
 Wants=network-online.target
 
 [Service]
+# Serialize against the other Drive/thumbnail-heavy jobs on this host. The
+# hourly refresh, the thumbnail backfill, the heavy-jobs chain and the prewarm
+# all hit the same Drive quota and the same thumb_service generation path;
+# two of them at once starve interactive thumbnail requests (504s at the LB on
+# a 2 vCPU guest). The wait is bounded: a job that cannot take the lock within
+# 15 minutes exits 75 (treated as success below) and its timer fires again, so
+# nothing piles up behind a multi-hour run.
+SuccessExitStatus=75
 Type=oneshot
 User={{ media_gallery_user }}
 Group={{ media_gallery_user }}
-ExecStart={{ media_gallery_dir }}/refresh_gallery.sh
+ExecStart=/usr/bin/flock -w 900 -E 75 /dev/shm/media-gallery-jobs.lock {{ media_gallery_dir }}/refresh_gallery.sh
 # NO TimeoutStartSec: refresh itself (manifest rebuild + incremental dedup
 # scan) is minutes at most, and both steps are idempotent/resumable, so a
 # mid-way kill just re-does less work next time — never restarts from zero.

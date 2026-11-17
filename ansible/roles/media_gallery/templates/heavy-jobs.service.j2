@@ -10,9 +10,17 @@ After=network-online.target media-gallery-trash.service
 Wants=network-online.target
 
 [Service]
+# Serialize against the other Drive/thumbnail-heavy jobs on this host. The
+# hourly refresh, the thumbnail backfill, the heavy-jobs chain and the prewarm
+# all hit the same Drive quota and the same thumb_service generation path;
+# two of them at once starve interactive thumbnail requests (504s at the LB on
+# a 2 vCPU guest). The wait is bounded: a job that cannot take the lock within
+# 15 minutes exits 75 (treated as success below) and its timer fires again, so
+# nothing piles up behind a multi-hour run.
+SuccessExitStatus=75
 Type=oneshot
 User=root
-ExecStart=/bin/bash {{ media_gallery_dir }}/gallery_heavy_jobs.sh
+ExecStart=/usr/bin/flock -w 900 -E 75 /dev/shm/media-gallery-jobs.lock /bin/bash {{ media_gallery_dir }}/gallery_heavy_jobs.sh
 # No TimeoutStartSec: each stage is genuinely long (the reclaim alone is tens
 # of thousands of Drive deletes) and every stage checkpoints itself, so a kill
 # only loses the current item.
