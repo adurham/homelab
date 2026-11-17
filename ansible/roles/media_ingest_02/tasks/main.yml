@@ -421,3 +421,43 @@
     group: root
     mode: '0644'
   notify: Reload SSH
+
+# ─── Source profile export (2026-11-17) ────────────────────────────────────
+# Every model is one or two ACCOUNTS on the source (a free feed and a paid one),
+# so the gallery cannot pair their folders by name — "sexyoverdrive" vs
+# "sexytestdrive" share nothing. ofscraper already fetches each profile (display
+# name, bio, avatar, price) and used to throw it away; source_profiles.py reads
+# its own response cache (no new API calls, no credentials) and pushes the
+# hashed identity to the gallery, where auto_merge.py pairs on it.
+- name: Deploy Source Profile Exporter
+  ansible.builtin.copy:
+    src: source_profiles.py
+    dest: "{{ media_ingest_02_dir }}/source_profiles.py"
+    owner: "{{ media_ingest_02_user }}"
+    group: "{{ media_ingest_02_user }}"
+    mode: '0750'
+
+- name: Render Source Profile Service Unit
+  ansible.builtin.template:
+    src: source_profiles.service.j2
+    dest: /etc/systemd/system/media-ingest-02-profiles.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Source Profile Timer Unit
+  ansible.builtin.template:
+    src: source_profiles.timer.j2
+    dest: /etc/systemd/system/media-ingest-02-profiles.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Source Profile Timer
+  ansible.builtin.systemd:
+    name: media-ingest-02-profiles.timer
+    enabled: true
+    state: started
+    daemon_reload: true

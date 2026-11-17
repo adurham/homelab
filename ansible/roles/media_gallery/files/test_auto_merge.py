@@ -80,5 +80,37 @@ if real:
     check("real library derives 4 pairs", len(live) == 4, live)
     check("real manual merges untouched", len(manual_kept) == 3, manual_kept)
 
+# --- 8. identity pairs (source profiles) ----------------------------------
+profiles = {
+    "sexyoverdrive": {"source_id": "a1", "name": "ashmodel", "avatar": "av1",
+                      "mentions": ["sexytestdrive"], "price": 0},
+    "sexytestdrive": {"source_id": "b2", "name": "ashmodel", "avatar": "av2",
+                      "mentions": [], "price": 8},
+    "delta": {"source_id": "c3", "name": "delta", "avatar": "x", "mentions": [], "price": 5},
+    "gama": {"source_id": "d4", "name": "gama", "avatar": "y", "mentions": [], "price": 5},
+}
+folders2 = ["sexyoverdrive", "sexytestdrive", "delta", "gama"]
+out = am.derive([], folders2, profiles)
+idpairs = [g for g in out if g["id"].startswith("auto:id:")]
+check("bio cross-reference pairs the feeds", len(idpairs) == 1
+      and idpairs[0]["folders"] == ["sexyoverdrive", "sexytestdrive"], idpairs)
+check("same name but both paid -> not paired",
+      not any(g["folders"] == ["delta", "gama"] for g in out))
+st = am.derive([{"id": idpairs[0]["id"], "name": "x", "folders": [], "ts": 1, "del": 1}],
+               folders2, profiles)
+check("identity pair respects a tombstone",
+      not any(g["id"] == idpairs[0]["id"] and not g.get("del") for g in st))
+# a name rule wins over identity for the same folders
+out2 = am.derive([], ["gemmajae", "gemmajaevip", "sexyoverdrive", "sexytestdrive"],
+                 {"gemmajae": {"name": "g", "price": 0, "mentions": ["gemmajaevip"]},
+                  "gemmajaevip": {"name": "g", "price": 0, "mentions": []},
+                  "sexyoverdrive": profiles["sexyoverdrive"],
+                  "sexytestdrive": profiles["sexytestdrive"]})
+check("name pair and identity pair coexist",
+      any(g["id"] == "auto:gemmajae" for g in out2)
+      and sum(1 for g in out2 if g["id"].startswith("auto:id:")) == 1, [g["id"] for g in out2])
+check("no profiles -> no identity groups",
+      not any(g["id"].startswith("auto:id:") for g in am.derive([], folders2, {})))
+
 print("\n%d failure(s)" % len(fails))
 sys.exit(1 if fails else 0)

@@ -237,9 +237,33 @@ _groups_lock = threading.Lock()
 # derived pair a set of folders would form, instead of the browser keeping a
 # second copy of it that can drift.
 try:
-    from auto_merge import pair_bases as _pair_bases
+    from auto_merge import pair_bases as _pair_bases, identity_bases as _identity_bases
 except Exception:  # noqa: BLE001 — a missing/rebuilt neighbour must not stop the service
     _pair_bases = None
+    _identity_bases = None
+
+# ---- source profiles (identity of the account behind a folder) -------------
+# Written by the scraper lane (source_profiles.py) through /ingest/profiles.
+# A free feed and a paid feed are two ACCOUNTS, so the folder names cannot pair
+# them; the display name / bio / avatar the scraper already fetches can. Hashed
+# fields only: the gallery never needs the raw source id or handle.
+PROFILES_FILE = Path(os.environ.get("TG_PROFILES_FILE", "/var/lib/media-gallery/source_profiles.json"))
+_profiles_lock = threading.Lock()
+
+
+def load_profiles() -> dict:
+    try:
+        d = json.loads(PROFILES_FILE.read_text())
+        return d.get("profiles", {}) if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_profiles(profiles: dict) -> None:
+    PROFILES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(PROFILES_FILE) + ".tmp"
+    Path(tmp).write_text(json.dumps({"profiles": profiles}, separators=(",", ":"), sort_keys=True))
+    os.replace(tmp, PROFILES_FILE)
 
 
 def load_groups() -> dict:
@@ -832,6 +856,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._favs()
             if p == "/merges":
                 return self._merges()
+            if p == "/profiles":
+                return self._profiles()
             self._json(404, {"error": "not found"})
         except Exception as e:  # noqa: BLE001 — surface the real error, don't bare-500
             import traceback
@@ -1409,10 +1435,15 @@ class Handler(BaseHTTPRequestHandler):
             data = load_groups()
             prev = data.get(user) or {"auto": True, "groups": []}
             merged_groups = clean
-            if unpair and _pair_bases:
+            if unpair and (_pair_bases or _identity_bases):
                 now = int(time.time() * 1000)
                 by_id = {g["id"]: g for g in merged_groups}
-                for base in _pair_bases(unpair):
+                keys = list(_pair_bases(unpair)) if _pair_bases else []
+                if _identity_bases:
+                    # identity pairs have no name marker: ask the same rule that
+                    # creates them, using the profile ledger
+                    keys += list(_identity_bases(list(unpair), load_profiles()))
+                for base in keys:
                     aid = "auto:" + base
                     if aid in by_id:
                         by_id[aid]["del"] = 1
@@ -1425,6 +1456,50 @@ class Handler(BaseHTTPRequestHandler):
             save_groups(data)
         return self._json(200, {"ok": True, "count": len(merged_groups),
                                 "auto": data[user]["auto"], "user": user})
+
+    def _profiles(self):
+        """POST /ingest/profiles  body {"profiles": {folder: {...}, ...}}
+
+        MERGES rather than replaces: the scraper's cache only holds the accounts it
+        has touched recently, so a replace would drop every profile it didn't
+        export this run. Fields are hashed by the producer; only names we can
+        validate are accepted.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, OSError) as e:
+            return self._json(400, {"error": f"bad json body: {e}"})
+        incoming = body.get("profiles")
+        if not isinstance(incoming, dict) or len(incoming) > 5000:
+            return self._json(400, {"error": "want 'profiles' object"})
+        clean = {}
+        for folder, p in incoming.items():
+            if not isinstance(folder, str) or not folder or len(folder) > 200:
+                return self._json(400, {"error": "bad folder in profiles"})
+            if "/" in folder or ".." in folder or "\x00" in folder:
+                return self._json(400, {"error": "bad folder in profiles"})
+            if not isinstance(p, dict):
+                return self._json(400, {"error": "profile must be an object"})
+            src = str(p.get("source_id") or "")[:64]
+            name = str(p.get("name") or "")[:128]
+            avatar = str(p.get("avatar") or "")[:64]
+            mentions = [str(m)[:40] for m in (p.get("mentions") or []) if isinstance(m, str)][:50]
+            try:
+                price = float(p.get("price") or 0)
+            except (TypeError, ValueError):
+                price = 0.0
+            try:
+                exported = int(p.get("exported") or 0)
+            except (TypeError, ValueError):
+                exported = 0
+            clean[folder] = {"source_id": src, "name": name, "avatar": avatar,
+                             "mentions": mentions, "price": price, "exported": exported}
+        with _profiles_lock:
+            profiles = load_profiles()
+            profiles.update(clean)
+            save_profiles(profiles)
+        return self._json(200, {"ok": True, "merged": len(clean), "total": len(profiles)})
 
     def _notdup(self):
         """POST /notdup  body {"sig": "<group signature>", "undo": bool}

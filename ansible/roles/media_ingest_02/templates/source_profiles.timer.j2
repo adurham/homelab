@@ -1,0 +1,13 @@
+# Managed by Ansible — roles/media_ingest_02. Do not edit by hand.
+[Unit]
+Description=Export model profile identity periodically
+
+[Timer]
+# The scraper refreshes profiles during a sweep; exporting every 30 min keeps the
+# gallery's pairing ledger current without waiting for the next full pass.
+OnBootSec=10min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

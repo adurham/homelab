@@ -1,0 +1,15 @@
+# Managed by Ansible — roles/media_ingest_02. Do not edit by hand.
+[Unit]
+Description=media-ingest-02 source profile export (identity of each model account)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ media_ingest_02_user | default('mediaingest') }}
+Group={{ media_ingest_02_user | default('mediaingest') }}
+EnvironmentFile={{ media_ingest_02_dir }}/scraper.env
+Environment=TG_SCRAPER_STATE={{ media_ingest_02_state }}
+ExecStart={{ media_ingest_02_dir }}/venv/bin/python {{ media_ingest_02_dir }}/source_profiles.py
+# A push failure (gallery down) must not flap the unit; the next tick re-runs it.
+SuccessExitStatus=0 1
