@@ -25,6 +25,7 @@ from telethon import TelegramClient as SourceClient
 from telethon.tl.types import InputMessagesFilterPhotoVideo
 
 from serve_publish import publish_local
+from cover_choice import pick_cover, thumb_cached
 
 # API creds only needed for a full (non-fast) scan; don't hard-require them so
 # `--fast` rebuilds work with zero upstream source access.
@@ -35,6 +36,10 @@ REMOTE = os.environ.get("TG_RCLONE_REMOTE", "gcrypt:")
 RCLONE_CONF = os.environ.get("RCLONE_CONFIG", "/home/mediagallery/.config/rclone/rclone.conf")
 EXCLUDE_FILE = os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/excluded.json")
 HIDDEN_FILE = Path(os.environ.get("TG_HIDDEN_FILE", "/var/lib/media-gallery/hidden.json"))
+# The owner's own settings for a folder (pinned cover, chat ids, ingest
+# redirects). Read here so a pinned cover survives the rebuild — see
+# cover_choice.py for why that used to get lost.
+FOLDER_META_FILE = Path(os.environ.get("TG_FOLDER_META", "/var/lib/media-gallery/folder_meta.json"))
 SRC = REMOTE + "by-chat"
 GALLERY = REMOTE + "gallery"
 # Local (tmpfs) thumbnail cache — used to pick a folder cover that is known to
@@ -396,27 +401,23 @@ async def main():
         # then the newest item as before. The scan is not capped: a folder whose
         # newest few hundred entries are all partial videos still has images
         # further down, and a stat() per item costs nothing next to the fetch.
-        def _cached_thumb(it) -> bool:
-            th = it.get("thumb") or ""
-            if not th.startswith("thumb/"):
-                return False
-            try:
-                return (thumb_cache / th[len("thumb/"):]).stat().st_size > 0
-            except OSError:
-                return False
+        # (The old `_cached_thumb(items_dict)` helper moved into cover_choice as
+        # `thumb_cached(thumb_path, cache_dir)`; pick_cover passes a PATH.)
+        def _cover_for(items, pinned=""):
+            # thumb_cached takes the THUMB PATH (that is pick_cover's contract);
+            # handing it an item dict is what broke the shard block on the first
+            # deploy and silently skipped folders_meta for a whole run.
+            return pick_cover(items, pinned, lambda p: thumb_cached(p, thumb_cache))
 
-        def _cover_for(items):
-            first_image = None
-            for it in items:
-                if it.get("type") != "image":
-                    continue
-                if _cached_thumb(it):
-                    return it.get("thumb")
-                if first_image is None:
-                    first_image = it.get("thumb")
-            if first_image:
-                return first_image
-            return items[0].get("thumb") if items else None
+        # The owner's pinned covers: folder_meta.json is user intent, so the
+        # rebuild must honour it instead of silently re-picking (that is what
+        # made a pinned cover "disappear" a few minutes after setting it).
+        try:
+            fmeta = json.loads(FOLDER_META_FILE.read_text())
+            if not isinstance(fmeta, dict):
+                fmeta = {}
+        except (OSError, ValueError):
+            fmeta = {}
 
         meta = {"generated": manifest[0].get("date") if manifest else None, "folders": []}
         for name in sorted(by_chat):
@@ -425,11 +426,13 @@ async def main():
             sp = items_dir / (k + ".json")
             sp.write_text(json.dumps({"folder": name, "items": items},
                                      separators=(",", ":")))
+            raw = fmeta.get(name)
+            entry = raw if isinstance(raw, dict) else {}
             meta["folders"].append({
                 "name": name,
                 "count": len(items),
                 "key": k,
-                "cover": _cover_for(items),
+                "cover": _cover_for(items, str(entry.get("cover") or "")),
                 # newest item date — lets the landing page sort "recently
                 # updated" without the full manifest (count alone can't tell
                 # a dormant 5,000-item folder from one touched today)

@@ -762,9 +762,12 @@
   }
   // cover without the items loaded (folders page from folders_meta.json)
   function coverPathFor(name){
-    if(folderCoverPath[name]) return '/'+folderCoverPath[name];
+    // The owner's pin wins: folder_meta is user intent, folders_meta is the
+    // rebuild's guess. Preferring the guess is why a pinned cover reverted on
+    // the next load even though the backend had it.
     var fm=folderMeta[name];
     if(fm && fm.cover) return '/thumb/'+name+'/'+fm.cover+'.jpg';
+    if(folderCoverPath[name]) return '/'+folderCoverPath[name];
     return '';
   }
 
