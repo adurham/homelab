@@ -75,20 +75,6 @@
   #dupView .gs-row:hover{border-color:var(--accent);}
   #dupView .gs-row img{width:56px;height:56px;object-fit:cover;border-radius:6px;display:block;flex:0 0 auto;}
   #dupView .gs-row span{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  #resumeBar{display:none;margin:0 0 16px;}
-  #resumeBar.show{display:block;}
-  #resumeBar .rcontinue{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
-    padding:14px 16px;border-radius:12px;border:1px solid var(--border);background:var(--panel);
-    color:inherit;font:inherit;cursor:pointer;transition:border-color .12s,transform .12s;}
-  #resumeBar .rcontinue:hover{border-color:var(--accent);transform:translateY(-1px);}
-  #resumeBar .rplay{font-size:22px;line-height:1;color:var(--accent);}
-  #resumeBar .rtext{display:flex;flex-direction:column;gap:3px;min-width:0;}
-  #resumeBar .rtitle{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  #resumeBar .rsub{font-size:12.5px;color:var(--muted);}
-  #resumeBar .rrecent{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
-  #resumeBar .rchip{padding:7px 12px;border-radius:999px;border:1px solid var(--border);
-    background:var(--panel2);color:inherit;font:inherit;font-size:12.5px;cursor:pointer;}
-  #resumeBar .rchip:hover{border-color:var(--accent);}
   #zoom{width:90px;vertical-align:middle;}
   .tile{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;
     cursor:pointer;background:var(--panel);border:1px solid var(--border);}
@@ -568,7 +554,6 @@
     <button id="fbulkDelete" class="danger">&#128465; Delete folders</button>
     <button id="fbulkClear">Clear</button>
   </div>
-  <div id="resumeBar"></div>
   <div id="folderGrid"></div>
   <div id="gsRow"></div>
   <div id="photoGrid" style="display:none"></div>
@@ -1408,7 +1393,6 @@
     var fsSel=document.getElementById('folderSort');
     if(fsSel){ fsSel.style.display=''; fsSel.value=folderSortMode; }
     setRoute(q?('#s='+encodeURIComponent(searchQuery)):'');
-    renderResumeBar();
     // prune folder-selection of folders that no longer exist, refresh the bar
     if(typeof selectedFolders!=='undefined'){
       Array.from(selectedFolders).forEach(function(n){
@@ -1524,48 +1508,6 @@
     resumeWrite(o);
   }
   function resumeFor(folder){ return resumeState().by[folder]||null; }
-  function ago(ts){
-    var s=Math.max(1,Math.round((Date.now()-ts)/1000));
-    if(s<90) return 'just now';
-    var m=Math.round(s/60); if(m<60) return m+' min ago';
-    var h=Math.round(m/60); if(h<36) return h+' h ago';
-    var d=Math.round(h/24); return d===1?'yesterday':d+' days ago';
-  }
-  function renderResumeBar(){
-    var bar=document.getElementById('resumeBar'); if(!bar) return;
-    if((searchQuery||'').trim()){ bar.className=''; bar.innerHTML=''; return; }   // keep a filtered list clean
-    var o=resumeState();
-    var last=o.recent[0];
-    var known=function(n){ return chats.indexOf(n)>=0 || emptyFolders.indexOf(n)>=0; };
-    if(!last||!known(last)){ bar.className=''; bar.innerHTML=''; return; }
-    var r=o.by[last]||null;
-    bar.innerHTML='';
-    var btn=document.createElement('button');
-    btn.className='rcontinue'; btn.type='button';
-    var ic=document.createElement('span'); ic.className='rplay'; ic.textContent='\u25B6'; btn.appendChild(ic);
-    var tx=document.createElement('span'); tx.className='rtext'; btn.appendChild(tx);
-    var ti=document.createElement('span'); ti.className='rtitle'; ti.textContent='Continue: '+last;
-    var su=document.createElement('span'); su.className='rsub';
-    var total=chatMap[last]?chatMap[last].length:0;
-    var bits=[];
-    if(r) bits.push('item '+(r.i+1).toLocaleString()+' of '+(total||r.n||0).toLocaleString());
-    if(r) bits.push(ago(r.ts));
-    su.textContent=bits.join(' \u00B7 ');
-    tx.appendChild(ti); tx.appendChild(su);
-    btn.addEventListener('click',function(){ openFolder(last); });
-    bar.appendChild(btn);
-    if(o.recent.length>1){
-      var row=document.createElement('div'); row.className='rrecent';
-      o.recent.slice(1).forEach(function(n){
-        if(!known(n)) return;
-        var c=document.createElement('button'); c.className='rchip'; c.type='button'; c.textContent=n;
-        c.addEventListener('click',function(){ openFolder(n); });
-        row.appendChild(c);
-      });
-      if(row.children.length) bar.appendChild(row);
-    }
-    bar.className='show';
-  }
   function saveResumeNow(){
     if(!vg.sizer||!shown.length) return;
     if(current==null||current==='__dup__'||current==='*') return;
