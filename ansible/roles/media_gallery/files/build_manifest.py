@@ -37,6 +37,9 @@ EXCLUDE_FILE = os.environ.get("TG_EXCLUDE_FILE", "/var/lib/media-gallery/exclude
 HIDDEN_FILE = Path(os.environ.get("TG_HIDDEN_FILE", "/var/lib/media-gallery/hidden.json"))
 SRC = REMOTE + "by-chat"
 GALLERY = REMOTE + "gallery"
+# Local (tmpfs) thumbnail cache — used to pick a folder cover that is known to
+# render; a missing entry only means "not warmed yet", never a failure.
+thumb_cache = Path(os.environ.get("THUMB_LOCAL_CACHE", "/var/lib/media-gallery/thumbcache"))
 # Local tmpfs mirror of the files the SPA fetches (this script publishes
 # manifest.json + folders.json). media-gallery-serve.service serves this dir
 # (rclone :local:, port 8093) and lb-01 routes the SPA's metadata fetches
@@ -383,6 +386,38 @@ async def main():
 
         items_dir = work / "items"
         items_dir.mkdir(exist_ok=True)
+
+        # Folder covers used to be items[0] — the newest item, which is very
+        # often a video. Those partial media files have no decodable poster, so
+        # the thumb service answers 404 X-Thumb-Reason: deterministic and the
+        # folder card stayed blank forever (17 of 18 blank cards on the landing
+        # page had a video cover). Prefer an IMAGE whose thumbnail is already on
+        # the tmpfs — that both renders and proves it renders — then any image,
+        # then the newest item as before. The scan is not capped: a folder whose
+        # newest few hundred entries are all partial videos still has images
+        # further down, and a stat() per item costs nothing next to the fetch.
+        def _cached_thumb(it) -> bool:
+            th = it.get("thumb") or ""
+            if not th.startswith("thumb/"):
+                return False
+            try:
+                return (thumb_cache / th[len("thumb/"):]).stat().st_size > 0
+            except OSError:
+                return False
+
+        def _cover_for(items):
+            first_image = None
+            for it in items:
+                if it.get("type") != "image":
+                    continue
+                if _cached_thumb(it):
+                    return it.get("thumb")
+                if first_image is None:
+                    first_image = it.get("thumb")
+            if first_image:
+                return first_image
+            return items[0].get("thumb") if items else None
+
         meta = {"generated": manifest[0].get("date") if manifest else None, "folders": []}
         for name in sorted(by_chat):
             items = by_chat[name]           # already date-desc from the manifest
@@ -394,7 +429,7 @@ async def main():
                 "name": name,
                 "count": len(items),
                 "key": k,
-                "cover": items[0].get("thumb") if items else None,
+                "cover": _cover_for(items),
                 # newest item date — lets the landing page sort "recently
                 # updated" without the full manifest (count alone can't tell
                 # a dormant 5,000-item folder from one touched today)
