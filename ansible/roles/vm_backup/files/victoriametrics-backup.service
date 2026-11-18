@@ -11,8 +11,10 @@ User=root
 # the old single-node dataset to GDrive; at home upload speeds that no longer
 # fits in an hour, and a timeout kill looks exactly like a failed backup.
 TimeoutStartSec=21600
-Restart=on-failure
-RestartSec=300
+# No auto-restart: the timer is the retry path (daily), and the watchdog alerts
+# at 36h without a success. Restart=on-failure with a 5-minute delay turned a
+# single upload failure into ten 22 GiB staging copies and a full disk.
+Restart=no
 
 [Install]
 WantedBy=multi-user.target

@@ -15,7 +15,14 @@
 #      and a copy that keeps them as symlinks is useless on another host.
 #   2. rclone copy -L the generation -> vmbackup_crypt:daily/<ts> (encrypted).
 #   3. On success: record size, delete every remote snapshot + the staging copy,
-#      apply retention. On failure: leave everything in place and exit non-zero.
+#      apply retention.
+#
+# FAILURE CLEANUP (2026-11-18): the old behaviour was "leave everything in place
+# for inspection", which combined with Restart=on-failure to stage a fresh
+# ~22 GiB copy every 5 minutes until vm-01's 251 GiB disk hit 100% (10 orphaned
+# generations = 205 GiB). A failed run now deletes BOTH the staged generation and
+# any snapshot it created, keeps nothing but the journal lines, and refuses to
+# start at all below FREE_MIN_GB of free space.
 #
 # Tiering: data older than 2y rolls off local vmstorage per -retentionPeriod=2y.
 # A SEPARATE yearly job (victoriametrics-archive-yearly.service) snapshots the
@@ -45,6 +52,7 @@ DAILY_KEEP_DAYS={{ vm_backup_daily_keep_days }}
 WEEKLY_KEEP_WEEKS={{ vm_backup_weekly_keep_weeks }}
 MAX_TOTAL_GB={{ vm_backup_max_total_gb }}
 ALWAYS_KEEP={{ vm_backup_always_keep }}
+FREE_MIN_GB=60
 
 # vmstorage nodes: "<name>=<ip>" pairs; each runs vmstorage on :8482
 VMSTORAGE_NODES="{{ vm_backup_vmstorage_nodes }}"
@@ -58,14 +66,42 @@ mkdir -p "$STATE_DIR"
 log() { logger -t "$LOG_TAG" -- "$*"; echo "[$(date -Is)] $*" >&2; }
 
 [ -f "$SSH_KEY" ] || { log "ERROR: $SSH_KEY missing (vmstorage snapshot pull key)"; exit 1; }
+
+# Preflight: a generation needs roughly the live dataset size on the staging
+# filesystem. Starting one with less headroom than that is how vm-01 filled up:
+# the copy fails halfway, and a retry loop stacks another partial copy on top.
+AVAIL_GB=$(df --output=avail -BG /var/lib/victoria-metrics | tail -1 | tr -dc '0-9')
+if [ "${AVAIL_GB:-0}" -lt "$FREE_MIN_GB" ]; then
+  log "ERROR: only ${AVAIL_GB}G free on the staging filesystem, need ${FREE_MIN_GB}G; refusing to stage a snapshot"
+  exit 1
+fi
+
 mkdir -p "$GEN_DIR"
 CREATED=()
 
+# On failure: drop this run's staged copy AND the snapshots it created. The
+# journal is the record; a half-written generation is never worth keeping and
+# leaks ~22 GiB per retry. Older (pre-fix) generation dirs are pruned too.
 fail() {
   log "ERROR: $*"
-  log "Left staged generation $GEN_DIR and any remote snapshots in place for inspection"
+  if [ -n "${GEN_DIR:-}" ] && [ -d "$GEN_DIR" ]; then
+    rm -rf --one-file-system "$GEN_DIR" && log "Removed staged generation $GEN_DIR"
+  fi
+  for entry in "${CREATED[@]:-}"; do
+    [ -n "$entry" ] || continue
+    ip=${entry%%:*}
+    name=${entry#*:}
+    curl -fsS -X POST "http://$ip:8482/snapshot/delete?snapshot=$name" >/dev/null \
+      && log "Deleted snapshot $name on $ip" \
+      || log "WARN: could not delete snapshot $name on $ip"
+  done
   exit 1
 }
+
+# Belt and braces: remove any staging generation left by a crashed/killed run
+# (SIGKILL bypasses the fail() trap), keeping only today's in-flight dir.
+find "$STAGE_BASE" -mindepth 1 -maxdepth 1 -type d ! -name "$DEST_NAME" -mtime +0 \
+  -exec rm -rf --one-file-system {} + 2>/dev/null || true
 
 # --- 1. Snapshot every vmstorage node and stage a self-contained generation ---
 for spec in $VMSTORAGE_NODES; do
