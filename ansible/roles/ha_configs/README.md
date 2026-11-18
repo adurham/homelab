@@ -36,56 +36,29 @@ Each Grafana replica and authentik's CT run their **own** HAProxy on
 containers can reach it), health-checking Patroni's `:8008/primary`. There is
 no shared DB load balancer in the path.
 
-## authentik outpost (`authentik-outpost.compose.yml`)
-
-`ghcr.io/goauthentik/proxy` on CT 148 (`172.16.0.50`) with
-`--network host`. Its only reachable port is `:9300`, which is the metrics
-listener (see "Outpost HA" below) — the LBs must not use it for `auth_request`.
-The forward-auth endpoint that answers correctly today is `:9000` on the two
-authentik guests (`172.16.0.20`, `172.16.0.60`): `401` without a session and a
-`302` to the provider's authorize URL from `/start`.
-
 ## Not yet automated
 
 - BIND secondary + both keepalived pairs are live-only.
 - The nginx vhost file (`/etc/nginx/sites-available/proxmox`) is hand-managed
   and not in the repo.
-- New CTs (149 dns-02, 148 outpost, 142/143 VM cluster) are not in the
+- New CTs (149 dns-02, 142/143 VM cluster) are not in the
   nightly backup jobs.
 
-## Outpost HA (second proxy outpost)
+## authentik outposts
 
-authentik allows **one live connection per outpost token** — a second proxy
-container reusing the first outpost's token gets `403 Forbidden`. HA requires
-a second registered outpost with its own token and service account
-(`ak-outpost-<uuid>`), created via the Django model:
+There is no standalone outpost. Every authentik server container (CT 100 on pve03, CT 150 on pve02) carries the **embedded outpost** on `:9000`,
+and both load balancers carry `upstream outpost_backend` with `172.16.0.20:9000` and `172.16.0.60:9000`. Scaling the servers scales the outposts,
+which is authentik's own HA model. (A separate `ghcr.io/goauthentik/proxy` container on CT 148 / 172.16.0.50 was retired and deleted on 2026-11-18:
+it was a second outpost nothing routed to, and it died when its outpost object was cleaned up. Its old config is not kept in the repo.)
 
-```
-Outpost.objects.create(name="proxy-2", type=OutpostType.PROXY)
-# do NOT pass config={} — the property calls asdict() and a plain dict raises
-# TypeError: asdict() should be called on dataclass instances
-```
+Failover between the two nodes depends on the nginx directives, not just on the upstream list: every authentik location sets
+`proxy_connect_timeout 3s` and `proxy_next_upstream error timeout http_502 http_503 http_504`. Without them nginx waits out its 75 s connect
+timeout before trying the other node (node-loss drill, 2026-11-18: ~1 in 5 requests hung). `scripts/ha_drills/authentik_failover_drill.py` re-proves it.
 
-Run the container in **bridge mode, not host mode** — under `--network host`
-it collides with the authentik server's :9000 and crash-loops:
-
-```
-docker run -d --name ak-proxy -p 9300:9300 -p 9444:9000 --restart always \
-  -e AUTHENTIK_HOST=http://172.16.0.20:9000 -e AUTHENTIK_INSECURE=true \
-  -e AUTHENTIK_TOKEN=<new outpost token> ghcr.io/goauthentik/proxy:2026.8.4
-```
-
-Both LBs carry `upstream outpost_backend` with `172.16.0.20:9000` and
-`172.16.0.60:9000`.
-
-**`:9300` is the outpost's Prometheus metrics listener, not its HTTP
-listener.** It answers `200` with metrics text to *every* path, including
-`/outpost.goauthentik.io/auth/nginx`, so an `auth_request` pointed at it
-passes every unauthenticated request — the gate silently becomes a no-op while
-`/ping` and the health checks all look fine. The upstream must be a listener
-that returns `401` to a request with no session cookie. Check after any change
-to this upstream, from a client with no cookies, against the VIP and against
-each LB node's own address:
+**`:9300` is an outpost's Prometheus metrics listener, not its HTTP listener.** It answers `200` with metrics text to *every* path, including
+`/outpost.goauthentik.io/auth/nginx`, so an `auth_request` pointed at it passes every unauthenticated request: the gate silently becomes a no-op
+while `/ping` and the health checks all look fine. The upstream must be a listener that returns `401` to a request with no session cookie.
+Check after any change to this upstream, from a client with no cookies, against the VIP and against each LB node's own address:
 
 ```
 curl -sk -o /dev/null -w '%{http_code} %{redirect_url}\n' \

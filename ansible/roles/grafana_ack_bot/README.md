@@ -96,7 +96,7 @@ All in `ansible/inventory/group_vars/all.yml`:
 
 The `discord_infra_alerts` contact point in `roles/grafana` is a plain
 `webhook` type (NOT `type: discord`) pointed at
-`http://172.16.0.50:8990/grafana-webhook` — this bot receives the raw
+`http://172.16.0.30:8990/grafana-webhook` — this bot receives the raw
 alertmanager payload and does the Discord posting itself, rather than
 Grafana's native Discord integration posting directly (which has no
 ack/silence capability of its own).

@@ -1148,6 +1148,7 @@ Source: `ansible/inventory/proxmox.yml` + `roles/pve_private_ip/defaults/main.ym
 | `graf-01`       | 107  | `172.16.0.41`    | -                  | Grafana + image renderer                    |
 | `proxy-01`      | 108  | `172.16.0.12`    | -                  | Squid caching proxy (listens `:3129` ssl-bump / `:3130`) |
 | ~~`hermes-gw-01`~~ | ~~113~~ | ~~`172.16.0.50`~~ | - | **Deleted 2026-11-08** — CT 113 and its tailnet name are gone; vmid 113 is free |
+| ~~`ak-outpost-01`~~ | ~~148~~ | ~~`172.16.0.50`~~ | - | **Retired and deleted 2026-11-18** — a standalone authentik proxy outpost nothing routed to (the embedded outposts on the two authentik servers do the work); `.50` and vmid 148 are free |
 | `gallery-01`    | 115  | `172.16.0.46`    | - (Tailscale: `100.83.114.12`) | Media gallery platform (OS/tailnet hostname kept as `tg-harvester-01`); joins the tailnet directly |
 | `media-ingest-01` | 116 | `172.16.0.47`   | -                  | Media collector (outbound-only)             |
 | `media-ingest-02` | 117 | `172.16.0.80`   | -                  | Secondary-source gallery collector (outbound-only) |
