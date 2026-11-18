@@ -16,10 +16,19 @@
     vent controller's downstairs heating bonus) or ecobee cool setpoint - 2F
     in cooling, plus input_number.basement_heatpump_offset.
 
-    The setpoint sent is the ROOM TARGET itself, never an extreme: if the
-    head ever behaves normally this is an ordinary thermostat command and
-    cannot overheat the room. Idle is expressed as 61F in heat mode / 84F in
-    cool mode, which is also ordinary behaviour for a healthy unit.
+    The head is driven as a dumb on/off heater: while the room wants heat it
+    is sent the RUN extreme (84F) so its own thermostat can never decide the
+    call is done, and everything hinges on the room reference below. Idle is
+    61F in heat mode / 84F in cool mode.
+
+    The extremes are 84/61 and not 85/60 on purpose: HA validates Fahrenheit
+    against a celsius ceiling, so 85 (29.4444C) and 60 are rejected at run time
+    with "Provided temperature ... is not valid" and the call silently does
+    nothing. The handset itself goes to 86F.
+
+    That only stays safe because the room reference is what parks it, so two
+    rules come with it: never remove the room-sensor-lost automation, and never
+    leave this one disabled with the head still sitting on the run extreme.
 
     Reference is sensor.7wq7_temperature (the local Zigbee sensor the vent
     controller already uses for this room), falling back to the ecobee
@@ -53,12 +62,15 @@
 
   action:
     - variables:
+        # Ecobee is the authority for this room (it is what the rest of the
+        # house plans against, and what the vent controller uses); the Zigbee
+        # sensor is the fallback when the ecobee reading is missing or absurd.
         ref: >-
+          {% set c = states('sensor.ecobee_edgewater_road_basement_temperature') | float(0) %}
           {% set l = states('sensor.7wq7_temperature') | float(0) %}
           {% set lu = states['sensor.7wq7_temperature'].last_updated %}
           {% set ca = (as_timestamp(now()) - as_timestamp(lu)) if lu else 99999 %}
-          {% set c = states('sensor.ecobee_edgewater_road_basement_temperature') | float(0) %}
-          {{ l if (ca < 1200 and 40 < l < 100) else (c if 40 < c < 100 else 0) }}
+          {{ c if 40 < c < 100 else (l if (ca < 1200 and 40 < l < 100) else 0) }}
         head: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'current_temperature') | float(0) }}"
         sp: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'temperature') | float(0) }}"
         offs: "{{ states('input_number.basement_heatpump_offset') | float(0) }}"
@@ -113,13 +125,16 @@
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
                     fan_mode: auto
-            - if: "{{ (sp | float(0) - heat_target | float(0)) | abs >= 0.5 }}"
+            # Run extreme, not the room target: the head's own thermostat must
+            # never be the thing that ends the call. The room reference below
+            # parks it.
+            - if: "{{ (sp | float(0) - 84) | abs >= 0.5 }}"
               then:
                 - service: climate.set_temperature
                   target:
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
-                    temperature: "{{ [[heat_target | float(0), 84] | min, 61] | max | round(0) }}"
+                    temperature: 84
 
         - conditions:
             - condition: template
@@ -151,13 +166,13 @@
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
                     fan_mode: auto
-            - if: "{{ (sp | float(0) - cool_target | float(0)) | abs >= 0.5 }}"
+            - if: "{{ (sp | float(0) - 61) | abs >= 0.5 }}"
               then:
                 - service: climate.set_temperature
                   target:
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
-                    temperature: "{{ [[cool_target | float(0), 84] | min, 61] | max | round(0) }}"
+                    temperature: 61
 
         # Nothing demanded: park it at the off-side of whatever mode it sits in.
         - conditions: []
@@ -181,7 +196,7 @@
     # room, the call is being ignored and no command can fix it. Say so.
     - if:
         - condition: template
-          value_template: "{{ do_heat and head | float(0) > ref | float(0) + 5 }}"
+          value_template: "{{ do_heat and head | float(0) > ref | float(0) + 8 }}"
       then:
         - service: persistent_notification.create
           data:
