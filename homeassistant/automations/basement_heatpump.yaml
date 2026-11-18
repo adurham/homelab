@@ -17,14 +17,16 @@
     in cooling, plus input_number.basement_heatpump_offset.
 
     The head is driven as a dumb on/off heater: while the room wants heat it
-    is sent the RUN extreme (84F) so its own thermostat can never decide the
-    call is done, and everything hinges on the room reference below. Idle is
-    61F in heat mode / 84F in cool mode.
+    is sent the RUN extreme (86F, the top of the unit's range) so its own
+    thermostat can never decide the call is done, and everything hinges on the
+    room reference below. Idle is 61F in heat mode / 84F in cool mode.
 
-    The extremes are 84/61 and not 85/60 on purpose: HA validates Fahrenheit
-    against a celsius ceiling, so 85 (29.4444C) and 60 are rejected at run time
-    with "Provided temperature ... is not valid" and the call silently does
-    nothing. The handset itself goes to 86F.
+    86F only became usable on 2026-11-17, when the dongle's ESPHome config
+    (/config/esphome/basement-heatpump.yaml) had visual_max_temperature raised
+    from 85 to 86 F and was reflashed over OTA. Below that the entity advertised
+    85 and refused to accept it (85F = 29.4444C against a 29.4444C ceiling).
+    Idle stays at 61 and never 60 for the same reason - 60F is the floor and
+    gets rejected.
 
     That only stays safe because the room reference is what parks it, so two
     rules come with it: never remove the room-sensor-lost automation, and never
@@ -62,15 +64,13 @@
 
   action:
     - variables:
-        # Ecobee is the authority for this room (it is what the rest of the
-        # house plans against, and what the vent controller uses); the Zigbee
-        # sensor is the fallback when the ecobee reading is missing or absurd.
+        # THE ECOBEE IS THE AUTHORITY for this room - sole reference, by the
+        # owner's instruction. No Zigbee fallback: if the ecobee reading is
+        # missing or absurd the reference is 0, which parks the head rather
+        # than letting it run on a different sensor.
         ref: >-
           {% set c = states('sensor.ecobee_edgewater_road_basement_temperature') | float(0) %}
-          {% set l = states('sensor.7wq7_temperature') | float(0) %}
-          {% set lu = states['sensor.7wq7_temperature'].last_updated %}
-          {% set ca = (as_timestamp(now()) - as_timestamp(lu)) if lu else 99999 %}
-          {{ c if 40 < c < 100 else (l if (ca < 1200 and 40 < l < 100) else 0) }}
+          {{ c if 40 < c < 100 else 0 }}
         head: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'current_temperature') | float(0) }}"
         sp: "{{ state_attr('climate.basement_heatpump_basement_office_ac', 'temperature') | float(0) }}"
         offs: "{{ states('input_number.basement_heatpump_offset') | float(0) }}"
@@ -128,13 +128,13 @@
             # Run extreme, not the room target: the head's own thermostat must
             # never be the thing that ends the call. The room reference below
             # parks it.
-            - if: "{{ (sp | float(0) - 84) | abs >= 0.5 }}"
+            - if: "{{ (sp | float(0) - 86) | abs >= 0.5 }}"
               then:
                 - service: climate.set_temperature
                   target:
                     entity_id: climate.basement_heatpump_basement_office_ac
                   data:
-                    temperature: 84
+                    temperature: 86
 
         - conditions:
             - condition: template
