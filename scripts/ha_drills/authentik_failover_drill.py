@@ -35,11 +35,15 @@ def node_of(ct):
             return n
     sys.exit(f"CT {ct} not found running")
 
-def wait_healthy(node, ct, secs=420):   # authentik takes 3-6 min to report healthy after a start
-    for _ in range(secs // 3):
-        if "healthy" in ans(node, f"pct exec {ct} -- docker ps --filter name=authentik-server-1 --format '{{{{.Status}}}}'") and "unhealthy" not in ans(node, f"pct exec {ct} -- docker ps --filter name=authentik-server-1 --format '{{{{.Status}}}}'"):
+NODE_IP = {100: "172.16.0.20", 150: "172.16.0.60"}
+
+def wait_healthy(node, ct, secs=420):   # authentik takes 3-6 min to report ready after a start
+    # Ask the node itself (the backend uses its own self-signed certificate, hence curl -k for this internal readiness URL only).
+    for _ in range(secs // 5):
+        r = subprocess.run(["curl", "-sk", "-m", "4", "-o", "/dev/null", "-w", "%{http_code}", f"https://{NODE_IP[ct]}:9443/-/health/ready/"], capture_output=True, text=True)
+        if r.stdout.strip() == "200":
             return True
-        time.sleep(3)
+        time.sleep(5)
     return False
 
 log = []
