@@ -447,6 +447,50 @@ scrape_configs:
         replacement: 127.0.0.1:9115
 
   # ---------------------------------------------------------------------
+  # HA-tier TCP probes (blackbox tcp_connect). The Grafana rule `probe_success{job="blackbox_ha_tier"} == 0` fires for any
+  # target in this job. This job existed only on vm-01 (hand-added; a redeploy of this template would have deleted it) and is
+  # now managed here. The three vmstorage nodes were added 2026-11-18: vmstorage on vm-clus-03 crash-looped for 9 h
+  # (corrupt data part, 5,849 failed starts) and nothing alerted because only the VIPs were probed, and the cluster
+  # (replicationFactor=2) kept serving from the other two nodes.
+  # ---------------------------------------------------------------------
+  - job_name: 'blackbox_ha_tier'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets: ['172.16.0.30:3100']
+        labels:
+          instance: 'loki-vip'
+      - targets: ['172.16.0.30:8481']
+        labels:
+          instance: 'vmselect-vip'
+      - targets: ['172.16.0.30:3900']
+        labels:
+          instance: 'garage-s3-vip'
+      - targets: ['172.16.0.44:8008']
+        labels:
+          instance: 'patroni-rest'
+      - targets: ['172.16.0.50:9300']
+        labels:
+          instance: 'outpost-01'
+      - targets: ['172.16.0.57:8482']
+        labels:
+          instance: 'vmstorage-vm-clus-01'
+      - targets: ['172.16.0.58:8482']
+        labels:
+          instance: 'vmstorage-vm-clus-02'
+      - targets: ['172.16.0.59:8482']
+        labels:
+          instance: 'vmstorage-vm-clus-03'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
+  # ---------------------------------------------------------------------
   # Patroni (the Postgres pair behind Grafana and authentik). Its REST port serves
   # Prometheus metrics. Added 2026-11-15 after pg-02 sat 12 h as a dead replica (Postgres
   # refusing connections, no primary_conninfo) while ha-manager showed "started" and the

@@ -1,0 +1,68 @@
+---
+# Apply ONLY /etc/victoriametrics/prometheus.yml on vm-01 and hot-reload it. No restart, no binary/version handling, no other host.
+#
+# Why this exists next to deploy_victoriametrics_scrape.yml: that playbook runs the whole `victoriametrics` role, which (a) targets
+# the `victoriametrics` group, now vm-01 PLUS the three vm-clus storage nodes (its header comment is stale), and (b) would
+# remove and re-download the VictoriaMetrics binary on any version mismatch. A scrape-target change needs neither.
+# The scraper on vm-01 is vmagent (:8429, remote-writing to the cluster); the `victoriametrics` service the role manages is not
+# what runs there. Scrape config is hot-reloadable (SIGHUP or GET /-/reload), so there is no restart and no gap beyond one scrape interval.
+#
+#   ansible-playbook -i inventory/proxmox.yml deploy_victoriametrics_scrape_config_only.yml
+#
+# Safety: the previous file is kept (backup), and if the expected probe targets do not show up as active after the reload
+# the previous file is restored and reloaded again, and the play fails.
+- name: Scrape config only (vm-01, vmagent)
+  hosts: vm-01
+  become: true
+  gather_facts: false
+  vars:
+    scrape_conf: /etc/victoriametrics/prometheus.yml
+    # instances that must be present after the reload (proves the new config was actually parsed and applied)
+    expect_instances: [vmstorage-vm-clus-01, vmstorage-vm-clus-02, vmstorage-vm-clus-03, loki-vip, patroni-rest]
+  pre_tasks:
+    - name: role defaults (the template uses them)
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/roles/victoriametrics/defaults/main.yml"
+  tasks:
+    - name: render the scrape config
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/roles/victoriametrics/templates/prometheus.yml.j2"
+        dest: "{{ scrape_conf }}"
+        mode: "0644"
+        backup: true
+      no_log: true            # the rendered file can carry scrape tokens
+      register: rendered
+
+    - name: hot-reload (no restart)
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8429/-/reload
+        method: GET
+        status_code: [200, 204]
+      when: rendered.changed
+
+    - name: verify and roll back on failure
+      when: rendered.changed
+      block:
+        - name: wait for the new targets to be discovered
+          ansible.builtin.uri:
+            url: http://127.0.0.1:8429/api/v1/targets
+            return_content: true
+          register: tg
+          until: expect_instances | select('in', tg.content) | list | length == expect_instances | length
+          retries: 12
+          delay: 5
+      rescue:
+        - name: restore the previous config
+          ansible.builtin.copy:
+            src: "{{ rendered.backup_file }}"
+            dest: "{{ scrape_conf }}"
+            remote_src: true
+            mode: "0644"
+          no_log: true
+        - name: reload the restored config
+          ansible.builtin.uri:
+            url: http://127.0.0.1:8429/-/reload
+            status_code: [200, 204]
+        - name: fail loudly
+          ansible.builtin.fail:
+            msg: "expected targets did not appear after the reload; the previous scrape config was restored and reloaded"
