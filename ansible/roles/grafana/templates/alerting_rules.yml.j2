@@ -5752,7 +5752,7 @@ groups:
       datasourceUid: victoriametrics
       model:
         editorMode: code
-        expr: probe_success{job="blackbox_ha_tier"} == 0
+        expr: 1 - probe_success{job="blackbox_ha_tier"}
         instant: true
         intervalMs: 1000
         maxDataPoints: 43200
