@@ -177,7 +177,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # TCP probes to Tanium postgres ports. Server appliances run the TS
   # postgres on 5432; module servers run the TMS postgres on 5433.
@@ -206,7 +206,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # TCP probe to Tanium SERVER consoles on port 443. Catches "appliance up +
   # postgres up + httpd or Tanium services crashed" — a failure the
@@ -230,7 +230,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # TCP probe to SSH (:22) on the amd-workstation dev box, addressed by its
   # STABLE tailnet IP (its LAN IP is DHCP; the tailnet address is its stable
@@ -258,7 +258,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # HTTPS probes to public-facing services. probe_ssl_earliest_cert_expiry
   # is exposed automatically; we alert when it gets close to now().
@@ -278,7 +278,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: instance
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # HTTPS probes that fail if the vhost returns X-Frame-Options: DENY or
   # CSP frame-ancestors 'none'. Catches the May-2026 regression class where
@@ -300,7 +300,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: instance
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # ---------------------------------------------------------------------
   # SDN egress / recursive DNS / tailnet liveness probes (added 2026-10-20)
@@ -333,7 +333,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: instance
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # Recursion, not just "port 53 answers". dns-01 resolving an external
   # name requires the whole chain (egress -> upstream -> cache); the
@@ -352,7 +352,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # The LAN resolvers themselves: 192.168.86.4 (lan-dns-01, pve01) and
   # 192.168.86.5 (lan-dns-02, pve02). These are what every LAN client's
@@ -379,7 +379,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # The alerting path's own delivery leg: grafana-ack-bot on graf-01. 200 means
   # the Discord client is connected; 503 means the process is up but cannot
@@ -398,7 +398,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # Directly-tailnet'd containers. These two lost their tailscaled when
   # their resolv.conf (MagicDNS only) lost DNS, which made them
@@ -419,7 +419,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # Unauthenticated request to a gallery DATA path, against the VIP and each
   # load balancer node. Must be a 302 to the login; see the gallery_auth_gate
@@ -444,7 +444,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # ---------------------------------------------------------------------
   # HA-tier TCP probes (blackbox tcp_connect). The Grafana rule `probe_success{job="blackbox_ha_tier"} == 0` fires for any
@@ -486,7 +486,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: 127.0.0.1:9115
+        replacement: {{ victoriametrics_blackbox_exporter | default('127.0.0.1:9115') }}
 
   # ---------------------------------------------------------------------
   # Patroni (the Postgres pair behind Grafana and authentik). Its REST port serves

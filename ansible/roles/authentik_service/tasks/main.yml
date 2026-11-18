@@ -174,3 +174,8 @@
     name: "acme.sh"
     state: absent
   when: authentik_service_retire_legacy | bool
+
+# Uploaded media is the only state authentik keeps outside PostgreSQL, and /opt/authentik/media is per node: mirror it to the peer.
+- name: Mirror uploaded media to the other authentik node
+  ansible.builtin.import_tasks: media_sync.yml
+  tags: [media_sync]

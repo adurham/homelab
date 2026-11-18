@@ -1,0 +1,59 @@
+---
+# Keep uploaded media identical on both authentik nodes (it is the only per-node state; see templates/authentik-media-sync.sh.j2).
+- name: rsync (the sync uses it)
+  ansible.builtin.apt:
+    name: rsync
+    state: present
+    cache_valid_time: 3600
+
+- name: media-sync private key (from the vault)
+  ansible.builtin.copy:
+    content: "{{ vault_authentik_media_sync_key | b64decode }}"
+    dest: /root/.ssh/authentik_media_sync
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: media-sync public key authorized on BOTH nodes (peer pulls and pushes)
+  ansible.builtin.authorized_key:
+    user: root
+    key: "{{ lookup('ansible.builtin.file', playbook_dir + '/roles/authentik_service/files/authentik_media_sync.pub') }}"
+    state: present
+
+- name: media-sync script
+  ansible.builtin.template:
+    src: authentik-media-sync.sh.j2
+    dest: /usr/local/sbin/authentik-media-sync.sh
+    mode: "0700"
+
+- name: media-sync service + timer (every 2 minutes)
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/authentik-media-sync.{{ item.ext }}"
+    mode: "0644"
+    content: "{{ item.content }}"
+  loop:
+    - ext: service
+      content: |
+        [Unit]
+        Description=Mirror authentik uploaded media to the other authentik node
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/local/sbin/authentik-media-sync.sh
+    - ext: timer
+      content: |
+        [Unit]
+        Description=Run the authentik media mirror every 2 minutes
+        [Timer]
+        OnBootSec=2min
+        OnUnitActiveSec=2min
+        [Install]
+        WantedBy=timers.target
+  register: ak_media_units
+
+- name: enable the media-sync timer
+  ansible.builtin.systemd:
+    name: authentik-media-sync.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ ak_media_units.changed }}"

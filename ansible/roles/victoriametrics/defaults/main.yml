@@ -99,3 +99,7 @@ windows_exporter_scrape_targets: []
 node_exporter_scrape_targets:
   - name: amd-workstation
     address: 100.66.90.53:9100
+
+# Where the blackbox exporter listens, as the scraper should address it. vm-01 runs its own (127.0.0.1); graf-02's second vmagent has no local
+# exporter and must use vm-01's private address (172.16.0.42:9115), which is what deploy_vmagent_graf02.yml passes.
+victoriametrics_blackbox_exporter: "127.0.0.1:9115"

@@ -42,3 +42,11 @@ authentik_docker_packages:
 
 # Retire the single-node leftovers (local nginx + acme.sh + override files) on nodes that had them.
 authentik_service_retire_legacy: true
+
+# The other authentik node, used only by the media mirror (tasks/media_sync.yml): uploaded media is per node and must be identical on both.
+# Derived from the two inventory entries so nothing is hard-coded: the peer is the other host in this play.
+# The other authentik node, used only by the media mirror (tasks/media_sync.yml). Media is per node and must be identical on both, so each node
+# syncs to its peer: derive it from the inventory instead of hard-coding addresses.
+authentik_peer_host: "{{ groups['authentik'] | list | difference([inventory_hostname]) | first | default(inventory_hostname) }}"
+authentik_peer_ip: "{{ (hostvars[authentik_peer_host].ansible_host | default(authentik_peer_host)) }}"
+

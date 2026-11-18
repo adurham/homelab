@@ -1,0 +1,67 @@
+---
+# Bring graf-02's SECOND vmagent under the repo. It was hand-built (2026-11-15, so monitoring survives the loss of vm-01) with a copy of
+# prometheus.yml that then drifted: it still probed the retired outpost-01 and lacked blackbox_gallery_auth_gate. From now on its scrape config
+# is the repo template, rendered with the exporter on vm-01 (graf-02 has no local blackbox exporter) and hot-reloaded, no restart.
+#
+#   ansible-playbook -i inventory/proxmox.yml deploy_vmagent_graf02.yml            # apply
+#   ansible-playbook -i inventory/proxmox.yml deploy_vmagent_graf02.yml --check    # dry run
+#
+# Verified after the reload: the expected targets are discovered and no retired ones remain; on failure the previous file is restored.
+- name: graf-02 second vmagent (repo-managed scrape config)
+  hosts: graf-02
+  become: true
+  gather_facts: false
+  vars:
+    victoriametrics_blackbox_exporter: "172.16.0.42:9115"   # vm-01's exporter: graf-02 has none of its own
+    scrape_conf: /etc/victoriametrics/prometheus.yml
+    expect_instances: [loki-vip, vmselect-vip, garage-s3-vip, patroni-rest,
+                       vmstorage-vm-clus-01, vmstorage-vm-clus-02, vmstorage-vm-clus-03]
+    retired_instances: [outpost-01]
+  tasks:
+    - name: role defaults (the template uses them)
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/roles/victoriametrics/defaults/main.yml"
+
+    - name: render the scrape config
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/roles/victoriametrics/templates/prometheus.yml.j2"
+        dest: "{{ scrape_conf }}"
+        mode: "0644"
+        backup: true
+      no_log: true
+      register: rendered
+
+    - name: hot-reload vmagent
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8429/-/reload
+        status_code: [200, 204]
+      when: rendered.changed
+
+    - name: verify (roll back on failure)
+      when: rendered.changed
+      block:
+        - name: expected targets discovered, retired ones gone
+          ansible.builtin.uri:
+            url: http://127.0.0.1:8429/api/v1/targets
+            return_content: true
+          register: tg
+          until: >-
+            (expect_instances | select('in', tg.content) | list | length == expect_instances | length)
+            and (retired_instances | select('in', tg.content) | list | length == 0)
+          retries: 12
+          delay: 5
+      rescue:
+        - name: restore the previous config
+          ansible.builtin.copy:
+            src: "{{ rendered.backup_file }}"
+            dest: "{{ scrape_conf }}"
+            remote_src: true
+            mode: "0644"
+          no_log: true
+        - name: reload the restored config
+          ansible.builtin.uri:
+            url: http://127.0.0.1:8429/-/reload
+            status_code: [200, 204]
+        - name: fail loudly
+          ansible.builtin.fail:
+            msg: "scrape targets did not converge; previous config restored and reloaded"

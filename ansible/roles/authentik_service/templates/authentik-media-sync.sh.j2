@@ -1,0 +1,17 @@
+#!/bin/bash
+# Managed by Ansible (roles/authentik_service). Mirrors /opt/authentik/media to the other authentik node.
+#
+# Why: uploaded media (Customization > Files: icons, brand logo, flow backgrounds) is the only state authentik keeps outside PostgreSQL, and
+# /opt/authentik/media is per node, so an upload on one node 404s through the other. Every server+worker instance needs to see the same files.
+# S3 is the other supported option, but authentik serves S3 media to browsers from presigned URLs, which would mean publishing Garage S3
+# (private today) on a public hostname with CORS and TLS for ~126 KB of files. Two nodes, same network: newest copy wins, deletes do not propagate
+# (a file deleted in the UI may linger on the peer; harmless, it is unreferenced).
+set -u
+PEER={{ authentik_peer_ip }}
+KEY=/root/.ssh/authentik_media_sync
+SRC=/opt/authentik/media/
+SSH="/usr/bin/ssh -i $KEY -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
+[ -d "$SRC" ] || { echo "no media dir"; exit 0; }
+/usr/bin/rsync -a -u --ignore-existing --exclude '*.part' --exclude '*.tmp' -e "$SSH" "$SRC" "root@$PEER:/opt/authentik/media/" 2>&1 | tail -3
+# also pull anything that exists only on the peer (so either node can be the source of a brand asset)
+/usr/bin/rsync -a -u --ignore-existing --exclude '*.part' --exclude '*.tmp' -e "$SSH" "root@$PEER:/opt/authentik/media/" "$SRC" 2>&1 | tail -3
