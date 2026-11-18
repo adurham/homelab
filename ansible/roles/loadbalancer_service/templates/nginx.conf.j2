@@ -442,6 +442,10 @@ server {
 
     location /outpost.goauthentik.io {
         proxy_pass http://outpost_backend/outpost.goauthentik.io;
+        # Fail over to the other authentik node fast. nginx's default is to wait for the connect to time out (75s here) before
+        # trying the next upstream, so a dead node made ~1 in 5 requests hang (authentik node-loss drill, 2026-11-18).
+        proxy_connect_timeout 3s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
         proxy_set_header X-Real-IP $remote_addr;
@@ -492,6 +496,10 @@ server {
         limit_req zone=auth_login   burst=15  nodelay;
 
         proxy_pass https://auth_backend;
+        # Fail over to the other authentik node fast. nginx's default is to wait for the connect to time out (75s here) before
+        # trying the next upstream, so a dead node made ~1 in 5 requests hang (authentik node-loss drill, 2026-11-18).
+        proxy_connect_timeout 3s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_ssl_server_name on;
         proxy_ssl_name auth.chi.lab.amd-e.com;
         proxy_set_header Host auth.chi.lab.amd-e.com;
@@ -637,6 +645,10 @@ server {
 
     location /outpost.goauthentik.io {
         proxy_pass http://outpost_backend/outpost.goauthentik.io;
+        # Fail over to the other authentik node fast. nginx's default is to wait for the connect to time out (75s here) before
+        # trying the next upstream, so a dead node made ~1 in 5 requests hang (authentik node-loss drill, 2026-11-18).
+        proxy_connect_timeout 3s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
         proxy_set_header X-Real-IP $remote_addr;
@@ -937,9 +949,11 @@ server {
         proxy_cache_lock_timeout 8s;
         proxy_cache_use_stale error timeout updating http_500 http_502 http_504;
         proxy_ignore_headers Cache-Control Expires Set-Cookie;
-        proxy_connect_timeout 5s;
+        proxy_connect_timeout 3s;
         proxy_read_timeout 12s;
-        proxy_next_upstream off;
+        # The auth check is an idempotent GET, so retrying it on the other node is safe. This used to be `off`, which turned one dead
+        # authentik node into failed auth checks (5xx) for every request routed to it.
+        proxy_next_upstream error timeout http_502 http_503 http_504;
     }
 
     # Everything else under /outpost.goauthentik.io (/start, /callback,
@@ -948,6 +962,10 @@ server {
     # Authentik (new OAuth state, session creation, etc.).
     location /outpost.goauthentik.io {
         proxy_pass http://outpost_backend/outpost.goauthentik.io;
+        # Fail over to the other authentik node fast. nginx's default is to wait for the connect to time out (75s here) before
+        # trying the next upstream, so a dead node made ~1 in 5 requests hang (authentik node-loss drill, 2026-11-18).
+        proxy_connect_timeout 3s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_set_header Host auth.chi.lab.amd-e.com;
         proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
         proxy_set_header X-Real-IP $remote_addr;
