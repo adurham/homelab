@@ -19,6 +19,9 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths={{ media_ingest_02_state }} {{ media_ingest_02_log_dir }}
+# ProtectHome hides the service user's ~/.gnupg, so point gpg at a keyring
+# inside the state dir (public key only; the private half stays off-box).
+Environment=GNUPGHOME={{ media_ingest_02_state }}/gnupg
 
 # A sweep can run long (many models, many posts). Give it a generous but bounded
 # runtime so a hung scrape doesn't block the next tick.

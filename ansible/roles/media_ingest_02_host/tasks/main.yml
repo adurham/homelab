@@ -17,6 +17,10 @@
 
 # Cluster-wide existence check (HA can migrate the CT, so query pmxcfs for
 # the full resource list rather than node-local `pct config`).
+- name: Ensure Media Ingest 02 memory backs the staging tmpfs
+  ansible.builtin.command: pct set 117 -memory {{ media_ingest_02_ct_memory_mb | default(40960) }}
+  changed_when: false
+
 - name: Check if Media Ingest 02 Container Exists in cluster
   ansible.builtin.shell: |
     set -o pipefail
@@ -30,7 +34,7 @@
   ansible.builtin.command: >
     pct create 117 /var/lib/vz/template/cache/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
     --hostname media-ingest-02
-    --cores 8 --memory 24576 --swap 512
+    --cores 8 --memory {{ media_ingest_02_ct_memory_mb | default(40960) }} --swap 512
     --rootfs nvme-data:{{ media_ingest_02_ct_rootfs_gb }}
     --net0 name=eth0,bridge={{ net_private_bridge }},ip={{ ip_media_ingest_02 }}/24,gw={{ net_private_gw }},mtu={{ net_private_mtu }}
     --unprivileged 1

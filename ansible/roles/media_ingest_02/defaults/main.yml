@@ -39,8 +39,8 @@ media_ingest_02_scrape_interval: "2h"
 media_ingest_02_scrape_lookback: 50
 # tmpfs staging size (RAM-backed). The scraper downloads a whole pass before the
 # wrapper pushes, so staging must hold a full pass worth of media. 4G covers most
-# passes of the manual list + filter discovery; the CT has 8G RAM to back it.
-media_ingest_02_staging_size: "14G"
+# passes, the purchased pass and the filter pass together; the CT's memory backs it.
+media_ingest_02_staging_size: "32G"
 # Per-model timeout (minutes) for the manual pass. The wrapper loops through the
 # model list one at a time, each with its own timeout, so a single stuck model
 # doesn't kill the rest of the list. The dupe-check DB retries timed-out models
@@ -70,6 +70,21 @@ media_ingest_02_scraper_download_sems: 2
 # pinned-list pass. The list name is case-insensitive and matched against the
 # user's custom lists on the source platform.
 media_ingest_02_pinned_list: ""
+# The source platform's built-in "purchased" user list: every creator any paid
+# content was bought from, including subscriptions that have since expired.
+# Those creators never show up in active-subscription discovery, so without this
+# pass their purchased media is never pulled. Paid area only, so the pass is
+# cheap per creator. Set to "false" to skip the pass entirely.
+media_ingest_02_purchased_pass: "true"
+# Per-creator timeout (minutes) for the purchased pass. It only walks the paid
+# area (one or two API calls plus any new downloads), so 10 minutes is generous.
+media_ingest_02_purchased_timeout_min: 10
+# Request-signing rules the upstream needs to sign its API calls. The platform
+# rotates these constants (format prefix/suffix + secret) without notice, and a
+# stale set makes EVERY call come back 401 "Please refresh the page" even with a
+# valid session — the lane goes silent, not noisy. This source validates the
+# rules against the live API every 15 minutes, so it tracks the rotation.
+media_ingest_02_signing_rules_url: "https://raw.githubusercontent.com/Fanclan/OnlyFans-Dynamic-Rules/main/rules.json"
 # Which upstream models to scrape. SENSITIVE — the model names reveal which
 # accounts the operator is subscribed to, so they live in the vault
 # (vault_media_ingest_02_scrape_usernames), NOT here. The env template pulls
@@ -119,7 +134,8 @@ media_ingest_02_likes_per_model_timeout: 900  # 15 min in seconds
 # file resident in tmpfs + its heap cost at push time:
 #   OLD (buffering) code, 9.3GB file: 9.3 tmpfs + ~18.6 heap  = ~27.9 GiB -> OOM
 #   NEW (streaming)  code, 9.3GB file: 9.3 tmpfs + ~0.025 heap = ~9.3 GiB -> fine
-#   NEW code + streaming REGRESSION, 8GiB file: 8 tmpfs + ~16 heap = ~24 GiB -> AT THE EDGE
+#   NEW code + streaming REGRESSION, 8GiB file: 8 tmpfs + ~16 heap = ~24 GiB -> fits 40 GiB,
+#     but a FULL 32 GiB staging plus one buffered 8 GiB push would not -> OOM
 # i.e. if the streaming fix is ever reverted/broken, this cap is just barely
 # survivable; raising it materially (or shrinking the cgroup) re-creates the
 # original OOM with no other change. Change one, re-check the other.

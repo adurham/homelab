@@ -60,6 +60,16 @@ SCRAPE_FILTER_ARGS = os.environ.get("M02_SCRAPE_FILTER_ARGS", "").strip()
 # backfill scrape each tick. Pin free-tier models to this list in the source
 # UI. Empty = skip the pinned-list pass.
 PINNED_LIST = os.environ.get("M02_PINNED_LIST", "").strip()
+# The source platform keeps a built-in "purchased" user list: every creator you
+# have ever bought paid content from, including expired subscriptions that the
+# active-subscription discovery can never see. Purchased content is fetched per
+# author, so anyone missing from the passes above is invisible unless their name
+# comes out of this list. Default on; set M02_PURCHASED_PASS=false to skip.
+PURCHASED_PASS = os.environ.get("M02_PURCHASED_PASS", "true").strip().lower() not in (
+    "", "0", "false", "no", "off")
+# Slug of that built-in list on the source platform (not a secret — it is the
+# same public slug the collections URL uses).
+PURCHASED_LIST_SLUG = os.environ.get("M02_PURCHASED_LIST_SLUG", "purchased").strip() or "purchased"
 
 # Where a download that could not be pushed is parked, encrypted to a PUBLIC key
 # whose private half lives in the password manager (not on this host). Staging is
@@ -446,13 +456,17 @@ def _run_scraper_free_parallel():
     return _run_scraper_discovered_pass("free", discovered)
 
 
-def _run_scraper_discovered_pass(label, discovered):
+def _run_scraper_discovered_pass(label, discovered, area_args=None, timeout_min=None):
     """Shared parallel scrape runner for discovered model lists (paid/free
-    subs, pinned list). Uses a background push thread to keep staging clear
-    while scrapers download."""
+    subs, pinned list, purchased authors). Uses a background push thread to keep
+    staging clear while scrapers download. area_args narrows the download areas
+    for the whole pass (e.g. ["--download-area", "Purchased"])."""
     parallelism = int(os.environ.get("M02_SCRAPER_PARALLELISM", "4"))
-    per_model_timeout = int(os.environ.get("M02_SCRAPER_PER_MODEL_TIMEOUT_MIN", "15"))
-    log.info("pass [%s] %d models, parallelism=%d", label, len(discovered), parallelism)
+    per_model_timeout = timeout_min or int(
+        os.environ.get("M02_SCRAPER_PER_MODEL_TIMEOUT_MIN", "15"))
+    extra = list(area_args or [])
+    log.info("pass [%s] %d models, parallelism=%d%s", label, len(discovered),
+             parallelism, (" area=%s" % extra[-1]) if extra else "")
     import threading
     from concurrent.futures import ThreadPoolExecutor, as_completed
     stop_push = threading.Event()
@@ -462,7 +476,8 @@ def _run_scraper_discovered_pass(label, discovered):
     try:
         with ThreadPoolExecutor(max_workers=parallelism) as pool:
             futures = {
-                pool.submit(_run_scraper_pass, "%s:%s" % (label, m), ["--username", m], per_model_timeout): m
+                pool.submit(_run_scraper_pass, "%s:%s" % (label, m),
+                            ["--username", m] + extra, per_model_timeout): m
                 for m in discovered
             }
             for fut in as_completed(futures):
@@ -560,6 +575,96 @@ def _run_scraper_pinned_parallel():
     if not discovered:
         return []
     return _run_scraper_discovered_pass("pinned", discovered)
+
+
+def _discover_purchased_users():
+    """Usernames behind the source's built-in "purchased" user list.
+
+    Two sources:
+      1. the built-in user list itself (lists/<slug>/users) — the same set the
+         collections page renders;
+      2. fallback when that list answers empty: every author in the global paid
+         feed, which is the ground truth for "content I bought".
+    Names only, deduped against the manual list (scraped in pass 1). Never
+    persisted anywhere.
+    """
+    if not PURCHASED_PASS:
+        log.info("M02_PURCHASED_PASS=false — purchased pass skipped")
+        return []
+    import asyncio
+    mods = _load_scraper_modules()
+    if mods is None:
+        return []
+    mgr = mods["manager"].Manager
+    of_env = mods["of_env"]
+
+    async def _from_list(c):
+        out, offset = [], 0
+        while True:
+            url = of_env.getattr("listusersEP").format(PURCHASED_LIST_SLUG, offset)
+            async with c.requests_async(url=url) as r:
+                if not (200 <= r.status < 300):
+                    log.warning("purchased list API %d at offset %d", r.status, offset)
+                    break
+                data = await r.json_()
+                users = data.get("list") or []
+                out.extend(u["username"] for u in users if u.get("username"))
+                if not users or data.get("hasMore") is not True:
+                    break
+                offset += len(users)
+        return out
+
+    async def _from_paid_feed(c, max_pages=50):
+        out, offset = [], 0
+        for _ in range(max_pages):
+            url = of_env.getattr("purchased_contentALL").format(offset)
+            async with c.requests_async(url=url) as r:
+                if not (200 <= r.status < 300):
+                    log.warning("paid feed API %d at offset %d", r.status, offset)
+                    break
+                data = await r.json_()
+                batch = next((v for v in data.values() if isinstance(v, list)), [])
+                for post in batch:
+                    who = post.get("fromUser") or post.get("author") or {}
+                    if who.get("username"):
+                        out.append(who["username"])
+                if not batch or data.get("hasMore") is not True:
+                    break
+                offset += len(batch)
+        return out
+
+    async def _fetch():
+        async with mgr.session.aget_subscription_session() as c:
+            listed = await _from_list(c)
+            if listed:
+                return listed, "list"
+            return await _from_paid_feed(c), "paid-feed"
+
+    try:
+        usernames, source = asyncio.run(_fetch())
+        manual = {m.strip().lower() for m in SCRAPE_USERNAMES.split(",") if m.strip()}
+        discovered = sorted({u.lower() for u in usernames} - manual)
+        log.info("purchased [%s]: %d names (%d after dedup with manual list)",
+                 source, len(usernames), len(discovered))
+        return discovered
+    except Exception as e:  # noqa: BLE001
+        log.error("purchased discovery failed: %s: %s", type(e).__name__, e)
+        return []
+
+
+def _run_scraper_purchased_parallel():
+    """Purchased pass: scrape only the paid-content area for every author in the
+    purchased list. A narrow area keeps expired subscriptions cheap — their
+    timeline/messages are not readable, but purchased media still is, and the
+    dupe-check DB means a re-run only fetches what is new."""
+    discovered = _discover_purchased_users()
+    if not discovered:
+        log.info("purchased pass: nothing discovered — skipped")
+        return []
+    timeout = int(os.environ.get("M02_SCRAPER_PURCHASED_TIMEOUT_MIN", "10"))
+    return _run_scraper_discovered_pass(
+        "purchased", discovered,
+        area_args=["--download-area", "Purchased"], timeout_min=timeout)
 
 
 # Stability tracker for _walk_and_push's size-comparison gate (module-level:
@@ -759,7 +864,13 @@ def _clear_stale_staging():
                 st = fpath.stat()
             except OSError:
                 continue
-            age = now - st.st_mtime
+            # AGE IS TAKEN FROM ctime, NOT mtime. The scraper stamps each
+            # download's mtime with the POST date, so a month-old post looks
+            # like a month-old file and the age check would delete a download
+            # that landed seconds ago (found live 2026-11-18: a 1-minute-old
+            # purchase was "cleared" as age=2613787min). ctime moves when the
+            # inode is written/chmod'ed, i.e. when the file actually landed.
+            age = now - st.st_ctime
             if age > max_age:
                 size = st.st_size
                 try:
@@ -1055,6 +1166,17 @@ def main():
         free_ok = all(r is not None and r.returncode == 0 for _, r in free_results)
         if not free_ok:
             log.warning("free pass had failures/timeouts; pushing whatever landed in staging")
+
+    # Pass 5: purchased. Every creator in the platform's built-in "purchased"
+    # user list gets a paid-area-only scrape — this is the only pass that sees
+    # creators whose subscription expired, because they never appear in the
+    # active-subscription discovery above. Narrow area on purpose: purchased
+    # media stays readable after expiry, timeline/messages do not.
+    purchased_results = _run_scraper_purchased_parallel()
+    if purchased_results:
+        purchased_ok = all(r is not None and r.returncode == 0 for _, r in purchased_results)
+        if not purchased_ok:
+            log.warning("purchased pass had failures/timeouts; pushing whatever landed in staging")
 
     pushed, failed, skipped = _walk_and_push()
     _accumulate_pushes(pushed, failed)
