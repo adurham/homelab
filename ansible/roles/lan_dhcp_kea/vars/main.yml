@@ -136,3 +136,8 @@ lan_dhcp_reservations:
   - mac: BC:04:35:DB:C7:6A
     ip: 192.168.86.84
     hostname: midea-ac
+  # Tati's Windows PC (PrintGuard remote help is scoped to the owner's address; her address must stay put so `ssh tati@192.168.86.45` keeps working).
+  # A hardware MAC (first octet 08: not a locally-administered/randomised one); she already holds .45, so this only pins what she has.
+  - mac: 08:b4:d2:6b:aa:7b
+    ip: 192.168.86.45
+    hostname: tati-pc
