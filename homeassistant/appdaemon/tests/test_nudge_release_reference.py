@@ -73,6 +73,7 @@ import smart_vent_controller as svc  # noqa: E402
 # flag flips again.
 assert svc.SETPOINT_NUDGE_ENABLED is True, (
     "suite assumes the nudge is enabled; revisit if the flag changed")
+svc.SETPOINT_NUDGE_COMFORT_ENABLED = True  # this suite exercises the comfort (worst_excess) source
 
 
 # ---- fake HA backend (full instance-state stub) -------------------------------

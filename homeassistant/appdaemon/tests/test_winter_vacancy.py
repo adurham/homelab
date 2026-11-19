@@ -34,6 +34,7 @@ sys.path.insert(0, APPS_DIR)
 import smart_vent_controller as svc  # noqa: E402
 
 svc.SETPOINT_NUDGE_ENABLED = True
+svc.SETPOINT_NUDGE_COMFORT_ENABLED = True  # these suites exercise the comfort (worst_excess) source
 
 PASS = []
 def check(label, cond):

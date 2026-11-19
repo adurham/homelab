@@ -851,6 +851,19 @@ ZONE_VACANCY_DONOR_MIN_COOLER_F = 0.25   # floor: never pull air from a room tha
 # average, the one thing vents can't touch. Exactly the scenario this
 # mechanism exists for, now with both required guardrails in place.
 SETPOINT_NUDGE_ENABLED    = True  # master switch — see note above (re-enabled 2026-09-02)
+# COMFORT-DRIVEN SOURCE OFF (2026-11-18). The `worst_excess` source above (a hot
+# occupied room -> move the ecobee setpoint SETPOINT_NUDGE_MAX_F) existed to push
+# the ecobee past its 2 F stage-2 differential so the compressor would "escalate".
+# That premise is wrong for this house: the HH860E2S11 is a Gen 1 inverter unit with
+# ONE compressor input (HH8 Gen 1 install manual p.49) that sets its own speed — a
+# plain Y1 call ramped it to ~4 kW and ecobee stage 2 never changed compressor
+# power (summer + 2026-11-18 tests). The ecobee is now single-stage on the heat
+# pump (Y2 removed), so a comfort nudge can only drag the whole-house target colder
+# (the 2026-09-02 "freezing Living Room" failure) and buys nothing. The PRE-COOL
+# demand source (_precool_demand) is a different thing — it deliberately lowers
+# the cool setpoint overnight to run the AC — and stays live through the same
+# nudge state machine. Tests that exercise the comfort source set this True.
+SETPOINT_NUDGE_COMFORT_ENABLED = False
 SETPOINT_NUDGE_ENGAGE_F   = 1.5   # worst_excess at/above this engages a nudge
 SETPOINT_NUDGE_RELEASE_F  = 0.5   # worst_excess at/below this releases it (hysteresis band; MUST be < ENGAGE)
 # GAIN/MAX_F chosen to guarantee a SINGLE, CONSTANT-MAGNITUDE nudge of exactly
@@ -1353,6 +1366,10 @@ class SmartVentController(hass.Hass):
 
         self.log(f"Smart Vent Controller ready. {len(all_vents)} vents across "
                  f"{len(ZONES)} zones. Cycle every {CYCLE_INTERVAL}s.")
+        # Deploy canary: a restart that loaded the new code prints this line.
+        self.log(f"  SETPOINT-NUDGE config: master={SETPOINT_NUDGE_ENABLED} "
+                 f"comfort_source={SETPOINT_NUDGE_COMFORT_ENABLED} "
+                 f"(pre-cool source always follows master)")
 
         # Stamp the heartbeat immediately so the sensor exists on startup and the
         # watchdog isn't tripped by the first-cycle delay after a restart.
@@ -4917,6 +4934,23 @@ class SmartVentController(hass.Hass):
                 excess = off - margin
                 if excess > worst_excess:
                     worst_excess = excess
+
+        # Comfort-driven source is OFF (see SETPOINT_NUDGE_COMFORT_ENABLED at the
+        # constants block, 2026-11-18). Zeroing it here — after the loop, before
+        # anything consumes it — makes effective_excess collapse to the pre-cool
+        # demand alone, and lets the release gates below (worst_excess <=
+        # RELEASE_F) free any comfort-owned hold left over from before a restart.
+        if not SETPOINT_NUDGE_COMFORT_ENABLED:
+            _raw_worst_excess = worst_excess
+            worst_excess = 0.0
+            # Keep the diagnostic: log (on change only, not every 120 s cycle)
+            # when a hot/cold occupied room WOULD have driven a nudge.
+            _would_nudge = _raw_worst_excess >= SETPOINT_NUDGE_ENGAGE_F
+            if _would_nudge != getattr(self, "_sp_comfort_suppressed", False):
+                self._sp_comfort_suppressed = _would_nudge
+                self.log(f"  SETPOINT-NUDGE: comfort source OFF - an occupied room "
+                         f"{'is' if _would_nudge else 'is no longer'} past its margin "
+                         f"(excess {_raw_worst_excess:.2f}F); setpoint left alone")
 
         # ------------------------------------------- Pre-cool demand (PHASE 2)
         # The SECOND demand source. 0.0 whenever pre-cool isn't gated active

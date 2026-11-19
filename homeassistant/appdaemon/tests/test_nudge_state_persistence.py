@@ -50,6 +50,7 @@ import smart_vent_controller as svc  # noqa: E402
 # offline unit-test run so the mechanism keeps being exercised/kept honest
 # for if/when a corrected, room-targeted redesign re-enables it.
 svc.SETPOINT_NUDGE_ENABLED = True
+svc.SETPOINT_NUDGE_COMFORT_ENABLED = True  # these suites exercise the comfort (worst_excess) source
 
 APP_DIR = tempfile.mkdtemp(prefix="nudge_state_test_")
 

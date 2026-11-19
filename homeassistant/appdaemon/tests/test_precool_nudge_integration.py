@@ -54,6 +54,7 @@ SVC_SOURCE_PATH = os.path.join(APPS_DIR, "smart_vent_controller.py")
 # switch is orthogonal to whether its state machine is correct, so force it on
 # for this offline run.
 svc.SETPOINT_NUDGE_ENABLED = True
+svc.SETPOINT_NUDGE_COMFORT_ENABLED = True  # these suites exercise the comfort (worst_excess) source
 
 APP_DIR = tempfile.mkdtemp(prefix="precool_nudge_test_")
 

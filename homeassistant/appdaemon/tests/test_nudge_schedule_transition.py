@@ -59,6 +59,7 @@ sys.path.insert(0, "/Users/adam.durham/repos/homelab/homeassistant/appdaemon/app
 import smart_vent_controller as svc  # noqa: E402
 
 svc.SETPOINT_NUDGE_ENABLED = True
+svc.SETPOINT_NUDGE_COMFORT_ENABLED = True  # these suites exercise the comfort (worst_excess) source
 
 GR = "Game Room"          # occupant-driving room (margin base 1.5, no override)
 GR_KEY = ("upstairs", GR)
