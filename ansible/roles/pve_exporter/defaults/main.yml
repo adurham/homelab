@@ -17,5 +17,5 @@
 # not duplicated here, since target selection happens at Prometheus
 # scrape-config time (URL query param), not in this role's own config.
 pve_exporter_version: "3.9.0"
-pve_exporter_listen_addr: "127.0.0.1"
+pve_exporter_listen_addr: "{{ ip_vm }}"   # vm-01's private address: both vmagents (vm-01 and graf-02) scrape it, so loopback is wrong (live since 2026-11-18)
 pve_exporter_listen_port: 9221

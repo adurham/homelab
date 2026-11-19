@@ -77,7 +77,8 @@
     - { path: "{{ authentik_dir }}/custom-templates", owner: "1000" }
 
 # Media is configuration-as-code: icons and branding live in the repo and are identical on every
-# node. (Uploading an icon through the UI lands on ONE node only - add the file to the repo instead.)
+# node. UI uploads are also safe now: tasks/media_sync.yml mirrors /opt/authentik/media between the two nodes every
+# 2 minutes (a file uploaded on one node appears on the other within that time; deletes do not propagate).
 - name: Deploy application icons
   ansible.builtin.copy:
     src: media/public/application-icons/

@@ -47,6 +47,9 @@ authentik_service_retire_legacy: true
 # Derived from the two inventory entries so nothing is hard-coded: the peer is the other host in this play.
 # The other authentik node, used only by the media mirror (tasks/media_sync.yml). Media is per node and must be identical on both, so each node
 # syncs to its peer: derive it from the inventory instead of hard-coding addresses.
-authentik_peer_host: "{{ groups['authentik'] | list | difference([inventory_hostname]) | first | default(inventory_hostname) }}"
+authentik_peer_host: "{{ groups['authentik_server'] | list | difference([inventory_hostname]) | first }}"
 authentik_peer_ip: "{{ (hostvars[authentik_peer_host].ansible_host | default(authentik_peer_host)) }}"
 
+# Login user for the media mirror. Root SSH login is disabled on CT 100 (hardening), so the key is authorized for the ansible login user with a forced
+# command that runs rrsync, confined to /opt/authentik/media, under sudo. The key cannot open a shell or touch anything else.
+authentik_media_sync_user: "{{ ansible_user | default('amd') }}"

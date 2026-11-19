@@ -15,10 +15,33 @@
     mode: "0600"
   no_log: true
 
-- name: media-sync public key authorized on BOTH nodes (peer pulls and pushes)
+- name: media tree owned by the container user (uid 1000) - an upload is written by that uid
+  # CT 100's tree was owned by uid 1001, so a UI upload through it failed with "Permission denied" (found 2026-11-18); only ak-02 accepted uploads.
+  ansible.builtin.file:
+    path: "{{ authentik_dir }}/media"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    recurse: true
+
+- name: the earlier unrestricted root entry for this key is gone
   ansible.builtin.authorized_key:
     user: root
     key: "{{ lookup('ansible.builtin.file', playbook_dir + '/roles/authentik_service/files/authentik_media_sync.pub') }}"
+    state: absent
+
+- name: forced-command wrapper (the only thing the key can run)
+  ansible.builtin.template:
+    src: authentik-media-rrsync.sh.j2
+    dest: /usr/local/sbin/authentik-media-rrsync
+    mode: "0755"
+
+- name: media-sync public key authorized for the login user, restricted to the wrapper
+  ansible.builtin.authorized_key:
+    user: "{{ authentik_media_sync_user }}"
+    key: "{{ lookup('ansible.builtin.file', playbook_dir + '/roles/authentik_service/files/authentik_media_sync.pub') }}"
+    key_options: 'restrict,command="/usr/local/sbin/authentik-media-rrsync"'
+    exclusive: false
     state: present
 
 - name: media-sync script

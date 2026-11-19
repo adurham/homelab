@@ -1,0 +1,5 @@
+#!/bin/bash
+# Managed by Ansible (roles/authentik_service). The ONLY command the media-sync key may run (authorized_keys forced command + `restrict`).
+# rrsync confines the rsync server to /opt/authentik/media; it needs root to create files owned by uid 1000 (the authentik container user),
+# and sudo drops SSH_ORIGINAL_COMMAND, so pass it through explicitly.
+exec sudo /usr/bin/env SSH_ORIGINAL_COMMAND="${SSH_ORIGINAL_COMMAND:-}" /usr/bin/rrsync -no-del -no-lock /opt/authentik/media

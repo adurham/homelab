@@ -76,7 +76,7 @@ scrape_configs:
       - source_labels: [__param_target]
         target_label: target
       - target_label: __address__
-        replacement: '127.0.0.1:{{ pve_exporter_listen_port | default(9221) }}'
+        replacement: '{{ ip_vm }}:{{ pve_exporter_listen_port | default(9221) }}'   # private address, not loopback: both vmagents (vm-01 and graf-02) scrape it
 
   # ---------------------------------------------------------------------
   # windows_exporter (roles/windows_exporter, port 9182, in-guest --

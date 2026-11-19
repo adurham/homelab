@@ -68,6 +68,7 @@ Garage, etcd, VictoriaMetrics storage, mail/NTP VIPs.
 | Grafana | 107 /.41 pve03 · 141 /.45 pve01 | → Patroni; → Discord, mail-01 | both 200; alerting gossip on :9094 now actually clustered (see below) |
 | authentik servers | 100 /.20 pve01 · 150 /.60 pve02 | → Patroni | live + ready 200 |
 | authentik outposts | embedded outpost in each authentik server (100 /.20 pve03 · 150 /.60 pve02); no standalone outpost (CT 148 retired 2026-11-18) | ← LB `auth_request` | 302 gate verified through VIP and both LBs; node-loss drill in `docs/ha-drills.md` |
+| authentik uploaded media | `/opt/authentik/media` on CT 100 + CT 150 | UI uploads (icons, logo, flow backgrounds) | mirrored both ways every 2 min by `authentik-media-sync` (rsync over a key forced into `rrsync`, confined to that folder, no shell, no deletes); both nodes can write uploads (CT 100 could not until 2026-11-18: wrong owner) |
 | Load balancer | 103 /.29 pve03 · 147 /.31 pve01, VIP `.30` | fronts every vhost | VIP on lb-01; HTTP liveness check with Host header — hung-nginx failover proven (SIGSTOP → VIP moved → SIGCONT → returned) |
 | BIND (lab zone) | 102 /.9 pve03 · 149 /.14 pve01, VIP `.10` | lab service names | both answer |
 | LAN DNS + DHCP (AdGuard/Kea) | 130 /.4 pve01 · 131 /.5 pve02 | LAN clients | hot-standby |

@@ -6,12 +6,18 @@
 # S3 is the other supported option, but authentik serves S3 media to browsers from presigned URLs, which would mean publishing Garage S3
 # (private today) on a public hostname with CORS and TLS for ~126 KB of files. Two nodes, same network: newest copy wins, deletes do not propagate
 # (a file deleted in the UI may linger on the peer; harmless, it is unreferenced).
-set -u
+set -u -o pipefail
 PEER={{ authentik_peer_ip }}
 KEY=/root/.ssh/authentik_media_sync
+USER={{ authentik_media_sync_user }}   # root SSH login is disabled on CT 100; the key is forced into rrsync on the peer
 SRC=/opt/authentik/media/
 SSH="/usr/bin/ssh -i $KEY -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
 [ -d "$SRC" ] || { echo "no media dir"; exit 0; }
-/usr/bin/rsync -a -u --ignore-existing --exclude '*.part' --exclude '*.tmp' -e "$SSH" "$SRC" "root@$PEER:/opt/authentik/media/" 2>&1 | tail -3
+# never sync a node to itself (a wrong peer lookup once did exactly that and the unit still reported success)
+if ip -4 -o addr show | grep -q "inet $PEER/"; then echo "refusing: peer address $PEER is this node itself" >&2; exit 3; fi
+rc=0
+/usr/bin/rsync -a -u --ignore-existing --numeric-ids -e "$SSH" "$SRC" "$USER@$PEER:./" || rc=$?
 # also pull anything that exists only on the peer (so either node can be the source of a brand asset)
-/usr/bin/rsync -a -u --ignore-existing --exclude '*.part' --exclude '*.tmp' -e "$SSH" "root@$PEER:/opt/authentik/media/" "$SRC" 2>&1 | tail -3
+/usr/bin/rsync -a -u --ignore-existing --numeric-ids -e "$SSH" "$USER@$PEER:./" "$SRC" || rc=$?
+# a real failure must fail the unit (it was swallowed by `| tail` once, and a self-syncing node looked healthy)
+exit $rc

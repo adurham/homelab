@@ -24,6 +24,12 @@
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/roles/victoriametrics/defaults/main.yml"
   tasks:
+    - name: snapshot which targets were healthy BEFORE the change (job/instance pairs)
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8429/api/v1/targets
+        return_content: true
+      register: before_tg
+
     - name: render the scrape config
       ansible.builtin.template:
         src: "{{ playbook_dir }}/roles/victoriametrics/templates/prometheus.yml.j2"
@@ -50,6 +56,18 @@
           register: tg
           until: expect_instances | select('in', tg.content) | list | length == expect_instances | length
           retries: 12
+          delay: 5
+        - name: no target that was healthy before may be unhealthy now (catches a template that is stale against the live file)
+          ansible.builtin.uri:
+            url: http://127.0.0.1:8429/api/v1/targets
+            return_content: true
+          register: after_tg
+          vars:
+            was_up: "{{ before_tg.json.data.activeTargets | selectattr('health', 'equalto', 'up') | map(attribute='scrapeUrl') | list }}"
+            now_bad: "{{ after_tg.json.data.activeTargets | selectattr('health', 'ne', 'up') | map(attribute='scrapeUrl') | list }}"
+            regressed: "{{ was_up | intersect(now_bad) }}"
+          until: (regressed | length) == 0
+          retries: 14
           delay: 5
       rescue:
         - name: restore the previous config
