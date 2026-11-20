@@ -409,6 +409,15 @@
     mode: '0644'
   notify: Restart Grafana
 
+- name: Deploy Network & Wi-Fi Health Dashboard
+  ansible.builtin.copy:
+    src: network_health.json
+    dest: /var/lib/grafana/dashboards/network_health.json
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: Restart Grafana
+
 - name: Create Alerting Provisioning Directory
   ansible.builtin.file:
     path: /etc/grafana/provisioning/alerting
