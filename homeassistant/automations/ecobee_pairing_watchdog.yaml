@@ -1,7 +1,8 @@
 # Ecobee HomeKit pairing watchdog ("Edgewater Road")
 #
 # What it watches: the single homekit_controller pairing to the ecobee
-# thermostat (config entry 01JWBHM9X5MWW0EPGZPPY9ZPTT), which carries the
+# thermostat (config entry 01M7V902QSK84TPV1S5SYCFX10 since the 2026-11-19
+# re-pair; it was 01JWBHM9X5MWW0EPGZPPY9ZPTT before), which carries the
 # thermostat itself, every room sensor, and every door/window contact --
 # including binary_sensor.garage_door_contact, the person-door sensor the
 # garage-lights automation triggers on. When this pairing drops, ALL of
@@ -72,7 +73,7 @@
   action:
     - service: homeassistant.reload_config_entry
       data:
-        entry_id: "01JWBHM9X5MWW0EPGZPPY9ZPTT"
+        entry_id: "01M7V902QSK84TPV1S5SYCFX10"
     - service: system_log.write
       data:
         message: >-
