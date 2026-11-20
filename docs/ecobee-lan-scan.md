@@ -71,6 +71,8 @@ discovery hunting anyway. Re-pairing was not done and is not indicated.
 | Cloud/WAN trouble | cloud-side sensors current (≤1.5 min) | fine |
 | The Sep 24–30 pairing flaps | flaps stopped while the sweep continues | unrelated |
 | HA-side mDNS loop | HA never browses `_d2d`; nothing in HA references it | not HA |
+| HomeKit pairing removed (2026-11-19) | thermostat 'Disconnect from HomeKit', sweep sampled for 3 min | sweep unchanged (66-95/s). **Do not repeat: it deletes HA's `Edgewater Road` entry, `climate.ecobee_thermostat`, the room sensors and `garage_door_contact`; re-pair in HA, never the iPhone Home app.** |
+| Fixed DHCP address (2026-11-19) | Kea reservation `.33 -> .120` (outside the pools), 15 s samples before/after | mean 77.6 -> 78.0 ARP/s, median 84.6 -> 84.6 — **no effect** (reservation kept as a stable address) |
 
 ## Can it be stopped? Not from inside the house today
 
