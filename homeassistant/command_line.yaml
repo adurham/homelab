@@ -81,3 +81,49 @@
     device_class: power
     state_class: measurement
     scan_interval: 30
+
+# ---------------------------------------------------------------------------
+# Hourly Wi-Fi / LAN health check (added 2026-11-19). HOME ASSISTANT IS THE SCHEDULER.
+# The measurements need the workstation's idle AX210 (monitor mode on 5 GHz ch149), its wired NIC
+# (multicast census), an iperf3 server for the MacBook and the privileged docker chroot -- none of which
+# exist on the HA Green -- so HA triggers the job over SSH and the workstation does the work.
+#   * The key (/config/.ssh/id_net_health, 0600, host-only, NOT in this repo) is a dedicated ed25519 key whose
+#     authorized_keys entry on amd-workstation is `from="192.168.86.2",no-pty,... command="python3
+#     ~/.hermes/scripts/net_health.py --json"`: it can run that one script and nothing else.
+#   * The run takes ~75 s and prints one JSON line; the sensor state is the number of problem flags
+#     (-1 = the run failed or an earlier run was still going). Details: attributes below.
+#   * The job also writes /var/lib/prometheus/node-exporter/netheal.prom, which is what feeds the
+#     "Network & Wi-Fi Health" Grafana dashboard (uid network-health).
+#   * Replaces the Hermes cron job on the workstation. Source of the script: ~/.hermes/scripts/net_health.py
+#     on amd-workstation (outside this repo). Runs at HA start/reload and then every hour.
+# ---------------------------------------------------------------------------
+- sensor:
+    name: "Network health"
+    unique_id: network_health_check
+    command: >-
+      ssh -i /config/.ssh/id_net_health -o BatchMode=yes -o StrictHostKeyChecking=yes
+      -o UserKnownHostsFile=/config/.ssh/known_hosts -o ConnectTimeout=10
+      adam.durham@192.168.86.19 run
+    scan_interval: 3600
+    command_timeout: 170
+    value_template: "{{ value_json.nflags if value_json.nflags is not none else -1 }}"
+    unit_of_measurement: "flags"
+    state_class: measurement
+    json_attributes:
+      - when
+      - flags
+      - wifi_down_mbps
+      - wifi_up_mbps
+      - wifi_band
+      - air_total_pct
+      - air_node_mc_pct
+      - lan_mc_pps
+      - ecobee_pps
+      - node_ping_max_ms
+      - max_loss_pct
+      - dhcp_offers
+      - mac_ping_p90_ms
+      - wan_down
+      - wan_up
+      - busy
+      - error
