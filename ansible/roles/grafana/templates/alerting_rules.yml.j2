@@ -5445,6 +5445,226 @@ groups:
     labels:
       severity: warning
     isPaused: false
+  - uid: netheal_collector_stale
+    title: Network health check has stopped reporting
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: '(time() - netheal_last_run_timestamp_seconds > bool 9000) or absent_over_time(netheal_last_run_timestamp_seconds[3h])'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: "The hourly Wi-Fi/LAN health check has not reported for over 2.5 hours"
+      description: "netheal_last_run_timestamp_seconds is older than 9000 s (or missing). Home Assistant's sensor.network_health runs the check every hour over SSH on amd-workstation (script ~/.hermes/scripts/net_health.py, key /config/.ssh/id_net_health on the HA host). Check that sensor's state (-1 means the run failed or was still busy), that amd-workstation is up, and that /var/lib/prometheus/node-exporter/netheal.prom is being rewritten. Dashboard: Network & Wi-Fi Health (uid network-health)."
+    labels:
+      severity: warning
+    isPaused: false
+  - uid: netheal_wired_target_loss
+    title: Packet loss to a wired network target
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'min_over_time(netheal_ping_loss_percent{target=~"router .1|Basement .63|GameRoom .51|MainBedroom .99|AT&T gw|DNS .4|DNS .5"}[100m]) >= bool 10'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: "{{ '{{' }} $labels.target }} lost 10 percent or more of its pings in two hourly checks in a row"
+      description: "From the wired basement workstation, 20 pings to {{ '{{' }} $labels.target }} lost at least 10 percent on both of the last two hourly runs. These targets are all wired (mesh nodes, the AT&T gateway, the two DNS servers), so this is a cable, switch, node or host problem, not Wi-Fi. Dashboard: Network & Wi-Fi Health. Also check lan_gateway_unreachable and the LAN DNS rules."
+    labels:
+      severity: warning
+    isPaused: false
+  - uid: netheal_broadcast_flood
+    title: A device is flooding the LAN with broadcasts
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'netheal_lan_source_pps{who!="amd-workstation"} > bool 20'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: "{{ '{{' }} $labels.who }} is sending more than 20 multicast/broadcast frames per second"
+      description: "The hourly 45 s wired census saw {{ '{{' }} $labels.who }} above 20 frames per second. Every Nest node re-sends each of these over the air at the slowest speed, so a flood eats Wi-Fi airtime for the whole house. Normal here: Home Assistant about 7-11 per second, everything else under 3. History: the ecobee thermostat sent 60-95 per second until it was set to the manual 192.168.86.6/29 address on 2026-11-19 (docs/ecobee-lan-scan.md); if it is the ecobee again, its network setting was reset to automatic. Dashboard: Network & Wi-Fi Health."
+    labels:
+      severity: warning
+    isPaused: false
+  - uid: netheal_wifi_throughput_low
+    title: Wi-Fi throughput to the MacBook is low
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'max_over_time(netheal_wifi_throughput_mbps[150m]) < bool 50'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: "Wi-Fi throughput ({{ '{{' }} $labels.direction }}) stayed under 50 Mbps in two hourly tests in a row"
+      description: "iperf3 between amd-workstation and the MacBook measured under 50 Mbps in the {{ '{{' }} $labels.direction }} direction on both of the last two hourly runs. Normal is hundreds of Mbps on 6 GHz. Look at the band and signal on the dashboard (Network & Wi-Fi Health): the Mac may be on a weak 5 GHz spot outdoors, or the channel is crowded (check the airtime panels and the top transmitters)."
+    labels:
+      severity: warning
+    isPaused: false
   - uid: sso_pve_authorize_broken
     title: PVE SSO authorize flow broken
     condition: C
