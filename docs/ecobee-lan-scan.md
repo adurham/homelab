@@ -1,5 +1,15 @@
 # Ecobee ARP sweep + `_d2d` browse: what drives them
 
+> **RESOLVED 2026-11-19 — the sweep follows the device's own subnet mask.** On the thermostat, Main Menu >
+> General > Settings > Wi-Fi > Network > (manual SSID) > static IP **`192.168.86.6`, mask `255.255.255.248`
+> (/29), gateway `192.168.86.1`, DNS `192.168.86.4` / `.5`** cut the sweep from ~78 ARP/s (251 targets) to
+> **~2.4/s (9 targets, all inside the /29)** and the house's total multicast from ~100/s to ~29/s. The /29
+> `192.168.86.0/29` contains the router, HA (.2) and both DNS servers, so HA's HomeKit pairing keeps working
+> (the pairing and all 145 live entities stayed up). Everything else reaches the thermostat through the router.
+> **Do not hand `.0-.7` out to anything else, and do not put the thermostat back on DHCP** (Kea always sends a
+> /24, so the flood returns). The Kea reservation `.120` is now only a fallback. The older sections below are the
+> history that led here; the "no lever exists" conclusion further down is superseded.
+
 **Status:** root-caused as far as this LAN allows (2026-10-30, two sessions). The HomeKit pairing is
 healthy and unimplicated. The `_d2d` browse is now explained and falsified as the sweep's cause; the ARP
 sweep's driver is still unidentified and **no lever available from the house side stops it**. Nothing was

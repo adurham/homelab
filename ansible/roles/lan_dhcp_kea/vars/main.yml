@@ -144,8 +144,11 @@ lan_dhcp_reservations:
   # ecobee Smart Thermostat Premium (hardware MAC, first octet 44). Pinned OUTSIDE the dynamic pools on
   # purpose: a reservation inside .20-.99 is not honoured by Kea 2.4.1 here. 2026-11-19 experiment: does a
   # fixed address change its ~60-95/s ARP sweep (docs/ecobee-lan-scan.md)? It held .113 on 10-30 and .33 now
-  # with the same sweep. RESULT: no effect (77.6 -> 78.0 ARP/s mean over 8.6 min after the move), kept only
-  # as a stable address. Remove this entry to revert; the thermostat then takes a pool lease again.
+  # with the same sweep. RESULT: no effect (77.6 -> 78.0 ARP/s mean over 8.6 min after the move).
+  # NOTE (2026-11-19): the thermostat is now set to a MANUAL 192.168.86.6/29 on the device itself (that shrinks its
+  # ARP sweep ~97%, see docs/ecobee-lan-scan.md), so it no longer asks DHCP at all. This entry is only the fallback
+  # if someone switches it back to automatic (it would then get .120 with a /24 and the flood returns).
+  # 192.168.86.0-.7 is the thermostat's /29: do not hand those addresses to anything else.
   - mac: 44:61:32:df:66:47
     ip: 192.168.86.120
     hostname: ecobee-thermostat
