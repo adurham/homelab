@@ -219,6 +219,67 @@ def test_cumulative_push_counters_reflect_all_writers():
             raise AssertionError(f"expected cumulative failed=1, got {mod._PUSH_TOTALS['failed']}")
 
 
+def test_msgclean_keeps_free_media_and_unlocked_ppv():
+    """Media the operator can already see always wins: a chat is left unread
+    when any unread message has viewable media — including a priced post that
+    was already unlocked (canView=true, price>0)."""
+    with tempfile.TemporaryDirectory() as td:
+        mod, _ = _import_module_fresh(Path(td))
+        chat = {"username": "somemodel", "unread": 1, "last_msg": {"text": "hi"}}
+        free_img = {"media": [{"canView": True, "hasError": False}], "price": 0}
+        unlocked_ppv = {"media": [{"canView": True, "hasError": False}], "price": 12}
+        for post in (free_img, unlocked_ppv):
+            action, reason = mod._msgclean_classify(chat, [post])
+            if action != "keep" or reason != "free-media":
+                raise AssertionError(f"expected keep/free-media for {post}, got {action}/{reason}")
+
+
+def test_msgclean_reads_only_clear_bait():
+    """Text-only bait and locked PPV get marked read; anything ambiguous, any
+    tip, any pinned chat and any priority model stays unread."""
+    with tempfile.TemporaryDirectory() as td:
+        mod, _ = _import_module_fresh(Path(td))
+        chat = {"username": "somemodel", "unread": 1, "last_msg": {"text": "hi"}}
+        locked = {"media": [{"canView": False, "hasError": False}], "price": 9.99}
+
+        cases = [
+            # (chat, posts, kwargs, expected_action, expected_reason_prefix)
+            (dict(chat), [], {}, "read", "spam-text:lonely"),
+            (dict(chat), [], {}, "read", "spam-text:attention"),
+            (dict(chat), [locked], {}, "read", "locked-ppv-only"),
+            (dict(chat), [locked], {"priority_names": {"somemodel"}}, "keep", "priority-allowlist"),
+            (dict(chat, has_tips=True), [], {}, "keep", "unread-tip"),
+            (dict(chat, pinned_msgs=1), [], {}, "keep", "pinned-messages"),
+            (dict(chat), [dict(locked, isPinned=True)], {}, "keep", "pinned-message"),
+            (dict(chat), [dict(locked, isTip=True)], {}, "keep", "unread-tip"),
+            (dict(chat, last_msg={"text": "hey", "from_user_id": 42}), [], {"my_id": 42}, "keep", "last-message-is-mine"),
+            (dict(chat, last_msg={"text": "saw your post yesterday"}), [], {}, "keep", "unclassified"),
+            (dict(chat), [locked], {"read_locked_ppv": False}, "keep", "unclassified"),
+        ]
+        texts = {
+            "spam-text:lonely": "I'm so lonely tonight",
+            "spam-text:attention": "I really need your attention",
+        }
+        for c, posts, kwargs, want_action, want_reason in cases:
+            if want_reason in texts:
+                c = dict(c, last_msg={"text": texts[want_reason]})
+            action, reason = mod._msgclean_classify(c, posts, **kwargs)
+            if action != want_action or not reason.startswith(want_reason):
+                raise AssertionError(
+                    f"case {c} {posts} {kwargs}: expected {want_action}/{want_reason},"
+                    f" got {action}/{reason}")
+
+
+def test_msgclean_strips_html_before_matching():
+    with tempfile.TemporaryDirectory() as td:
+        mod, _ = _import_module_fresh(Path(td))
+        text = '<p><span class="m-editor-fs__default">i&#39;m lonely</span></p>'
+        if not mod._msgclean_spam_reason(text):
+            raise AssertionError("HTML-wrapped bait text must still match")
+        if mod._msgclean_spam_reason("<p>thanks for the tip lol</p>"):
+            raise AssertionError("benign text must not match")
+
+
 def main():
     print("test_scraper_wrapper: running")
     check("growing file is never pushed mid-download (the core regression)",
@@ -231,6 +292,12 @@ def main():
           test_part_suffix_never_pushed_even_if_size_stable)
     check("cumulative push counters sum all writers",
           test_cumulative_push_counters_reflect_all_writers)
+    check("message pass keeps free media and unlocked PPV unread",
+          test_msgclean_keeps_free_media_and_unlocked_ppv)
+    check("message pass reads only clear bait",
+          test_msgclean_reads_only_clear_bait)
+    check("message pass strips HTML before matching",
+          test_msgclean_strips_html_before_matching)
     print(f"test_scraper_wrapper: ALL {PASS} TESTS PASSED")
     print("PASS")
     sys.exit(0)

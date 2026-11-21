@@ -34,6 +34,7 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -1115,6 +1116,432 @@ def _run_like_pass():
              state["daily_likes_used"], state["daily_likes_used"], LIKE_DAILY_CAP)
 
 
+# ─── Message cleanup pass (unread spam triage) ───────────────────────────────
+# The /chats/{uid}/messages endpoint marks a chat read server-side on ANY GET —
+# that is why the upstream scraper was patched to use /chats/{uid}/media for
+# message downloads. This pass therefore never GETs /messages: it enumerates
+# unread chats via /chats (verified 2026-11-21: repeated GETs leave unread
+# counts untouched), inspects only media-bearing messages via .../media, and
+# changes read state ONLY through the explicit mark-as-read endpoint.
+#
+# Default posture is KEEP: a chat stays unread unless every unread message is
+# clearly broadcast bait — text-only spam ("I'm lonely", "want your
+# attention", ...) or locked PPV. Anything with a free viewable photo/video, a
+# tip, a pinned message, or a model on the priority allowlist is never touched.
+MSGCLEAN_ENABLED = os.environ.get("M02_MSGCLEAN_ENABLED", "").strip().lower() in (
+    "1", "true", "yes")
+MSGCLEAN_DRY_RUN = os.environ.get("M02_MSGCLEAN_DRY_RUN", "").strip().lower() in (
+    "1", "true", "yes")
+MSGCLEAN_MAX_ACTIONS = int(os.environ.get("M02_MSGCLEAN_MAX_ACTIONS", "40"))
+MSGCLEAN_MAX_CHAT_PAGES = int(os.environ.get("M02_MSGCLEAN_MAX_CHAT_PAGES", "40"))
+MSGCLEAN_READ_LOCKED_PPV = os.environ.get(
+    "M02_MSGCLEAN_READ_LOCKED_PPV", "true").strip().lower() in ("1", "true", "yes")
+MSGCLEAN_MIN_INTERVAL = float(os.environ.get("M02_MSGCLEAN_MIN_INTERVAL", "0.7"))
+MSGCLEAN_PRIORITY_USERNAMES = {
+    u.strip().lower() for u in os.environ.get(
+        "M02_MSGCLEAN_PRIORITY_USERNAMES", "").split(",") if u.strip()
+}
+MSGCLEAN_STATE_FILE = Path(os.environ.get(
+    "M02_MSGCLEAN_STATE_FILE", str(STAGING.parent / "msg_clean_state.json")))
+
+# Broadcast-bait phrases. A match is a *hint*, never the only test: a chat is
+# only marked read when it also carries no free viewable media. Patterns are
+# deliberately narrow (money/pin/personal-question signals are separate keep
+# guards), and unmatched text stays unread.
+MSGCLEAN_SPAM_PATTERNS = [
+    ("lonely", r"\blonely\b"),
+    ("attention", r"\b(need|needs|want|wants|crave|craving|pay|paying|paid)\s+(me\s+)?(some\s+|your\s+|ur\s+)?attention\b|\battention\s+(from\s+you|please)\b"),
+    ("miss-you", r"\b(i\s+)?miss\s+(you|u|ya)\b|\bmissing\s+(you|u)\b"),
+    ("thinking-of-you", r"\b(thinking|thought)\s+(of|about)\s+(you|u)\b"),
+    ("waiting-for-you", r"\b(waiting|wait|been waiting|still waiting)\s+(for|on)\s+(you|u)\b"),
+    ("come-talk", r"\bcome\s+(talk|chat|play|see me|keep me company|spend time)\b"),
+    ("talk-to-me", r"\b(talk|chat|speak)\s+to\s+me\b|\btext\s+me(\s+back)?\b|\breply\s+to\s+me\b|\banswer\s+me\b"),
+    ("dont-ignore-me", r"\b(don'?t|do not|stop)\s+ignor(e|ing)\s+me\b|\bwhy\s+(are\s+you|u)\s+ignoring\b"),
+    ("are-you-there", r"\bare\s+(you|u)\s+(there|up|awake|around|busy)\b|\bwhere\s+(are\s+you|r\s+u|ru)\b"),
+    ("bored-alone", r"\b(so\s+|i'?m\s+|im\s+)?bored\b|\ball\s+alone\b|\bnobody\s+to\s+(talk|chat)\b"),
+    ("keep-company", r"\bkeep\s+me\s+company\b"),
+    ("wyd", r"\b(wyd|what\s+are\s+you\s+(doing|up\s+to))\b"),
+    ("just-for-you", r"\b(just|only|specially)\s+for\s+(you|u)\b|\bmade\s+(this|it)\s+for\s+(you|u)\b"),
+    ("show-you", r"\b(want|wanna|waiting|dying)\s+to\s+show\s+(you|u)\b|\bsomething\s+(special|hot)\s+(for\s+you|waiting)\b"),
+    ("check-messages", r"\bcheck\s+(your|ur)\s+(messages|dms|inbox)\b|\bsent\s+(you|u)\s+something\b"),
+    ("dont-miss", r"\bdon'?t\s+miss\b|\blimited\s+time\b|\bunlock\b|\bfree\s+(today|now)\b"),
+]
+_MSGCLEAN_SPAM_RE = [(reason, re.compile(pat, re.IGNORECASE))
+                     for reason, pat in MSGCLEAN_SPAM_PATTERNS]
+
+
+def _msgclean_plain_text(text):
+    """Chat text arrives as HTML (m-editor markup). Strip tags + entities so
+    pattern matching sees words, not markup."""
+    if not text:
+        return ""
+    import html as _html
+    return _html.unescape(re.sub(r"<[^>]+>", " ", str(text))).strip()
+
+
+def _msgclean_spam_reason(text):
+    """Return the spam-phrase tag that matches this text, or None."""
+    plain = _msgclean_plain_text(text)
+    if not plain:
+        return None
+    for reason, rx in _MSGCLEAN_SPAM_RE:
+        if rx.search(plain):
+            return reason
+    return None
+
+
+def _msgclean_free_viewable(post):
+    """True when the message carries media the operator can actually see right
+    now: at least one item with canView set and no error.
+
+    Viewability — not price — is the test. A priced post the operator already
+    unlocked still reports its media as canView=true; a PPV that costs money
+    reports canView=false (that is the "requires an unlock" case)."""
+    for m in (post.get("media") or []):
+        if m.get("canView") and not m.get("hasError"):
+            return True
+    return False
+
+
+def _msgclean_post_is_ppv(post):
+    """A message that costs money: priced media or locked text."""
+    price = post.get("price") or 0
+    return bool((isinstance(price, (int, float)) and price > 0) or post.get("lockedText"))
+
+
+def _msgclean_classify(chat, unread_posts, priority_names=(), my_id=None,
+                       read_locked_ppv=True):
+    """Decide what to do with ONE unread chat.
+
+    chat: {username, unread, has_tips, pinned_msgs, last_msg{...}}
+    unread_posts: media-bearing unread messages, newest first, each
+        {id, price, lockedText, media:[{canView, hasError}], isPinned, isTip,
+         text, from_user_id}
+    Returns (action, reason) with action 'keep' (leave unread) or 'read'.
+
+    Keep wins ties on purpose: this pass exists to cut spam without losing
+    messages, so every ambiguous case stays unread.
+    """
+    username = (chat.get("username") or "").lower()
+    if int(chat.get("unread") or 0) <= 0:
+        return "keep", "no-unread"
+    if username in priority_names:
+        return "keep", "priority-allowlist"
+    if chat.get("has_tips"):
+        return "keep", "unread-tip"
+    if int(chat.get("pinned_msgs") or 0) > 0:
+        return "keep", "pinned-messages"
+    for p in unread_posts:
+        if p.get("isTip"):
+            return "keep", "unread-tip"
+        if p.get("isPinned"):
+            return "keep", "pinned-message"
+        if _msgclean_free_viewable(p):
+            return "keep", "free-media"
+    last = chat.get("last_msg") or {}
+    if my_id is not None and last.get("from_user_id") == my_id:
+        return "keep", "last-message-is-mine"
+    # From here on: no free media anywhere in the unread batch.
+    for p in unread_posts:
+        reason = _msgclean_spam_reason(p.get("text"))
+        if reason:
+            return "read", "spam-text:" + reason
+    reason = _msgclean_spam_reason(last.get("text"))
+    if reason:
+        return "read", "spam-text:" + reason
+    if read_locked_ppv:
+        if unread_posts and all(_msgclean_post_is_ppv(p) for p in unread_posts):
+            return "read", "locked-ppv-only"
+        if not unread_posts and _msgclean_post_is_ppv(last):
+            return "read", "locked-ppv-only"
+    return "keep", "unclassified"
+
+
+def _msgclean_load_state():
+    import json
+    if MSGCLEAN_STATE_FILE.exists():
+        try:
+            return json.loads(MSGCLEAN_STATE_FILE.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            log.warning("msg_clean_state.json corrupt (%s) — resetting", e)
+    return {}
+
+
+def _msgclean_write_state(state):
+    import json
+    try:
+        MSGCLEAN_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        MSGCLEAN_STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True))
+    except OSError as e:
+        log.error("failed to write msg_clean_state: %s", e)
+
+
+# ─── DRM pending audit ───────────────────────────────────────────────────────
+# Widevine-protected videos (media whose only source is a .mpd/DASH manifest)
+# cannot be downloaded without a CDM. The upstream scraper records them as
+# downloaded anyway, with no file on disk — so they vanish from every later
+# sweep and from the error path. This audit finds them across every per-model
+# metadata DB, reports them, and (opt-in) resets the flag so a sweep with a
+# working CDM re-fetches them.
+DRM_AUDIT_ENABLED = os.environ.get("M02_DRM_AUDIT", "true").strip().lower() in (
+    "1", "true", "yes")
+DRM_REPAIR = os.environ.get("M02_DRM_REPAIR", "false").strip().lower() in (
+    "1", "true", "yes")
+METADATA_DIR = Path(os.environ.get(
+    "M02_METADATA_DIR", str(Path(CONFIG_FILE).parent / "metadata")))
+DRM_REPORT_FILE = Path(os.environ.get(
+    "M02_DRM_REPORT_FILE", str(STAGING.parent / "drm_pending.json")))
+
+
+def _drm_audit():
+    """Report (and optionally reset) videos flagged downloaded that have no
+    file — i.e. DRM media skipped for lack of a CDM. Returns a dict summary."""
+    import json
+    import sqlite3
+    summary = {"scanned": 0, "models": 0, "pending": 0, "repaired": 0,
+               "by_model": {}}
+    if not METADATA_DIR.is_dir():
+        log.warning("drm audit: metadata dir %s missing — skipped", METADATA_DIR)
+        return summary
+    for db in sorted(METADATA_DIR.glob("*/user_data.db")):
+        summary["scanned"] += 1
+        try:
+            conn = sqlite3.connect(str(db), timeout=5)
+            rows = conn.execute(
+                "select media_id, link from medias where media_type='Videos'"
+                " and downloaded=1 and (size is null or size=0)").fetchall()
+        except sqlite3.Error as e:
+            log.warning("drm audit: %s unreadable: %s", db.name, e)
+            continue
+        if not rows:
+            conn.close()
+            continue
+        drm = [(mid, link) for mid, link in rows if link and ".mpd" in link]
+        if not drm:
+            conn.close()
+            continue
+        model = db.parent.name
+        summary["models"] += 1
+        summary["pending"] += len(drm)
+        summary["by_model"][model] = len(drm)
+        if DRM_REPAIR:
+            try:
+                conn.executemany(
+                    "update medias set downloaded=0, size=NULL where media_id=?",
+                    [(mid,) for mid, _ in drm])
+                conn.commit()
+                summary["repaired"] += len(drm)
+            except sqlite3.Error as e:
+                log.warning("drm audit: repair failed for %s: %s", model, e)
+        conn.close()
+    if summary["pending"]:
+        top = sorted(summary["by_model"].items(), key=lambda kv: -kv[1])[:10]
+        if DRM_REPAIR:
+            log.warning("drm audit: %d DRM videos reset for re-download across"
+                        " %d models (top: %s)", summary["repaired"],
+                        summary["models"], top)
+        elif DRM_AUDIT_ENABLED:
+            log.warning("drm audit: %d purchased videos are marked downloaded but"
+                        " have NO file — Widevine-protected; need a CDM"
+                        " (key-mode manual + private-key/client-id). Top: %s",
+                        summary["pending"], top)
+    try:
+        DRM_REPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DRM_REPORT_FILE.write_text(json.dumps(summary, indent=2, sort_keys=True))
+    except OSError as e:
+        log.warning("drm audit: could not write %s: %s", DRM_REPORT_FILE, e)
+    return summary
+
+
+def _run_message_pass():
+    """Unread spam triage. Runs after the like pass.
+
+    Enumerates unread chats, reads only media-bearing messages (never
+    /messages, which would mark them read), and POSTs mark-as-read for chats
+    that are pure broadcast bait. Everything else is left unread.
+    """
+    if not MSGCLEAN_ENABLED:
+        log.info("message pass skipped — disabled (M02_MSGCLEAN_ENABLED)")
+        return
+
+    import asyncio
+    import datetime as _dt
+
+    mods = _load_scraper_modules()
+    if mods is None:
+        log.warning("message pass skipped — scraper modules unavailable")
+        return
+    mgr = mods["manager"].Manager
+
+    state = _msgclean_load_state()
+    today = _dt.date.today().isoformat()
+    if state.get("date") != today:
+        state["date"] = today
+        state["actions_today"] = 0
+
+    stats = {"chats_seen": 0, "unread_seen": 0, "read": 0, "keep": 0,
+             "errors": 0, "budget_hit": 0}
+    recent = []
+
+    async def _json(c, url, method="get", body=None):
+        # The session wrapper raises on non-2xx (and retries with backoff), so
+        # every call has to be contained here — one bad chat must not abort the
+        # whole pass.
+        try:
+            async with c.requests_async(url=url, method=method, json=body) as r:
+                status = r.status
+                if not (200 <= status < 300):
+                    return None, status
+                try:
+                    return await r.json_(), status
+                except Exception:  # noqa: BLE001
+                    return {}, status
+        except Exception as e:  # noqa: BLE001
+            log.debug("message pass: %s %s raised %s", method, url, type(e).__name__)
+            return None, getattr(e, "status", None)
+
+    async def _run():
+        async with mgr.session.aget_subscription_session() as c:
+            me, _ = await _json(c, "https://onlyfans.com/api2/v2/users/me")
+            my_id = (me or {}).get("id")
+            offset = 0
+            for _page in range(MSGCLEAN_MAX_CHAT_PAGES):
+                url = ("https://onlyfans.com/api2/v2/chats?limit=20&offset=%d"
+                       "&order=recent") % offset
+                data, status = await _json(c, url)
+                if data is None:
+                    log.warning("message pass: chats page offset=%d -> HTTP %s", offset, status)
+                    stats["errors"] += 1
+                    break
+                lst = data.get("list") or []
+                if not lst:
+                    break
+                for chat in lst:
+                    stats["chats_seen"] += 1
+                    with_user = chat.get("withUser") or {}
+                    uid = with_user.get("id")
+                    username = with_user.get("username") or ""
+                    unread = int(chat.get("unreadMessagesCount") or 0)
+                    if unread <= 0 or uid is None:
+                        continue
+                    stats["unread_seen"] += 1
+                    # Priority guards that need no extra request.
+                    if username.lower() in MSGCLEAN_PRIORITY_USERNAMES:
+                        stats["keep"] += 1
+                        log.info("message pass: KEEP %s (priority-allowlist)", username)
+                        continue
+                    if chat.get("hasUnreadTips"):
+                        stats["keep"] += 1
+                        log.info("message pass: KEEP %s (unread-tip)", username)
+                        continue
+                    lm = chat.get("lastMessage") or {}
+                    last_msg = {
+                        "id": lm.get("id"),
+                        "from_user_id": (lm.get("fromUser") or {}).get("id"),
+                        "text": lm.get("text"),
+                        "price": lm.get("price"),
+                        "lockedText": lm.get("lockedText"),
+                        "isTip": lm.get("isTip"),
+                        "isPinned": lm.get("isPinned"),
+                        "mediaCount": lm.get("mediaCount"),
+                    }
+                    last_read = chat.get("lastReadMessageId")
+                    try:
+                        last_read_n = int(str(last_read)) if last_read not in (None, "") else 0
+                    except (TypeError, ValueError):
+                        last_read_n = 0
+                    murl = ("https://onlyfans.com/api2/v2/chats/%s/media?limit=50"
+                            "&offset=0&order=desc&skip_users=all&skip_users_dups=1") % uid
+                    mdata, mstatus = await _json(c, murl)
+                    if mdata is None:
+                        stats["errors"] += 1
+                        log.warning("message pass: %s media -> HTTP %s (kept unread)",
+                                    username, mstatus)
+                        continue
+                    unread_posts = []
+                    for p in (mdata.get("list") or []):
+                        try:
+                            pid = int(str(p.get("id")))
+                        except (TypeError, ValueError):
+                            continue
+                        if pid <= last_read_n:
+                            break  # newest-first: everything older is read
+                        unread_posts.append({
+                            "id": pid,
+                            "price": p.get("price"),
+                            "lockedText": p.get("lockedText"),
+                            "media": p.get("media") or [],
+                            "isPinned": p.get("isPinned"),
+                            "isTip": p.get("isTip"),
+                            "text": p.get("text"),
+                            "_from_user_id": (p.get("fromUser") or {}).get("id"),
+                        })
+                    if last_msg.get("from_user_id") is None and unread_posts:
+                        last_msg["from_user_id"] = unread_posts[0].get("_from_user_id")
+                    action, reason = _msgclean_classify(
+                        {"username": username, "unread": unread,
+                         "has_tips": chat.get("hasUnreadTips"),
+                         "pinned_msgs": chat.get("countPinnedMessages"),
+                         "last_msg": last_msg},
+                        unread_posts, MSGCLEAN_PRIORITY_USERNAMES, my_id,
+                        MSGCLEAN_READ_LOCKED_PPV)
+                    if action == "keep":
+                        stats["keep"] += 1
+                        log.info("message pass: KEEP %s unread=%d (%s)",
+                                 username, unread, reason)
+                        continue
+                    if state.get("actions_today", 0) + stats["read"] >= MSGCLEAN_MAX_ACTIONS:
+                        stats["budget_hit"] += 1
+                        log.info("message pass: cap %d reached — %s left unread (%s)",
+                                 MSGCLEAN_MAX_ACTIONS, username, reason)
+                        continue
+                    if MSGCLEAN_DRY_RUN:
+                        stats["read"] += 1
+                        log.info("message pass: WOULD-READ %s unread=%d (%s)",
+                                 username, unread, reason)
+                        recent.append({"user": username, "reason": reason,
+                                       "dry_run": True, "at": _dt.datetime.now().isoformat(timespec="seconds")})
+                        continue
+                    purl = ("https://onlyfans.com/api2/v2/chats/%s/mark-as-read" % uid)
+                    _, pstatus = await _json(c, purl, method="post", body={})
+                    if pstatus in (200, 201, 204):
+                        stats["read"] += 1
+                        recent.append({"user": username, "reason": reason,
+                                       "at": _dt.datetime.now().isoformat(timespec="seconds")})
+                        log.info("message pass: MARKED READ %s unread=%d (%s)",
+                                 username, unread, reason)
+                    else:
+                        stats["errors"] += 1
+                        log.warning("message pass: %s mark-as-read -> HTTP %s",
+                                    username, pstatus)
+                    if MSGCLEAN_MIN_INTERVAL:
+                        await asyncio.sleep(MSGCLEAN_MIN_INTERVAL)
+                if not data.get("hasMore"):
+                    break
+                try:
+                    offset = int(data.get("nextOffset") or (offset + len(lst)))
+                except (TypeError, ValueError):
+                    offset += len(lst)
+
+    try:
+        asyncio.run(_run())
+    except Exception as e:  # noqa: BLE001
+        stats["errors"] += 1
+        log.error("message pass failed: %s: %s", type(e).__name__, e)
+
+    state["actions_today"] = state.get("actions_today", 0) + (
+        0 if MSGCLEAN_DRY_RUN else stats["read"])
+    state["last_run"] = _dt.datetime.now().isoformat(timespec="seconds")
+    state["last_result"] = stats
+    if recent:
+        state["recent_actions"] = (recent + state.get("recent_actions", []))[:50]
+    _msgclean_write_state(state)
+    log.info("message pass done: chats=%d unread=%d read=%d keep=%d errors=%d%s",
+             stats["chats_seen"], stats["unread_seen"], stats["read"],
+             stats["keep"], stats["errors"],
+             " (DRY RUN)" if MSGCLEAN_DRY_RUN else "")
+
+
 def main():
     _clear_stale_staging()
     _check_staging_usage()
@@ -1183,11 +1610,25 @@ def main():
     log.info("sweep done: pushed=%d failed=%d skipped=%d (cumulative: pushed=%d failed=%d)",
              pushed, failed, skipped, _PUSH_TOTALS["pushed"], _PUSH_TOTALS["failed"])
 
+    # Truth check: videos the upstream marked downloaded but never wrote (DRM /
+    # Widevine, skipped for lack of a CDM). Without this the sweep reports a
+    # clean run while those videos are simply absent from the gallery forever.
+    try:
+        _drm_audit()
+    except Exception as e:  # noqa: BLE001
+        log.warning("drm audit failed: %s: %s", type(e).__name__, e)
+
     # Pass 5: like timeline posts from active subscriptions. Runs after all
     # downloads and pushes are complete. Only targets the manual model list
     # (explicit subs), not auto-discovered free subs. See _run_like_pass() for
     # the backlog/daily mode state machine.
     _run_like_pass()
+
+    # Pass 6: unread message triage — clears broadcast-bait chats (text-only
+    # spam / locked PPV) while leaving anything with free viewable media, tips,
+    # pins or a priority model untouched. Read state is only changed through
+    # the explicit mark-as-read endpoint; see _run_message_pass().
+    _run_message_pass()
 
 
 if __name__ == "__main__":

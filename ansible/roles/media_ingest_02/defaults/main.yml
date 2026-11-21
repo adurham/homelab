@@ -97,6 +97,26 @@ media_ingest_02_likes_daily_cap: 500
 media_ingest_02_likes_per_model_cap: 50
 media_ingest_02_likes_per_model_timeout: 900  # 15 min in seconds
 
+# Unread-message triage (runs after the like pass). Leaves a chat unread when
+# any unread message carries media the operator can already see, when a tip is
+# waiting, when the chat has pinned messages, or when the model is on the
+# priority allowlist. Marks a chat read only when every unread message is
+# text-only broadcast bait or locked PPV. Read state is changed only through
+# the explicit mark-as-read endpoint — never by fetching /messages.
+media_ingest_02_msgclean_enabled: "true"
+media_ingest_02_msgclean_dry_run: "false"    # "true" = log decisions, change nothing
+media_ingest_02_msgclean_max_actions: 40     # per sweep, on top of the daily count
+media_ingest_02_msgclean_min_interval: "0.7" # seconds between mark-as-read calls
+media_ingest_02_msgclean_read_locked_ppv: "true"  # locked PPV with no viewable media counts as spam
+
+# DRM audit. Widevine-protected videos are recorded as "downloaded" by the
+# upstream scraper even though no file was written; without the audit a sweep
+# reports a clean run while those videos are silently absent. "repair" resets
+# the flag so a sweep with a configured CDM re-fetches them — leave false until
+# key-mode/private-key/client-id are set in config.json.
+media_ingest_02_drm_audit: "true"
+media_ingest_02_drm_repair: "false"
+
 # Defense-in-depth cap (bytes) on a single media item's size, wired into
 # config.json's download_options.file_size_limit. the scraper checks this in
 # _check_forced_skip() immediately AFTER the response opens but BEFORE any
