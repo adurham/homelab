@@ -308,6 +308,19 @@
     frigate_config_rendered: "{{ lookup('ansible.builtin.template', 'frigate-config.yml.j2') }}"
   no_log: true
 
+# Root-cause fix for the capture leak: patched video.py (see the script header).
+# Must exist BEFORE docker compose up, because compose bind-mounts it.
+- name: Install the video.py patch builder inside the CT
+  ansible.builtin.command: >-
+    pct push {{ vmid }} {{ role_path }}/files/build-frigate-video-patch.sh
+    /opt/frigate/build-frigate-video-patch.sh --perms 0755
+  changed_when: true
+
+- name: Build the patched video.py inside the CT
+  ansible.builtin.command: >-
+    pct exec {{ vmid }} -- /opt/frigate/build-frigate-video-patch.sh {{ frigate_image }}
+  changed_when: true
+
 - name: Render docker-compose locally
   ansible.builtin.set_fact:
     frigate_compose_rendered: "{{ lookup('ansible.builtin.template', 'docker-compose.yml.j2') }}"
@@ -509,6 +522,40 @@
   ansible.builtin.command: >-
     pct exec {{ vmid }} -- bash -c
     "printf '%s\n' '*/5 * * * * root python3 /opt/frigate/camera_health.py >> /var/log/frigate_health.log 2>&1' > /etc/cron.d/frigate-health"
+  changed_when: true
+
+# ── Capture-leak watchdog ────────────────────────────────────────────────────
+# A single frigate.capture process leaks to ~10 GB (upstream 0.17.2; ~200 MB is
+# healthy) until the docker memcg OOM-kills that one child. PID 1 survives, so
+# docker never restarts the container and the camera stays dead for ~10 min
+# (2026-11-17: 12:07 and 14:22 local). This polls per-process RSS every 15 s,
+# dumps evidence to /var/log/frigate-leak/ and restarts the container at 1.5 GB.
+- name: Install the capture-leak watchdog inside the CT
+  ansible.builtin.command: >-
+    pct push {{ vmid }} {{ role_path }}/files/capture_rss_watchdog.py
+    /opt/frigate/capture_rss_watchdog.py --perms 0755
+  changed_when: true
+
+- name: Install the capture-leak watchdog systemd unit inside the CT
+  ansible.builtin.command: >-
+    pct push {{ vmid }} {{ role_path }}/files/frigate-rss-watchdog.service
+    /etc/systemd/system/frigate-rss-watchdog.service --perms 0644
+  changed_when: true
+
+# py-spy lets the watchdog dump the leaking process's Python stacks as evidence.
+# Lives in /opt/frigate (CT rootfs), so it survives container recreates.
+- name: Install py-spy in the CT for leak evidence
+  ansible.builtin.command: >-
+    pct exec {{ vmid }} -- bash -c
+    "test -x /opt/frigate/py-spy || { docker exec frigate pip install -q --target /tmp/pyspy py-spy
+    && docker exec frigate cat /tmp/pyspy/bin/py-spy > /opt/frigate/py-spy
+    && chmod 755 /opt/frigate/py-spy; }"
+  changed_when: true
+
+- name: Enable the capture-leak watchdog
+  ansible.builtin.command: >-
+    pct exec {{ vmid }} -- bash -c
+    "systemctl daemon-reload && systemctl enable --now frigate-rss-watchdog.service"
   changed_when: true
 
 # ── Last-good frame server ──────────────────────────────────────────────────

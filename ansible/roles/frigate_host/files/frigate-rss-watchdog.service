@@ -1,0 +1,17 @@
+# Ansible managed
+# Restarts Frigate (with evidence capture) when a frigate.capture process leaks
+# past ~1.5 GB, before the docker memcg thrashes and OOM-kills one child.
+# See files/capture_rss_watchdog.py.
+[Unit]
+Description=Frigate capture memory-leak watchdog
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -u /opt/frigate/capture_rss_watchdog.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -27,7 +27,10 @@ vm_disk: 60  # GiB rootfs on nvme-data (--rootfs nvme-data:{{ vm_disk }})
 net_private_ip: "{{ ip_frigate }}/24"
 
 # Frigate container (single container, custom go2rtc binary at /config/go2rtc).
-frigate_image: "ghcr.io/blakeblackshear/frigate:stable"
+# Pinned by digest (0.17.2-3d4dd3a): templates/docker-compose.yml.j2 bind-mounts a patched
+# video.py built from exactly this image (files/build-frigate-video-patch.sh). Re-run that
+# script and re-validate before moving the pin.
+frigate_image: "ghcr.io/blakeblackshear/frigate:stable@sha256:d4351369984d4a9e2a49ac59736f6490856a7ea11f7790040746d21496967010"
 # Upstream go2rtc tag the mounted patched binary is built from. Home Assistant
 # raises an `recommended_version` repair whenever the go2rtc server is older
 # than the version its own integration recommends (2026.11 recommends 1.9.15),

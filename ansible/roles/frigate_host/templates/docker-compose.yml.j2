@@ -41,10 +41,12 @@ services:
     # capture/embeddings leak grows until the LXC's own cgroup OOMs and the
     # kernel picks an arbitrary victim inside the container — 7 kills in 14
     # days on pve01, every one of them `frigate.capture`, at 6 GB and then
-    # 13.8 GB. With this set, docker kills and restarts the container cleanly
-    # instead, which is the failure mode the CT is already built to survive
-    # (see frigate-recreate.service). 12g leaves ~4 GB for docker/containerd/
-    # OS inside a 16 GB CT. Paired with frigate-restart-weekly.timer so the
+    # 13.8 GB. (Original intent: docker kills and restarts the container
+    # cleanly instead. CORRECTION 2026-11-17: the memcg OOM kills only the
+    # leaking child, PID 1 survives (OOMKilled=false), so docker does NOT
+    # restart it; the real defence is frigate-rss-watchdog.service, which
+    # restarts the container at 1.5 GB RSS.) See also frigate-recreate.service.
+    # 12g leaves ~4 GB for docker/containerd/OS inside a 16 GB CT. Paired with frigate-restart-weekly.timer so the
     # leak is normally reset before the limit is ever reached.
     mem_limit: {{ frigate_mem_limit | default('12g') }}
     memswap_limit: {{ frigate_mem_limit | default('12g') }}
@@ -53,6 +55,9 @@ services:
       - {{ frigate_base_dir }}/media:/media/frigate
       - {{ frigate_base_dir }}/go2rtc/go2rtc_patched:/config/go2rtc:ro
       - {{ frigate_base_dir }}/go2rtc/keepalive.sh:/opt/frigate/go2rtc/keepalive.sh:ro
+      # Stock video.py minus the unbounded communicate() drain (the capture-leak root
+      # cause). Built by files/build-frigate-video-patch.sh; valid for the pinned image only.
+      - {{ frigate_base_dir }}/patches/video.py:/opt/frigate/frigate/video.py:ro
       - type: tmpfs
         target: /tmp/cache
         tmpfs:
