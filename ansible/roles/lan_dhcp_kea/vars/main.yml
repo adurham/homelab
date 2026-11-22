@@ -71,9 +71,28 @@ lan_dhcp_reservations:
   - mac: 0C:EF:15:C3:7D:62
     ip: 192.168.86.15
     hostname: es208g
-  - mac: 9C:37:CB:B9:C7:6B
-    ip: 192.168.86.32
+  # The 14.10 Pro console at .44 (MAC d4:f7:d5:48:17:aa; the old 9C:37:CB:B9:C7:6B
+  # held .32 until 2026-11). It is OFF the forge/MITM path as of 2026-11-22: no
+  # per-host options, so it inherits the subnet gateway .1 and DNS .4/.5. PS5
+  # MITM work moved to the Slim (.105/.106).
+  - mac: d4:f7:d5:48:17:aa
+    ip: 192.168.86.44
     hostname: ps5
+  # PS5 Slim (13.40) -- the live target. Gateway and DNS pinned to the forge so
+  # the ps5forge_slim nft table on .56 sees its traffic (added live 2026-11-22;
+  # recorded here so a repo deploy does not silently drop it).
+  - mac: 54:e6:fd:3c:4d:2c
+    ip: 192.168.86.105
+    hostname: ps5-slim-lan
+    options:
+      router: 192.168.86.56
+      dns: 192.168.86.56
+  - mac: b4:1f:4d:d8:a0:de
+    ip: 192.168.86.106
+    hostname: ps5-slim-wifi
+    options:
+      router: 192.168.86.56
+      dns: 192.168.86.56
   - mac: b8:7b:d4:da:5e:17
     ip: 192.168.86.192
     hostname: nest-cam-indoor
