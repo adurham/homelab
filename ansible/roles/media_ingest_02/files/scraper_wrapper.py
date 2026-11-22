@@ -1542,10 +1542,50 @@ def _run_message_pass():
              " (DRY RUN)" if MSGCLEAN_DRY_RUN else "")
 
 
+def _session_alive():
+    """One cheap API call: is the stored session still accepted?
+
+    OnlyFans revokes a session on the first rejected request, so a dead session
+    must abort the sweep *before* the passes — otherwise every model repeats the
+    same doomed login and the account looks abusive.
+    """
+    import asyncio
+
+    mods = _load_scraper_modules()
+    if mods is None:
+        return None  # can't tell; let the passes decide
+    mgr = mods["manager"].Manager
+
+    async def _probe():
+        async with mgr.session.aget_subscription_session() as c:
+            async with c.requests_async(url="https://onlyfans.com/api2/v2/users/me") as r:
+                if r.status != 200:
+                    return "HTTP %s" % r.status
+                body = await r.read_()
+                import json as _json
+                data = _json.loads(body)
+                if not data.get("isAuth"):
+                    return "not authenticated"
+                return None
+
+    try:
+        return asyncio.run(_probe())
+    except Exception as e:  # noqa: BLE001
+        return "%s: %s" % (type(e).__name__, e)
+
+
 def main():
     _clear_stale_staging()
     _check_staging_usage()
     _check_auth()
+
+    # Stop before the passes if the session is already dead: a rejected request
+    # revokes the session server-side, so retrying it 149 times only hurts.
+    reason = _session_alive()
+    if reason:
+        log.error("session check failed (%s) — skipping this sweep to protect "
+                  "the account; refresh auth.json and re-run", reason)
+        sys.exit(0)
     try:
         ex = store_client.get_excluded()
         log.info("gallery auth OK; %d excluded stems", len(ex))
