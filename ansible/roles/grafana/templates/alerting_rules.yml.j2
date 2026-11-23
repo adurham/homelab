@@ -1126,14 +1126,15 @@ groups:
     execErrState: Error
     for: 5m
     annotations:
-      summary: Tati's iPhone WiFi presence tracker has gone stale
-      description: 'person.tati_sharp has read ''unknown'' for over an hour and input_boolean.tati_phone_tracking_stale
-        is set. Most likely cause: iOS rotated the private WiFi MAC address for the
-        home network, so the nmap_tracker entity linked to her phone no longer matches.
-        Fix: nmap-scan 192.168.86.0/24, find the new MAC for her iPhone (hostname
-        often still resolves as iphone*.lan or similar), enable/rename that device_tracker
-        entity in HA, then re-link it via person/update on person.tati_sharp. No action
-        needed from her -- this is fully fixable HA-side.'
+      summary: Tati's iPhone presence tracker has gone stale
+      description: 'Her phone has not delivered a location report to HA in 24h (input_boolean.tati_phone_tracking_stale
+        is set by the HA automations from input_datetime.tati_phone_last_report).
+        The tracker is the iOS Companion app GPS device_tracker on person.tati -- NOT
+        an nmap WiFi tracker, so a rotated private MAC is not the cause and there is
+        no LAN entity to re-link. Her device currently exposes no other sensors to HA
+        (no battery/activity), so there is nothing server-side to cross-check. Fix is
+        on the phone: iOS Companion app -> Location Always + Precise, Background App
+        Refresh on, open the app once. The flag clears itself on the next real report.'
     labels:
       severity: warning
     isPaused: false

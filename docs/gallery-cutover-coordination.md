@@ -74,3 +74,35 @@ that is why — not a stray process.
 - The purge of `gcrypt:` must wait for a clean `check` **and** for this session's
   post-cutover push test — if the new tree is written to before the check, the
   check result no longer describes it.
+
+## 2026-11-23 ~15:35 CST — desktop session took the cutover over (both prior sessions gone)
+
+The homelab session that started the final pass is dead; its watcher (a `until grep`
+loop) was killed so it could not fire a second concurrent `rclone check`.
+
+Measured now:
+- final pass: still running on pve01 (pid 6004), 70% / ~33.8k of 56 GiB queued,
+  throughput recovering (94 KiB/s → 21 MiB/s within a minute; the low samples are
+  Drive upload latency on the large videos, not a quota error — 0 rate-limit errors,
+  11 `unexpected EOF` uploads which the pass retries).
+- gallery stack: still stopped (deliberate, 18:13:23 UTC). All 7 ingest-parked items
+  are ciphertext in `/var/lib/media-ingest/failed` (7 media + 7 sidecars, 9.7 MB),
+  0 lost, 0 park failures, staging 10 MB / 512 MB.
+- `media-ingest-01` collector + reconcile were stopped 20:49 UTC (after the pass
+  started) — resumed by the finish gate below, not by hand.
+- `recrypt-gallery.timer`: **disabled** now (was merely stopped and still enabled, so
+  a reboot would have re-armed it).
+
+**Ownership of the rest of the runbook is a cron gate on the workstation**, not a
+session: `~/.hermes/bin/gallery_cutover_finish.sh` (every 15 min, flocked,
+marker-gated `~/.hermes/state/gallery_cutover_finish.done`, log
+`...finish.log`, outcome `...finish.result`). It waits for the pass to exit, runs
+`rclone check --size-only --one-way` (must be 0 differences; re-runs the bounded
+pass up to 3 times if dirty), then deploys `deploy_media_gallery.yml`, asserts the
+guest remote is `gdrive:tg-harvester-v2` and ≥3 gallery ports listen, starts the
+media-ingest-01 collector + reconcile timer, disables the re-key timer and resets the
+failed unit.
+
+Gate 1 of `of_cutover_resume.sh` (gallery remote = `gdrive:tg-harvester-v2`) is
+therefore satisfied only after that deploy lands; nothing else in this file changes
+for the ingest-02 side — its post-cutover steps 1–3 still stand.
