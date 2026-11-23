@@ -53,7 +53,7 @@ stream() {
   tag=$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_')
   if ! on "$node" "rm -f /run/offsite.$tag.*; set -o pipefail; zfs send -c $ds | tee >(wc -c >/run/offsite.$tag.cnt) >(sha256sum >/run/offsite.$tag.sum)" \
         | rclone rcat "$REMOTE/$name.partial" --bwlimit "$BWLIMIT" --drive-chunk-size 128M; then
-    echo "pve-tanium-offsite: stream failed: $ds" >&2; rclone deletefile "$REMOTE/$name.partial" >/dev/null 2>&1 || true
+    echo "pve-tanium-offsite: stream failed: $ds" >&2; rclone deletefile "$REMOTE/$name.partial" --drive-use-trash=false >/dev/null 2>&1 || true
     return 1
   fi
   want=$(on "$node" "for i in 1 2 3 4 5 6 7 8 9 10; do [ -s /run/offsite.$tag.cnt ] && [ -s /run/offsite.$tag.sum ] && break; sleep 1; done; tr -d ' \n' </run/offsite.$tag.cnt")
@@ -61,7 +61,7 @@ stream() {
   got=$(rclone lsf --format s "$REMOTE/$name.partial" 2>/dev/null | head -1)
   if [ -z "$want" ] || [ -z "$sum" ] || [ "$got" != "$want" ]; then
     echo "pve-tanium-offsite: SIZE/CHECKSUM MISMATCH for $name: source sent '${want:-?}', Drive has '${got:-nothing}'" >&2
-    rclone deletefile "$REMOTE/$name.partial" >/dev/null 2>&1 || true
+    rclone deletefile "$REMOTE/$name.partial" --drive-use-trash=false >/dev/null 2>&1 || true
     return 1
   fi
   rclone moveto "$REMOTE/$name.partial" "$REMOTE/$name" || return 1
@@ -77,10 +77,10 @@ cleanup_orphans() {
   good=$(printf '%s\n' "$all" | sed -nE 's/^([0-9]+)_config_([0-9]{8}-[0-9]{4})\.conf$/\1_\2/p')
   while read -r f; do
     [ -n "$f" ] || continue
-    case "$f" in drill_*) continue;; *.partial) rclone deletefile "$REMOTE/$f" && echo "pve-tanium-offsite: removed partial $f"; continue;; esac
+    case "$f" in drill_*) continue;; *.partial) rclone deletefile "$REMOTE/$f" --drive-use-trash=false && echo "pve-tanium-offsite: removed partial $f"; continue;; esac
     st=$(printf '%s' "$f" | sed -nE 's/^([0-9]+)_.*_([0-9]{8}-[0-9]{4})\.(zfs|conf|txt)$/\1_\2/p')
     [ -n "$st" ] || continue
-    printf '%s\n' "$good" | grep -qx "$st" || { rclone deletefile "$REMOTE/$f" && echo "pve-tanium-offsite: removed orphan $f"; }
+    printf '%s\n' "$good" | grep -qx "$st" || { rclone deletefile "$REMOTE/$f" --drive-use-trash=false && echo "pve-tanium-offsite: removed orphan $f"; }
   done <<< "$all"
 }
 
@@ -102,8 +102,8 @@ if [ "$MODE" = drill ]; then
   Z="{{ pve_tanium_offsite_pool }}"
   SRC="$Z/dr-drill-src"; DST="$Z/dr-drill-dst"
   cleanup() { on "$DN" "zfs destroy -r $SRC" 2>/dev/null || true; zfs destroy -r "$DST" 2>/dev/null || true
-              rclone deletefile "$REMOTE/drill_$STAMP.zfs" >/dev/null 2>&1 || true
-              rclone deletefile "$REMOTE/drill_$STAMP.zfs.partial" >/dev/null 2>&1 || true; }
+              rclone deletefile "$REMOTE/drill_$STAMP.zfs" --drive-use-trash=false >/dev/null 2>&1 || true
+              rclone deletefile "$REMOTE/drill_$STAMP.zfs.partial" --drive-use-trash=false >/dev/null 2>&1 || true; }
   trap cleanup EXIT
   on "$DN" "zfs create -s -V 2G $SRC; sleep 1; dd if=/dev/urandom of=/dev/zvol/$SRC bs=1M count=1024 status=none; zfs snapshot $SRC@drill"
   out=$(stream "$DN" "$SRC@drill" "drill_$STAMP.zfs"); echo "uploaded from $DN: $out"
@@ -160,7 +160,7 @@ for vmid in $VMIDS; do
     rclone lsf "$REMOTE/" --files-only 2>/dev/null | sed -nE "s/^${vmid}_config_([0-9]{8}-[0-9]{4})\.conf$/\1/p" | sort -r \
       | tail -n +$((KEEP+1)) | while read -r old; do
           rclone lsf "$REMOTE/" --files-only | grep -E "^${vmid}_.*_${old}\.(zfs|conf|txt)$" | while read -r f; do
-            rclone deletefile "$REMOTE/$f" && echo "pve-tanium-offsite: pruned $f"; done
+            rclone deletefile "$REMOTE/$f" --drive-use-trash=false && echo "pve-tanium-offsite: pruned $f"; done
         done
     echo "pve-tanium-offsite: VM $vmid done, $((total/1073741824)) GiB in $(( $(date +%s) - t0 )) s"
   else

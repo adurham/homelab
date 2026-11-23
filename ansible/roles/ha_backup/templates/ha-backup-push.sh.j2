@@ -29,7 +29,7 @@ echo "ha-backup-push: fetched $new new, $have already present"
 
 rclone copy "$DEST" "vmbackup_crypt:{{ ha_backup_gdrive_subdir }}/" --transfers 2 --checkers 4 --stats-one-line 2>&1 | tail -2
 find "$DEST" -name '*.tar' -type f -mtime +"$KEEP" -delete
-rclone delete "vmbackup_crypt:{{ ha_backup_gdrive_subdir }}/" --min-age "${KEEP}d" --rmdirs >/dev/null 2>&1 || true
+rclone delete "vmbackup_crypt:{{ ha_backup_gdrive_subdir }}/" --min-age "${KEEP}d" --rmdirs --drive-use-trash=false >/dev/null 2>&1 || true
 echo "ha-backup-push: done $(date -Is) local=$(ls -1 "$DEST"/*.tar 2>/dev/null | wc -l) files"
 
 # Liveness for alerting: record that this run finished, so a dead timer or a

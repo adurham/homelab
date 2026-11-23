@@ -131,7 +131,7 @@ rclone lsf "$REMOTE/" --files-only 2>/dev/null \
       [ -n "$old" ] || continue
       [ "${KEY_OK[$k]:-0}" = 1 ] || continue
       if [ "$DRY" = 1 ]; then echo "pve-backup-push: WOULD prune $old"; continue; fi
-      rclone deletefile "$REMOTE/$old" >/dev/null 2>&1 \
+      rclone deletefile "$REMOTE/$old" --drive-use-trash=false >/dev/null 2>&1 \
         && echo "pve-backup-push: pruned $old"
     done
 echo "pve-backup-push: done $(date -Is) staged_now=$(find "$STAGE" -maxdepth 1 -type f | wc -l)"
