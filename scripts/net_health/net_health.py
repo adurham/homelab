@@ -295,11 +295,17 @@ def rate_and_pre(rt):
     return 24.0, 20.0
 
 
+def med_rssi(e):
+    """Median RSSI the capture heard for this transmitter; None when the record carried no radiotap RSSI."""
+    r = e.get("rssi") or []
+    return int(st.median(r)) if r else None
+
+
 def analyze_air(path, namer):
     blob = open(path, "rb").read()
     if len(blob) < 64:
         return {"error": "empty capture"}
-    per = defaultdict(lambda: {"f": 0, "r": 0, "air": 0.0})
+    per = defaultdict(lambda: {"f": 0, "r": 0, "air": 0.0, "rssi": []})
     node_mc = defaultdict(float)
     beacons = Counter()
     amp = set()
@@ -344,6 +350,8 @@ def analyze_air(path, namer):
         ta = norm_mac(":".join("%02x" % b for b in p[rl + 10:rl + 16]))
         e = per[ta]
         e["f"] += 1
+        if "rssi" in rt:
+            e["rssi"].append(rt["rssi"])
         e["air"] += air
         if ftype in (0, 2) and flags & 8:
             e["r"] += 1
@@ -357,11 +365,17 @@ def analyze_air(path, namer):
     top = []
     for m, e in sorted(per.items(), key=lambda kv: -kv[1]["air"])[:6]:
         top.append({"who": namer(m), "mac": m, "air_pct": round(100 * e["air"] / wall, 1), "frames": e["f"],
-                    "retry_pct": round(100.0 * e["r"] / max(e["f"], 1), 1)})
+                    "retry_pct": round(100.0 * e["r"] / max(e["f"], 1), 1), "rssi": med_rssi(e)})
     nodes_air = sum(e["air"] for m, e in per.items() if m in NODES)
     non_node = [x for x in per.items() if x[0] not in NODES]
-    offenders = [{"who": namer(m), "air_pct": round(100 * e["air"] / wall, 1), "frames": e["f"], "retry_pct": round(100.0 * e["r"] / max(e["f"], 1), 1)}
-                 for m, e in non_node if (e["air"] / wall > 0.08 or (e["air"] / wall > 0.03 and e["f"] >= 300 and e["r"] / e["f"] > 0.50))]
+    # A retry-rate finding needs the station heard at a usable level: from the basement sniffer a camera
+    # upstairs reads -90 dBm and we hear mostly its retransmissions, so 70-95 % "retries" is the vantage,
+    # not the link (owner's point, 2026-11-23). Air hogging is judged regardless of level.
+    offenders = [{"who": namer(m), "air_pct": round(100 * e["air"] / wall, 1), "frames": e["f"],
+                  "retry_pct": round(100.0 * e["r"] / max(e["f"], 1), 1), "rssi": med_rssi(e)}
+                 for m, e in non_node
+                 if (e["air"] / wall > 0.08 or (e["air"] / wall > 0.03 and e["f"] >= 300 and e["r"] / e["f"] > 0.50
+                                                and (med_rssi(e) is None or med_rssi(e) >= -70)))]
     return {"span_s": round(span), "records": nrec,
             "total_air_pct": round(100 * (sum(e["air"] for e in per.values()) + resp) / wall, 1),
             "nodes_air_pct": round(100 * nodes_air / wall, 1),
@@ -515,7 +529,11 @@ def render(r, full=False):
     if a and not a.get("error"):
         L.append("5GHz ch149 airtime %s%% (mesh nodes %s%%, node multicast %s%%, ACK/CTS %s%%); %d stations heard" % (
             a["total_air_pct"], a["nodes_air_pct"], a["nodes_mc_air_pct"], a["responses_pct"], a["stations_heard"]))
-        L.append("top airtime: " + "; ".join("%s %.0f%% (retry %.0f%%)" % (t["who"], t["air_pct"], t["retry_pct"]) for t in a["top"][:4]))
+        def _r(t):
+            if t.get("rssi") is not None and t["rssi"] < -75:
+                return "retries not meaningful at %d dBm" % t["rssi"]
+            return "retry %.0f%%" % t["retry_pct"]
+        L.append("top airtime: " + "; ".join("%s %.0f%% (%s)" % (t["who"], t["air_pct"], _r(t)) for t in a["top"][:4]))
     elif a:
         L.append("airtime: " + a.get("error", "?"))
     if mc and not mc.get("error"):
