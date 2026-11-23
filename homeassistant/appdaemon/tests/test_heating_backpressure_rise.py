@@ -67,6 +67,9 @@ class Fake(svc.SmartVentController):
         self._coil = coil
         self._heat_guard_level = None
         self._room_need = {}
+        self._room_occupied = {}
+        self._bp_clamped = False
+        self._scorecard = {}
         # Coil-feedback state the cooling path reads when a cycle is not heating.
         self._coil_emergency_latched = False
         self._coil_emergency_since = None
@@ -371,6 +374,75 @@ check("T9 an empty need map still caps closures at the budget",
 # =============================================================================
 check("T10 the heating occupancy weight beats the +2F floor bonus",
       svc.HEAT_OCC_NEED_BONUS > svc.UPSTAIRS_HEAT_RISE_BONUS)
+
+# =============================================================================
+# 11. Outcome scorecard: what the house actually did, independent of the passes.
+# =============================================================================
+class FakeScore(Fake):
+    """Fake whose room temps and occupancy are seeded directly."""
+
+    def __init__(self, temps, occ, **kw):
+        super().__init__(**kw)
+        self._temps_override = temps
+        self._room_occupied = occ
+
+    def _read_temp(self, entity):
+        return self._temps_override.get(entity)
+
+
+Z = svc.ZONES["upstairs"]["rooms"]
+D = svc.ZONES["downstairs"]["rooms"]
+gb1 = Z["Guest Bedroom 1"]["temp"]        # occupied, 4F behind
+gb2 = Z["Guest Bedroom 2"]["temp"]        # occupied, 1F behind
+kit = D["Kitchen"]["temp"]                # vacant, 6F behind
+
+_temps = {gb1: 60.0, gb2: 63.0, kit: 52.0}
+_occ = {("upstairs", "Guest Bedroom 1"): True,
+        ("upstairs", "Guest Bedroom 2"): True,
+        ("downstairs", "Kitchen"): False}
+
+ha = FakeScore(_temps, _occ, equipment="fan,auxHeat1", watts=388)
+ha._publish_scorecard("heating", 72.0, 64.0)
+state, attrs = ha.published[svc.SCORECARD_ENTITY]
+check("T11 occupancy-weighted error averages only the occupied rooms",
+      abs(attrs["occ_err_f"] - 2.5) < 1e-6 and state == "2.5")
+check("T11 rooms_behind counts occupied rooms past the deadband (4F is, 1F is not)",
+      attrs["rooms_behind"] == "1" and attrs["rooms_occupied_scored"] == "2")
+check("T11 worst vacant drift is the vacant room's own error",
+      abs(attrs["worst_vacant_drift_f"] - 12.0) < 1e-6)
+check("T11 spread is warmest minus coldest readable room",
+      abs(attrs["spread_f"] - 11.0) < 1e-6)
+check("T11 degree-hours accumulate at the error x cycle time",
+      abs(float(attrs["occ_degf_h_today"])
+          - round(2.5 * svc.CYCLE_INTERVAL / 3600.0, 2)) < 1e-6)
+
+ha._publish_scorecard("heating", 72.0, 64.0)
+state2, attrs2 = ha.published[svc.SCORECARD_ENTITY]
+check("T11 a second cycle doubles the degree-hour accumulator",
+      abs(float(attrs2["occ_degf_h_today"])
+          - round(2 * 2.5 * svc.CYCLE_INTERVAL / 3600.0, 2)) < 1e-6)
+
+ha._bp_clamped = True
+ha._publish_scorecard("heating", 72.0, 64.0)
+_, attrs3 = ha.published[svc.SCORECARD_ENTITY]
+check("T11 a cycle where the budget bound adds a minute to the cap counter",
+      abs(float(attrs3["cap_bound_min_today"]) - svc.CYCLE_INTERVAL / 60.0) < 1e-6)
+check("T11 the clamp flag is cleared after it is scored", ha._bp_clamped is False)
+
+from datetime import date as _date
+ha._scorecard = {"day": _date(2026, 11, 22), "occ_degf_h": 99.0, "cap_min": 99.0}
+ha._publish_scorecard("heating", 72.0, 64.0)
+_, attrs4 = ha.published[svc.SCORECARD_ENTITY]
+check("T11 a new local day resets the accumulators",
+      abs(float(attrs4["occ_degf_h_today"])
+          - round(2.5 * svc.CYCLE_INTERVAL / 3600.0, 2)) < 1e-6
+      and float(attrs4["cap_bound_min_today"]) == 0.0)
+
+ha = FakeScore(_temps, _occ, equipment="fan,auxHeat1", watts=105.0)
+ha._publish_scorecard("idle", 72.0, 64.0)
+state5, attrs5 = ha.published[svc.SCORECARD_ENTITY]
+check("T11 an idle cycle reports no error rather than a zero",
+      state5 == "unknown" and attrs5["occ_err_f"] is None)
 
 print(f"\n{sum(PASS)}/{len(PASS)} checks passed")
 sys.exit(0 if all(PASS) else 1)

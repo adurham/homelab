@@ -398,6 +398,11 @@ EQUIP_STATES = {
 # Published every cycle so the current form/tap/enclosure is visible (and so a
 # new state appearing in the house is caught rather than silently mis-handled).
 EQUIP_STATE_ENTITY = "sensor.smart_vent_equipment_state"
+# Outcome scorecard: what the house actually did this cycle, independent of any
+# of the passes' own opinions. Without it there is no way to tell whether the
+# controller beats leaving every vent open — the offline suites test logic, not
+# results. Accumulators reset at local midnight.
+SCORECARD_ENTITY = "sensor.smart_vent_scorecard"
 
 # ── Dynamic backpressure (coil-temperature feedback) ────────────────────────
 # A suction-line temp sensor (sensor.kitchen_water_temp_sensor, strapped to
@@ -1443,6 +1448,13 @@ class SmartVentController(hass.Hass):
         # the closure budget binds the air goes to the rooms that are behind
         # rather than to whichever room has the fewest vents.
         self._room_need = {}
+        # Per-room occupancy as the ladder finally decided it (after the PIR
+        # latch, activity veto and vacant-floor policy), for the scorecard.
+        self._room_occupied = {}
+        # Set by the backpressure pass when it had to reopen rooms, i.e. the
+        # closure budget actually bound this cycle.
+        self._bp_clamped = False
+        self._scorecard = {}
 
         # Run the control loop
         self.run_every(self.control_loop, "now+10", CYCLE_INTERVAL)
@@ -1479,6 +1491,9 @@ class SmartVentController(hass.Hass):
         self.log(f"  HEATING GUARD config: rise warn={HEAT_RISE_WARN_F}F "
                  f"emergency={HEAT_RISE_EMERGENCY_F}F, latched per call, "
                  f"high-fire cap={MAX_CLOSED_RATIO_HEATING_WARN:.0%}")
+        self.log(f"  SCORECARD: {SCORECARD_ENTITY} every cycle "
+                 f"(occ-weighted error, spread, vacant drift, cap minutes; "
+                 f"day boundary = local midnight)")
         self.log(f"  EQUIPMENT STATE table: {', '.join(sorted(EQUIP_STATES))} "
                  f"(top tap >= {BLOWER_HIGH_TAP_W:.0f}W, measured rows="
                  f"{', '.join(s for s, p in sorted(EQUIP_STATES.items()) if p['measured'])})")
@@ -1864,6 +1879,9 @@ class SmartVentController(hass.Hass):
             for vent in room.get("vents", []):
                 self._set_vent(vent, position)
 
+        # Record what the house actually did this cycle (outcome, not intent).
+        self._publish_scorecard(hvac_action, target_cool, target_heat)
+
     # ── Auto mode logic ───────────────────────────────────────────────────────
 
     def _auto_calculate(self, hvac_mode, hvac_action, target_cool, target_heat):
@@ -1882,6 +1900,7 @@ class SmartVentController(hass.Hass):
 
         room_positions = {}  # (zone_name, room_name) -> position
         self._room_need = {}  # (zone_name, room_name) -> need this cycle
+        self._room_occupied = {}  # (zone_name, room_name) -> bool this cycle
 
         # If HVAC is idle or fan-only, open everything for equalization.
         if hvac_action in ("idle", "fan", "off", None):
@@ -1972,8 +1991,10 @@ class SmartVentController(hass.Hass):
                     self.log(f"  {zone_name}/{room_name}: unknown action -> 100%")
                     continue
 
-                # Remember the score for the backpressure reopen ranking.
+                # Remember the score for the backpressure reopen ranking, and
+                # the occupancy the policy finally settled on, for the scorecard.
                 self._room_need[key] = need
+                self._room_occupied[key] = bool(is_occupied)
 
                 # Score -> position
                 # Unoccupied rooms near/below setpoint should close —
@@ -5609,6 +5630,78 @@ class SmartVentController(hass.Hass):
             },
         )
 
+    def _publish_scorecard(self, hvac_action, target_cool, target_heat):
+        """Publish what the house actually did this cycle, not what the passes think.
+
+        Occupancy-weighted error (how far behind the rooms people are in are),
+        the spread between the warmest and coldest room, the worst drift of an
+        unoccupied room, and how much of the day the closure budget was binding.
+        Without a number like this there is no way to tell whether the
+        controller beats leaving every vent open: the offline suites test logic,
+        never results. Accumulators reset at local midnight.
+        """
+        now = self.datetime()
+        # getattr: telemetry must never break the control loop, and a partially
+        # constructed instance (reload, test harness) has no card yet.
+        card = getattr(self, "_scorecard", None) or {}
+        if card.get("day") != now.date():
+            card = {"day": now.date(), "occ_degf_h": 0.0, "cap_min": 0.0}
+            self._scorecard = card
+
+        heating = hvac_action == "heating"
+        cooling = hvac_action == "cooling"
+        temps, occ_err, vac_err = [], [], []
+        for zn, zone in ZONES.items():
+            for rn, sensors in zone["rooms"].items():
+                key = (zn, rn)
+                t = self._read_temp(sensors.get("temp"))
+                if t is not None:
+                    temps.append(t)
+                if not (heating or cooling) or t is None:
+                    continue
+                target = target_heat if heating else target_cool
+                if target is None:
+                    continue
+                err = (target - t) if heating else (t - target)
+                state = self._room_occupied.get(key)
+                if state is False:
+                    vac_err.append(err)
+                elif state:
+                    occ_err.append(err)
+
+        occ_err_f = (sum(occ_err) / len(occ_err)) if occ_err else None
+        rooms_behind = sum(1 for e in occ_err if e > DEADBAND)
+        spread = (max(temps) - min(temps)) if len(temps) >= 2 else None
+        worst_vacant = max(vac_err) if vac_err else None
+
+        if occ_err_f is not None and occ_err_f > 0:
+            card["occ_degf_h"] += occ_err_f * (CYCLE_INTERVAL / 3600.0)
+        if getattr(self, "_bp_clamped", False):
+            card["cap_min"] += CYCLE_INTERVAL / 60.0
+
+        self.set_state(
+            SCORECARD_ENTITY,
+            state=(f"{occ_err_f:.1f}" if occ_err_f is not None else "unknown"),
+            attributes={
+                "friendly_name": "Smart Vent Scorecard",
+                "icon": "mdi:chart-line",
+                "action": hvac_action,
+                "occ_err_f": None if occ_err_f is None else round(occ_err_f, 2),
+                # Strings for the counters: AppDaemon drops falsy attributes,
+                # so a genuine zero would vanish from the card and read as
+                # "this was never measured".
+                "rooms_occupied_scored": str(len(occ_err)),
+                "rooms_behind": str(rooms_behind),
+                "spread_f": None if spread is None else round(spread, 1),
+                "worst_vacant_drift_f": (None if worst_vacant is None
+                                         else round(worst_vacant, 1)),
+                "occ_degf_h_today": f"{card['occ_degf_h']:.2f}",
+                "cap_bound_min_today": f"{card['cap_min']:.1f}",
+                "day": str(card["day"]),
+            },
+        )
+        self._bp_clamped = False
+
     def _room_temp_mean(self):
         """Mean of every readable room temp — the return-air proxy for the rise.
 
@@ -5758,6 +5851,7 @@ class SmartVentController(hass.Hass):
         closed_count = sum(n for _, n in closed_rooms) + offline
         if closed_count <= max_closed:
             return room_positions
+        self._bp_clamped = True
         self.log(f"Backpressure: {closed_count} vents would close "
                  f"({len(closed_rooms)} commanded, {offline} offline), "
                  f"max allowed {max_closed} ({label}). Opening rooms to 50%.")
@@ -5793,6 +5887,7 @@ class SmartVentController(hass.Hass):
         trumps redirection.
         """
         total_vents = len(_get_all_vents())
+        self._bp_clamped = False
 
         # Which form + tap is running decides the enclosure: gas low fire and
         # the heat pump share one blower tap but not one limit, and the high
