@@ -1454,6 +1454,9 @@ class SmartVentController(hass.Hass):
         # Set by the backpressure pass when it had to reopen rooms, i.e. the
         # closure budget actually bound this cycle.
         self._bp_clamped = False
+        # This cycle's closure budget (see _cycle_budget), computed before the
+        # passes so they can plan against the same limit the guard enforces.
+        self._budget = {}
         self._scorecard = {}
 
         # Run the control loop
@@ -1799,8 +1802,10 @@ class SmartVentController(hass.Hass):
         # comfortable rooms. Symmetric: helps hot rooms when cooling, cold rooms
         # when heating. Must run BEFORE backpressure so backpressure remains the
         # final safety net.
+        budget = self._cycle_budget(hvac_action)
         room_positions = self._apply_priority_rooms(
-            room_positions, hvac_action, eff_cool, eff_heat, mode
+            room_positions, hvac_action, eff_cool, eff_heat, mode,
+            max_closed=budget["max_closed_cmd"]
         )
 
         # Fan-assist redistribution: when the system is idle but a room is still
@@ -3037,7 +3042,8 @@ class SmartVentController(hass.Hass):
             self.log(f"zone-presence publish failed (non-fatal): {e}")
 
     def _apply_priority_rooms(self, room_positions, hvac_action,
-                              target_cool, target_heat=None, mode=None):
+                              target_cool, target_heat=None, mode=None,
+                              max_closed=None):
         """Redirect CFM toward ANY struggling room by throttling rooms that are
         already comfortable. Symmetric across heating and cooling.
 
@@ -3057,9 +3063,23 @@ class SmartVentController(hass.Hass):
         SKIPPED in Cool Upstairs / Cool Downstairs modes — those are explicit
         whole-house redirections and the priority pass would re-pin hot rooms
         in the closed zone back to 100% as beneficiaries, defeating the mode.
+
+        max_closed is the cycle's closure budget from _cycle_budget(). When it
+        is given, an ESCALATED throttle that would need more closed vents than
+        the budget has left falls back to the half-open throttle instead, so a
+        pass in the middle of the chain cannot spend airflow the equipment
+        guard has already accounted for. None = no budget (legacy callers).
         """
         if mode in ("Cool Upstairs", "Cool Downstairs"):
             return room_positions
+
+        closures_left = None
+        if max_closed is not None:
+            already_closed = sum(
+                len(ZONES[k[0]]["rooms"][k[1]].get("vents", []))
+                for k, p in room_positions.items() if p == 0
+            )
+            closures_left = max(0, max_closed - already_closed)
         # Bug fix (2026-09-02, "freezing Living Room/Kitchen" incident): snapshot
         # the room_positions this function was HANDED, before any mutation below.
         # This is _auto_calculate's own verdict for every room this cycle —
@@ -3352,7 +3372,16 @@ class SmartVentController(hass.Hass):
             for dkey, docc, dtemp in donors:
                 if throttled >= donor_budget:
                     break
-                room_positions[dkey] = donor_pos
+                pos_to_set = donor_pos
+                if pos_to_set == 0 and closures_left is not None:
+                    n_vents = len(ZONES[dkey[0]]["rooms"][dkey[1]].get("vents", []))
+                    if n_vents > closures_left:
+                        # Budget spent: a half-open donor still redirects some
+                        # air and costs the machine nothing.
+                        pos_to_set = PRIORITY_DONOR_POS
+                    else:
+                        closures_left -= n_vents
+                room_positions[dkey] = pos_to_set
                 throttled += 1
                 # Include zone-presence context so the live log makes the
                 # measured axis visible: contention for the donor's (vacant)
@@ -3368,7 +3397,8 @@ class SmartVentController(hass.Hass):
                             + ")")
                 self.log(f"  Priority {room_name} ({temp:.1f}F): throttling "
                          f"{dz}/{dkey[1]} ({dtemp:.1f}F, "
-                         f"{'occ' if docc else 'empty'}) -> {donor_pos}%{zctx}")
+                         f"{'occ' if docc else 'empty'}) -> {pos_to_set}%{zctx}"
+                         + (" (budget-limited)" if pos_to_set != donor_pos else ""))
 
             mode_tag = "heat" if heating else "cool"
             tag = [mode_tag]
@@ -5624,6 +5654,8 @@ class SmartVentController(hass.Hass):
                 "tap": "high" if info.get("high_tap") else "low",
                 "equipment": info.get("equipment"),
                 "closed_cap": params.get("cap"),
+                "closure_budget": (getattr(self, "_budget", {}) or {}).get(
+                    "max_closed_cmd"),
                 "rise_warn_f": params.get("rise_warn"),
                 "rise_emergency_f": params.get("rise_emergency"),
                 "measured": params.get("measured"),
@@ -5803,6 +5835,31 @@ class SmartVentController(hass.Hass):
         """(state_key, EQUIP_STATES row, info) for the current cycle."""
         state, info = self._equipment_state(hvac_action)
         return state, EQUIP_STATES.get(state, EQUIP_STATES["heat_unknown"]), info
+
+    def _cycle_budget(self, hvac_action):
+        """The closure budget for this cycle, computed ONCE before any pass runs.
+
+        Every pass that can close a vent plans against this number instead of
+        discovering the limit at the backpressure watchdog, so when the budget
+        binds the allocation reflects the need ranking rather than whichever
+        pass happened to run last. A vent that cannot be commanded is already
+        effectively closed, so it comes off the budget before anyone spends it.
+        """
+        state, params, _info = self._state_params(hvac_action)
+        total = len(_get_all_vents())
+        offline = self._offline_vent_count()
+        cap = params.get("cap", MAX_CLOSED_RATIO_HEATING_WARN)
+        budget = {
+            "state": state,
+            "cap": cap,
+            "total": total,
+            "offline": offline,
+            "max_closed_cmd": max(0, int(total * cap) - offline),
+            "rise_warn": params.get("rise_warn") or HEAT_RISE_WARN_F,
+            "rise_emergency": params.get("rise_emergency") or HEAT_RISE_EMERGENCY_F,
+        }
+        self._budget = budget
+        return budget
 
     def _heating_supply_max(self):
         """Max duct temp across open vents (heating supply-air proxy), or None."""

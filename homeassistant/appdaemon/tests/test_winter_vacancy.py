@@ -428,6 +428,34 @@ check("T2b sleeping Main Bedroom is not throttled as a donor",
       out[("downstairs", "Main Bedroom")] == 50
       and not any("throttling downstairs/Main Bedroom" in l for l in ha.logs))
 
+# The cycle's closure budget is computed BEFORE this pass and handed to it: an
+# escalated donor throttle may not spend airflow the equipment guard has
+# already accounted for. Built by hand so the donors really are still open
+# (the heating ladder closes satisfied rooms, leaving the pass nothing to
+# throttle, which is why this cannot be exercised through the ladder).
+ha = FakeHA()
+ha.set_house(True)
+ha.stamp_zone("upstairs", True)
+ha.stamp_zone("downstairs", True)
+ha.set_room("upstairs", "Guest Bedroom 1", 58.0, occ=True)   # 6F behind -> escalate
+ha.set_room("downstairs", "Kitchen", 65.0)
+ha.set_room("downstairs", "Living Room", 65.0)
+_base = {(zn, rn): 100 for zn, z in svc.ZONES.items() for rn in z["rooms"]}
+_base[("downstairs", "Kitchen")] = 50
+_base[("downstairs", "Living Room")] = 50
+_bene = ("upstairs", "Guest Bedroom 1")
+tight = ha._apply_priority_rooms(dict(_base), "heating", 72.0, 64.0, "Auto",
+                                 max_closed=0)
+loose = ha._apply_priority_rooms(dict(_base), "heating", 72.0, 64.0, "Auto",
+                                 max_closed=99)
+
+check("T2c the escalated beneficiary is pinned open either way",
+      tight[_bene] == 100 and loose[_bene] == 100)
+check("T2c a zero closure budget keeps throttled donors half-open",
+      tight[("downstairs", "Kitchen")] == 50)
+check("T2c a generous budget lets the escalation close donors",
+      loose[("downstairs", "Kitchen")] == 0)
+
 # =============================================================================
 # 3. Priority pass: vacant rooms never recruit donors; occupied-floor
 #    sleeping rooms do.
