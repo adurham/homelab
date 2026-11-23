@@ -46,7 +46,8 @@ WIRED = ("router .1", "Basement .63", "GameRoom .51", "MainBedroom .99", "AT&T g
 # The three indoor Nest cams report the SAME DHCP hostname ("nest-cam-indoor"), so the reports
 # name them by the AP they are proven to transmit to (receiver address on their uplink frames).
 STATIC_NAMES = {"b8:7b:d4:da:5e:17": "foyer-cam", "b8:7b:d4:e8:b2:bf": "basement-cam",
-                "3c:31:74:55:a4:2c": "catroom-cam", "1c:53:f9:34:4c:ce": "google-72",
+                "3c:31:74:55:a4:2c": "catroom-cam", "18:b4:30:e7:52:8e": "doorbell-cam",
+                "1c:53:f9:34:4c:ce": "backyard-cam", "3c:31:74:bf:75:b2": "driveway-cam",
                 "44:61:32:df:66:47": "ecobee", "ac:67:84:8c:8d:6f": "Kitchen Hub Max", "98:b6:e9:26:cf:f6": "Switch(.60)",
                 "94:83:c4:d7:ea:9e": "GL.iNet(.104)", "1a:78:57:3e:42:5c": "MacBook"}
 
