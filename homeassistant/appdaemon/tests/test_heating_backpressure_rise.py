@@ -1,18 +1,25 @@
-"""Offline test: heating backpressure fires on the duct-air RISE, not an
-absolute supply temperature.
+"""Offline test: the vent controller's airflow enclosure is per equipment state.
 
-Why this file exists (2026-11-23): the heating guard was written against
-125F/135F absolute supply thresholds, which the house never reaches — the first
-season the gas furnace actually ran, every aux call peaked at 103.2-103.6F
-supply against a 64F house, so both thresholds were dead code. The furnace's own
-manual states its limit as a RISE (Z9ET080C16: 25-55F at low fire, 40-70F at
-high fire), so the guard now measures rise over the room-temp mean. These checks
-pin the bands, the fallbacks, and the arithmetic.
+The house runs one blower in six states — cooling low/high, heat-pump heat
+low/high, gas low fire/high fire — and each has its own airflow and its own
+limit. This file pins:
+
+  * the resolver (form from the thermostat, tap from the air-handler watts),
+  * the per-state enclosure (closure cap + duct-air rise bands),
+  * the fail-safe rule that an unreadable input always resolves to the LOW tap,
+    and an unreadable equipment_status to the tightest heat budget,
+  * the latches, so opening a vent cannot release the guard mid-call.
+
+Numbers behind the measured rows (2026-11-23): gas low fire peaked at 103.2-
+103.6F supply against a 63.8-64.0F house = 39.5F rise on the LO HEAT tap
+(388 W); the heat pump peaked at 30.8F on the same Medium tap (415 W); the top
+tap is ~650 W. Furnace ratings: 25-55F rise at low fire, 40-70F at high fire
+(JCI tech guide Table 2, Z9ET080C16).
 """
 import os
 import sys
 import types
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ── Stub the appdaemon import chain ────────────────────────────────────────────
 ad = types.ModuleType("appdaemon")
@@ -48,33 +55,50 @@ def check(name, ok):
 
 
 class Fake(svc.SmartVentController):
-    """Controller with the two measured inputs replaced by seeded numbers."""
+    """Controller with the measured inputs replaced by seeded numbers."""
 
-    def __init__(self, supply, return_t, equipment=None):
+    def __init__(self, supply=None, return_t=66.0, equipment=None,
+                 watts=None, watts_age_s=0.0, coil=50.0):
         self._supply = supply
         self._return_t = return_t
         self._equipment = equipment
+        self._watts = watts
+        self._watts_age = watts_age_s
+        self._coil = coil
         self._heat_guard_level = None
         # Coil-feedback state the cooling path reads when a cycle is not heating.
         self._coil_emergency_latched = False
         self._coil_emergency_since = None
         self._coil_ratio_current = None
         self._coil_ratio_changed_at = None
-        self._cooling_started_at = None
+        self._cooling_started_at = NOW - timedelta(seconds=1200)
         self._coil_sensor_fail_count = 0
         self.logs = []
         self.published = {}
 
+    # --- HA shims -------------------------------------------------------------
     def log(self, msg, *a, **k):
         self.logs.append(msg)
 
     def datetime(self, aware=False):
         return NOW
 
+    def parse_datetime(self, stamp):
+        return datetime.fromisoformat(stamp)
+
     def get_state(self, entity, attribute=None):
         if entity == svc.EQUIPMENT_STATUS_ENTITY:
             return self._equipment
+        if entity == svc.EQUIPMENT_POWER_ENTITY:
+            if attribute == "last_updated":
+                return (NOW - timedelta(seconds=self._watts_age)).isoformat()
+            return None if self._watts is None else str(self._watts)
+        if entity == svc.COIL_TEMP_SENSOR:
+            return None if self._coil is None else str(self._coil)
         return None
+
+    def get_history(self, entity, **k):
+        return []          # coil "stuck" check sees no history -> not stuck
 
     def _heating_supply_max(self):
         return self._supply
@@ -95,135 +119,201 @@ def closed_vents(out):
                for (z, r), p in out.items() if p == 0)
 
 
-def total_vents():
-    return len(svc._get_all_vents())
-
-
-TOTAL = total_vents()
-CAP_40 = int(TOTAL * svc.MAX_CLOSED_RATIO_HEATING)
+TOTAL = len(svc._get_all_vents())
+CAP = {k: int(TOTAL * v["cap"]) for k, v in svc.EQUIP_STATES.items()}
 CAP_25 = int(TOTAL * svc.MAX_CLOSED_RATIO_HEATING_WARN)
-print(f"({TOTAL} vents: 40% cap = {CAP_40} closed, 25% cap = {CAP_25} closed)\n")
+print(f"({TOTAL} vents; caps: {CAP})\n")
 
 # =============================================================================
-# 1. The bands, using today's real numbers.
+# 1. The resolver: form from the thermostat, tap from the blower watts.
 # =============================================================================
-ha = Fake(supply=103.4, return_t=63.9)          # 39.5F rise — the hottest aux call
-out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T1 real gas-heat rise (39.5F) keeps the full 40% closure budget",
-      closed_vents(out) <= CAP_40 and closed_vents(out) > CAP_25)
+def resolve(action, equipment=None, watts=None, age=0.0):
+    return Fake(equipment=equipment, watts=watts, watts_age_s=age)._equipment_state(action)
 
-ha = Fake(supply=94.8, return_t=64.0)           # 30.8F rise — the heat pump call
-out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T1 real heat-pump rise (30.8F) keeps the full 40% closure budget",
-      closed_vents(out) <= CAP_40 and closed_vents(out) > CAP_25)
 
-ha = Fake(supply=112.0, return_t=66.0)          # 46.0F rise — airflow going short
+check("T1 cooling at 415W resolves to the low cooling tap",
+      resolve("cooling", watts=415)[0] == "cool_low")
+check("T1 cooling at 650W resolves to the high cooling tap",
+      resolve("cooling", watts=650)[0] == "cool_high")
+check("T1 heat pump at 415W resolves to the low heat-pump tap",
+      resolve("heating", "fan,heatPump", 415)[0] == "hp_heat_low")
+check("T1 heat pump at 650W resolves to the high heat-pump tap",
+      resolve("heating", "fan,heatPump", 650)[0] == "hp_heat_high")
+check("T1 gas stage 1 at 388W resolves to gas low fire",
+      resolve("heating", "fan,auxHeat1", 388)[0] == "gas_low")
+check("T1 gas stage 2 resolves to gas high fire even at LO HEAT watts",
+      resolve("heating", "fan,auxHeat2", 388)[0] == "gas_high")
+check("T1 heating with an unreadable equipment_status is heat_unknown",
+      resolve("heating", "unknown", 650)[0] == "heat_unknown")
+check("T1 idle resolves to idle",
+      resolve("idle", "unknown", 232)[0] == "idle")
+
+# =============================================================================
+# 2. Fail-safe: unreadable or stale inputs fall to the LOW (tighter) tap.
+# =============================================================================
+check("T2 no blower meter at all -> low tap, not high",
+      resolve("cooling", watts=None)[0] == "cool_low")
+check("T2 a stale blower reading (>10 min) is ignored -> low tap",
+      resolve("cooling", watts=650, age=svc.BLOWER_STALE_SEC + 60)[0] == "cool_low")
+check("T2 a fresh blower reading is trusted -> high tap",
+      resolve("cooling", watts=650, age=60)[0] == "cool_high")
+check("T2 gas at 650W with stage-1 only still counts as a high tap",
+      resolve("heating", "fan,auxHeat1", 650)[0] == "gas_high")
+
+# =============================================================================
+# 3. Heating: measured rows get their real rise bands and closure budget.
+# =============================================================================
+ha = Fake(supply=103.4, return_t=63.9, equipment="fan,auxHeat1", watts=388)
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T1 a 46F rise tightens the heating cap to 25%",
+check("T3 real gas low-fire rise (39.5F) keeps the 40% budget",
+      closed_vents(out) <= CAP["gas_low"] and closed_vents(out) > CAP_25)
+
+ha = Fake(supply=94.8, return_t=64.0, equipment="fan,heatPump", watts=415)
+out = ha._apply_backpressure_rooms(all_closed(), "heating")
+check("T3 real heat-pump rise (30.8F) keeps the 40% budget",
+      closed_vents(out) <= CAP["hp_heat_low"] and closed_vents(out) > CAP_25)
+
+ha = Fake(supply=112.0, return_t=66.0, equipment="fan,auxHeat1", watts=388)
+out = ha._apply_backpressure_rooms(all_closed(), "heating")
+check("T3 a 46F rise throttles to 25%",
       closed_vents(out) <= CAP_25)
 
-ha = Fake(supply=118.0, return_t=66.0)          # 52.0F rise — past the low-fire rating
+ha = Fake(supply=118.0, return_t=66.0, equipment="fan,auxHeat1", watts=388)
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T1 a 52F rise force-opens every closed vent",
+check("T3 a 52F rise force-opens every closed vent",
       closed_vents(out) == 0)
 
-# =============================================================================
-# 2. Rise, not absolute: the same duct temp must read differently at two house
-#    temperatures. This is the case the old 125F absolute threshold got wrong.
-# =============================================================================
-ha = Fake(supply=124.0, return_t=72.0)          # 52F rise, 124F absolute
+ha = Fake(supply=103.4, return_t=63.9, equipment="fan,auxHeat2", watts=388)
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T2 124F supply in a 72F house is 52F of rise — emergency fires where the "
-      "old 125F absolute threshold would have stayed at 40%",
+check("T3 gas high fire holds the 25% budget at a normal low-fire rise",
+      closed_vents(out) <= CAP["gas_high"])
+
+ha = Fake(supply=103.4, return_t=63.9, equipment="unknown", watts=650)
+out = ha._apply_backpressure_rooms(all_closed(), "heating")
+check("T3 an unknown heat form holds the 25% budget",
+      closed_vents(out) <= CAP["heat_unknown"])
+
+# =============================================================================
+# 4. Rise, not absolute supply temperature (the old 125F/135F pair was dead).
+# =============================================================================
+ha = Fake(supply=124.0, return_t=72.0, equipment="fan,auxHeat1", watts=388)
+out = ha._apply_backpressure_rooms(all_closed(), "heating")
+check("T4 124F supply in a 72F house is 52F of rise -> emergency",
       closed_vents(out) == 0)
 
-ha = Fake(supply=116.0, return_t=72.0)          # 44F rise, warm house
+ha = Fake(supply=116.0, return_t=72.0, equipment="fan,auxHeat1", watts=388)
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T2 116F supply in a 72F house is only 44F of rise — no throttle",
-      closed_vents(out) <= CAP_40 and closed_vents(out) > CAP_25)
+check("T4 116F supply in a 72F house is 44F of rise -> no throttle",
+      closed_vents(out) <= CAP["gas_low"] and closed_vents(out) > CAP_25)
 
 # =============================================================================
-# 3. Fallbacks fail conservative, never permissive.
+# 5. Fallbacks fail conservative, never permissive.
 # =============================================================================
-ha = Fake(supply=None, return_t=64.0)
+ha = Fake(supply=None, return_t=64.0, equipment="fan,heatPump", watts=415)
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T3 no open-vent supply sample caps closures at 25%",
+check("T5 no open-vent supply sample caps closures at 25%",
       closed_vents(out) <= CAP_25)
 
-ha = Fake(supply=120.0, return_t=None)
+ha = Fake(supply=120.0, return_t=None, equipment="fan,heatPump", watts=415)
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T3 no readable room temps (no rise) caps closures at 25%",
+check("T5 no readable room temps (no rise) caps closures at 25%",
       closed_vents(out) <= CAP_25)
 
 # =============================================================================
-# 4. Arithmetic + publication.
+# 6. Latches: opening vents drops the rise, so the guard must not flap.
 # =============================================================================
-ha = Fake(supply=103.4, return_t=63.9)
-supply, rise = ha._heating_rise()
-check("T4 _heating_rise returns the hottest vent minus the room mean",
-      supply == 103.4 and abs(rise - 39.5) < 1e-6)
-
-ha = Fake(supply=103.4, return_t=None)
-check("T4 _heating_rise reports (supply, None) with no return proxy",
-      ha._heating_rise() == (103.4, None))
-
-ha = Fake(supply=103.4, return_t=63.9)
-ha._publish_heating_supply()
-state, attrs = ha.published[svc.HEATING_SUPPLY_ENTITY]
-check("T4 the supply sensor publishes supply_max_f, return_proxy_f and rise_f",
-      state == "103.4"
-      and attrs.get("supply_max_f") == 103.4
-      and abs(attrs.get("return_proxy_f") - 63.9) < 1e-6
-      and abs(attrs.get("rise_f") - 39.5) < 1e-6)
-
-# =============================================================================
-# 5. Latching: opening vents drops the rise, so the guard must not release
-#    mid-call and let the vents close again.
-# =============================================================================
-ha = Fake(supply=112.0, return_t=66.0)          # 46F rise -> warn
+ha = Fake(supply=112.0, return_t=66.0, equipment="fan,heatPump", watts=415)
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T5 a 46F rise throttles to 25% and latches",
+check("T6 a 46F rise throttles to 25% and latches",
       closed_vents(out) <= CAP_25 and ha._heat_guard_level == "warn")
 
-ha._supply = 95.0                                # rise falls back to 29F mid-call
+ha._supply = 95.0
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T5 the latch holds after the rise falls back (no flap back to 40%)",
+check("T6 the latch holds after the rise falls back",
       closed_vents(out) <= CAP_25 and ha._heat_guard_level == "warn")
 
-out = ha._apply_backpressure_rooms(all_closed(), "idle")
-check("T5 a non-heating cycle clears the latch for the next call",
+ha._apply_backpressure_rooms(all_closed(), "idle")
+check("T6 a non-heating cycle clears the latch",
       ha._heat_guard_level is None)
 
 out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T5 the next heat call starts clean and gets the 40% budget back",
-      closed_vents(out) <= CAP_40 and closed_vents(out) > CAP_25)
+check("T6 the next heat call starts clean and gets its budget back",
+      closed_vents(out) <= CAP["hp_heat_low"] and closed_vents(out) > CAP_25)
 
 # =============================================================================
-# 6. Gas high fire: never observed here, so hold the tighter budget regardless
-#    of the measured rise.
+# 7. Cooling: the suction guard still governs, but the state caps what it may
+#    argue for. LO COOL is 1175 CFM on a 5-ton coil (235 CFM/ton) -> 60% max.
 # =============================================================================
-ha = Fake(supply=103.4, return_t=63.9, equipment="fan,auxHeat2")
-out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T6 gas high fire (auxHeat2) caps closures at 25% even at a normal rise",
-      closed_vents(out) <= CAP_25)
+ha = Fake(equipment=None, watts=415, coil=50.0)   # healthy coil, low tap
+out = ha._apply_backpressure_rooms(all_closed(), "cooling")
+check("T7 a healthy coil on the LOW cooling tap is held to 60% closed",
+      closed_vents(out) <= CAP["cool_low"])
 
-ha = Fake(supply=103.4, return_t=63.9, equipment="fan,auxHeat1")
-out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T6 gas low fire (auxHeat1) keeps the 40% budget",
-      closed_vents(out) <= CAP_40 and closed_vents(out) > CAP_25)
+ha = Fake(equipment=None, watts=650, coil=50.0)   # healthy coil, top tap
+out = ha._apply_backpressure_rooms(all_closed(), "cooling")
+check("T7 a healthy coil on the HIGH cooling tap may use the 80% ceiling",
+      closed_vents(out) <= CAP["cool_high"] and closed_vents(out) > CAP["cool_low"])
 
-ha = Fake(supply=103.4, return_t=63.9, equipment="unknown")
-out = ha._apply_backpressure_rooms(all_closed(), "heating")
-check("T6 an unknown equipment status falls through to the rise guard",
-      closed_vents(out) <= CAP_40 and closed_vents(out) > CAP_25)
+ha = Fake(equipment=None, watts=None, coil=None)  # no feedback at all
+out = ha._apply_backpressure_rooms(all_closed(), "cooling")
+check("T7 no coil feedback and no meter stays at the static 60%",
+      closed_vents(out) <= int(TOTAL * svc.MAX_CLOSED_RATIO))
+
+# An idle cycle must NOT inherit the unknown-heat 25% budget: manual modes
+# (Cool Upstairs/Downstairs) close vents between calls on purpose.
+ha = Fake(equipment="unknown", watts=232, coil=None)
+out = ha._apply_backpressure_rooms(all_closed(), "idle")
+check("T7 an idle cycle keeps the historical 60% static ceiling",
+      closed_vents(out) <= int(TOTAL * svc.MAX_CLOSED_RATIO)
+      and closed_vents(out) > CAP_25)
+
+ha = Fake(equipment="unknown", watts=232)
+ha._publish_equipment_state("idle")
+state, attrs = ha.published[svc.EQUIP_STATE_ENTITY]
+check("T7 the idle publish reports the static cap, not the heat budget",
+      state == "idle" and attrs.get("closed_cap") == svc.MAX_CLOSED_RATIO)
 
 # =============================================================================
-# 7. The retired absolute thresholds must not creep back.
+# 8. Arithmetic, publication, and the retired thresholds.
 # =============================================================================
-check("T7 the old absolute thresholds are gone (guard cannot regress silently)",
+ha = Fake(supply=103.4, return_t=63.9, equipment="fan,auxHeat1", watts=388)
+supply, rise = ha._heating_rise()
+check("T8 _heating_rise returns the hottest vent minus the room mean",
+      supply == 103.4 and abs(rise - 39.5) < 1e-6)
+
+check("T8 _heating_rise reports (supply, None) with no return proxy",
+      Fake(supply=103.4, return_t=None)._heating_rise() == (103.4, None))
+
+ha = Fake(supply=103.4, return_t=63.9, equipment="fan,auxHeat1", watts=388)
+ha._publish_heating_supply()
+state, attrs = ha.published[svc.HEATING_SUPPLY_ENTITY]
+check("T8 the supply sensor publishes supply_max_f, return_proxy_f and rise_f",
+      state == "103.4" and attrs.get("supply_max_f") == 103.4
+      and abs(attrs.get("return_proxy_f") - 63.9) < 1e-6
+      and abs(attrs.get("rise_f") - 39.5) < 1e-6)
+
+ha = Fake(supply=103.4, return_t=63.9, equipment="fan,auxHeat1", watts=388)
+ha._publish_equipment_state("heating")
+state, attrs = ha.published[svc.EQUIP_STATE_ENTITY]
+check("T8 the equipment-state sensor names the form, tap and enclosure",
+      state == "gas_low" and attrs.get("tap") == "low"
+      and attrs.get("blower_w") == 388.0
+      and attrs.get("closed_cap") == svc.EQUIP_STATES["gas_low"]["cap"]
+      and attrs.get("measured") is True)
+
+check("T8 the old absolute thresholds are gone",
       not hasattr(svc, "HEAT_SUPPLY_WARN_F")
       and not hasattr(svc, "HEAT_SUPPLY_EMERGENCY_F"))
-check("T7 the rise thresholds are ordered sensibly vs the manual's 55F low-fire band",
+_heat_states = {s: p for s, p in svc.EQUIP_STATES.items()
+                if s.startswith(("hp_heat", "gas", "heat_"))}
+check("T8 no unmeasured HEATING state is more permissive than a measured one",
+      all(p["cap"] <= max(v["cap"] for v in _heat_states.values() if v["measured"])
+          for s, p in _heat_states.items() if not p["measured"]))
+check("T8 the high cooling tap is the only state allowed more rope than its "
+      "low tap, and it stays under the hard ceiling (live coil feedback governs)",
+      svc.EQUIP_STATES["cool_high"]["cap"] > svc.EQUIP_STATES["cool_low"]["cap"]
+      and svc.EQUIP_STATES["cool_high"]["cap"] <= svc.MAX_CLOSED_RATIO_HARD_CEILING)
+check("T8 the rise bands are ordered and inside the manual's low-fire rating",
       svc.HEAT_RISE_WARN_F < svc.HEAT_RISE_EMERGENCY_F <= 55.0)
 
 print(f"\n{sum(PASS)}/{len(PASS)} checks passed")

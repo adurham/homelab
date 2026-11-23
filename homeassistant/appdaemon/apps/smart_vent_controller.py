@@ -338,6 +338,67 @@ MAX_CLOSED_RATIO_HEATING_WARN = 0.25
 HEAT_RISE_WARN_F = 45.0
 HEAT_RISE_EMERGENCY_F = 51.0
 
+# ── Equipment state: which form of the system is running, at which tap ───────
+# One blower serves three forms, and each form has its own airflow and its own
+# limit, so the enclosure has to be per-form rather than one global number:
+#
+#   form        call                       tap / wire            book CFM @0.5"
+#   cooling     Y1                         LO COOL  gray          1175
+#               Y/Y2                       HI COOL  black         1625
+#   heat pump   Y1                         LO COOL  gray          1175
+#               Y/Y2                       HI COOL  black         1625
+#   gas         W (low fire, 52 MBH)       LO HEAT  yellow        1075
+#               W (high fire, 80 MBH)      HI HEAT  blue          unmeasured
+#
+# The furnace cannot tell a cooling call from a heat-pump heating call — it
+# only sees Y1 / Y/Y2 — so the FORM comes from the thermostat's
+# equipment_status and the TAP comes from the air-handler circuit's watts. The
+# watts matter because the high tap can be driven by the outdoor unit's own
+# Y/Y2 output, which never appears in equipment_status at all (the ecobee's Y2
+# conductor is disconnected at both ends): 415 W is the Medium tap, ~650 W is
+# High, and 388 W is the gas LO HEAT tap.
+EQUIPMENT_POWER_ENTITY = "sensor.edgewater_road_power_minute_average_7"
+BLOWER_HIGH_TAP_W = 550.0     # >= this is the top tap (Medium ~415, High ~650)
+BLOWER_STALE_SEC = 600        # Vue quiet this long -> assume the low tap
+
+# Per-state enclosure. `cap` is the fraction of vents this form may close;
+# `rise_warn` / `rise_emergency` are the duct-air rise bands it may run at.
+# Rows marked measured=True are backed by real calls on this house; the rest
+# keep the tightest budget until the equipment is observed at that tap — a
+# blank row must never be more permissive than a measured one.
+EQUIP_STATES = {
+    # idle / fan-only: equalize, no heat, and no per-form enclosure to apply.
+    # The row exists so the cooling-side clamp keeps its historical static 60%
+    # ceiling when a manual mode (Cool Upstairs etc.) closes vents between calls
+    # — an idle cycle must not inherit the unknown-heat 25% budget.
+    "idle":         {"cap": MAX_CLOSED_RATIO, "rise_warn": None,
+                     "rise_emergency": None, "measured": True},
+    # cooling: the suction-line guard still governs below these ceilings.
+    # LO COOL is 1175 CFM on a 5-ton coil = 235 CFM/ton, well under the
+    # 350-400 the manual wants, so the low tap does NOT get the 80% ceiling.
+    "cool_low":     {"cap": 0.60, "rise_warn": None, "rise_emergency": None,
+                     "measured": True},
+    "cool_high":    {"cap": 0.80, "rise_warn": None, "rise_emergency": None,
+                     "measured": False},
+    # heat pump: measured 30.8F rise at the low tap; shares the gas low-fire band.
+    "hp_heat_low":  {"cap": 0.40, "rise_warn": HEAT_RISE_WARN_F,
+                     "rise_emergency": HEAT_RISE_EMERGENCY_F, "measured": True},
+    "hp_heat_high": {"cap": 0.40, "rise_warn": HEAT_RISE_WARN_F,
+                     "rise_emergency": HEAT_RISE_EMERGENCY_F, "measured": False},
+    # gas: low fire measured at 39.5F rise on the LO HEAT tap; high fire has
+    # never been observed, so it holds 25% closed and the wide provisional band.
+    "gas_low":      {"cap": 0.40, "rise_warn": HEAT_RISE_WARN_F,
+                     "rise_emergency": HEAT_RISE_EMERGENCY_F, "measured": True},
+    "gas_high":     {"cap": 0.25, "rise_warn": 58.0, "rise_emergency": 64.0,
+                     "measured": False},
+    # heating with an unreadable equipment_status: no form, no tap -> tightest.
+    "heat_unknown": {"cap": 0.25, "rise_warn": HEAT_RISE_WARN_F,
+                     "rise_emergency": HEAT_RISE_EMERGENCY_F, "measured": False},
+}
+# Published every cycle so the current form/tap/enclosure is visible (and so a
+# new state appearing in the house is caught rather than silently mis-handled).
+EQUIP_STATE_ENTITY = "sensor.smart_vent_equipment_state"
+
 # ── Dynamic backpressure (coil-temperature feedback) ────────────────────────
 # A suction-line temp sensor (sensor.kitchen_water_temp_sensor, strapped to
 # the vapor line at the indoor coil outlet) gives a direct proxy for coil
@@ -1404,6 +1465,9 @@ class SmartVentController(hass.Hass):
         self.log(f"  HEATING GUARD config: rise warn={HEAT_RISE_WARN_F}F "
                  f"emergency={HEAT_RISE_EMERGENCY_F}F, latched per call, "
                  f"high-fire cap={MAX_CLOSED_RATIO_HEATING_WARN:.0%}")
+        self.log(f"  EQUIPMENT STATE table: {', '.join(sorted(EQUIP_STATES))} "
+                 f"(top tap >= {BLOWER_HIGH_TAP_W:.0f}W, measured rows="
+                 f"{', '.join(s for s, p in sorted(EQUIP_STATES.items()) if p['measured'])})")
 
         # Stamp the heartbeat immediately so the sensor exists on startup and the
         # watchdog isn't tripped by the first-cycle delay after a restart.
@@ -1733,7 +1797,9 @@ class SmartVentController(hass.Hass):
                                                    heating=heating_now)
         self._publish_precool_sensor(precool_gate)
 
-        # Publish the heating supply-air max for backpressure calibration.
+        # Publish what the equipment is doing (form + tap + enclosure), then the
+        # heating supply-air max for backpressure calibration.
+        self._publish_equipment_state(hvac_action)
         if hvac_action == "heating":
             self._publish_heating_supply()
         elif self.get_state(HEATING_SUPPLY_ENTITY) != "unknown":
@@ -5489,6 +5555,33 @@ class SmartVentController(hass.Hass):
             },
         )
 
+    def _publish_equipment_state(self, hvac_action):
+        """Publish which form + tap the controller resolved this cycle.
+
+        One line of observability for a six-state machine: if the house ever
+        does something the table does not cover (a tap it has never been seen
+        at, a form the thermostat reports that was not expected), it shows up
+        here instead of silently changing how much air the vents close.
+        """
+        state, info = self._equipment_state(hvac_action)
+        params = EQUIP_STATES.get(state, EQUIP_STATES["heat_unknown"])
+        self.set_state(
+            EQUIP_STATE_ENTITY,
+            state=state,
+            attributes={
+                "friendly_name": "Smart Vent Equipment State",
+                "icon": "mdi:hvac",
+                "state_key": state,
+                "blower_w": info.get("blower_w"),
+                "tap": "high" if info.get("high_tap") else "low",
+                "equipment": info.get("equipment"),
+                "closed_cap": params.get("cap"),
+                "rise_warn_f": params.get("rise_warn"),
+                "rise_emergency_f": params.get("rise_emergency"),
+                "measured": params.get("measured"),
+            },
+        )
+
     def _room_temp_mean(self):
         """Mean of every readable room temp — the return-air proxy for the rise.
 
@@ -5516,23 +5609,80 @@ class SmartVentController(hass.Hass):
             return supply, None
         return supply, supply - return_t
 
-    def _gas_fire_stage(self):
-        """'high' if the thermostat reports aux stage 2, 'low' for stage 1, else None.
-
-        Only the thermostat's own request is visible here. The furnace board can
-        also step itself to high fire on a timer without the thermostat asking —
-        that case shows up as a rising supply temperature and is caught by the
-        rise guard instead, whose failure mode (force-open) is the safe one.
-        """
+    def _equipment_status_parts(self):
+        """Tokens from the thermostat's equipment_status, lowercased, or []."""
         state = self.get_state(EQUIPMENT_STATUS_ENTITY)
-        if not state or state in ("unknown", "unavailable"):
+        if not state or state in ("unknown", "unavailable", ""):
+            return []
+        return [p.strip().lower() for p in str(state).split(",") if p.strip()]
+
+    def _blower_watts(self):
+        """Air-handler circuit watts, or None when the meter is missing/stale."""
+        state = self.get_state(EQUIPMENT_POWER_ENTITY)
+        if state in (None, "unknown", "unavailable", ""):
             return None
-        parts = [p.strip() for p in str(state).split(",")]
-        if any(p.startswith("auxHeat") and p != "auxHeat1" for p in parts):
+        try:
+            watts = float(state)
+        except (ValueError, TypeError):
+            return None
+        stamp = self.get_state(EQUIPMENT_POWER_ENTITY, attribute="last_updated")
+        if stamp:
+            try:
+                age = (self.datetime() - self.parse_datetime(stamp)).total_seconds()
+            except Exception:
+                return watts  # unparseable stamp is not a reason to distrust the value
+            if age > BLOWER_STALE_SEC:
+                return None
+        return watts
+
+    def _gas_fire_stage(self):
+        """'high' if the thermostat asks for aux stage 2, 'low' for stage 1, else None."""
+        parts = self._equipment_status_parts()
+        if any(p.startswith("auxheat") and p != "auxheat1" for p in parts):
             return "high"
-        if any(p.startswith("auxHeat") for p in parts):
+        if any(p.startswith("auxheat") for p in parts):
             return "low"
         return None
+
+    def _equipment_state(self, hvac_action):
+        """Resolve which form of the system is running, and at which tap.
+
+        Returns (state_key, info) where state_key indexes EQUIP_STATES and info
+        carries the signals behind the decision (for the log and the published
+        sensor). The FORM comes from the thermostat (cooling / heat pump / gas),
+        the TAP from the air-handler watts — the high tap can be driven by the
+        outdoor unit's own Y/Y2 output, which equipment_status never shows.
+
+        Any unreadable input resolves to the LOW tap, which is the tighter
+        enclosure in every form, and an unreadable equipment_status resolves to
+        heat_unknown (no form known -> tightest heat budget).
+        """
+        parts = self._equipment_status_parts()
+        watts = self._blower_watts()
+        high_tap = watts is not None and watts >= BLOWER_HIGH_TAP_W
+        info = {
+            "blower_w": watts,
+            "high_tap": high_tap,
+            "equipment": ",".join(parts) if parts else "unknown",
+        }
+
+        if hvac_action == "cooling":
+            return ("cool_high" if high_tap else "cool_low"), info
+
+        if hvac_action == "heating":
+            if any(p.startswith("auxheat") for p in parts):
+                gas_high = high_tap or self._gas_fire_stage() == "high"
+                return ("gas_high" if gas_high else "gas_low"), info
+            if any(p.startswith("heatpump") for p in parts):
+                return ("hp_heat_high" if high_tap else "hp_heat_low"), info
+            return "heat_unknown", info
+
+        return "idle", info
+
+    def _state_params(self, hvac_action):
+        """(state_key, EQUIP_STATES row, info) for the current cycle."""
+        state, info = self._equipment_state(hvac_action)
+        return state, EQUIP_STATES.get(state, EQUIP_STATES["heat_unknown"]), info
 
     def _heating_supply_max(self):
         """Max duct temp across open vents (heating supply-air proxy), or None."""
@@ -5587,11 +5737,19 @@ class SmartVentController(hass.Hass):
         """
         total_vents = len(_get_all_vents())
 
+        # Which form + tap is running decides the enclosure: gas low fire and
+        # the heat pump share one blower tap but not one limit, and the high
+        # tap of any form has more airflow headroom than the low tap.
+        state, params, _info = self._state_params(hvac_action)
+        rise_warn = params.get("rise_warn") or HEAT_RISE_WARN_F
+        rise_emergency = params.get("rise_emergency") or HEAT_RISE_EMERGENCY_F
+        state_cap = params.get("cap", MAX_CLOSED_RATIO_HEATING_WARN)
+
         # Heating: no coil-freeze physics, but the furnace/heat pump needs
         # minimum airflow. Use the RISE of the hottest open-vent duct temp over
-        # the room-temp mean (return proxy): back off from 40% closed to 25%
-        # when the rise says the airflow is short, and force-open everything at
-        # the emergency rise. See the HEAT_RISE_* constants for the derivation.
+        # the room-temp mean (return proxy): back off from the state's budget to
+        # 25% closed when the rise says the airflow is short, and force-open
+        # everything at the emergency rise. See the HEAT_RISE_* constants.
         if hvac_action == "heating":
             supply_max, rise = self._heating_rise()
 
@@ -5599,44 +5757,34 @@ class SmartVentController(hass.Hass):
             # rise, so an unlatched guard would release, let the vents close
             # again, and flap for the whole call. Level only ever escalates
             # inside a call and resets when the heat call ends (below).
-            if rise is not None and rise >= HEAT_RISE_EMERGENCY_F:
+            if rise is not None and rise >= rise_emergency:
                 if self._heat_guard_level != "emergency":
-                    self.log(f"*** HEATING SUPPLY EMERGENCY: rise {rise:.1f}F "
-                             f"(supply {supply_max:.1f}F) >= "
-                             f"{HEAT_RISE_EMERGENCY_F}F — force-opening closed "
-                             f"vents for the rest of this call ***")
+                    self.log(f"*** HEATING SUPPLY EMERGENCY: {state} rise "
+                             f"{rise:.1f}F (supply {supply_max:.1f}F) >= "
+                             f"{rise_emergency}F — force-opening closed vents "
+                             f"for the rest of this call ***")
                 self._heat_guard_level = "emergency"
-            elif (rise is not None and rise >= HEAT_RISE_WARN_F
+            elif (rise is not None and rise >= rise_warn
                     and self._heat_guard_level != "emergency"):
                 if self._heat_guard_level != "warn":
                     self.log(f"Heating supply rise {rise:.1f}F (supply "
-                             f"{supply_max:.1f}F) >= {HEAT_RISE_WARN_F}F — "
+                             f"{supply_max:.1f}F, {state}) >= {rise_warn}F — "
                              f"throttling closures to 25% for this call")
                 self._heat_guard_level = "warn"
 
             if self._heat_guard_level == "emergency":
                 return self._open_closed_rooms_for_backpressure(
                     room_positions, 0,
-                    f"heating rise {rise:.1f}F emergency" if rise is not None
-                    else "heating rise emergency (latched)")
+                    f"heating {state} rise {rise:.1f}F emergency"
+                    if rise is not None
+                    else f"heating {state} emergency (latched)")
 
-            fire_stage = self._gas_fire_stage()
-            if fire_stage == "high":
-                # High fire has its own, wider rise rating and has never been
-                # observed here — hold the tighter closure budget until its real
-                # supply temperature has been measured.
-                max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING_WARN)
-                bp_label = "heating gas high fire (25%)"
-            elif self._heat_guard_level == "warn":
-                max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING_WARN)
-                bp_label = f"heating rise {rise:.1f}F (supply {supply_max:.1f}F)"
-            elif rise is None:
-                max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING_WARN)
-                bp_label = "heating no rise sample (25%)"
-            else:
-                max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING)
-                bp_label = (f"heating static {MAX_CLOSED_RATIO_HEATING:.0%} "
-                            f"(rise {rise:.1f}F)")
+            cap = state_cap
+            if self._heat_guard_level == "warn" or rise is None:
+                cap = min(cap, MAX_CLOSED_RATIO_HEATING_WARN)
+            max_closed = int(total_vents * cap)
+            rise_txt = f"rise {rise:.1f}F" if rise is not None else "no rise sample"
+            bp_label = f"heating {state} {cap:.0%} ({rise_txt})"
             return self._open_closed_rooms_for_backpressure(
                 room_positions, max_closed, bp_label)
 
@@ -5710,6 +5858,15 @@ class SmartVentController(hass.Hass):
             max_closed = int(total_vents * MAX_CLOSED_RATIO)
             new_ratio = MAX_CLOSED_RATIO
             bp_label = f"static {MAX_CLOSED_RATIO:.0%} ({coil_reason})"
+
+        # Per-state ceiling on closures. The coil guard can argue for the 80%
+        # hard ceiling, but only on the top cooling tap where the airflow is
+        # there to support it: LO COOL is 1175 CFM on a 5-ton coil (235
+        # CFM/ton, under the manual's 350-400), so it never gets more than 60%.
+        state_closed = int(total_vents * state_cap)
+        if max_closed > state_closed:
+            max_closed = state_closed
+            bp_label = f"{bp_label} -> {state} cap {state_cap:.0%}"
 
         return self._open_closed_rooms_for_backpressure(
             room_positions, max_closed, bp_label)
