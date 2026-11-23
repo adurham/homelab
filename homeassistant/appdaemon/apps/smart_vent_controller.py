@@ -403,6 +403,11 @@ EQUIP_STATE_ENTITY = "sensor.smart_vent_equipment_state"
 # controller beats leaving every vent open — the offline suites test logic, not
 # results. Accumulators reset at local midnight.
 SCORECARD_ENTITY = "sensor.smart_vent_scorecard"
+# The nudge gate's decision as its OWN numeric sensor. Attributes are not
+# scraped into the metrics store and the recorder only keeps days here, so a
+# week of shadow running has to live in a STATE value or there is nothing to
+# look at afterwards.
+NUDGE_SHADOW_ENTITY = "sensor.smart_vent_nudge_shadow"
 
 # ── Dynamic backpressure (coil-temperature feedback) ────────────────────────
 # A suction-line temp sensor (sensor.kitchen_water_temp_sensor, strapped to
@@ -1903,6 +1908,25 @@ class SmartVentController(hass.Hass):
 
         # Record what the house actually did this cycle (outcome, not intent).
         self._publish_scorecard(hvac_action, target_cool, target_heat)
+
+        # The nudge shadow is published by the nudge pass while the system is
+        # actually conditioning (that is the only time a nudge could matter);
+        # between calls, hold the series at 0 so a week of it is continuous
+        # rather than a scatter of last-call values.
+        if hvac_action not in ("heating", "cooling") \
+                and self.get_state(NUDGE_SHADOW_ENTITY) != "0":
+            self.set_state(
+                NUDGE_SHADOW_ENTITY,
+                state="0",
+                attributes={
+                    "friendly_name": "Smart Vent Nudge Shadow",
+                    "icon": "mdi:thermostat-auto",
+                    "gate_ok": "false",
+                    "state_ok": "false",
+                    "equip_state": "idle",
+                    "action": hvac_action,
+                },
+            )
 
     # ── Auto mode logic ───────────────────────────────────────────────────────
 
@@ -5155,6 +5179,21 @@ class SmartVentController(hass.Hass):
                                                "hp_heat_low", "hp_heat_high"),
             "state": _shadow_state,
         }
+        # Numeric state so the week of shadow data actually lands in the metrics
+        # store (attributes are not scraped, and the recorder only keeps days).
+        self.set_state(
+            NUDGE_SHADOW_ENTITY,
+            state=f"{shadow_excess:.2f}",
+            attributes={
+                "friendly_name": "Smart Vent Nudge Shadow",
+                "icon": "mdi:thermostat-auto",
+                "room": self._shadow_nudge["room"],
+                "gate_ok": str(bool(self._shadow_nudge["recirc_ok"])).lower(),
+                "state_ok": str(bool(self._shadow_nudge["state_allowed"])).lower(),
+                "equip_state": _shadow_state,
+                "action": hvac_action,
+            },
+        )
 
         # Comfort-driven source is OFF (see SETPOINT_NUDGE_COMFORT_ENABLED at the
         # constants block, 2026-11-18). Zeroing it here — after the loop, before
