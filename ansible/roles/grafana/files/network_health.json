@@ -16,7 +16,7 @@
     "to": "now"
   },
   "timezone": "browser",
-  "description": "Hourly Wi-Fi/LAN health check from the basement workstation (hermes cron job net_health.py -> node_exporter textfile netheal.prom). Collector: ~/.hermes/scripts/net_health.py. Process notes: docs/ecobee-lan-scan.md.",
+  "description": "Hourly health check: cabled probes run on the Home Assistant box (/config/scripts/net_wired.py), Wi-Fi capture on the basement workstation (net_health.py) -> node_exporter textfile netheal.prom. Collector: ~/.hermes/scripts/net_health.py. Process notes: docs/ecobee-lan-scan.md.",
   "panels": [
     {
       "id": 1,
@@ -294,7 +294,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Mesh nodes + gateway: ping avg (ms)",
-      "description": "From the wired basement workstation. Healthy nodes are well under 2 ms; a climb means the wired side (switch/cable/node) is hurting, not Wi-Fi.",
+      "description": "Measured on the HA Green (wired probes moved there 2026-11-23): its own reply path to the router is ~10 ms, the mesh nodes stay under 2 ms; a climb means the wired side (switch/cable/node), not Wi-Fi.",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"

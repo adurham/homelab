@@ -52,7 +52,7 @@ stat("Health check last ran", "time() - netheal_last_run_timestamp_seconds", 12,
 
 # ---- wired side
 ts("Mesh nodes + gateway: ping avg (ms)", [('netheal_ping_avg_ms{target=~"router .1|Basement .63|GameRoom .51|MainBedroom .99|AT&T gw"}', "{{target}}")],
-   0, 4, unit="ms", desc="From the wired basement workstation. Healthy nodes are well under 2 ms; a climb means the wired side (switch/cable/node) is hurting, not Wi-Fi.")
+   0, 4, unit="ms", desc="Measured on the HA Green (wired probes moved there 2026-11-23): its own reply path to the router is ~10 ms, the mesh nodes stay under 2 ms; a climb means the wired side (switch/cable/node), not Wi-Fi.")
 ts("Packet loss (%) to every target", [("netheal_ping_loss_percent", "{{target}}")], 12, 4, unit="percent", min_=0,
    desc="20 pings each, every hour. Anything above 0 on a wired target is worth a look.")
 
@@ -76,7 +76,7 @@ ts("Router uptime (hours) / DHCP offers", [("netheal_router_uptime_seconds / 360
 dash = {
     "uid": "network-health", "title": "Network & Wi-Fi Health", "tags": ["network", "wifi", "homelab"], "schemaVersion": 39, "version": 1,
     "editable": True, "graphTooltip": 1, "refresh": "5m", "time": {"from": "now-24h", "to": "now"}, "timezone": "browser",
-    "description": "Hourly Wi-Fi/LAN health check from the basement workstation (hermes cron job net_health.py -> node_exporter textfile netheal.prom). "
+    "description": "Hourly health check: cabled probes run on the Home Assistant box (/config/scripts/net_wired.py), Wi-Fi capture on the basement workstation (net_health.py) -> node_exporter textfile netheal.prom. "
                    "Collector: ~/.hermes/scripts/net_health.py. Process notes: docs/ecobee-lan-scan.md.",
     "panels": panels, "templating": {"list": []}, "annotations": {"list": []}, "links": [],
 }

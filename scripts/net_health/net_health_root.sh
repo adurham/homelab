@@ -1,20 +1,16 @@
 #!/bin/bash
-# Runs as root inside the privileged host chroot (see net_health.py). Captures, in parallel, for $2 seconds:
-#   1. all Ethernet multicast/broadcast on the wired NIC (who is flooding the LAN)
-#   2. 5 GHz ch149/80 MHz in monitor mode on the idle AX210 (who uses the air)
-# then one real DHCP DISCOVER (offer count). Always restores the managed wlp2s0.
+# Runs as root inside the privileged host chroot (see net_health.py).
+# Wi-Fi ONLY (owner's rule 2026-11-23): the wired multicast census and the DHCP DISCOVER now run
+# on the Home Assistant box (/config/scripts/net_wired.py). What is left here is the 5 GHz
+# ch149/80 MHz monitor capture on the idle AX210; the managed wlp2s0 is always put back.
 OUT="${1:?outdir}"
 DUR="${2:-45}"
 mkdir -p "$OUT"
-rm -f "$OUT"/mc.pcap "$OUT"/air.pcap "$OUT"/dhcp.txt "$OUT"/root.log
+rm -f "$OUT"/air.pcap "$OUT"/root.log
 exec >"$OUT/root.log" 2>&1
 echo "start $(date +%T) dur=$DUR"
 PHY=$(ls /sys/class/ieee80211 2>/dev/null | head -1)
-NIC=$(ip -o -4 route show default | awk '{print $5; exit}')
-echo "phy=$PHY nic=$NIC"
-
-timeout "$DUR" tcpdump -i "$NIC" -n -s 64 -w "$OUT/mc.pcap" 'ether multicast' >/dev/null 2>&1 &
-MCPID=$!
+echo "phy=$PHY"
 
 ok=0
 if [ -n "$PHY" ]; then
@@ -39,13 +35,11 @@ else
   echo "TUNE_FAILED"
   sleep "$DUR"
 fi
-wait "$MCPID" 2>/dev/null
 
 ip link set mon0 down 2>/dev/null
 iw dev mon0 del 2>/dev/null
 [ -n "$PHY" ] && iw phy "$PHY" interface add wlp2s0 type managed 2>&1
 ip link set wlp2s0 up 2>&1
 
-timeout 25 nmap --script broadcast-dhcp-discover -e "$NIC" >"$OUT/dhcp.txt" 2>&1
 echo "done $(date +%T)"
 chown -R adam.durham:adam.durham "$OUT"

@@ -127,3 +127,28 @@
       - wan_up
       - busy
       - error
+
+
+# ---------------------------------------------------------------------------
+# Wired half of the network health check. Owner's rule (2026-11-23): every
+# physically-cabled measurement runs on the HA box; the workstation may only
+# measure Wi-Fi. /config/scripts/net_wired.py (python3, stdlib only) does ICMP
+# loss/latency to the mesh nodes, AT&T gateway, both resolvers and the WAN, DNS
+# query time, the Nest router status API, one real DHCP DISCOVER (offer count)
+# and a 45 s wired multicast/broadcast census. State = DHCP offers (-1 = failed).
+# The hourly Wi-Fi job on amd-workstation reads this sensor and merges the two.
+- sensor:
+    name: "Network health wired"
+    unique_id: network_health_wired
+    command: "python3 /config/scripts/net_wired.py"
+    scan_interval: 3600
+    command_timeout: 240
+    value_template: "{{ value_json.dhcp.offers if value_json.dhcp.offers is not none else -1 }}"
+    unit_of_measurement: "offers"
+    state_class: measurement
+    json_attributes:
+      - ping
+      - dns_ms
+      - router
+      - dhcp
+      - mc

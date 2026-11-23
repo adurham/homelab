@@ -2,17 +2,17 @@
 """Hourly Wi-Fi / LAN health check for the house (no LLM). Scheduled by HOME ASSISTANT (sensor.network_health runs
 `ssh ... run` -> `--json` below); see homelab/scripts/net_health/README.md. `--verbose` is the manual human-readable run.
 
-Every run takes ~75 s and measures, from the wired basement workstation:
-  * ping loss / latency to the 4 mesh nodes, the AT&T gateway, WAN, both DNS servers; DNS query time
-  * router uptime + mesh channel (reboot / channel-change detection), per-BSSID channel of every `4D4C` radio
-  * Ethernet multicast/broadcast census (top sources, ARP share)  -> finds floods like the ecobee's
-  * 5 GHz ch149/80 MHz monitor capture on the idle AX210 -> decoded airtime %, top transmitters, retries,
-    mesh-node multicast airtime
-  * one real DHCP DISCOVER (offer count)
-  * the WAN speed test Home Assistant already runs (Ookla via the HA REST API), never a Mac-side probe
+Measurements are split by the owner's rule (2026-11-23): Home Assistant owns everything that is
+physically cabled, the workstation is allowed to measure Wi-Fi only.
+  * HA (`/config/scripts/net_wired.py`, sensor.network_health_wired): ping loss / latency to the 4 mesh
+    nodes, AT&T gateway, WAN and both DNS servers; DNS query time; router uptime + mesh channel; one real
+    DHCP DISCOVER (offer count); 45 s wired multicast/broadcast census (top sources, ARP share)
+  * workstation (~50 s): per-BSSID channel of every `4D4C` radio, and the 5 GHz ch149/80 MHz monitor
+    capture on the idle AX210 -> decoded airtime %, top transmitters, retries, mesh-node multicast airtime
+  * the WAN speed test Home Assistant already runs (Ookla via the HA REST API) is only read back
 Appends one JSON line to ~/.hermes/cache/net-health/hourly.jsonl. Prints (so cron delivers) ONLY when the set of
 flags changes, i.e. new problem / cleared problem; silent when nothing changed. `--verbose` always prints.
-`--parse-only <air.pcap> <mc.pcap>` re-runs the analysis on existing captures.
+`--parse-only <air.pcap>` re-runs the airtime analysis on an existing capture.
 """
 import concurrent.futures as cf
 import datetime as dt
@@ -40,11 +40,8 @@ NODES = {  # 5 GHz BSSID -> name
     "bc:df:58:be:4f:91": "MainBedroom pt",
     "bc:df:58:be:4d:1b": "GameRoom pt",
 }
-PING_TARGETS = {
-    "router .1": "192.168.86.1", "Basement .63": "192.168.86.63", "GameRoom .51": "192.168.86.51",
-    "MainBedroom .99": "192.168.86.99", "AT&T gw": "192.168.1.254", "WAN 1.1.1.1": "1.1.1.1",
-    "DNS .4": "192.168.86.4", "DNS .5": "192.168.86.5",
-}
+SLOW_MS = {"router .1": 25, "AT&T gw": 60}
+
 WIRED = ("router .1", "Basement .63", "GameRoom .51", "MainBedroom .99", "AT&T gw", "DNS .4", "DNS .5")
 STATIC_NAMES = {"44:61:32:df:66:47": "ecobee", "ac:67:84:8c:8d:6f": "Kitchen Display", "98:b6:e9:26:cf:f6": "Switch(.60)",
                 "94:83:c4:d7:ea:9e": "GL.iNet(.104)", "1a:78:57:3e:42:5c": "MacBook"}
@@ -108,29 +105,37 @@ class Namer:
 
 
 # ---------------------------------------------------------------- active probes
-def ping_stats(host, count=20):
-    out = sh(["ping", "-c", str(count), "-i", "0.2", "-W", "1", host], timeout=40)
-    m = re.search(r"(\d+) packets transmitted, (\d+) received", out)
-    r = re.search(r"= ([\d.]+)/([\d.]+)/([\d.]+)/", out)
-    if not m:
-        return {"loss": 100.0, "avg": None, "max": None}
-    loss = 100.0 * (int(m.group(1)) - int(m.group(2))) / max(int(m.group(1)), 1)
-    return {"loss": round(loss, 1), "avg": float(r.group(2)) if r else None, "max": float(r.group(3)) if r else None}
+def ha_api(path):
+    """Read one HA REST endpoint with the token in ~/.hermes/.env (same source ha_ookla uses)."""
+    env = {}
+    for ln in open(HOME + "/.hermes/.env"):
+        if "=" in ln and not ln.startswith("#"):
+            k, v = ln.split("=", 1)
+            env[k.strip()] = v.strip().strip('"').strip("'")
+    rq = urllib.request.Request(env["HASS_URL"].rstrip("/") + path, headers={"Authorization": "Bearer " + env["HASS_TOKEN"]})
+    return json.load(urllib.request.urlopen(rq, timeout=15))
 
 
-def dns_ms(server):
-    out = sh(["dig", "+tries=1", "+time=2", "@" + server, "nh%d.example.com" % int(time.time() * 1000 % 100000)], timeout=10)
-    m = re.search(r"Query time: (\d+) msec", out)
-    return int(m.group(1)) if m else None
-
-
-def router_status():
+def ha_wired():
+    """Everything cabled is measured on the HA box; this only reads the result back."""
     try:
-        d = json.load(urllib.request.urlopen("http://192.168.86.1/api/v1/status", timeout=5))
-        return {"uptime": d.get("system", {}).get("uptime"), "mesh_channel": d.get("meshInfo", {}).get("mesh-channel"),
-                "wan_online": d.get("wan", {}).get("online")}
+        d = ha_api("/api/states/sensor.network_health_wired")
+        a = d.get("attributes", {})
+        age = (time.time() - dt.datetime.fromisoformat(d["last_updated"]).timestamp()) / 60
+        return {"ping": a.get("ping") or {}, "dns_ms": a.get("dns_ms") or {}, "router": a.get("router") or {},
+                "dhcp": a.get("dhcp") or {}, "mc": a.get("mc") or {}, "age_min": round(age)}
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e)[:60]}
+        return {"error": str(e)[:60], "ping": {}, "dns_ms": {}, "router": {}, "dhcp": {}, "mc": {}, "age_min": None}
+
+
+def name_mc(mc, namer):
+    """HA's census reports source MACs; name them here where the Kea reservations are."""
+    out = {"span_s": mc.get("span_s"), "total_pps": mc.get("total_pps"), "arp_share": mc.get("arp_share"), "top": []}
+    if mc.get("error"):
+        return {"error": mc["error"]}
+    for t in mc.get("top", []):
+        out["top"].append({"who": namer(t["mac"]), "mac": t["mac"], "pps": t["pps"]})
+    return out
 
 
 def node_channels():
@@ -361,41 +366,13 @@ def analyze_air(path, namer):
             "stations_heard": sum(1 for _, e in non_node if e["f"] >= 20)}
 
 
-def analyze_mc(path, namer):
-    blob = open(path, "rb").read()
-    if len(blob) < 64:
-        return {"error": "empty capture"}
-    endian = "<" if struct.unpack("<I", blob[:4])[0] in (0xA1B2C3D4, 0xA1B23C4D) else ">"
-    src, arp, tot = Counter(), 0, 0
-    t0 = t1 = None
-    off = 24
-    while off + 16 <= len(blob):
-        s, u, incl, orig = struct.unpack(endian + "IIII", blob[off:off + 16])
-        off += 16
-        p = blob[off:off + incl]
-        off += incl
-        if len(p) < 14:
-            continue
-        ts = s + u / 1e6
-        t0 = ts if t0 is None else t0
-        t1 = ts
-        tot += 1
-        src[":".join("%02x" % b for b in p[6:12])] += 1
-        if struct.unpack("!H", p[12:14])[0] == 0x0806:
-            arp += 1
-    span = max((t1 or 0) - (t0 or 0), 1.0)
-    return {"total_pps": round(tot / span, 1), "arp_share": round(100.0 * arp / max(tot, 1)),
-            "top": [{"who": namer(m), "mac": m, "pps": round(c / span, 1)} for m, c in src.most_common(5)]}
-
-
-# ---------------------------------------------------------------- flags
 def make_flags(r, prev):
     f = []
     for name in WIRED:
         p = r["ping"].get(name, {})
         if p.get("loss", 0) >= 2:
             f.append("%s ping loss %.0f%%" % (name, p["loss"]))
-        elif p.get("avg") is not None and p["avg"] > (60 if name == "AT&T gw" else 8):
+        elif p.get("avg") is not None and p["avg"] > SLOW_MS.get(name, 8):
             f.append("%s slow: %.1f ms avg" % (name, p["avg"]))
     w = r["ping"].get("WAN 1.1.1.1", {})
     if w.get("loss", 0) >= 2:
@@ -419,6 +396,10 @@ def make_flags(r, prev):
         moved = [k for k in ch if prev["node_channels"].get(k) not in (None, ch[k])]
         if moved:
             f.append("radio channel changed: " + ", ".join("%s %s->%s" % (k[-8:], prev["node_channels"][k], ch[k]) for k in moved[:3]))
+    if r.get("wired_age_min") is None:
+        f.append("HA wired sensor unreadable" + (": " + r["wired_error"] if r.get("wired_error") else ""))
+    elif r["wired_age_min"] > 90:
+        f.append("HA wired sensor is stale (%d min old)" % r["wired_age_min"])
     mc = r.get("mc", {})
     if mc.get("total_pps", 0) > 60:
         f.append("LAN multicast/broadcast high: %s/s" % mc["total_pps"])
@@ -470,30 +451,28 @@ def collect(parse_only=None):
     namer = Namer()
     r = {"ts": int(time.time()), "when": time.strftime("%a %H:%M")}
     if parse_only:
-        air_pcap, mc_pcap = parse_only
-        r.update(ping={}, dns_ms={}, router={}, node_channels={}, dhcp_offers=None)
+        air_pcap = parse_only[0]
+        r.update(ping={}, dns_ms={}, router={}, node_channels={}, dhcp_offers=None, mc={})
     else:
         r["node_channels"] = node_channels()
-        r["router"] = router_status()
+        wired = ha_wired()
+        r["wired_age_min"] = wired.get("age_min")
+        r["ping"] = wired.get("ping") or {}
+        r["dns_ms"] = wired.get("dns_ms") or {}
+        r["router"] = wired.get("router") or {}
+        r["dhcp_offers"] = (wired.get("dhcp") or {}).get("offers")
+        r["mc"] = name_mc(wired.get("mc") or {}, namer)
+        if wired.get("error"):
+            r["wired_error"] = wired["error"]
         os.makedirs(RUN, exist_ok=True)
         cmd = ["/usr/bin/docker", "run", "--rm", "--privileged", "--pid=host", "--network=host", "-v", "/:/host", "debian:12",
                "chroot", "/host", "/bin/bash", ROOT_SH, RUN, str(CAP_SECONDS)]
         root = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        with cf.ThreadPoolExecutor(8) as ex:
-            pf = {k: ex.submit(ping_stats, h) for k, h in PING_TARGETS.items()}
-            df = {k: ex.submit(dns_ms, PING_TARGETS[k]) for k in ("DNS .4", "DNS .5")}
-            r["ping"] = {k: v.result() for k, v in pf.items()}
-            r["dns_ms"] = {k: v.result() for k, v in df.items()}
         try:
             root.wait(timeout=CAP_SECONDS + 90)
         except subprocess.TimeoutExpired:
             root.kill()
-        air_pcap, mc_pcap = RUN + "/air.pcap", RUN + "/mc.pcap"
-        try:
-            r["dhcp_offers"] = open(RUN + "/dhcp.txt").read().count("Server Identifier")
-        except Exception:  # noqa: BLE001
-            r["dhcp_offers"] = None
-        # the WAN speed test runs AFTER the capture so its traffic is not in the airtime/multicast census
+        air_pcap = RUN + "/air.pcap"
         r["wan"] = ha_ookla()
     try:
         r["air"] = analyze_air(air_pcap, namer)
@@ -501,10 +480,6 @@ def collect(parse_only=None):
         r["air"] = {"error": "parse %s" % str(e)[:50]}
     if os.path.exists(RUN + "/root.log") and "TUNE_FAILED" in open(RUN + "/root.log").read():
         r["air"] = {"error": "monitor interface would not tune to ch149"}
-    try:
-        r["mc"] = analyze_mc(mc_pcap, namer)
-    except Exception as e:  # noqa: BLE001
-        r["mc"] = {"error": "parse %s" % str(e)[:50]}
     flags = make_flags(r, prev)
     nd, macs = new_devices(prev, namer)
     r["new_devices"] = [namer(m) for m in nd]
