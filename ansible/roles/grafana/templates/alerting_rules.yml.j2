@@ -5445,6 +5445,116 @@ groups:
     labels:
       severity: warning
     isPaused: false
+  - uid: gdrive_free_low
+    title: Google Drive running out of quota (<150 GiB free)
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: 'gdrive_space_bytes{kind="free"} < bool 161061273600'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 30m
+    annotations:
+      summary: Google Drive has less than 150 GiB free
+      description: "gdrive_space_bytes{kind=\"free\"} is under 150 GiB (161061273600 B). The account holds the off-site VM backups (vm-backup-v2), the media gallery (tg-harvester-v2) and Gmail; a full quota stops uploads AND Gmail delivery. Reported hourly by media-gallery-drive-space.timer on CT 115 from `rclone about gdrive:`. Reclaim, cheapest first: purge a superseded backup tree (always with --drive-use-trash=false -- a bare delete/purge only fills Trash, which still counts against the quota), prune old daily snapshots, and the old gallery tree LAST after its re-key cutover is verified."
+    labels:
+      severity: warning
+    isPaused: false
+  - uid: gdrive_space_stale
+    title: Google Drive quota reporter has stopped reporting
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: victoriametrics
+      model:
+        datasource:
+          type: prometheus
+          uid: victoriametrics
+        editorMode: code
+        expr: '(time() - gdrive_space_last_run_timestamp_seconds > bool 7200) or absent_over_time(gdrive_space_last_run_timestamp_seconds[6h])'
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        range: false
+        refId: A
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            type: last
+            params: []
+          type: query
+        datasource:
+          name: Expression
+          type: __expr__
+          uid: __expr__
+        expression: A
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: C
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 30m
+    annotations:
+      summary: The hourly Google Drive quota reporter is not reporting
+      description: "gdrive_space_last_run_timestamp_seconds is older than 2 h or missing, so gdrive_free_low is blind. media-gallery-drive-space.timer on CT 115 (script /opt/media-gallery/drive_space_report.sh) pushes it from `rclone about gdrive:`. Check `systemctl status media-gallery-drive-space.timer`, then run the service by hand and look for an expired OAuth token or 172.16.0.30:8428 being unreachable."
+    labels:
+      severity: warning
+    isPaused: false
   - uid: netheal_collector_stale
     title: Network health check has stopped reporting
     condition: C
@@ -5607,61 +5717,6 @@ groups:
     annotations:
       summary: "{{ '{{' }} $labels.who }} is sending more than 20 multicast/broadcast frames per second"
       description: "The hourly 45 s wired census saw {{ '{{' }} $labels.who }} above 20 frames per second. Every Nest node re-sends each of these over the air at the slowest speed, so a flood eats Wi-Fi airtime for the whole house. Normal here: Home Assistant about 7-11 per second, everything else under 3. History: the ecobee thermostat sent 60-95 per second until it was set to the manual 192.168.86.6/29 address on 2026-11-19 (docs/ecobee-lan-scan.md); if it is the ecobee again, its network setting was reset to automatic. Dashboard: Network & Wi-Fi Health."
-    labels:
-      severity: warning
-    isPaused: false
-  - uid: netheal_wifi_throughput_low
-    title: Wi-Fi throughput to the MacBook is low
-    condition: C
-    data:
-    - refId: A
-      relativeTimeRange:
-        from: 600
-        to: 0
-      datasourceUid: victoriametrics
-      model:
-        datasource:
-          type: prometheus
-          uid: victoriametrics
-        editorMode: code
-        expr: 'max_over_time(netheal_wifi_throughput_mbps[150m]) < bool 50'
-        instant: true
-        intervalMs: 1000
-        maxDataPoints: 43200
-        range: false
-        refId: A
-    - refId: C
-      datasourceUid: __expr__
-      model:
-        conditions:
-        - evaluator:
-            params:
-            - 0
-            type: gt
-          operator:
-            type: and
-          query:
-            params:
-            - A
-          reducer:
-            type: last
-            params: []
-          type: query
-        datasource:
-          name: Expression
-          type: __expr__
-          uid: __expr__
-        expression: A
-        intervalMs: 1000
-        maxDataPoints: 43200
-        refId: C
-        type: threshold
-    noDataState: OK
-    execErrState: Error
-    for: 5m
-    annotations:
-      summary: "Wi-Fi throughput ({{ '{{' }} $labels.direction }}) stayed under 50 Mbps in two hourly tests in a row"
-      description: "iperf3 between amd-workstation and the MacBook measured under 50 Mbps in the {{ '{{' }} $labels.direction }} direction on both of the last two hourly runs. Normal is hundreds of Mbps on 6 GHz. Look at the band and signal on the dashboard (Network & Wi-Fi Health): the Mac may be on a weak 5 GHz spot outdoors, or the channel is crowded (check the airtime panels and the top transmitters)."
     labels:
       severity: warning
     isPaused: false

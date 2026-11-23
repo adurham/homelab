@@ -9,7 +9,7 @@ Every run takes ~75 s and measures, from the wired basement workstation:
   * 5 GHz ch149/80 MHz monitor capture on the idle AX210 -> decoded airtime %, top transmitters, retries,
     mesh-node multicast airtime
   * one real DHCP DISCOVER (offer count)
-  * a summary of the MacBook's own ~/wifi-health.csv for the last hour (ssh; skipped if the Mac is away)
+  * the WAN speed test Home Assistant already runs (Ookla via the HA REST API), never a Mac-side probe
 Appends one JSON line to ~/.hermes/cache/net-health/hourly.jsonl. Prints (so cron delivers) ONLY when the set of
 flags changes, i.e. new problem / cleared problem; silent when nothing changed. `--verbose` always prints.
 `--parse-only <air.pcap> <mc.pcap>` re-runs the analysis on existing captures.
@@ -147,58 +147,6 @@ def node_channels():
     return res
 
 
-MAC_SNIPPET = r'''
-import csv, json, statistics as st, time
-try:
-    rows=[r for r in csv.DictReader(open("/Users/adam.durham/wifi-health.csv")) if r["ping_avg"] and int(r["epoch"])>time.time()-3600]
-    out={"n":len(rows)}
-    if rows:
-        a=sorted(float(r["ping_avg"]) for r in rows); m=sorted(float(r["ping_max"]) for r in rows)
-        out.update(avg_med=round(st.median(a),1), avg_p90=round(a[int(len(a)*.9)],1), max_p90=round(m[int(len(m)*.9)],1),
-                   rssi=int(st.median(int(r["rssi"]) for r in rows)), tx=int(st.median(int(r["txrate"]) for r in rows)),
-                   bands=dict((k,sum(1 for r in rows if r["band"]+"/"+r["channel"]==k)) for k in set(r["band"]+"/"+r["channel"] for r in rows)))
-    print(json.dumps(out))
-except Exception as e:
-    print(json.dumps({"error":str(e)[:80]}))
-'''
-
-
-def mac_summary():
-    try:
-        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "macbook-jump", "python3", "-"], input=MAC_SNIPPET,
-                           capture_output=True, text=True, timeout=40)
-        return json.loads(r.stdout.strip().splitlines()[-1])
-    except Exception as e:  # noqa: BLE001
-        return {"offline": str(e)[:40]}
-
-
-def wifi_speed():
-    """Throughput between the wired workstation and the MacBook over whatever Wi-Fi band it is on (iperf3, both
-    directions, one-shot server on the workstation). Skipped quietly when the Mac is away."""
-    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "macbook-jump"]
-    res = {}
-    try:
-        s = subprocess.run(ssh + ["/tmp/wstat"], capture_output=True, text=True, timeout=20).stdout.strip().split(",")
-        res.update(band=s[0], chan=s[1], rssi=int(s[2]), tx=int(s[4]))
-    except Exception as e:  # noqa: BLE001
-        return {"offline": str(e)[:40]}
-    for direction, extra in (("up", []), ("down", ["-R"])):
-        srv = subprocess.Popen(["iperf3", "-s", "-1", "-p", "5202"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(0.8)
-        try:
-            out = subprocess.run(ssh + ["/opt/homebrew/bin/iperf3", "-c", "192.168.86.19", "-p", "5202", "-t", "6", "-J"] + extra,
-                                 capture_output=True, text=True, timeout=45).stdout
-            end = json.loads(out)["end"]
-            res[direction] = round(end["sum_received"]["bits_per_second"] / 1e6)
-            res[direction + "_retr"] = end["sum_sent"].get("retransmits")
-        except Exception as e:  # noqa: BLE001
-            res[direction + "_err"] = str(e)[:40]
-        finally:
-            try:
-                srv.wait(timeout=4)
-            except Exception:  # noqa: BLE001
-                srv.kill()
-    return res
 
 
 def ha_ookla():
@@ -265,21 +213,8 @@ def write_prom(r):
         g("netheal_lan_arp_share_percent", "Share of LAN multicast that is ARP.", mc["arp_share"])
         for t in mc["top"][:5]:
             g("netheal_lan_source_pps", "Multicast/broadcast frames per second from one of the top-5 sources.", t["pps"], who=t["who"])
-    mac = r.get("mac", {})
-    if "n" in mac and mac.get("n"):
-        g("netheal_mac_samples", "MacBook Wi-Fi log samples in the last hour.", mac["n"])
-        g("netheal_mac_ping_median_ms", "MacBook ping to the router, median of 3-ping averages, last hour.", mac.get("avg_med"))
-        g("netheal_mac_ping_p90_ms", "MacBook ping to the router, 90th percentile, last hour.", mac.get("avg_p90"))
-        g("netheal_mac_ping_max_p90_ms", "MacBook worst-ping 90th percentile, last hour.", mac.get("max_p90"))
-        g("netheal_mac_rssi_dbm", "MacBook Wi-Fi signal, median, last hour.", mac.get("rssi"))
-        g("netheal_mac_txrate_mbps", "MacBook Wi-Fi link rate, median, last hour.", mac.get("tx"))
-    w = r.get("wifi", {})
-    for d in ("down", "up"):
-        g("netheal_wifi_throughput_mbps", "iperf3 TCP throughput workstation<->MacBook over Wi-Fi.", w.get(d), direction=d)
-        g("netheal_wifi_retransmits", "TCP retransmits during the Wi-Fi throughput test.", w.get(d + "_retr"), direction=d)
-    if w.get("band"):
-        g("netheal_wifi_test_info", "Band/channel the MacBook was on during the throughput test.", 1, band=w["band"], channel=w["chan"])
-        g("netheal_wifi_test_rssi_dbm", "MacBook signal during the throughput test.", w["rssi"])
+
+
     lines = []
     for name, (help_, vals) in m.items():
         lines += ["# HELP %s %s" % (name, help_), "# TYPE %s gauge" % name] + vals
@@ -503,13 +438,8 @@ def make_flags(r, prev):
         for name, bps in a.get("beacons_per_s", {}).items():
             if bps < 3:
                 f.append("no beacons heard from %s (%.1f/s)" % (name, bps))
-    m = r.get("mac", {})
-    if m.get("avg_p90", 0) > 150:
-        f.append("MacBook Wi-Fi bad hour: ping p90 %.0f ms (%s)" % (m["avg_p90"], m.get("bands")))
-    w = r.get("wifi", {})
-    slow = [(d, w[d]) for d in ("down", "up") if isinstance(w.get(d), int) and w[d] < 50]
-    if slow:
-        f.append("Wi-Fi throughput low on %s/%s (signal %s dBm): " % (w.get("band"), w.get("chan"), w.get("rssi")) + ", ".join("%s %d Mbps" % x for x in slow))
+
+
     n = r.get("wan", {})
     if n and not n.get("error"):
         if n.get("age_h", 0) > 3:
@@ -541,7 +471,7 @@ def collect(parse_only=None):
     r = {"ts": int(time.time()), "when": time.strftime("%a %H:%M")}
     if parse_only:
         air_pcap, mc_pcap = parse_only
-        r.update(ping={}, dns_ms={}, router={}, node_channels={}, dhcp_offers=None, mac={})
+        r.update(ping={}, dns_ms={}, router={}, node_channels={}, dhcp_offers=None)
     else:
         r["node_channels"] = node_channels()
         r["router"] = router_status()
@@ -551,11 +481,9 @@ def collect(parse_only=None):
         root = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         with cf.ThreadPoolExecutor(8) as ex:
             pf = {k: ex.submit(ping_stats, h) for k, h in PING_TARGETS.items()}
-            mf = ex.submit(mac_summary)
             df = {k: ex.submit(dns_ms, PING_TARGETS[k]) for k in ("DNS .4", "DNS .5")}
             r["ping"] = {k: v.result() for k, v in pf.items()}
             r["dns_ms"] = {k: v.result() for k, v in df.items()}
-            r["mac"] = mf.result()
         try:
             root.wait(timeout=CAP_SECONDS + 90)
         except subprocess.TimeoutExpired:
@@ -565,8 +493,7 @@ def collect(parse_only=None):
             r["dhcp_offers"] = open(RUN + "/dhcp.txt").read().count("Server Identifier")
         except Exception:  # noqa: BLE001
             r["dhcp_offers"] = None
-        # speed tests run AFTER the capture so their traffic is not in the airtime/multicast census
-        r["wifi"] = wifi_speed()
+        # the WAN speed test runs AFTER the capture so its traffic is not in the airtime/multicast census
         r["wan"] = ha_ookla()
     try:
         r["air"] = analyze_air(air_pcap, namer)
@@ -613,15 +540,8 @@ def render(r, full=False):
         L.append("airtime: " + a.get("error", "?"))
     if mc and not mc.get("error"):
         L.append("LAN multicast %s/s (ARP %s%%): " % (mc["total_pps"], mc["arp_share"]) + "; ".join("%s %.1f/s" % (t["who"], t["pps"]) for t in mc["top"][:3]))
-    if r.get("mac"):
-        m = r["mac"]
-        L.append("MacBook last hour: " + (", ".join("%s=%s" % (k, v) for k, v in m.items()) if "n" in m else str(m)))
-    w = r.get("wifi") or {}
-    if w.get("band"):
-        L.append("Wi-Fi throughput (Mac, %s GHz ch%s, %s dBm): down %s Mbps / up %s Mbps (retransmits %s / %s)" % (
-            w["band"], w["chan"], w["rssi"], w.get("down"), w.get("up"), w.get("down_retr"), w.get("up_retr")))
-    elif w:
-        L.append("Wi-Fi throughput: skipped (%s)" % w)
+
+
     n = r.get("wan") or {}
     if n and not n.get("error"):
         L.append("WAN (HA Ookla, %.1f h old): %s down / %s up Mbps, ping %s ms" % (n.get("age_h", -1), n.get("down"), n.get("up"), n.get("ping")))
@@ -631,16 +551,14 @@ def render(r, full=False):
 
 
 def summary(r):
-    a, mc, w, n = r.get("air", {}), r.get("mc", {}), r.get("wifi", {}), r.get("wan", {})
+    a, mc, n = r.get("air", {}), r.get("mc", {}), r.get("wan", {})
     nodes = [r["ping"][k] for k in ("router .1", "Basement .63", "GameRoom .51", "MainBedroom .99") if k in r["ping"]]
     return {"ts": r["ts"], "when": r["when"], "flags": r["flags"], "nflags": len(r["flags"]),
-            "wifi_down_mbps": w.get("down"), "wifi_up_mbps": w.get("up"),
-            "wifi_band": ("%s/%s" % (w["band"], w["chan"])) if w.get("band") else None,
             "air_total_pct": a.get("total_air_pct"), "air_node_mc_pct": a.get("nodes_mc_air_pct"),
             "lan_mc_pps": mc.get("total_pps"), "ecobee_pps": next((t["pps"] for t in mc.get("top", []) if t["who"] == "ecobee"), 0.0),
             "node_ping_max_ms": max([(x.get("avg") or 0) for x in nodes] or [0]),
             "max_loss_pct": max([v.get("loss", 0) for v in r["ping"].values()] or [0]),
-            "dhcp_offers": r.get("dhcp_offers"), "mac_ping_p90_ms": r.get("mac", {}).get("avg_p90"),
+            "dhcp_offers": r.get("dhcp_offers"),
             "wan_down": n.get("down"), "wan_up": n.get("up")}
 
 

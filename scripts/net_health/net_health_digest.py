@@ -50,14 +50,7 @@ print("5GHz ch149 airtime %    : " + rng(col(lambda r: r["air"]["total_air_pct"]
 print("node multicast airtime %: " + rng(col(lambda r: r["air"]["nodes_mc_air_pct"])))
 print("LAN multicast pps       : " + rng(col(lambda r: r["mc"]["total_pps"])))
 print("ecobee broadcasts/s     : " + rng(col(lambda r: next((t["pps"] for t in r["mc"]["top"] if t["who"] == "ecobee"), 0.0))))
-print("Wi-Fi throughput down   : " + rng(col(lambda r: r["wifi"]["down"]), "%.0f") + " Mbps   up: " + rng(col(lambda r: r["wifi"]["up"]), "%.0f") + " Mbps   tests: %d" % len(col(lambda r: r["wifi"]["down"])))
 print("WAN (HA Ookla) down/up  : " + rng(col(lambda r: r["wan"]["down"]), "%.0f") + " / " + rng(col(lambda r: r["wan"]["up"]), "%.0f") + " Mbps")
-print("MacBook ping p90 ms     : " + rng(col(lambda r: r["mac"]["avg_p90"])) + "   hours with data: %d" % len(col(lambda r: r["mac"].get("avg_p90"))))
-bands = Counter()
-for r in day:
-    for k, v in (r.get("mac") or {}).get("bands", {}).items():
-        bands[k] += v
-print("MacBook band mix (samples): " + (", ".join("%s %d" % kv for kv in bands.most_common()) if bands else "none"))
 top = Counter()
 for r in day:
     for t in (r.get("air") or {}).get("top", [])[:5]:

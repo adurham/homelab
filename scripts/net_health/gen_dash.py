@@ -39,19 +39,14 @@ def ts(title, targets, x, y, w=12, h=8, unit="none", desc="", min_=None, max_=No
 
 
 # ---- top row: the numbers you glance at
-stat("Wi-Fi down (Mac)", 'netheal_wifi_throughput_mbps{direction="down"}', 0, unit="Mbits",
-     steps=[{"color": "red", "value": None}, {"color": "orange", "value": 50}, {"color": "green", "value": 200}],
-     desc="iperf3 workstation -> MacBook over whatever Wi-Fi band the Mac is on, hourly.")
-stat("Wi-Fi up (Mac)", 'netheal_wifi_throughput_mbps{direction="up"}', 4, unit="Mbits",
-     steps=[{"color": "red", "value": None}, {"color": "orange", "value": 50}, {"color": "green", "value": 200}])
-stat("WAN down (Ookla)", 'homeassistant_sensor_data_rate_mbit_per_s{entity="sensor.ookla_speedtest"}', 8, unit="Mbits",
+stat("WAN down (Ookla)", 'homeassistant_sensor_data_rate_mbit_per_s{entity="sensor.ookla_speedtest"}', 0, unit="Mbits",
      steps=[{"color": "red", "value": None}, {"color": "orange", "value": 300}, {"color": "green", "value": 600}],
      desc="Hourly Ookla test run by Home Assistant (same series as the Internet Speed dashboard).")
-stat("WAN up (Ookla)", 'homeassistant_sensor_data_rate_mbit_per_s{entity="sensor.ookla_speedtest_upload"}', 12, unit="Mbits",
+stat("WAN up (Ookla)", 'homeassistant_sensor_data_rate_mbit_per_s{entity="sensor.ookla_speedtest_upload"}', 4, unit="Mbits",
      steps=[{"color": "red", "value": None}, {"color": "orange", "value": 300}, {"color": "green", "value": 600}])
-stat("Active problem flags", "netheal_flags", 16, steps=[{"color": "green", "value": None}, {"color": "red", "value": 1}],
+stat("Active problem flags", "netheal_flags", 8, steps=[{"color": "green", "value": None}, {"color": "red", "value": 1}],
      desc="Number of flags the hourly check raised in its latest run (details in ~/.hermes/cache/net-health/hourly.jsonl).")
-stat("Health check last ran", "time() - netheal_last_run_timestamp_seconds", 20, unit="s", decimals=0,
+stat("Health check last ran", "time() - netheal_last_run_timestamp_seconds", 12, unit="s", decimals=0,
      steps=[{"color": "green", "value": None}, {"color": "orange", "value": 5400}, {"color": "red", "value": 9000}],
      desc="Collector liveness: it should run hourly; orange after 90 min, red after 2.5 h.")
 
@@ -60,18 +55,6 @@ ts("Mesh nodes + gateway: ping avg (ms)", [('netheal_ping_avg_ms{target=~"router
    0, 4, unit="ms", desc="From the wired basement workstation. Healthy nodes are well under 2 ms; a climb means the wired side (switch/cable/node) is hurting, not Wi-Fi.")
 ts("Packet loss (%) to every target", [("netheal_ping_loss_percent", "{{target}}")], 12, 4, unit="percent", min_=0,
    desc="20 pings each, every hour. Anything above 0 on a wired target is worth a look.")
-
-# ---- Wi-Fi from the Mac
-ts("Wi-Fi throughput Mac <-> workstation (Mbps)", [("netheal_wifi_throughput_mbps", "{{direction}}")], 0, 12, unit="Mbits", min_=0,
-   desc="iperf3, 6 s each way. Dips = congestion or the Mac being on a weak band. See the band row below.")
-ts("MacBook ping to router: last-hour median / 90th pct / worst-90th (ms)",
-   [("netheal_mac_ping_median_ms", "median"), ("netheal_mac_ping_p90_ms", "90th percentile"), ("netheal_mac_ping_max_p90_ms", "worst-ping 90th pct")],
-   12, 12, unit="ms", min_=0, desc="From the Mac's own passive logger (~/wifi-health.csv). Missing hours = Mac asleep/offline.")
-ts("MacBook link rate (Mbps) and signal (dBm)",
-   [("netheal_mac_txrate_mbps", "link rate Mbps (median)"), ("netheal_wifi_test_rssi_dbm", "signal dBm during throughput test")], 0, 20, unit="none",
-   desc="Link rate swinging at a flat signal means a busy channel; signal sliding means moving away/blocked.")
-ts("Retransmits during the Wi-Fi throughput test", [("netheal_wifi_retransmits", "{{direction}}")], 12, 20, unit="none", min_=0,
-   desc="TCP retransmits in the 6 s test: loss on the radio path. Hundreds at high rate is normal; thousands is a bad link.")
 
 # ---- the air
 ts("5 GHz ch149 airtime (%) as heard from the basement",
@@ -98,5 +81,8 @@ dash = {
     "panels": panels, "templating": {"list": []}, "annotations": {"list": []}, "links": [],
 }
 out = sys.argv[1] if len(sys.argv) > 1 else "network_health.json"
+for _p in panels:  # the Mac panels used to sit at y=12..27; nothing may point at the Mac now
+    if _p["gridPos"]["y"] >= 28:
+        _p["gridPos"]["y"] -= 16
 json.dump(dash, open(out, "w"), indent=2)
 print("wrote", out, "panels:", len(panels))

@@ -21,144 +21,6 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Wi-Fi down (Mac)",
-      "description": "iperf3 workstation -> MacBook over whatever Wi-Fi band the Mac is on, hourly.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "victoriametrics"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 0,
-        "y": 0
-      },
-      "targets": [
-        {
-          "expr": "netheal_wifi_throughput_mbps{direction=\"down\"}",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          },
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "Mbits",
-          "decimals": null,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 50
-              },
-              {
-                "color": "green",
-                "value": 200
-              }
-            ]
-          },
-          "color": {
-            "mode": "thresholds"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "textMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        }
-      }
-    },
-    {
-      "id": 2,
-      "type": "stat",
-      "title": "Wi-Fi up (Mac)",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "victoriametrics"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 4,
-        "y": 0
-      },
-      "targets": [
-        {
-          "expr": "netheal_wifi_throughput_mbps{direction=\"up\"}",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          },
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "Mbits",
-          "decimals": null,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 50
-              },
-              {
-                "color": "green",
-                "value": 200
-              }
-            ]
-          },
-          "color": {
-            "mode": "thresholds"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "textMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        }
-      }
-    },
-    {
-      "id": 3,
-      "type": "stat",
       "title": "WAN down (Ookla)",
       "description": "Hourly Ookla test run by Home Assistant (same series as the Internet Speed dashboard).",
       "datasource": {
@@ -168,7 +30,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 8,
+        "x": 0,
         "y": 0
       },
       "targets": [
@@ -226,7 +88,7 @@
       }
     },
     {
-      "id": 4,
+      "id": 2,
       "type": "stat",
       "title": "WAN up (Ookla)",
       "description": "",
@@ -237,7 +99,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 12,
+        "x": 4,
         "y": 0
       },
       "targets": [
@@ -295,7 +157,7 @@
       }
     },
     {
-      "id": 5,
+      "id": 3,
       "type": "stat",
       "title": "Active problem flags",
       "description": "Number of flags the hourly check raised in its latest run (details in ~/.hermes/cache/net-health/hourly.jsonl).",
@@ -306,7 +168,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 16,
+        "x": 8,
         "y": 0
       },
       "targets": [
@@ -360,7 +222,7 @@
       }
     },
     {
-      "id": 6,
+      "id": 4,
       "type": "stat",
       "title": "Health check last ran",
       "description": "Collector liveness: it should run hourly; orange after 90 min, red after 2.5 h.",
@@ -371,7 +233,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 20,
+        "x": 12,
         "y": 0
       },
       "targets": [
@@ -429,7 +291,7 @@
       }
     },
     {
-      "id": 7,
+      "id": 5,
       "type": "timeseries",
       "title": "Mesh nodes + gateway: ping avg (ms)",
       "description": "From the wired basement workstation. Healthy nodes are well under 2 ms; a climb means the wired side (switch/cable/node) is hurting, not Wi-Fi.",
@@ -501,7 +363,7 @@
       }
     },
     {
-      "id": 8,
+      "id": 6,
       "type": "timeseries",
       "title": "Packet loss (%) to every target",
       "description": "20 pings each, every hour. Anything above 0 on a wired target is worth a look.",
@@ -573,322 +435,7 @@
       }
     },
     {
-      "id": 9,
-      "type": "timeseries",
-      "title": "Wi-Fi throughput Mac <-> workstation (Mbps)",
-      "description": "iperf3, 6 s each way. Dips = congestion or the Mac being on a weak band. See the band row below.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "victoriametrics"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 12
-      },
-      "targets": [
-        {
-          "expr": "netheal_wifi_throughput_mbps",
-          "legendFormat": "{{direction}}",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "Mbits",
-          "min": 0,
-          "max": null,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 0,
-            "showPoints": "auto",
-            "spanNulls": 7200000,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            }
-          },
-          "color": {
-            "mode": "palette-classic"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 10,
-      "type": "timeseries",
-      "title": "MacBook ping to router: last-hour median / 90th pct / worst-90th (ms)",
-      "description": "From the Mac's own passive logger (~/wifi-health.csv). Missing hours = Mac asleep/offline.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "victoriametrics"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 12
-      },
-      "targets": [
-        {
-          "expr": "netheal_mac_ping_median_ms",
-          "legendFormat": "median",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          }
-        },
-        {
-          "expr": "netheal_mac_ping_p90_ms",
-          "legendFormat": "90th percentile",
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          }
-        },
-        {
-          "expr": "netheal_mac_ping_max_p90_ms",
-          "legendFormat": "worst-ping 90th pct",
-          "refId": "C",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms",
-          "min": 0,
-          "max": null,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 0,
-            "showPoints": "auto",
-            "spanNulls": 7200000,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            }
-          },
-          "color": {
-            "mode": "palette-classic"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 11,
-      "type": "timeseries",
-      "title": "MacBook link rate (Mbps) and signal (dBm)",
-      "description": "Link rate swinging at a flat signal means a busy channel; signal sliding means moving away/blocked.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "victoriametrics"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 20
-      },
-      "targets": [
-        {
-          "expr": "netheal_mac_txrate_mbps",
-          "legendFormat": "link rate Mbps (median)",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          }
-        },
-        {
-          "expr": "netheal_wifi_test_rssi_dbm",
-          "legendFormat": "signal dBm during throughput test",
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "min": null,
-          "max": null,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 0,
-            "showPoints": "auto",
-            "spanNulls": 7200000,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            }
-          },
-          "color": {
-            "mode": "palette-classic"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 12,
-      "type": "timeseries",
-      "title": "Retransmits during the Wi-Fi throughput test",
-      "description": "TCP retransmits in the 6 s test: loss on the radio path. Hundreds at high rate is normal; thousands is a bad link.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "victoriametrics"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 20
-      },
-      "targets": [
-        {
-          "expr": "netheal_wifi_retransmits",
-          "legendFormat": "{{direction}}",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "min": 0,
-          "max": null,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 0,
-            "showPoints": "auto",
-            "spanNulls": 7200000,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            }
-          },
-          "color": {
-            "mode": "palette-classic"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 13,
+      "id": 7,
       "type": "timeseries",
       "title": "5 GHz ch149 airtime (%) as heard from the basement",
       "description": "45 s monitor capture each hour on ch149/80 MHz. Was 35% total / 11% multicast before the ecobee /29 fix, ~25% / 3-6% after.",
@@ -900,7 +447,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 28
+        "y": 12
       },
       "targets": [
         {
@@ -987,7 +534,7 @@
       }
     },
     {
-      "id": 14,
+      "id": 8,
       "type": "timeseries",
       "title": "Airtime by transmitter (top 5 each hour, %)",
       "description": "Who is using the channel. A new name here that is not a mesh node is the thing to investigate.",
@@ -999,7 +546,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 28
+        "y": 12
       },
       "targets": [
         {
@@ -1059,7 +606,7 @@
       }
     },
     {
-      "id": 15,
+      "id": 9,
       "type": "timeseries",
       "title": "LAN broadcast+multicast frames per second",
       "description": "Wired 45 s census. Every node re-sends each of these over the air at the slowest speed. The ecobee was 63-95/s here before the 2026-11-19 fix; it should now be ~2.5/s. Home Assistant (Nmap Tracker) sits near 7-11/s.",
@@ -1071,7 +618,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 36
+        "y": 20
       },
       "targets": [
         {
@@ -1140,7 +687,7 @@
       }
     },
     {
-      "id": 16,
+      "id": 10,
       "type": "timeseries",
       "title": "Retry % of the top-5 transmitters",
       "description": "High retries on a device with real airtime = it has a bad link (weak signal, far node).",
@@ -1152,7 +699,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 36
+        "y": 20
       },
       "targets": [
         {
@@ -1212,7 +759,7 @@
       }
     },
     {
-      "id": 17,
+      "id": 11,
       "type": "timeseries",
       "title": "DNS lookup time (ms)",
       "description": "",
@@ -1224,7 +771,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 44
+        "y": 28
       },
       "targets": [
         {
@@ -1284,7 +831,7 @@
       }
     },
     {
-      "id": 18,
+      "id": 12,
       "type": "timeseries",
       "title": "Router uptime (hours) / DHCP offers",
       "description": "Uptime dropping to near 0 = the Nest rebooted. DHCP offers other than 1 = a rogue or dead DHCP server.",
@@ -1296,7 +843,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 44
+        "y": 28
       },
       "targets": [
         {
