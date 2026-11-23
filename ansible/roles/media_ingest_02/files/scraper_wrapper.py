@@ -112,6 +112,8 @@ UPLOAD_LEDGER = Path(os.environ.get(
     "M02_UPLOAD_LEDGER", str(STAGING.parent / "upload_ledger.sqlite")))
 LEDGER_REPORT_FILE = Path(os.environ.get(
     "M02_LEDGER_REPORT_FILE", str(STAGING.parent / "upload_ledger_report.json")))
+RECONCILE_REPORT_FILE = Path(os.environ.get(
+    "M02_RECONCILE_REPORT_FILE", str(STAGING.parent / "reconcile_report.json")))
 # Only the --audit CLI path uses this; the sweep never resets on its own.
 RESET_KNOWN_GAPS = False
 _ledger_lock = threading.Lock()
@@ -1649,6 +1651,115 @@ def _audit_backlog():
     return out
 
 
+def _reconcile_missing(apply=False):
+    """Ask the gallery which downloaded media it does NOT account for, and reset
+    exactly those so the next sweep re-fetches them.
+
+    The staged file is deleted after a verified push, so "no file on disk" means
+    nothing on its own — absence is only provable by asking the gallery.
+    POST /ingest/have answers "do you have this stem" from the ingest datemap
+    (every stem ever ingested) UNION the exclusion ledger (deliberately deleted
+    stems count as accounted-for, so deletes are never resurrected). Rows the
+    gallery does not account for, and which the local ledger never marked
+    verified, are the genuine, provable gaps.
+
+    Run: python3 scraper_wrapper.py --reconcile          (report only)
+         python3 scraper_wrapper.py --reconcile --apply  (reset them)
+    """
+    import sqlite3
+    out = {"candidates": 0, "have": 0, "missing": 0, "reset": 0,
+           "excluded_from_ask": 0, "by_model": {}, "error": None,
+           "missing_by_type": {}, "missing_by_month": {}}
+    try:
+        redirects = dict((store_client.get_folder_meta() or {}).get("redirects") or {})
+    except Exception as e:  # noqa: BLE001
+        redirects = {}
+        log.warning("reconcile: folder_meta fetch failed (%s); using raw usernames", e)
+
+    verified = set()
+    if UPLOAD_LEDGER.exists():
+        conn = _ledger_conn()
+        verified = {(m, f) for m, f in conn.execute(
+            "select model, filename from pushes where state='verified'")}
+        conn.close()
+
+    cands = []  # (model, filename, stem, media_type, posted_at)
+    for db in sorted(METADATA_DIR.glob("*/user_data.db")):
+        model = db.parent.name
+        try:
+            conn = sqlite3.connect(str(db), timeout=30)
+            rows = conn.execute(
+                "select filename, directory, media_type, posted_at from medias"
+                " where downloaded=1").fetchall()
+            mid = conn.execute("select max(model_id) from medias").fetchone()[0]
+            conn.close()
+        except sqlite3.Error as e:
+            log.warning("reconcile: %s unreadable: %s", db.name, e)
+            continue
+        # The metadata dir is <username>_<model_id>, but the STAGING dir — and so
+        # the gallery folder and the stem prefix — is the bare username. Strip
+        # the id (verified against the DB's own model_id, not by guessing), then
+        # apply the durable-merge redirects exactly as the push path does.
+        username = model
+        if mid and model.endswith("_%s" % mid):
+            username = model[: -len("_%s" % mid)]
+        folder = resolve_folder(redirects, username)
+        for filename, directory, mtype, posted in rows:
+            if not filename:
+                continue
+            if (model, filename) in verified:
+                out["excluded_from_ask"] += 1
+                continue
+            if (Path(directory or "") / filename).exists():
+                out["excluded_from_ask"] += 1  # still staged; the drain pushes it
+                continue
+            raw_stem = f"{folder}_{Path(filename).stem}"
+            stem = "".join(c if c.isalnum() or c in "-_" else "-"
+                           for c in raw_stem).strip("-") or "unknown"
+            cands.append((model, filename, stem, mtype or "?", posted or ""))
+
+    out["candidates"] = len(cands)
+    if not cands:
+        log.info("reconcile: nothing unaccounted-for to ask about")
+        return out
+    try:
+        have = store_client.have_stems([c[2] for c in cands])
+    except Exception as e:  # noqa: BLE001
+        out["error"] = "%s: %s" % (type(e).__name__, e)
+        log.error("reconcile: /ingest/have failed — %s", out["error"])
+        return out
+    out["have"] = len(have)
+    gaps = {}
+    for model, filename, stem, mtype, posted in cands:
+        if stem in have:
+            continue
+        out["missing"] += 1
+        out["missing_by_type"][mtype] = out["missing_by_type"].get(mtype, 0) + 1
+        month = str(posted)[:7] or "unknown"
+        out["missing_by_month"][month] = out["missing_by_month"].get(month, 0) + 1
+        gaps.setdefault(model, []).append((filename, stem))
+    for model, items in gaps.items():
+        out["by_model"][model] = len(items)
+        if apply:
+            out["reset"] += _reset_downloaded(
+                model, [f for f, _ in items], "gallery does not account for it")
+            for filename, stem in items:
+                _ledger_record(stem, model, filename, 0, model,
+                               "missing_confirmed",
+                               "gallery /ingest/have says no; re-queued")
+    top = sorted(out["by_model"].items(), key=lambda kv: -kv[1])[:10]
+    log.warning("reconcile: candidates=%d have=%d MISSING=%d reset=%d%s top=%s",
+                out["candidates"], out["have"], out["missing"], out["reset"],
+                "" if apply else " (report only — pass --apply to re-queue)", top)
+    try:
+        RECONCILE_REPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        RECONCILE_REPORT_FILE.write_text(json.dumps(out, indent=2, sort_keys=True),
+                                         encoding="utf-8")
+    except OSError as e:
+        log.warning("reconcile: could not write %s: %s", RECONCILE_REPORT_FILE, e)
+    return out
+
+
 def _run_message_pass():
     """Unread spam triage. Runs after the like pass.
 
@@ -1992,6 +2103,11 @@ if __name__ == "__main__":
         # reached the gallery (see _audit_backlog). Does not touch the gallery.
         RESET_KNOWN_GAPS = "--reset-known-gaps" in sys.argv
         result = _audit_backlog()
+        print(json.dumps(result, indent=2, sort_keys=True))
+    elif "--reconcile" in sys.argv:
+        # Ask the gallery (POST /ingest/have) which downloaded media it does not
+        # account for. Report-only unless --apply is given.
+        result = _reconcile_missing(apply="--apply" in sys.argv)
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         main()

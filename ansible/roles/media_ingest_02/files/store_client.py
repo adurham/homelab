@@ -161,6 +161,30 @@ def get_excluded() -> set:
     return set(r.json().get("excluded", []))
 
 
+def have_stems(stems) -> set:
+    """Which of these stems does the gallery already ACCOUNT FOR?
+
+    POST /ingest/have -> {"have": [...]}, where "accounted for" = present in the
+    gallery's ingest datemap (every stem ever ingested) UNION the exclusion
+    ledger (stems the owner deliberately deleted). This is the gallery's own
+    answer to "do you have it", and the only inventory the collector needs: it
+    lets the reconcile distinguish "pushed and stored" from "dropped and lost"
+    without listing 550k objects off Drive. Read-only; chunked to stay inside
+    the server's HAVE_MAX_STEMS bound.
+    """
+    have = set()
+    clean = [s for s in dict.fromkeys(stems) if s]
+    for i in range(0, len(clean), 4000):
+        chunk = clean[i:i + 4000]
+        r = requests.post(f"{GALLERY_BASE}/ingest/have",
+                          headers={**_auth_headers(),
+                                   "Content-Type": "application/json"},
+                          json={"stems": chunk}, timeout=TIMEOUT)
+        r.raise_for_status()
+        have.update(r.json().get("have") or [])
+    return have
+
+
 def get_folder_meta() -> dict:
     """Fetch {folder: {cover, chat_ids}} so the collector can route chat-ids to
     user-mapped folders (rename-safe)."""
