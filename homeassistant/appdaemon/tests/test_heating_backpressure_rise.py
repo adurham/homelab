@@ -66,6 +66,7 @@ class Fake(svc.SmartVentController):
         self._watts_age = watts_age_s
         self._coil = coil
         self._heat_guard_level = None
+        self._room_need = {}
         # Coil-feedback state the cooling path reads when a cycle is not heating.
         self._coil_emergency_latched = False
         self._coil_emergency_since = None
@@ -315,6 +316,61 @@ check("T8 the high cooling tap is the only state allowed more rope than its "
       and svc.EQUIP_STATES["cool_high"]["cap"] <= svc.MAX_CLOSED_RATIO_HARD_CEILING)
 check("T8 the rise bands are ordered and inside the manual's low-fire rating",
       svc.HEAT_RISE_WARN_F < svc.HEAT_RISE_EMERGENCY_F <= 55.0)
+
+# =============================================================================
+# 9. Budget accounting: offline vents are spent, and reopening is need-ranked.
+# =============================================================================
+class FakeOffline(Fake):
+    """Fake whose first N vents read 'unavailable' (a Flair dropout)."""
+
+    def __init__(self, offline_vents, **kw):
+        super().__init__(**kw)
+        self._offline = set(svc._get_all_vents()[:offline_vents])
+
+    def get_state(self, entity, attribute=None):
+        if attribute is None and entity in self._offline:
+            return "unavailable"
+        return super().get_state(entity, attribute)
+
+
+ha = FakeOffline(0, equipment="fan,auxHeat1", watts=388)
+check("T9 no offline vents -> offline count is 0", ha._offline_vent_count() == 0)
+
+ha = FakeOffline(3, equipment="fan,auxHeat1", watts=388)
+check("T9 three offline vents are counted as unavailable",
+      ha._offline_vent_count() == 3)
+
+# 3 offline + a 40% budget (8) leaves only 5 vents that may be COMMANDED closed.
+ha = FakeOffline(3, supply=103.4, return_t=63.9,
+                 equipment="fan,auxHeat1", watts=388)
+out = ha._apply_backpressure_rooms(all_closed(), "heating")
+commanded = closed_vents(out)
+check("T9 offline vents consume the closure budget (8 allowed -> 5 commanded)",
+      commanded <= CAP["gas_low"] - 3)
+
+# Reopen order: the room that is behind must come back first.
+_rooms = [("upstairs", "Guest Bathroom"), ("downstairs", "Hallway"),
+          ("downstairs", "Main Bathroom")]
+_positions = {k: 0 for k in _rooms}
+_needs = {_rooms[0]: 4.0, _rooms[1]: 1.0, _rooms[2]: -1.0}
+ha = Fake(equipment="fan,auxHeat1", watts=388)
+out = ha._open_closed_rooms_for_backpressure(_positions, 1, "test", need_map=_needs)
+check("T9 the room with the highest need is reopened first",
+      out[_rooms[0]] == 50 and out[_rooms[1]] == 50 and out[_rooms[2]] == 0)
+
+# No need on record (Manual mode): still caps, never crashes, and does not
+# pretend to rank.
+_positions = {k: 0 for k in _rooms}
+ha = Fake(equipment="fan,auxHeat1", watts=388)
+out = ha._open_closed_rooms_for_backpressure(_positions, 1, "test", need_map={})
+check("T9 an empty need map still caps closures at the budget",
+      sum(1 for v in out.values() if v == 0) <= 1)
+
+# =============================================================================
+# 10. Occupancy outranks the floor mirror in the heating ladder.
+# =============================================================================
+check("T10 the heating occupancy weight beats the +2F floor bonus",
+      svc.HEAT_OCC_NEED_BONUS > svc.UPSTAIRS_HEAT_RISE_BONUS)
 
 print(f"\n{sum(PASS)}/{len(PASS)} checks passed")
 sys.exit(0 if all(PASS) else 1)

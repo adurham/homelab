@@ -619,6 +619,14 @@ MANUAL_OVERRIDE_CONFIRM_SEC = 8
 # Reversed for heating: downstairs gets the bonus (cold sinks).
 UPSTAIRS_HEAT_RISE_BONUS = 2.0
 
+# Occupancy weight in the HEATING ladder. It has to exceed the +2F floor mirror
+# above, or a VACANT room on the boosted floor (need = gap + 2.0) outscores an
+# OCCUPIED room at the same temperature on the floor above (need = gap + 1.0) —
+# which inverts the owner's stated priority ("occupied rooms first") in exactly
+# the season where the two floors are compared most often. Cooling keeps the
+# original 1.0: its per-floor thresholds are tuned around that number.
+HEAT_OCC_NEED_BONUS = 2.5
+
 # ── Priority-room airflow concentration ───────────────────────────────────────
 # ANY room can become disadvantaged: end of a long supply run, sun-facing
 # (solar gain), a poorly insulated duct delivering warm supply air, or just a
@@ -1430,6 +1438,12 @@ class SmartVentController(hass.Hass):
         # it re-close on the next cycle (see _apply_backpressure_rooms).
         self._heat_guard_level = None
 
+        # Per-room need scores from the most recent ladder pass, keyed
+        # (zone, room). Backpressure ranks its reopen order by these, so when
+        # the closure budget binds the air goes to the rooms that are behind
+        # rather than to whichever room has the fewest vents.
+        self._room_need = {}
+
         # Run the control loop
         self.run_every(self.control_loop, "now+10", CYCLE_INTERVAL)
 
@@ -1867,6 +1881,7 @@ class SmartVentController(hass.Hass):
         """
 
         room_positions = {}  # (zone_name, room_name) -> position
+        self._room_need = {}  # (zone_name, room_name) -> need this cycle
 
         # If HVAC is idle or fan-only, open everything for equalization.
         if hvac_action in ("idle", "fan", "off", None):
@@ -1938,15 +1953,27 @@ class SmartVentController(hass.Hass):
                     if target_heat is None:
                         room_positions[key] = 50
                         continue
-                    need = target_heat - temp
-                    if zone_name in ("downstairs", "basement"):
-                        need += UPSTAIRS_HEAT_RISE_BONUS
-                    need += occ_bonus
+                    gap = target_heat - temp
+                    need = gap
+                    # Both heating bonuses are URGENCY boosts, so they apply
+                    # only to a room that is actually behind. Applied to a
+                    # satisfied room they manufacture need out of a negative
+                    # gap (a room 2F ABOVE the heat setpoint scoring positive
+                    # and getting heated). Within the behind-set, occupancy
+                    # outranks the floor mirror — see HEAT_OCC_NEED_BONUS.
+                    if gap >= 0:
+                        if zone_name in ("downstairs", "basement"):
+                            need += UPSTAIRS_HEAT_RISE_BONUS
+                        if is_occupied:
+                            need += HEAT_OCC_NEED_BONUS
 
                 else:
                     room_positions[key] = 100
                     self.log(f"  {zone_name}/{room_name}: unknown action -> 100%")
                     continue
+
+                # Remember the score for the backpressure reopen ranking.
+                self._room_need[key] = need
 
                 # Score -> position
                 # Unoccupied rooms near/below setpoint should close —
@@ -5699,21 +5726,51 @@ class SmartVentController(hass.Hass):
                 supply = t if supply is None else max(supply, t)
         return supply
 
-    def _open_closed_rooms_for_backpressure(self, room_positions, max_closed, label):
-        """Open closed rooms to 50% (fewest vents first) until under max_closed."""
-        closed_count = sum(
-            len(ZONES[key[0]]["rooms"][key[1]].get("vents", []))
-            for key, pos in room_positions.items() if pos == 0)
-        if closed_count <= max_closed:
-            return room_positions
-        self.log(f"Backpressure: {closed_count} vents would close, "
-                 f"max allowed {max_closed} ({label}). Opening rooms to 50%.")
+    def _offline_vent_count(self):
+        """Vents that are currently unreachable (cannot be opened OR closed).
+
+        A vent we cannot command is not a vent we can budget for: the Flair link
+        drops out on this house (3 of 20 offline right now), and a force-open
+        cannot reopen one. So they are counted against the closure budget the
+        same way a closed vent is — the safe direction.
+        """
+        offline = 0
+        for vent in _get_all_vents():
+            if self.get_state(vent) == "unavailable":
+                offline += 1
+        return offline
+
+    def _open_closed_rooms_for_backpressure(self, room_positions, max_closed, label,
+                                            need_map=None):
+        """Open closed rooms to 50% until under max_closed.
+
+        Order is by the room's own NEED, highest first, so when the budget binds
+        the air goes to the rooms that are behind rather than to whichever room
+        happens to carry the fewest vents. Rooms with no need on record (Manual
+        mode, a missing temperature) sort after the known ones, and ties break
+        on fewest vents so the smallest number of damper moves is made.
+        """
+        offline = self._offline_vent_count()
         closed_rooms = [
             (key, len(ZONES[key[0]]["rooms"][key[1]].get("vents", [])))
             for key, pos in room_positions.items() if pos == 0
         ]
-        closed_rooms.sort(key=lambda x: x[1])
-        for key, count in closed_rooms:
+        closed_count = sum(n for _, n in closed_rooms) + offline
+        if closed_count <= max_closed:
+            return room_positions
+        self.log(f"Backpressure: {closed_count} vents would close "
+                 f"({len(closed_rooms)} commanded, {offline} offline), "
+                 f"max allowed {max_closed} ({label}). Opening rooms to 50%.")
+
+        def rank(item):
+            key, n = item
+            need = None if need_map is None else need_map.get(key)
+            # Unknown need sorts after every known one (never jumps the queue).
+            return (0 if need is not None else 1,
+                    -(need if need is not None else 0.0),
+                    n)
+
+        for key, count in sorted(closed_rooms, key=rank):
             room_positions[key] = 50
             closed_count -= count
             self.log(f"  Opened {key[0]}/{key[1]} ({count} vents) to 50% for backpressure")
@@ -5777,7 +5834,8 @@ class SmartVentController(hass.Hass):
                     room_positions, 0,
                     f"heating {state} rise {rise:.1f}F emergency"
                     if rise is not None
-                    else f"heating {state} emergency (latched)")
+                    else f"heating {state} emergency (latched)",
+                    need_map=self._room_need)
 
             cap = state_cap
             if self._heat_guard_level == "warn" or rise is None:
@@ -5786,7 +5844,8 @@ class SmartVentController(hass.Hass):
             rise_txt = f"rise {rise:.1f}F" if rise is not None else "no rise sample"
             bp_label = f"heating {state} {cap:.0%} ({rise_txt})"
             return self._open_closed_rooms_for_backpressure(
-                room_positions, max_closed, bp_label)
+                room_positions, max_closed, bp_label,
+                need_map=self._room_need)
 
         # Any non-heating cycle ends the latch: the next heat call starts from a
         # clean slate (and a furnace that cooled off between calls).
@@ -5869,7 +5928,7 @@ class SmartVentController(hass.Hass):
             bp_label = f"{bp_label} -> {state} cap {state_cap:.0%}"
 
         return self._open_closed_rooms_for_backpressure(
-            room_positions, max_closed, bp_label)
+            room_positions, max_closed, bp_label, need_map=self._room_need)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
