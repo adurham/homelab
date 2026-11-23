@@ -94,6 +94,7 @@ class FakeHA(svc.SmartVentController):
         self._fan_assist_active = False
         self._cooling_ended_at = None
         self._last_hvac_action = None
+        self._heat_guard_level = None
         for _zn, zone in svc.ZONES.items():
             for _rn, sensors in zone["rooms"].items():
                 self.states[sensors["temp"]] = 66.0

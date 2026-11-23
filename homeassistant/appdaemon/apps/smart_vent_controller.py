@@ -291,6 +291,11 @@ DELIVERY_PENALTY_ENTITY = "sensor.smart_vent_delivery_handicap"
 # Heating supply-air max (hottest open-vent duct temp), published for
 # calibration of the heating backpressure thresholds.
 HEATING_SUPPLY_ENTITY = "sensor.smart_vent_heating_supply"
+# What the thermostat has energized, e.g. "fan,auxHeat1" / "fan,heatPump".
+# Used to tell gas LOW fire from gas HIGH fire: the two have different rated
+# rises (25-55F vs 40-70F) on the same blower tap, so one guard cannot serve
+# both without either tripping high fire or leaving low fire unprotected.
+EQUIPMENT_STATUS_ENTITY = "sensor.ecobee_edgewater_road_equipment_status"
 # Observability for the zone-presence contention axis: publishes each zone's
 # occupied/vacant state + last-occupied age + the computed contention for the
 # current cycle, so the deploy dispatch / Grafana can see the fix in action.
@@ -311,8 +316,27 @@ MAX_CLOSED_RATIO_HARD_CEILING = 0.80
 # hot, and force-open closed rooms at the emergency threshold.
 MAX_CLOSED_RATIO_HEATING = 0.40
 MAX_CLOSED_RATIO_HEATING_WARN = 0.25
-HEAT_SUPPLY_WARN_F = 125.0
-HEAT_SUPPLY_EMERGENCY_F = 135.0
+#
+# The thresholds are a TEMPERATURE RISE over the return air, not an absolute
+# supply temperature. Two reasons:
+#   1. The furnace manual specifies a RISE band, so that is the number with a
+#      meaning attached. Z9ET080C16 (JCI tech guide Table 2): low fire
+#      80/52 MBH input, 77/50 output, rated rise 25-55F; high fire rise
+#      40-70F. Gas heat runs the LO HEAT / Med-Low tap (~1075 CFM at 0.5"
+#      static, Table 6), so the book predicts ~43F of rise at low fire.
+#   2. An absolute threshold drifts with the house setpoint: 125F meant one
+#      thing at a 72F house and another at a 64F house, which is how the old
+#      pair (125/135) ended up never firing at all.
+#
+# Measured 2026-11-23 (first season the gas furnace has actually run here):
+# five low-fire aux calls peaked at 103.2-103.6F supply against a 63.8-64.0F
+# house = 39.3-39.8F rise, i.e. the book's 43F plenum rise once the ~4F of
+# supply-duct loss is allowed for; the afternoon heat-pump call peaked at
+# 30.8F. WARN therefore sits ~5F above the hottest real gas call and
+# EMERGENCY at the low-fire rating, so both engage while the airflow is still
+# recoverable instead of after the high limit has already tripped.
+HEAT_RISE_WARN_F = 45.0
+HEAT_RISE_EMERGENCY_F = 51.0
 
 # ── Dynamic backpressure (coil-temperature feedback) ────────────────────────
 # A suction-line temp sensor (sensor.kitchen_water_temp_sensor, strapped to
@@ -1340,6 +1364,11 @@ class SmartVentController(hass.Hass):
         self._coil_emergency_since = None
         self._coil_sensor_fail_count = 0
 
+        # Heating-supply guard level for the CURRENT heat call: None | "warn" |
+        # "emergency". Latched so opening vents cannot release the guard and let
+        # it re-close on the next cycle (see _apply_backpressure_rooms).
+        self._heat_guard_level = None
+
         # Run the control loop
         self.run_every(self.control_loop, "now+10", CYCLE_INTERVAL)
 
@@ -1370,6 +1399,11 @@ class SmartVentController(hass.Hass):
         self.log(f"  SETPOINT-NUDGE config: master={SETPOINT_NUDGE_ENABLED} "
                  f"comfort_source={SETPOINT_NUDGE_COMFORT_ENABLED} "
                  f"(pre-cool source always follows master)")
+        # Deploy canary for the heating-airflow guard: if this line is absent
+        # after a restart, the old file is what loaded.
+        self.log(f"  HEATING GUARD config: rise warn={HEAT_RISE_WARN_F}F "
+                 f"emergency={HEAT_RISE_EMERGENCY_F}F, latched per call, "
+                 f"high-fire cap={MAX_CLOSED_RATIO_HEATING_WARN:.0%}")
 
         # Stamp the heartbeat immediately so the sensor exists on startup and the
         # watchdog isn't tripped by the first-cycle delay after a restart.
@@ -5434,8 +5468,15 @@ class SmartVentController(hass.Hass):
         return chosen
 
     def _publish_heating_supply(self):
-        """Publish the hottest open-vent duct temp for threshold calibration."""
+        """Publish the hottest open-vent duct temp and its rise over the rooms.
+
+        Both numbers, because the heating guard now fires on the RISE (the
+        furnace manual's own units); the absolute supply temp stays published so
+        the rise can be sanity-checked against a thermometer at a register.
+        """
         supply = self._heating_supply_max()
+        return_t = self._room_temp_mean()
+        rise = None if (supply is None or return_t is None) else supply - return_t
         self.set_state(
             HEATING_SUPPLY_ENTITY,
             state=str(round(supply, 1)) if supply is not None else "unknown",
@@ -5443,8 +5484,55 @@ class SmartVentController(hass.Hass):
                 "friendly_name": "Smart Vent Heating Supply Max F",
                 "icon": "mdi:thermometer-high",
                 "supply_max_f": supply,
+                "return_proxy_f": return_t,
+                "rise_f": rise,
             },
         )
+
+    def _room_temp_mean(self):
+        """Mean of every readable room temp — the return-air proxy for the rise.
+
+        Deliberately built from the rooms this app already reads rather than an
+        external house-average entity: one less sensor to go stale, and the same
+        number the balancing math works from.
+        """
+        temps = []
+        for zone in ZONES.values():
+            for sensors in zone["rooms"].values():
+                t = self._read_temp(sensors.get("temp"))
+                if t is not None:
+                    temps.append(t)
+        if not temps:
+            return None
+        return sum(temps) / len(temps)
+
+    def _heating_rise(self):
+        """(hottest open-vent supply F, rise over the room mean or None)."""
+        supply = self._heating_supply_max()
+        if supply is None:
+            return None, None
+        return_t = self._room_temp_mean()
+        if return_t is None:
+            return supply, None
+        return supply, supply - return_t
+
+    def _gas_fire_stage(self):
+        """'high' if the thermostat reports aux stage 2, 'low' for stage 1, else None.
+
+        Only the thermostat's own request is visible here. The furnace board can
+        also step itself to high fire on a timer without the thermostat asking —
+        that case shows up as a rising supply temperature and is caught by the
+        rise guard instead, whose failure mode (force-open) is the safe one.
+        """
+        state = self.get_state(EQUIPMENT_STATUS_ENTITY)
+        if not state or state in ("unknown", "unavailable"):
+            return None
+        parts = [p.strip() for p in str(state).split(",")]
+        if any(p.startswith("auxHeat") and p != "auxHeat1" for p in parts):
+            return "high"
+        if any(p.startswith("auxHeat") for p in parts):
+            return "low"
+        return None
 
     def _heating_supply_max(self):
         """Max duct temp across open vents (heating supply-air proxy), or None."""
@@ -5500,28 +5588,61 @@ class SmartVentController(hass.Hass):
         total_vents = len(_get_all_vents())
 
         # Heating: no coil-freeze physics, but the furnace/heat pump needs
-        # minimum airflow. Use the hottest open-vent duct temperature as the
-        # supply-air signal; back off from 40% closed to 25% when it is hot,
-        # and force-open everything at the emergency threshold.
+        # minimum airflow. Use the RISE of the hottest open-vent duct temp over
+        # the room-temp mean (return proxy): back off from 40% closed to 25%
+        # when the rise says the airflow is short, and force-open everything at
+        # the emergency rise. See the HEAT_RISE_* constants for the derivation.
         if hvac_action == "heating":
-            supply_max = self._heating_supply_max()
-            if supply_max is not None and supply_max >= HEAT_SUPPLY_EMERGENCY_F:
-                self.log(f"*** HEATING SUPPLY EMERGENCY: duct {supply_max:.1f}F >= "
-                         f"{HEAT_SUPPLY_EMERGENCY_F}F — force-opening closed vents ***")
+            supply_max, rise = self._heating_rise()
+
+            # Latch the guard for the rest of the call. Opening vents drops the
+            # rise, so an unlatched guard would release, let the vents close
+            # again, and flap for the whole call. Level only ever escalates
+            # inside a call and resets when the heat call ends (below).
+            if rise is not None and rise >= HEAT_RISE_EMERGENCY_F:
+                if self._heat_guard_level != "emergency":
+                    self.log(f"*** HEATING SUPPLY EMERGENCY: rise {rise:.1f}F "
+                             f"(supply {supply_max:.1f}F) >= "
+                             f"{HEAT_RISE_EMERGENCY_F}F — force-opening closed "
+                             f"vents for the rest of this call ***")
+                self._heat_guard_level = "emergency"
+            elif (rise is not None and rise >= HEAT_RISE_WARN_F
+                    and self._heat_guard_level != "emergency"):
+                if self._heat_guard_level != "warn":
+                    self.log(f"Heating supply rise {rise:.1f}F (supply "
+                             f"{supply_max:.1f}F) >= {HEAT_RISE_WARN_F}F — "
+                             f"throttling closures to 25% for this call")
+                self._heat_guard_level = "warn"
+
+            if self._heat_guard_level == "emergency":
                 return self._open_closed_rooms_for_backpressure(
                     room_positions, 0,
-                    f"heating supply {supply_max:.1f}F emergency")
-            if supply_max is None:
+                    f"heating rise {rise:.1f}F emergency" if rise is not None
+                    else "heating rise emergency (latched)")
+
+            fire_stage = self._gas_fire_stage()
+            if fire_stage == "high":
+                # High fire has its own, wider rise rating and has never been
+                # observed here — hold the tighter closure budget until its real
+                # supply temperature has been measured.
                 max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING_WARN)
-                bp_label = "heating no supply sample (25%)"
-            elif supply_max >= HEAT_SUPPLY_WARN_F:
+                bp_label = "heating gas high fire (25%)"
+            elif self._heat_guard_level == "warn":
                 max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING_WARN)
-                bp_label = f"heating supply {supply_max:.1f}F"
+                bp_label = f"heating rise {rise:.1f}F (supply {supply_max:.1f}F)"
+            elif rise is None:
+                max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING_WARN)
+                bp_label = "heating no rise sample (25%)"
             else:
                 max_closed = int(total_vents * MAX_CLOSED_RATIO_HEATING)
-                bp_label = f"heating static {MAX_CLOSED_RATIO_HEATING:.0%}"
+                bp_label = (f"heating static {MAX_CLOSED_RATIO_HEATING:.0%} "
+                            f"(rise {rise:.1f}F)")
             return self._open_closed_rooms_for_backpressure(
                 room_positions, max_closed, bp_label)
+
+        # Any non-heating cycle ends the latch: the next heat call starts from a
+        # clean slate (and a furnace that cooled off between calls).
+        self._heat_guard_level = None
 
         # Try to get dynamic ratio from coil feedback
         coil_temp, coil_reason = self._coil_temp_for_backpressure(hvac_action)
