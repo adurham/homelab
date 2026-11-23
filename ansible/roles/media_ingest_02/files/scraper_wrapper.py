@@ -79,6 +79,43 @@ PURCHASED_LIST_SLUG = os.environ.get("M02_PURCHASED_LIST_SLUG", "purchased").str
 PARK_DIR = Path(os.environ.get("M02_PARK_DIR", str(STAGING.parent / "failed")))
 PARK_RECIPIENT = os.environ.get("STAGING_PARK_RECIPIENT", "park@media-ingest.local")
 
+# Per-model scraper metadata DBs (one user_data.db per model, keyed by the
+# directory name = <username>_<model_id>). ofscraper's own dupe-check lives in
+# these: `medias.downloaded` is what makes the next sweep skip a media.
+METADATA_DIR = Path(os.environ.get(
+    "M02_METADATA_DIR", str(Path(CONFIG_FILE).parent / "metadata")))
+
+# ─── Upload ledger + verified-push gate ──────────────────────────────────────
+# ROOT CAUSE of "content missing from the gallery" (2026-11-23): ofscraper
+# flips medias.downloaded=1 the moment a file lands in staging, so the flag
+# means "downloaded to tmpfs", NOT "stored in the gallery". The wrapper then
+# unlinked the staged copy on any HTTP success, and three paths could drop a
+# staged file while the flag stayed 1: exclusion-skip unlink, the 4h stale
+# sweeper (whose log claimed the file "will re-download next sweep" -- it
+# never did, because downloaded=1), and any abort/timeout mid-sweep. Any of
+# those is permanent and invisible from this host.
+#
+# Fix, three parts:
+#   1. VERIFY the gallery said it stored the object (push_media's response
+#      carries `stored`). An unverified push is a FAILED push -> the file is
+#      parked encrypted, never unlinked, never counted as delivered.
+#   2. LEDGER every stem's outcome in a real SQLite table, so "did this get
+#      into the gallery" is answerable on this host without gallery access.
+#   3. Every path that drops a staged file WITHOUT a verified store records it
+#      in the ledger and resets medias.downloaded=0 for that media, so the next
+#      sweep actually re-downloads it.
+# M02_UPLOAD_VERIFY=false is the escape hatch if a gallery cutover changes the
+# response shape; it downgrades the gate to "log the response", not "assume ok".
+UPLOAD_VERIFY = os.environ.get("M02_UPLOAD_VERIFY", "true").strip().lower() not in (
+    "0", "false", "no", "off")
+UPLOAD_LEDGER = Path(os.environ.get(
+    "M02_UPLOAD_LEDGER", str(STAGING.parent / "upload_ledger.sqlite")))
+LEDGER_REPORT_FILE = Path(os.environ.get(
+    "M02_LEDGER_REPORT_FILE", str(STAGING.parent / "upload_ledger_report.json")))
+# Only the --audit CLI path uses this; the sweep never resets on its own.
+RESET_KNOWN_GAPS = False
+_ledger_lock = threading.Lock()
+
 STAGING.mkdir(parents=True, exist_ok=True)
 Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=logging.INFO,
@@ -704,6 +741,96 @@ def _accumulate_pushes(pushed: int, failed: int):
         _PUSH_TOTALS["failed"] += failed
 
 
+def _ledger_conn():
+    """Open (and lazily create) the upload ledger. One row per stem."""
+    import sqlite3
+    UPLOAD_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(UPLOAD_LEDGER), timeout=30)
+    conn.execute(
+        "create table if not exists pushes ("
+        " stem text primary key, model text, filename text, size integer,"
+        " folder text, state text, ts text, detail text)")
+    conn.execute("create index if not exists pushes_state on pushes(state)")
+    conn.execute("create index if not exists pushes_model on pushes(model, filename)")
+    return conn
+
+
+def _ledger_record(stem, model, filename, size, folder, state, detail=""):
+    """Record a stem's delivery outcome. Never raises: the ledger must not be
+    able to take a sweep down, and a lost ledger row is recovered by the next
+    push attempt (the file only disappears on a verified store)."""
+    if len(str(detail)) > 2000:
+        detail = str(detail)[:2000] + "…"
+    try:
+        with _ledger_lock:
+            conn = _ledger_conn()
+            conn.execute(
+                "insert into pushes (stem, model, filename, size, folder, state, ts, detail)"
+                " values (?,?,?,?,?,?,?,?)"
+                " on conflict(stem) do update set model=excluded.model,"
+                " filename=excluded.filename, size=excluded.size,"
+                " folder=excluded.folder, state=excluded.state, ts=excluded.ts,"
+                " detail=excluded.detail",
+                (stem, model, filename, int(size or 0), folder, state,
+                 dt.datetime.now().isoformat(timespec="seconds"), str(detail)))
+            conn.commit()
+            conn.close()
+    except Exception as e:  # noqa: BLE001
+        log.warning("ledger write failed for %s (%s): %s", stem, state, e)
+
+
+def _push_verified(resp):
+    """Did the gallery actually STORE this object? Returns (ok, detail).
+
+    push_media's response carries `stored` (1 = the gallery kept the object);
+    an HTTP 200 alone is not evidence of storage — the whole defect was treating
+    it as such. Unknown/ambiguous shapes are treated as UNVERIFIED on purpose:
+    that parks the file (recoverable) instead of deleting it (gone).
+    """
+    if not UPLOAD_VERIFY:
+        return True, f"verify disabled; response={resp!r}"[:400]
+    if not isinstance(resp, dict):
+        return False, f"non-dict upload response: {type(resp).__name__}: {resp!r}"[:400]
+    if resp.get("error") or resp.get("failed"):
+        return False, f"gallery reported failure: {resp!r}"[:400]
+    stored = resp.get("stored")
+    if stored in (1, "1", True):
+        return True, "stored=%s" % stored
+    return False, f"gallery did not confirm stored: {resp!r}"[:400]
+
+
+def _reset_downloaded(model, filenames, why=""):
+    """Clear ofscraper's downloaded flag for media whose staged copy we just
+    dropped without a verified store, so the next sweep ACTUALLY re-downloads
+    it. The 4h stale sweeper used to unlink these while the flag stayed 1 —
+    which is how content vanished permanently. Returns rows reset."""
+    import sqlite3
+    if not filenames:
+        return 0
+    db = METADATA_DIR / model / "user_data.db"
+    if not db.exists():
+        return 0
+    reset = 0
+    try:
+        conn = sqlite3.connect(str(db), timeout=30)
+        try:
+            for name in filenames:
+                cur = conn.execute(
+                    "update medias set downloaded=0, size=NULL"
+                    " where filename=? and downloaded=1", (name,))
+                reset += cur.rowcount or 0
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        log.warning("downloaded-flag reset failed for %s: %s", model, e)
+        return 0
+    if reset:
+        log.warning("reset downloaded=0 for %d %s media (%s) — next sweep re-fetches",
+                    reset, model, why or "unverified drop")
+    return reset
+
+
 def _park(fpath: Path, folder: str, stem: str) -> None:
     """Encrypt a download whose push failed into PARK_DIR; never keep plaintext."""
     try:
@@ -722,13 +849,31 @@ def _park(fpath: Path, folder: str, stem: str) -> None:
         )
         log.warning("PARKED %s (encrypted) in %s — push failed, kept for off-box recovery",
                     stem, PARK_DIR)
+        # Parked = NOT in the gallery. The encrypted copy is the only copy until
+        # a recovery pass re-pushes it; recording it means the gap is countable
+        # from this host instead of invisible.
+        try:
+            size = fpath.stat().st_size
+        except OSError:
+            size = 0
+        _ledger_record(stem, fpath.parent.name, fpath.name, size, folder,
+                       "parked", "encrypted copy in %s" % dst.name)
     except Exception as e:  # noqa: BLE001
         log.error("could not park %s: %s: %s", stem, type(e).__name__, e)
+        _ledger_record(stem, fpath.parent.name, fpath.name, 0, folder,
+                       "park_failed", "%s: %s" % (type(e).__name__, e))
 
 
-def _walk_and_push():
+def _walk_and_push(force_old_sec=0):
     """Walk the staging tree (flat per-model: <model_username>/<file>) and push
     each file to the gallery. Returns (pushed, failed, skipped).
+
+    force_old_sec: when non-zero, a staged file whose ctime is older than this
+    many seconds bypasses the size gate below and is pushed on the first look.
+    Only main()'s sweep-start drain passes it, where the scraper has not been
+    started yet -- so there is no writer to race and no need for the second
+    observation. This is what recovers an abort/timeout: those leave COMPLETE
+    files in staging while ofscraper has already flagged them downloaded.
 
     STABILITY GATE (2026-09-15, revised same day): the scraper writes each
     file directly into its final staging path while downloading it -- there's
@@ -805,7 +950,9 @@ def _walk_and_push():
                 size = fpath.stat().st_size
             except OSError:
                 continue
-            if _SEEN_SIZES.get(key) != size:
+            if force_old_sec and (dt.datetime.now().timestamp() - fpath.stat().st_ctime) > force_old_sec:
+                pass  # sweep-start drain: complete leftover, no writer running
+            elif _SEEN_SIZES.get(key) != size:
                 _SEEN_SIZES[key] = size
                 skipped += 1
                 continue
@@ -820,6 +967,8 @@ def _walk_and_push():
             if _is_excluded(stem) or _is_excluded(raw_stem):
                 skipped += 1
                 log.info("skip excluded stem=%s (deleted in gallery)", stem)
+                _ledger_record(stem, model_dir.name, fpath.name, size, folder,
+                               "excluded_skip", "stem in gallery exclusion ledger")
                 try:
                     fpath.unlink()
                 except OSError:
@@ -829,9 +978,19 @@ def _walk_and_push():
             mtime = fpath.stat().st_mtime
             date_iso = dt.datetime.fromtimestamp(mtime).isoformat()
             try:
-                store_client.push_media(folder, str(fpath), stem, date_iso, is_out=False)
+                resp = store_client.push_media(folder, str(fpath), stem, date_iso, is_out=False)
+                ok, why = _push_verified(resp)
+                if not ok:
+                    # HTTP success is not storage. Raise into the failure path so
+                    # the file is parked (recoverable) instead of unlinked (gone).
+                    raise RuntimeError(f"unverified push: {why}")
                 pushed += 1
-                log.info("PUSHED %s -> %s", stem, folder)
+                log.info("PUSHED %s -> %s (%s)", stem, folder, why)
+                # Ledger BEFORE the unlink: a crash in between leaves a verified
+                # row plus a still-staged file, which the next drain re-pushes
+                # harmlessly. The reverse order would lose the record.
+                _ledger_record(stem, model_dir.name, fpath.name, size, folder,
+                               "verified", why)
                 try:
                     fpath.unlink()
                 except OSError:
@@ -865,6 +1024,7 @@ def _clear_stale_staging():
     now = dt.datetime.now().timestamp()
     cleared = 0
     cleared_bytes = 0
+    dropped = {}  # model -> [filename] unlinked without a verified store
     for model_dir in sorted(STAGING.iterdir()):
         if not model_dir.is_dir():
             continue
@@ -882,15 +1042,37 @@ def _clear_stale_staging():
             # purchase was "cleared" as age=2613787min). ctime moves when the
             # inode is written/chmod'ed, i.e. when the file actually landed.
             age = now - st.st_ctime
-            if age > max_age:
+            if age > max_age and fpath.suffix == ".part":
+                # Orphaned partial download from a killed sweep: incomplete by
+                # construction, nothing to re-queue (the complete file never
+                # existed), so drop it without a ledger row or a DB reset.
+                try:
+                    fpath.unlink()
+                    cleared += 1
+                    cleared_bytes += st.st_size
+                    log.warning("cleared orphaned .part %s (age=%.0fmin)",
+                                fpath, age / 60)
+                except OSError as e:
+                    log.error("failed to clear stale .part %s: %s", fpath, e)
+            elif age > max_age:
                 size = st.st_size
+                raw_stem = f"{model_dir.name}_{fpath.stem}"
+                stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in raw_stem).strip("-") or "unknown"
+                # Record BEFORE the unlink, and reset the scraper's downloaded
+                # flag for this exact file below: without the reset the sweep
+                # never re-fetches it (that was the silent, permanent loss).
+                _ledger_record(stem, model_dir.name, fpath.name, size, model_dir.name,
+                               "dropped_unstored",
+                               "stale staging (%0.f min) unlinked without a verified store"
+                               % (age / 60))
                 try:
                     fpath.unlink()
                     cleared += 1
                     cleared_bytes += size
+                    dropped.setdefault(model_dir.name, []).append(fpath.name)
                     log.warning(
                         "cleared stale staging file %s (age=%.0fmin, size=%.1fMB) "
-                        "-- will re-download next sweep",
+                        "-- downloaded flag will be reset so it IS re-fetched",
                         fpath, age / 60, size / 1e6,
                     )
                 except OSError as e:
@@ -900,9 +1082,13 @@ def _clear_stale_staging():
                 model_dir.rmdir()
         except OSError:
             pass
+    reset = 0
+    for model, names in dropped.items():
+        reset += _reset_downloaded(model, names, "stale staging dropped")
     if cleared:
-        log.warning("stale staging sweep: cleared %d file(s), %.1fMB total",
-                    cleared, cleared_bytes / 1e6)
+        log.warning("stale staging sweep: cleared %d file(s), %.1fMB total,"
+                    " %d media re-queued for download",
+                    cleared, cleared_bytes / 1e6, reset)
 
 
 def _check_staging_usage():
@@ -1297,8 +1483,7 @@ DRM_AUDIT_ENABLED = os.environ.get("M02_DRM_AUDIT", "true").strip().lower() in (
     "1", "true", "yes")
 DRM_REPAIR = os.environ.get("M02_DRM_REPAIR", "false").strip().lower() in (
     "1", "true", "yes")
-METADATA_DIR = Path(os.environ.get(
-    "M02_METADATA_DIR", str(Path(CONFIG_FILE).parent / "metadata")))
+# METADATA_DIR is defined once, near STAGING at the top of the file.
 DRM_REPORT_FILE = Path(os.environ.get(
     "M02_DRM_REPORT_FILE", str(STAGING.parent / "drm_pending.json")))
 
@@ -1361,6 +1546,107 @@ def _drm_audit():
     except OSError as e:
         log.warning("drm audit: could not write %s: %s", DRM_REPORT_FILE, e)
     return summary
+
+
+# ─── Delivery ledger report + backlog audit ──────────────────────────────────
+def _upload_ledger_report():
+    """Group the delivery ledger by outcome and write it next to the DRM report.
+
+    This is the on-host answer to "did the gallery get it": every stem the
+    wrapper touched has a row, and only `verified` means the gallery confirmed
+    storage. Cheap (one GROUP BY), so it runs at the end of every sweep.
+    """
+    import sqlite3
+    summary = {"states": {}, "known_gaps": 0, "last_ts": None}
+    if not UPLOAD_LEDGER.exists():
+        return summary
+    try:
+        conn = _ledger_conn()
+        for state, n, last in conn.execute(
+                "select state, count(*), max(ts) from pushes group by state"):
+            summary["states"][state] = n
+            if last and (summary["last_ts"] or "") < last:
+                summary["last_ts"] = last
+        conn.close()
+    except sqlite3.Error as e:
+        log.warning("ledger report failed: %s", e)
+        return summary
+    gaps = sum(n for s, n in summary["states"].items() if s != "verified")
+    summary["known_gaps"] = gaps
+    if gaps:
+        log.warning("upload ledger: %d stem(s) NOT confirmed stored — %s",
+                    gaps, summary["states"])
+    else:
+        log.info("upload ledger: %s", summary["states"] or "empty")
+    return summary
+
+
+def _audit_backlog():
+    """Full scan: which downloaded media are known NOT to be in the gallery?
+
+    Only a gallery inventory can prove an object is absent; this produces the
+    candidate set the wrapper can prove on its own, per model DB:
+      * `known_gap`  — downloaded=1, no file on disk, ledger says it was
+                       dropped/parked/failed. These are safe to reset.
+      * `unverified` — downloaded=1, no file on disk, ledger has no row for it
+                       (downloaded before the ledger existed). Candidate only —
+                       most of these WERE pushed successfully.
+    Run: python3 scraper_wrapper.py --audit [--reset-known-gaps]
+    """
+    import sqlite3
+    out = {"models": 0, "downloaded": 0, "staged": 0, "verified": 0,
+           "known_gap": 0, "unverified": 0, "reset": 0, "by_model": {}}
+    ledger = {}
+    if UPLOAD_LEDGER.exists():
+        conn = _ledger_conn()
+        for model, filename, state in conn.execute(
+                "select model, filename, state from pushes"):
+            ledger[(model, filename)] = state
+        conn.close()
+    for db in sorted(METADATA_DIR.glob("*/user_data.db")):
+        model = db.parent.name
+        out["models"] += 1
+        try:
+            conn = sqlite3.connect(str(db), timeout=30)
+            rows = conn.execute(
+                "select filename, directory, size from medias"
+                " where downloaded=1").fetchall()
+        except sqlite3.Error as e:
+            log.warning("backlog audit: %s unreadable: %s", db.name, e)
+            continue
+        gaps = []
+        for filename, directory, size in rows:
+            out["downloaded"] += 1
+            if not filename:
+                continue
+            path = Path(directory or "") / filename
+            if path.exists():
+                out["staged"] += 1
+                continue
+            state = ledger.get((model, filename))
+            if state == "verified":
+                out["verified"] += 1
+            elif state in ("dropped_unstored", "parked", "park_failed", "verify_failed"):
+                out["known_gap"] += 1
+                gaps.append(filename)
+            else:
+                out["unverified"] += 1
+        if gaps:
+            out["by_model"][model] = len(gaps)
+        if RESET_KNOWN_GAPS and gaps:
+            out["reset"] += _reset_downloaded(model, gaps, "backlog audit")
+        conn.close()
+    top = sorted(out["by_model"].items(), key=lambda kv: -kv[1])[:10]
+    log.warning("backlog audit: downloaded=%d staged=%d verified=%d"
+                " known_gap=%d unverified=%d reset=%d top=%s",
+                out["downloaded"], out["staged"], out["verified"],
+                out["known_gap"], out["unverified"], out["reset"], top)
+    try:
+        LEDGER_REPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LEDGER_REPORT_FILE.write_text(json.dumps(out, indent=2, sort_keys=True))
+    except OSError as e:
+        log.warning("backlog audit: could not write %s: %s", LEDGER_REPORT_FILE, e)
+    return out
 
 
 def _run_message_pass():
@@ -1585,6 +1871,18 @@ def _session_alive():
 
 
 def main():
+    # Drain whatever the previous sweep left in staging BEFORE the stale sweeper
+    # gets a chance to drop it. An aborted/timed-out sweep leaves COMPLETE files
+    # behind while ofscraper has already flagged them downloaded=1 — pushing them
+    # here is the recovery edge; _clear_stale_staging then only sees files that
+    # genuinely cannot be pushed. force_old_sec is safe here because no scraper
+    # is running yet, so there is no writer to race.
+    if STAGING.exists():
+        d_pushed, d_failed, d_skipped = _walk_and_push(force_old_sec=600)
+        _accumulate_pushes(d_pushed, d_failed)
+        if d_pushed or d_failed:
+            log.info("sweep-start drain: pushed=%d failed=%d skipped=%d",
+                     d_pushed, d_failed, d_skipped)
     _clear_stale_staging()
     _check_staging_usage()
     _check_auth()
@@ -1668,6 +1966,12 @@ def main():
     except Exception as e:  # noqa: BLE001
         log.warning("drm audit failed: %s: %s", type(e).__name__, e)
 
+    # Delivery truth: how many stems this host knows the gallery did NOT store.
+    try:
+        _upload_ledger_report()
+    except Exception as e:  # noqa: BLE001
+        log.warning("upload ledger report failed: %s: %s", type(e).__name__, e)
+
     # Pass 5: like timeline posts from active subscriptions. Runs after all
     # downloads and pushes are complete. Only targets the manual model list
     # (explicit subs), not auto-discovered free subs. See _run_like_pass() for
@@ -1682,4 +1986,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--audit" in sys.argv:
+        # Read-only scan of every model DB against the upload ledger. Add
+        # --reset-known-gaps to re-queue the media this host can prove never
+        # reached the gallery (see _audit_backlog). Does not touch the gallery.
+        RESET_KNOWN_GAPS = "--reset-known-gaps" in sys.argv
+        result = _audit_backlog()
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        main()
