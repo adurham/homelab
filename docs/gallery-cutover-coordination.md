@@ -58,6 +58,15 @@ Both are the homelab session's call — this session is not touching pve01.
    posts / expired purchases), not a delivery bug.
 3. Only then re-enable `media-ingest-02.timer`.
 
+That re-enable is automated: `~/.hermes/bin/of_cutover_resume.sh` runs from the
+workstation's crontab every 15 min and fires exactly once, only when all three
+of these are true — gallery `rclone.conf` `remote =` is `gdrive:tg-harvester-v2`,
+no `rclone copy gcrypt: gcrypt2:` is running on pve01, and
+`media-gallery-upload.service` is active. It then starts the timer, runs the
+reconcile, and writes the result to `~/.hermes/state/of_cutover_resume.log`
+(marker `~/.hermes/state/of_cutover_resumed`). If uploads resume on their own,
+that is why — not a stray process.
+
 ## Not mine to do
 
 - The final pass, the `rclone check --size-only --one-way`, the repoint deploy,
