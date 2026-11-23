@@ -962,6 +962,18 @@ SETPOINT_NUDGE_ENABLED    = True  # master switch — see note above (re-enabled
 # the cool setpoint overnight to run the AC — and stays live through the same
 # nudge state machine. Tests that exercise the comfort source set this True.
 SETPOINT_NUDGE_COMFORT_ENABLED = False
+# v1 comfort cap: the comfort source may move the thermostat at most this far
+# (pre-cool keeps the full SETPOINT_NUDGE_MAX_F). The lever exists to rescue an
+# occupant, not to pre-cool the mass of the house.
+SETPOINT_NUDGE_COMFORT_MAX_F = 1.0
+# "Recirculating the current air is not sufficient" -- the owner's gate, measured
+# from FAN-ASSIST's own outcome rather than from the delivery penalty (which only
+# accrues mid-call, when a nudge is a no-op, and opens for duct-limited rooms
+# where extra runtime buys nothing). An attempt is recorded when fan-assist
+# engages for a room OR finds nothing banked to move; the gate opens once the
+# attempt is old enough AND the room's gap has not closed meanwhile.
+SETPOINT_NUDGE_RECIRC_MIN = 20.0     # minutes of recirculation before the thermostat may move
+SETPOINT_NUDGE_RECIRC_GAIN_F = 0.5   # closing the gap by this much = recirculation is working
 SETPOINT_NUDGE_ENGAGE_F   = 1.5   # worst_excess at/above this engages a nudge
 SETPOINT_NUDGE_RELEASE_F  = 0.5   # worst_excess at/below this releases it (hysteresis band; MUST be < ENGAGE)
 # GAIN/MAX_F chosen to guarantee a SINGLE, CONSTANT-MAGNITUDE nudge of exactly
@@ -1457,6 +1469,11 @@ class SmartVentController(hass.Hass):
         # This cycle's closure budget (see _cycle_budget), computed before the
         # passes so they can plan against the same limit the guard enforces.
         self._budget = {}
+        # Per-room recirculation attempts: key -> {"since": datetime, "gap": F}.
+        # Written by fan-assist, read by the nudge's recirculation gate.
+        self._recirc_attempt = {}
+        # Shadow record of what the comfort nudge WOULD do (published, no writes).
+        self._shadow_nudge = {}
         self._scorecard = {}
 
         # Run the control loop
@@ -3583,6 +3600,9 @@ class SmartVentController(hass.Hass):
                         donors.append(((zn, rn), doccupied, dtemp))
 
             if not donors:
+                # Nothing banked to move: that is itself an answer for the
+                # nudge's recirculation gate (the air-side lever cannot help).
+                self._record_recirc_attempt(key, off)
                 continue  # nothing banked to move -> running the fan is pointless
 
             # Engage: fan on, needy room wide open, choke the banked rooms so
@@ -3618,6 +3638,9 @@ class SmartVentController(hass.Hass):
                 room_positions[dkey] = donor_pos
                 throttled += 1
 
+            # Recirculation was just tried for this room; the nudge gate reads
+            # the attempt age against the gap at this moment.
+            self._record_recirc_attempt(key, off)
             kind = "warm" if heating else "cold"
             tag = " [ESCALATED]" if escalated else ""
             self.log(f"  FAN-ASSIST {room_name} ({temp:.1f}F, off{off:+.1f}, "
@@ -5048,6 +5071,11 @@ class SmartVentController(hass.Hass):
         # Worst excess over OCCUPIED rooms, measured exactly like _zone_contention
         # (line ~1530): off_target - _room_margin, clamped at >= 0.
         worst_excess = 0.0
+        # SHADOW (no writes): what the comfort source WOULD do under the
+        # recirculation gate. Published on the scorecard so the gate can be
+        # judged on real days before it is ever allowed to move a setpoint.
+        shadow_excess = 0.0
+        shadow_key = None
         for zone_name, zone in ZONES.items():
             for room_name, sensors in zone["rooms"].items():
                 key = (zone_name, room_name)
@@ -5112,6 +5140,21 @@ class SmartVentController(hass.Hass):
                 excess = off - margin
                 if excess > worst_excess:
                     worst_excess = excess
+                if excess > shadow_excess and self._recirc_exhausted(key, off):
+                    shadow_excess = excess
+                    shadow_key = key
+
+        _shadow_state = self._equipment_state(hvac_action)[0]
+        self._shadow_nudge = {
+            "excess": round(shadow_excess, 2),
+            "room": None if shadow_key is None else f"{shadow_key[0]}/{shadow_key[1]}",
+            "recirc_ok": shadow_excess >= SETPOINT_NUDGE_ENGAGE_F,
+            # v1: heat-pump and cooling states only; a gas-state hold would just
+            # make the furnace run longer into a 1F gap.
+            "state_allowed": _shadow_state in ("cool_low", "cool_high",
+                                               "hp_heat_low", "hp_heat_high"),
+            "state": _shadow_state,
+        }
 
         # Comfort-driven source is OFF (see SETPOINT_NUDGE_COMFORT_ENABLED at the
         # constants block, 2026-11-18). Zeroing it here — after the loop, before
@@ -5729,6 +5772,12 @@ class SmartVentController(hass.Hass):
                                          else round(worst_vacant, 1)),
                 "occ_degf_h_today": f"{card['occ_degf_h']:.2f}",
                 "cap_bound_min_today": f"{card['cap_min']:.1f}",
+                # Shadow nudge: what the comfort source would do if it were
+                # allowed to write. Nothing here moves a setpoint.
+                "would_nudge_excess_f": (getattr(self, "_shadow_nudge", {}) or {}).get("excess"),
+                "would_nudge_room": (getattr(self, "_shadow_nudge", {}) or {}).get("room"),
+                "would_nudge_gate_ok": str(bool((getattr(self, "_shadow_nudge", {}) or {}).get("recirc_ok"))).lower(),
+                "would_nudge_state_ok": str(bool((getattr(self, "_shadow_nudge", {}) or {}).get("state_allowed"))).lower(),
                 "day": str(card["day"]),
             },
         )
@@ -5835,6 +5884,35 @@ class SmartVentController(hass.Hass):
         """(state_key, EQUIP_STATES row, info) for the current cycle."""
         state, info = self._equipment_state(hvac_action)
         return state, EQUIP_STATES.get(state, EQUIP_STATES["heat_unknown"]), info
+
+    def _record_recirc_attempt(self, key, gap):
+        """Note that fan-assist tried to move air for this room (or found none)."""
+        if getattr(self, "_recirc_attempt", None) is None:
+            self._recirc_attempt = {}
+        self._recirc_attempt[key] = {"since": self.datetime(), "gap": gap}
+
+    def _recirc_exhausted(self, key, gap):
+        """Has recirculation been tried for this room and failed to close the gap?
+
+        The owner's rule as a measurement: fan-assist ran for the room at least
+        SETPOINT_NUDGE_RECIRC_MIN ago and the gap has not closed by
+        SETPOINT_NUDGE_RECIRC_GAIN_F since. A room back at target carries no
+        evidence (its record is dropped), and a room never tried is never
+        eligible - silence is not failure.
+        """
+        # getattr: a controller that has never run fan-assist (a reload, or a
+        # harness) has no tracker, and "no evidence" must mean "not eligible".
+        attempts = getattr(self, "_recirc_attempt", None) or {}
+        if gap <= 0:
+            attempts.pop(key, None)
+            return False
+        rec = attempts.get(key)
+        if not rec:
+            return False
+        mins = (self.datetime() - rec["since"]).total_seconds() / 60.0
+        if mins < SETPOINT_NUDGE_RECIRC_MIN:
+            return False
+        return (rec["gap"] - gap) < SETPOINT_NUDGE_RECIRC_GAIN_F
 
     def _cycle_budget(self, hvac_action):
         """The closure budget for this cycle, computed ONCE before any pass runs.
