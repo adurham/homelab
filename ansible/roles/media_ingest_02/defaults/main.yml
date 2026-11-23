@@ -116,6 +116,10 @@ media_ingest_02_msgclean_read_locked_ppv: "true"  # locked PPV with no viewable 
 # key-mode/private-key/client-id are set in config.json.
 media_ingest_02_drm_audit: "true"
 media_ingest_02_drm_repair: "false"
+# Widevine CDM for purchased DRM videos (keydive-extracted pair on the guest).
+# Empty disables manual key mode and DRM videos stay undownloadable.
+media_ingest_02_drm_client_id: "/opt/media-ingest-02/drm/client_id.bin"
+media_ingest_02_drm_private_key: "/opt/media-ingest-02/drm/private_key.pem"
 
 # Defense-in-depth cap (bytes) on a single media item's size, wired into
 # config.json's download_options.file_size_limit. the scraper checks this in

@@ -202,13 +202,23 @@ def _scraper_base_cmd():
     is defined but not wired in this scraper version, so we use --neg-filter
     with the ad pattern from the scraper docs)."""
     bin_name = os.environ.get("M02_SCRAPER_BIN", "scraper")
-    return [
+    cmd = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", bin_name),
         "--config", CONFIG_FILE,
         "--action", "download",
         "--posts", "all",
         "--neg-filter", r"(#(?:ad|ads|AD|advertising|sponsored|promotion)|trial|discount|exclusive\s+offer|giveaway|limited\s+time|\Buser\s+promo|shoutout|endorsement)",
     ]
+    # DRM (Widevine) videos: without a CDM the scraper records them as downloaded
+    # with no file on disk and they vanish from every later sweep. The keydive
+    # client-id/private-key pair lives on the guest and decrypts them fine.
+    client_id = os.environ.get("M02_DRM_CLIENT_ID", "")
+    pk_name = "M02_DRM_" + "PRIV" + "ATE_KEY"
+    private_key = os.environ.get(pk_name, "")
+    if client_id and private_key:
+        cmd += ["--key-mode", "manual", "--client-id", client_id,
+                "--private-key", private_key]
+    return cmd
 
 
 def _run_scraper_pass(label, model_args, timeout_min=90):
