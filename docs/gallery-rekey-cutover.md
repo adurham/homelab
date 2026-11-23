@@ -66,3 +66,40 @@ Two independent things, do not conflate them:
   trashed objects still count against the 5 TB quota (this bit us for 136 GiB).
 - Do not raise `recrypt-gallery`'s window past Friday 18:00 — the weekend pushes
   need the 750 GB/day upload cap.
+
+## 2026-11-23 ~12:05 CST — root cause of the "missing pics": the recrypt copy itself
+
+Owner reported chats showing ~2 images (aminahvip, ms_cece) that later came back.
+
+Measured:
+- The gallery index is complete. 283,002 manifest entries; diff against a full
+  `rclone lsl gcrypt:by-chat` (283,606 objects) → **0 missing, 0 size
+  mismatches, 0 zero-byte**. 617 of 619 chats indexed (2 new, next refresh).
+  Nothing in the ingest/gallery path deletes media (no rclone delete/purge).
+- `media-gallery-gallery` logged **5,643 `unexpected EOF` read errors** in the
+  last 7 days — **3,014 on 11-22 and 2,629 on 11-23**, i.e. only once the
+  re-key copy started hammering Drive. A listing that errors part-way yields a
+  PARTIAL manifest, so a chat shows a couple of items until the next refresh.
+- Stopped `recrypt-gallery.timer` + `recrypt-gallery.service` at 18:02 UTC.
+  **0 `unexpected EOF` in the 5 minutes after** (was ~2,600/day).
+
+Conclusion: the re-key copy competes with the app for Drive's per-user API
+budget and produces partial listings. Do NOT restart it at the current rate.
+
+### Next cutover plan (revised)
+1. Leave `recrypt-gallery` STOPPED until the cutover window; it does not
+   converge while ingest runs anyway (35.8k objects behind and flat).
+2. Cutover window: stop the ingest writers, run ONE bounded final pass with a
+   raised `--tpslimit` and no `--bwlimit`, then `rclone check --size-only
+   --one-way` = 0 differences.
+3. Repoint `media_gallery_gdrive_folder` → `tg-harvester-v2`, redeploy
+   media_gallery + media_ingest, restart the `media-gallery-*` units.
+4. Only then purge `gcrypt:` (old, 1.24 TiB) with `--drive-use-trash=false`.
+5. Re-enable nothing until a day of clean operation.
+
+### Also open
+- CT 115 thumbcache tmpfs: 6G, 96% full (5.57 GB / 277,084 files) — prewarm
+  cannot add thumbs. Raise `media_gallery_thumbcache_tmpfs_size` (6G→10G) and
+  CT 115 memory (16G→24G); costs a cache rebuild.
+- The gallery's transient partial manifests have no alert. The recrypt copy had
+  no rate/budget guard either — that is why it silently degraded the app.
