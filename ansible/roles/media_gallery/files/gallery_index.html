@@ -1441,16 +1441,38 @@
     }
   }
   function favCount(){
-    var n=0;
-    // Count against the folder LIST (chats/emptyFolders, from folders_meta), not
-    // chatMap: chatMap is filled per-folder only when a shard loads, so on the
-    // landing page it is empty and every favorite would count as gone.
+    // Count what the Favorites view can actually SHOW, not what is stored.
+    // A folder claimed by a merged folder is never drawn on its own, so a star
+    // on two members of one group is ONE card — otherwise the header ("N
+    // favorites") and the button ("Favorites (M)") disagree, which is exactly
+    // what 19-vs-12 was: stale member stars inside merges.
+    var n=0, seen={}, owner={}, gL=grpList();
+    gL.forEach(function(g){ g.folders.forEach(function(f){ if(!owner[f]) owner[f]=g; }); });
     for(var k in favSet){
       if(!favSet[k]) continue;
-      var g=isGrpKey(k)?grpById(grpIdOf(k)):null;
-      if(chats.indexOf(k)>=0 || emptyFolders.indexOf(k)>=0 || (g && !g.del)) n++;
+      if(isGrpKey(k)){
+        var g=grpById(grpIdOf(k));
+        if(g && !g.del && !seen['g:'+g.id]){ seen['g:'+g.id]=1; n++; }
+        continue;
+      }
+      if(owner[k]) continue;               // counted through its group card
+      if(chats.indexOf(k)>=0 || emptyFolders.indexOf(k)>=0){
+        if(!seen['f:'+k]){ seen['f:'+k]=1; n++; }
+      }
     }
+    // a group whose MEMBER is starred shows as a favorite card too
+    gL.forEach(function(g){
+      if(g.del || seen['g:'+g.id]) return;
+      if(g.folders.some(function(f){ return favHas(f); })){ seen['g:'+g.id]=1; n++; }
+    });
     return n;
+  }
+  // Is this rendered card a favorite? A merged card is one card: starred
+  // directly OR through any of its member folders.
+  function entFav(e){
+    if(!e) return false;
+    if(e.kind==='group') return favHas(e.key) || e.group.folders.some(function(f){ return favHas(f); });
+    return favHas(e.key);
   }
   function setFavOnly(on){
     favOnly=!!on;
@@ -1909,7 +1931,7 @@
       return false;
     }
     var baseEnt=entries.filter(function(e){
-      if(favOnly && !favHas(e.key)) return false;
+      if(favOnly && !entFav(e)) return false;
       return entMatch(e);
     });
     baseEnt.sort(function(a,b){
@@ -1986,12 +2008,31 @@
           f.appendChild(db);
         }
         var favK=grp?grpKey(grp.id):name;
-        var fb2=document.createElement('button'); fb2.className='ffav'+(favHas(favK)?' on':'');
+        var fb2=document.createElement('button'); fb2.className='ffav'+(entFav(grp?{kind:'group',key:favK,group:grp}:{kind:'folder',key:favK})?' on':'');
         fb2.type='button';
-        fb2.title=favHas(favK)?'Remove from favorites':'Add to favorites';
-        fb2.innerHTML=favHas(favK)?'\u2605':'\u2606';
+        var favOn=function(){ return grp ? (favHas(favK)||grp.folders.some(function(n){ return favHas(n); })) : favHas(favK); };
+        fb2.title=favOn()?'Remove from favorites':'Add to favorites';
+        fb2.innerHTML=favOn()?'\u2605':'\u2606';
         fb2.addEventListener('click',function(e){
           e.stopPropagation(); e.preventDefault();
+          if(grp){
+            // A merged card is ONE card: starring it stars the GROUP; unstarring
+            // also clears member stars, else the count and the card disagree
+            // (two starred members but a card that looks unstarred).
+            if(favOn()){
+              delete favSet[favK];
+              grp.folders.forEach(function(n){ delete favSet[n]; });
+              favSave(); favPush();
+            }else{
+              favSet[favK]=1; favSave(); favPush();
+            }
+            if(favOnly){ renderFolders(); return; }
+            fb2.className='ffav'+(favOn()?' on':'');
+            fb2.innerHTML=favOn()?'\u2605':'\u2606';
+            fb2.title=favOn()?'Remove from favorites':'Add to favorites';
+            if(elFavBtn){ elFavBtn.innerHTML='\u2605 Favorites ('+favCount()+')'; }
+            return;
+          }
           favToggle(favK);
           fb2.title=favHas(favK)?'Remove from favorites':'Add to favorites';
         });
@@ -3060,6 +3101,9 @@
             // new name SURVIVES A REFRESH until the server's rebuilt manifest (now
             // near-instant) reflects it. applyFolderRenames() reapplies on boot.
             pendingRename[oldName]=nn; savePendingRenames();
+            // a starred folder keeps its star under the new name, else the
+            // favorites count drifts (the old key is never rendered again)
+            if(favSet[oldName]){ delete favSet[oldName]; favSet[nn]=1; favSave(); favPush(); }
             var ei=emptyFolders.indexOf(oldName); if(ei>=0) emptyFolders[ei]=nn;
             // a merged folder follows a renamed member (else the chip and the
             // prune both point at a folder name that no longer exists)
