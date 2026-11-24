@@ -1658,7 +1658,13 @@ class Handler(BaseHTTPRequestHandler):
                 errors.append(f"{item.filename}: excluded stem (deleted in gallery)")
                 print(f"[upload] rejected excluded stem={stem}", flush=True)
                 continue
-            tmp = pdir / f"{stem}{ext}.tmp"
+            # Unique tmp name per request: two concurrent pushes of the SAME
+            # stem (the OF wrapper re-pushes a file every 5s while it is still
+            # being written) used to collide on one path, so the loser's
+            # replace()/stat() hit FileNotFoundError and reported stored=0 —
+            # which the wrapper treats as a failed push and parks a recovery
+            # copy of media the gallery already had.
+            tmp = pdir / f".{stem}{ext}.{os.getpid()}.{time.time_ns()}.tmp"
             try:
                 # chunked stream copy — never load whole file in RAM
                 with open(tmp, "wb") as out:
