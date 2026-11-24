@@ -31,6 +31,6 @@ media_gallery_ct_cores: 2
 # (same reasoning as the 2026-09-11 dns/proxy/lb/tailscale-gw bumps). Swap
 # left at 1024: CT swap caps shared HOST swap and pve02's host swap already
 # runs near-full, so more swap would be the wrong lever (see dns_host comment).
-media_gallery_ct_memory_mb: 16384
+media_gallery_ct_memory_mb: 24576
 media_gallery_ct_swap_mb: 1024
 media_gallery_ct_rootfs_gb: 32

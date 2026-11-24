@@ -770,6 +770,42 @@
     state: started
     daemon_reload: true
 
+# ─── Google Drive quota reporter (feeding the gdrive_free_low alert) ───────
+# The account crept to 93% with no metric behind it. Hourly `rclone about`
+# -> VictoriaMetrics over the same push endpoint Alloy uses.
+- name: Render Google Drive quota reporter Script
+  ansible.builtin.template:
+    src: drive-space-report.sh.j2
+    dest: "{{ media_gallery_dir }}/drive_space_report.sh"
+    owner: "{{ media_gallery_user }}"
+    group: "{{ media_gallery_user }}"
+    mode: '0750'
+
+- name: Render Google Drive quota reporter Service Unit
+  ansible.builtin.template:
+    src: drive-space.service.j2
+    dest: /etc/systemd/system/media-gallery-drive-space.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Render Google Drive quota reporter Timer Unit
+  ansible.builtin.template:
+    src: drive-space.timer.j2
+    dest: /etc/systemd/system/media-gallery-drive-space.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Systemd
+
+- name: Enable & Start Google Drive quota reporter Timer
+  ansible.builtin.systemd:
+    name: media-gallery-drive-space.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
 - name: Render Gallery Refresh Service Unit
   ansible.builtin.template:
     src: refresh.service.j2

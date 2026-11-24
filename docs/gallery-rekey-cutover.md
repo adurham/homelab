@@ -103,3 +103,56 @@ budget and produces partial listings. Do NOT restart it at the current rate.
   CT 115 memory (16G→24G); costs a cache rebuild.
 - The gallery's transient partial manifests have no alert. The recrypt copy had
   no rate/budget guard either — that is why it silently degraded the app.
+
+## 2026-11-23 ~18:50 CST — cutover COMPLETE
+
+The mirror was converged with the writers stopped and the gallery now reads
+`tg-harvester-v2` with the v2 crypt keys.
+
+What ran:
+
+1. Writers quiesced: `media-gallery-*` stopped, CT 116 collector + reconcile
+   timer stopped, CT 117 already idle.
+2. One bounded final pass (`/root/recrypt/gallery-final.sh`, started 12:48):
+   **47,952 files / 59.65 GiB** copied, 13 `unexpected EOF` upload errors. It
+   was interrupted at 17:29 once all bytes were over — it had spent 30 min in
+   its own verify with 14 objects stuck retrying at a few KB/s.
+3. `rclone check gcrypt: gcrypt2: --size-only --one-way`: **513,842 matching,
+   15 differences, 0 other errors**. Differences = 13 missing + 2
+   `sizes differ` thumbnails. The 2 thumbs were re-copied successfully.
+4. The 13 missing files are **corrupt in the OLD tree**, not a copy problem:
+   `rclone copyto gcrypt:by-chat/Chelsea/ms_cece_tempvid_3519982114_1320103266.mp4`
+   fails with `unexpected EOF` after 3 attempts. All 13 are `tempvid`/`.bin`
+   Telegram transient videos under `by-chat/`; the list is in
+   `/root/recrypt/gallery-retry.txt`. No local copies survive (the capture
+   cache holds only `backfill/`), so they are unrecoverable from either side.
+
+Deploy notes (things that bit):
+
+- `roles/media_gallery` renders `rclone.conf` with `force: false` so a
+  service-refreshed OAuth token is never clobbered — a normal deploy therefore
+  does NOT repoint the folder or install new passwords. Use
+  `repoint_media_gallery.yml`, which edits the three crypt lines in place
+  (with backups) and restarts the units.
+- `drive-space-report.sh.j2` had two template bugs (Jinja ate `{{kind=...}}`,
+  then shell quoting broke the `python3 -c '...'` string). Both fixed; the
+  unit now exits 0.
+- The thumbcache mount unit had `size=10G` but the live mount stayed at 6G
+  (`mount -o remount` refused). Fix: stop `media-gallery-thumb`, restart
+  `var-lib-media\x2dgallery-thumbcache.mount`, start the thumb service. The
+  cache is empty now and prewarm backfills it.
+
+Verified after cutover: manifest rebuilt with 283,302 entries (newest from
+today), `/thumb/<path>` returns a real JPEG generated from `gcrypt2`, gallery
+and serve ports return 200 on 172.16.0.46, the LB returns 302 -> authentik
+(SSO intact), CT 116 collector + reconcile timer back on.
+
+Open:
+
+- Purge `gcrypt:` (old, 1.24 TiB) only after a day of clean operation:
+  `rclone purge gcrypt: --drive-use-trash=false`.
+- Then drop the `*_v2` remote names / vault keys and the `recrypt-*` units.
+- The source has duplicate-named folders (`thumbs/69morbosa` etc.); rclone
+  logs `Duplicate directory found in source - ignoring`. Harmless for reads,
+  but object/size counts overstate the tree.
+- The new tree carries a stray `__probe_eof` folder from source-read testing.

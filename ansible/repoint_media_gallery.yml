@@ -1,0 +1,52 @@
+---
+# One-shot cutover: repoint the LIVE rclone config at the re-keyed tree.
+#
+# Why not just re-run deploy_media_gallery.yml: that role renders rclone.conf.j2
+# with `force: false` so a token the service refreshes itself is never
+# clobbered. That also means the folder/password change never lands. This
+# playbook edits only the three crypt lines in place, leaves the OAuth token
+# alone, and restarts the units that hold the remote open.
+- name: Repoint gallery rclone config at tg-harvester-v2 (v2 crypt keys)
+  hosts: gallery-01
+  gather_facts: false
+  vars_files:
+    - roles/media_gallery/defaults/main.yml
+  tasks:
+    - name: Point gcrypt at the re-keyed Drive folder
+      ansible.builtin.lineinfile:
+        path: /home/mediagallery/.config/rclone/rclone.conf
+        regexp: '^remote = gdrive:'
+        line: "remote = gdrive:{{ media_gallery_gdrive_folder }}"
+        owner: mediagallery
+        group: mediagallery
+        mode: '0600'
+        backup: true
+      no_log: true
+
+    - name: Install the v2 crypt password
+      ansible.builtin.lineinfile:
+        path: /home/mediagallery/.config/rclone/rclone.conf
+        regexp: '^password = '
+        line: "password = {{ vault_media_gallery_crypt_password_v2 }}"
+        backup: true
+      no_log: true
+
+    - name: Install the v2 crypt password2
+      ansible.builtin.lineinfile:
+        path: /home/mediagallery/.config/rclone/rclone.conf
+        regexp: '^password2 = '
+        line: "password2 = {{ vault_media_gallery_crypt_password2_v2 }}"
+        backup: true
+      no_log: true
+
+    - name: Restart the units that hold the gcrypt remote open
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: restarted
+        daemon_reload: true
+      loop:
+        - media-gallery-gallery.service
+        - media-gallery-serve.service
+        - media-gallery-thumb.service
+        - media-gallery-upload.service
+        - media-gallery-trash.service

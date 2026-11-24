@@ -1,0 +1,12 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# Hourly: gdrive_space_bytes + gdrive_space_last_run_timestamp_seconds.
+# OnUnitActiveSec is fine here (the run is seconds, not hours).
+[Unit]
+Description=media-gallery Google Drive quota reporter schedule
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+# Managed by Ansible — roles/media_gallery. Do not edit by hand.
+# One-shot Google Drive quota reporter -> VictoriaMetrics (gdrive_space_bytes).
+[Unit]
+Description=media-gallery Google Drive quota reporter (-> VictoriaMetrics)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ media_gallery_user }}
+Group={{ media_gallery_user }}
+ExecStart={{ media_gallery_dir }}/drive_space_report.sh

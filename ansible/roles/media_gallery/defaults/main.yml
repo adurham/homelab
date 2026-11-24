@@ -3,7 +3,10 @@
 media_gallery_user: mediagallery
 # The Drive folder the gcrypt crypt remote wraps. LIVE is tg-harvester (the template used to say media-gallery, which was never true).
 # During the 2026-11 crypt re-key the new tree is tg-harvester-v2; switch this together with the vault crypt passwords at cutover.
-media_gallery_gdrive_folder: "tg-harvester"
+media_gallery_gdrive_folder: "tg-harvester-v2"
+# Where drive_space_report.sh pushes gdrive_space_bytes (same endpoint Alloy
+# remote-writes to). Feeds the gdrive_free_low / gdrive_space_stale alerts.
+media_gallery_metrics_push_url: "http://172.16.0.30:8428/api/v1/import/prometheus"
 media_gallery_dir: /opt/media-gallery        # code + venv
 media_gallery_state: /var/lib/media-gallery  # session, captures (ReadWrite)
 media_gallery_log_dir: /var/log/media-gallery
@@ -101,7 +104,7 @@ media_gallery_serve_tmpfs_size: "512M"
 # Sized to comfortably hold the largest video (~3.4 GiB) plus working room. The
 # CT RAM (media_gallery_ct_memory_mb, 16 GiB since 2026-10-13) must stay
 # above this peak.
-media_gallery_thumbcache_tmpfs_size: "6G"
+media_gallery_thumbcache_tmpfs_size: "10G"
 
 # Free-space safety margin (MiB) the thumb service keeps in the thumbcache tmpfs
 # when admitting an original download for a video poster. The service reserves

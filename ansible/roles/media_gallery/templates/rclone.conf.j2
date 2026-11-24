@@ -20,5 +20,10 @@ type = crypt
 remote = gdrive:{{ media_gallery_gdrive_folder }}
 filename_encryption = standard
 directory_name_encryption = true
-password = {{ vault_media_gallery_crypt_password }}
-password2 = {{ vault_media_gallery_crypt_password2 }}
+# 2026-11-23 cutover: the gallery now reads tg-harvester-v2, which is
+# encrypted with the RE-KEYED (v2) crypt passwords. The unsuffixed
+# vault_media_gallery_crypt_password{,2} are the OLD keys (they still open the
+# old tg-harvester tree until it is purged); drop the _v2 names and restore
+# the unsuffixed ones once that tree is gone.
+password = {{ vault_media_gallery_crypt_password_v2 }}
+password2 = {{ vault_media_gallery_crypt_password2_v2 }}

@@ -1,0 +1,31 @@
+#!/bin/bash
+# Hourly Google Drive quota reporter for the media-gallery Drive account.
+#
+# Why: the account crept to 93% (and Gmail on the same account stops delivering
+# when Drive is full) with no metric behind it. `rclone about` is a single
+# cheap API call; the numbers go straight into VictoriaMetrics (the same URL
+# Alloy remote-writes node metrics to) so gdrive_free_low / gdrive_space_stale
+# can fire long before the quota is gone.
+#
+# Runs here because CT 115 holds the only always-on rclone config with this
+# Drive account's credentials. Always exits 0: a failure must show up as a
+# STALE metric (gdrive_space_stale), not as a permanently-failed unit.
+set -u
+CONF="/home/{{ media_gallery_user }}/.config/rclone/rclone.conf"
+URL="{{ media_gallery_metrics_push_url }}"
+
+J=$(rclone --config "$CONF" about gdrive: --json 2>/dev/null) || exit 0
+[ -n "$J" ] || exit 0
+
+printf '%s' "$J" | python3 -c '
+import json, sys, time
+d = json.load(sys.stdin)
+job = "media_gallery_gdrive"
+for k in ("total", "used", "free", "trashed"):
+    v = d.get(k) or 0
+    if v < 0:            # rclone reports -1 for "unknown"
+        v = 0
+    print("gdrive_space_bytes{kind=\"%s\",job=\"%s\"} %d" % (k, job, int(v)))
+print("gdrive_space_last_run_timestamp_seconds{job=\"%s\"} %d" % (job, int(time.time())))
+' | curl -sS --max-time 20 -o /dev/null -X POST --data-binary @- "$URL" || exit 0
+exit 0
