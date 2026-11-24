@@ -1053,11 +1053,28 @@ class Handler(BaseHTTPRequestHandler):
                    {"created": folder} if r.returncode == 0 else {"error": r.stderr[:200]})
 
     def _rename(self, raw):
-        """POST /rename/<old>/<new> — rename a gallery folder. Moves the original
-        media AND its thumbnail cache, so posters survive the rename. The manifest
-        rebuild then re-keys every item's `chat`/`file`/`thumb` to the new name
-        (the manifest is derived from the folder listing, so a rebuild is enough).
-        Idempotent-ish: refuses if <new> already exists (would merge, surprising)."""
+        """POST /ingest/rename/<old>/<new>[?merge=1] — rename a gallery folder.
+        Moves the original media AND its thumbnail cache, so posters survive the
+        rename. The manifest rebuild then re-keys every item's `chat`/`file`/`thumb`
+        to the new name (the manifest is derived from the folder listing, so a
+        rebuild is enough).
+
+        If <new> already exists:
+          * without ?merge=1 -> 409 {"can_merge": true, "existing": N} so the UI
+            can ask the user whether to merge (a silent merge would be surprising);
+          * with ?merge=1 -> the merge path (unique files move, same-stem
+            duplicates are deleted from the source, source is purged, redirects
+            are registered). Nothing is ever overwritten — merge_folder treats a
+            same-stem destination file as canonical.
+        A plain rename also registers name:/user: redirects now, so the ingest
+        lanes that still push under the OLD folder name land in the new one
+        instead of recreating the folder (that gap is what produced duplicate
+        folders in the first place).
+        """
+        merge_mode = False
+        if "?" in raw:
+            raw, _, qs = raw.partition("?")
+            merge_mode = "merge=1" in qs
         parts = [s for s in raw.split("/") if s]
         if len(parts) != 2:
             return self._json(400, {"error": "want /rename/<old>/<new>"})
@@ -1067,10 +1084,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "bad folder name"})
         if old == new:
             return self._json(200, {"renamed": old, "to": new, "noop": True})
-        # refuse if destination already exists (avoid silent merge)
+        # destination already exists?
         chk = rclone("lsf", f"{SRC}/{new}/")
-        if chk.returncode == 0 and chk.stdout.strip():
-            return self._json(409, {"error": f"folder '{new}' already exists"})
+        existing = [l for l in (chk.stdout or "").splitlines() if l.strip()] if chk.returncode == 0 else []
+        if existing:
+            if not merge_mode:
+                return self._json(409, {
+                    "error": f"folder '{new}' already exists",
+                    "can_merge": True,
+                    "existing": len(existing),
+                })
+            # merge old -> new (same code path as POST /ingest/merge/<old>/<new>)
+            return self._merge("%s/%s" % (old, new))
         # move the originals
         r = rclone("move", f"{SRC}/{old}", f"{SRC}/{new}",
                    "--transfers", "8", "--checkers", "16",
@@ -1089,7 +1114,12 @@ class Handler(BaseHTTPRequestHandler):
             meta = load_folder_meta()
             if old in meta:
                 meta[new] = {**meta.get(new, {}), **meta.pop(old)}
-                save_folder_meta(meta)
+            # register name:/user:(+chat:) redirects so pushes under the OLD name
+            # (the collector keeps using its own folder/user name) land here.
+            chat_ids = sorted(set(meta.get(new, {}).get("chat_ids") or []))
+            meta["redirects"] = folder_redirect.merge_redirects(
+                meta.get("redirects", {}), old, new, chat_ids)
+            save_folder_meta(meta)
         _dirty.set()  # rebuild manifest -> items re-keyed to <new>
         _rebuild_now.set()  # structural change -> rebuild now, skip debounce
         self._json(200, {"renamed": old, "to": new})

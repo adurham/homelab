@@ -3031,37 +3031,53 @@
   },0);
 
   // ---- folder rename ----
+  // Renaming onto an existing folder offers a MERGE instead of failing: the
+  // server answers 409 {can_merge:true} for a plain rename and does the real
+  // merge (unique files move, same-stem duplicates drop from the source, source
+  // is purged, redirects registered) when asked with ?merge=1.
   function renameFolder(oldName){
     if(!oldName||oldName==='*') return;
     var nn=window.prompt('Rename folder "'+oldName+'" to:', oldName);
     if(nn==null) return;
     nn=nn.trim(); if(!nn||nn===oldName) return;
-    if(chatMap[nn]||emptyFolders.indexOf(nn)>=0){ alert('A folder named "'+nn+'" already exists.'); return; }
-    fetch('/rename/'+encodeURIComponent(oldName)+'/'+encodeURIComponent(nn),
+    var exists=(chatMap[nn]||emptyFolders.indexOf(nn)>=0);
+    if(exists && !window.confirm('A folder named "'+nn+'" already exists.\n\nMerge "'+oldName+'" into it?\n\nSame-named files are dropped from "'+oldName+'" (nothing in "'+nn+'" is overwritten), unique files move across, and future uploads for either name land there.')) return;
+    doFolderRename(oldName,nn,exists);
+  }
+  function doFolderRename(oldName,nn,merge){
+    fetch('/rename/'+encodeURIComponent(oldName)+'/'+encodeURIComponent(nn)+(merge?'?merge=1':''),
       {method:'POST',credentials:'same-origin'})
       .then(function(r){
         if(r.status===200){
-          toast('✓ Renamed “'+oldName+'” → “'+nn+'”','ok');
-          // OPTIMISTIC re-key in the LOCAL manifest so the change shows instantly.
-          // The server manifest rebuild is debounced ~20s, so a refetch here would
-          // return the OLD name and undo the rename visually. Re-key every item
-          // locally AND record a folder-level pendingRename in localStorage so the
-          // new name SURVIVES A REFRESH until the server's rebuilt manifest (now
-          // near-instant) reflects it. applyFolderRenames() reapplies on boot.
-          // Record the rename; applyFolderRenames() (in buildChats) does the
-          // actual re-keying — both now and on every future load — until the
-          // server's manifest shows the new name. Don't re-key inline here, or the
-          // retire-check would immediately think the server already caught up.
-          pendingRename[oldName]=nn; savePendingRenames();
-          var ei=emptyFolders.indexOf(oldName); if(ei>=0) emptyFolders[ei]=nn;
-          // a merged folder follows a renamed member (else the chip and the
-          // prune both point at a folder name that no longer exists)
-          grpFolderRenamed(oldName,nn);
-          // carry folder cover/meta to the new name locally too
-          if(folderMeta[oldName]){ folderMeta[nn]=folderMeta[oldName]; delete folderMeta[oldName]; }
-          buildChats(); renderFolders();
-        }else if(r.status===409){ toast('A folder named “'+nn+'” already exists','err'); }
-        else { toast('Rename failed (HTTP '+r.status+')','err'); }
+          return r.json().catch(function(){return {};}).then(function(j){
+            var merged=!!(j&&j.merged);
+            toast(merged?('✓ Merged “'+oldName+'” into “'+nn+'” (moved '+(j.moved||0)+', dupes '+(j.removed_dupes||0)+')')
+                        :('✓ Renamed “'+oldName+'” → “'+nn+'”'),'ok');
+            // OPTIMISTIC re-key in the LOCAL manifest so the change shows instantly.
+            // The server manifest rebuild is debounced ~20s, so a refetch here would
+            // return the OLD name and undo the rename visually. Re-key every item
+            // locally AND record a folder-level pendingRename in localStorage so the
+            // new name SURVIVES A REFRESH until the server's rebuilt manifest (now
+            // near-instant) reflects it. applyFolderRenames() reapplies on boot.
+            pendingRename[oldName]=nn; savePendingRenames();
+            var ei=emptyFolders.indexOf(oldName); if(ei>=0) emptyFolders[ei]=nn;
+            // a merged folder follows a renamed member (else the chip and the
+            // prune both point at a folder name that no longer exists)
+            grpFolderRenamed(oldName,nn);
+            // carry folder cover/meta to the new name locally too
+            if(folderMeta[oldName]){ folderMeta[nn]=folderMeta[oldName]; delete folderMeta[oldName]; }
+            buildChats(); renderFolders();
+          });
+        }
+        if(r.status===409){
+          return r.json().catch(function(){return {};}).then(function(j){
+            if(j&&j.can_merge && window.confirm('A folder named "'+nn+'" already exists ('+(j.existing||'some')+' files).\n\nMerge "'+oldName+'" into it?')){
+              doFolderRename(oldName,nn,true); return;
+            }
+            toast('A folder named “'+nn+'” already exists','err');
+          });
+        }
+        toast('Rename failed (HTTP '+r.status+')','err');
       })
       .catch(function(){ toast('Network error during rename','err'); });
   }
