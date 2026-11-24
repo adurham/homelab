@@ -156,3 +156,38 @@ Open:
   logs `Duplicate directory found in source - ignoring`. Harmless for reads,
   but object/size counts overstate the tree.
 - The new tree carries a stray `__probe_eof` folder from source-read testing.
+
+## 2026-11-23 night — the 13 missing `_tempvid_` files were re-pulled from OF
+
+They are not Telegram media: `scraper_wrapper.py` names OF DASH/DRM downloads
+`<model>_tempvid_<media_id>_<post_id>`. The old Drive objects were truncated and
+DRM-wrapped, which is why they could not be copied. 11 of 13 came back clean and
+decrypted; 2 have no download URL upstream.
+
+Procedure (works, repeatable):
+
+1. Map the stem to the model DB row: `media_id = <a>`, `post_id = <b>` in
+   `/var/lib/media-ingest-02/metadata/<model>_<id>/user_data.db`, table `medias`.
+2. Reset that row: `update medias set downloaded=0` (+ `skip_permanent=0` where
+   the column exists — not every model DB has it).
+3. Re-download just that post with the keydive CDM:
+   `/opt/media-ingest-02/repull_one.sh <model> <post_id>` under
+   `systemd-run --property=EnvironmentFile=/opt/media-ingest-02/scraper.env
+   --uid=mediaingest` (the script runs `ofscraper --config ... --action download
+   --post-id <id> --force-all --key-mode manual --client-id ... --private-key ...`).
+   A plain `--posts all` rescan does NOT re-fetch: post-level rows are already
+   present, so `--post-id <id> --force-all` is required.
+4. Push the staged file with its ORIGINAL stem so the gallery entry is restored
+   rather than duplicated: `store_client.push_media(folder, path,
+   "<model>_tempvid_<media_id>_<post_id>", "", False)` — run under the same
+   systemd-run env, because `store_client` needs AUTHENTIK_TOKEN_URL etc.
+5. Run `media-gallery-manifest.service` so the stems reappear in the SPA.
+
+Gotchas:
+- A model can be renamed upstream and keep its account id: `camille_rose23` is
+  now `camille_rose25`, and the row lives in `camille_rose25_559666258`. Search
+  by `post_id` across all model DBs when a row looks empty.
+- `prinlemonice` and `princesslemonice` are the same account (370640585).
+- `prinlemonice` (4501639455/2526501451) and `spicyeriroll`
+  (4256890731/2225387674) still have `filename=None` and re-scrape returns 0
+  videos — locked/expired upstream, no URL to download.
