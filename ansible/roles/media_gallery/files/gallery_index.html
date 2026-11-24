@@ -3071,6 +3071,23 @@
     if(c) c.addEventListener('click',function(){ document.getElementById('mprogScrim').classList.remove('show'); });
   },0);
 
+  // After a rename/merge the SERVER manifest still carries the OLD folder name
+  // until build_manifest.py finishes (tens of seconds, sometimes a few minutes).
+  // Without this the card re-keys locally and shows "0 items" until the user
+  // reloads. Poll the manifest until the new name actually has items.
+  function scheduleRenameRefresh(nn,old){
+    var tries=0;
+    function once(){
+      tries++;
+      reloadManifest(current===null?null:nn).then(function(){
+        var ok=(typeof chatMap!=='undefined'&&chatMap[nn]&&chatMap[nn].length)||emptyFolders.indexOf(nn)>=0;
+        if(!ok && tries<8) setTimeout(once, tries<3?10000:30000);
+        else if(ok && old && pendingRename[old]){ delete pendingRename[old]; savePendingRenames(); }
+      }).catch(function(){ if(tries<8) setTimeout(once,30000); });
+    }
+    setTimeout(once,5000);
+  }
+
   // ---- folder rename ----
   // Renaming onto an existing folder offers a MERGE instead of failing: the
   // server answers 409 {can_merge:true} for a plain rename and does the real
@@ -3111,6 +3128,7 @@
             // carry folder cover/meta to the new name locally too
             if(folderMeta[oldName]){ folderMeta[nn]=folderMeta[oldName]; delete folderMeta[oldName]; }
             buildChats(); renderFolders();
+            scheduleRenameRefresh(nn,oldName);
           });
         }
         if(r.status===409){
