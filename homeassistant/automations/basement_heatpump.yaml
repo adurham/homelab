@@ -32,6 +32,12 @@
     rules come with it: never remove the room-sensor-lost automation, and never
     leave this one disabled with the head still sitting on the run extreme.
 
+    The unit's remote can also drop the head back into AUTO (heat_cool). Every
+    branch here keys on the literal heat/cool states, so in auto the automation
+    goes inert and the head runs to whatever setpoint the remote left - that
+    happened 2026-11-24 12:43 (auto, 70F, room 68.8F). The idle branch now
+    reclaims auto to heat before parking.
+
     Reference is sensor.7wq7_temperature (the local Zigbee sensor the vent
     controller already uses for this room), falling back to the ecobee
     basement sensor when the Zigbee one is stale or missing.
@@ -177,6 +183,27 @@
         # Nothing demanded: park it at the off-side of whatever mode it sits in.
         - conditions: []
           sequence:
+            # The unit's own remote can put the head back into AUTO (heat_cool).
+            # Every branch above keys on the literal heat/cool states, so in
+            # heat_cool this automation goes inert: no demand branch fires and
+            # the park below skipped too, leaving the head running to whatever
+            # setpoint the remote left on it. That happened 2026-11-24 12:43
+            # (auto, 70F, room 68.8F) and nothing corrected it for 8 hours.
+            # Reclaim it to heat, the safe idle: the 61F park sits below the
+            # room, so it can never call for anything.
+            - if: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'heat_cool') }}"
+              then:
+                - service: climate.set_hvac_mode
+                  target:
+                    entity_id: climate.basement_heatpump_basement_office_ac
+                  data:
+                    hvac_mode: heat
+                # Continue on timeout: sp above is the pre-reclaim reading, so
+                # a setpoint written while the head is still in heat_cool would
+                # land in the wrong mode's frame. Let the next run park it.
+                - wait_template: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'heat') }}"
+                  timeout: "00:00:20"
+                  continue_on_timeout: true
             - if: "{{ is_state('climate.basement_heatpump_basement_office_ac', 'heat') and sp | float(0) > 62 }}"
               then:
                 - service: climate.set_temperature
