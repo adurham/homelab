@@ -3494,7 +3494,7 @@ groups:
           type: prometheus
           uid: victoriametrics
         editorMode: code
-        expr: (time() - max_over_time(pve_backup_push_last_success_timestamp_seconds[12d]))
+        expr: (time() - max(max_over_time(pve_backup_push_last_success_timestamp_seconds[12d])))
           > bool 777600 or absent_over_time(pve_backup_push_last_success_timestamp_seconds[12d])
         instant: true
         intervalMs: 1000
